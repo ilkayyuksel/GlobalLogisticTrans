@@ -10,6 +10,7 @@
 // on each model that needs them.
 //
 //   PARTIAL UNIQUE INDEXES (Prisma has no filtered-index syntax)
+//     driver              UNIQUE (licence_number)           WHERE is_active
 //     vehicle             UNIQUE (license_plate)            WHERE is_active
 //     trailer             UNIQUE (license_plate)            WHERE is_active
 //     custom_property     UNIQUE (name)                     WHERE is_active
@@ -400,11 +401,18 @@ model TripCustomProperty {
 
 /// A company driver. Planning information only — authentication lives in Auth0
 /// and is deliberately not linked to this table.
+///
+/// Requires a manual partial unique index:
+///   UNIQUE (licence_number) WHERE is_active
 model Driver {
   id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
 
   /// Not unique: two drivers may genuinely share a name.
   name             String  @db.Text
+  /// Driving licence number. Optional, because a Driver may be registered
+  /// before the licence details are known. Unique among ACTIVE Drivers only,
+  /// so deactivating a Driver frees the number for reuse. Never an identifier.
+  licenceNumber    String? @map("licence_number") @db.Text
   phoneNumber      String? @map("phone_number") @db.Text
   email            String? @db.Text
   /// See database_schema.md open point O5.

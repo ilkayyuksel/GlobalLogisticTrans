@@ -568,6 +568,7 @@ Represents a company driver. Contains planning-related information only; authent
 |---|---|---|---|---|
 | `id` | `UUID` | NO | `gen_random_uuid()` | Primary key |
 | `name` | `TEXT` | NO | — | Not unique |
+| `licence_number` | `TEXT` | YES | `NULL` | Unique among active Drivers only |
 | `phone_number` | `TEXT` | YES | `NULL` | |
 | `email` | `TEXT` | YES | `NULL` | |
 | `emergency_contact` | `TEXT` | YES | `NULL` | See open point O5 |
@@ -578,7 +579,9 @@ Represents a company driver. Contains planning-related information only; authent
 
 ### Constraints
 
-None. Driver names are explicitly not unique.
+- Partial `UNIQUE (licence_number)` where `is_active = TRUE` — scoped to active rows for the same reason as vehicle and trailer plates: a deactivated Driver keeps its historical value while freeing the number for reuse. `NULL` values are distinct in PostgreSQL, so any number of Drivers may have no licence number.
+
+Driver names are explicitly not unique.
 
 ### Foreign Keys
 
@@ -589,6 +592,7 @@ None. Vehicle linkage is owned by `vehicle_assignment`.
 | Index | Columns | Type |
 |---|---|---|
 | PK | `id` | Primary key |
+| Unique (partial) | `licence_number` where `is_active = TRUE` | Unique |
 | Lookup | `is_active` | B-tree — assignment dropdowns |
 
 ### Application-enforced rules
@@ -596,6 +600,7 @@ None. Vehicle linkage is owned by `vehicle_assignment`.
 - Created manually only; never created automatically.
 - Never physically deleted.
 - Inactive Drivers cannot receive new Trips but remain linked to historical Trips.
+- A licence number is never used as an identifier; `id` remains the only identity.
 
 ---
 

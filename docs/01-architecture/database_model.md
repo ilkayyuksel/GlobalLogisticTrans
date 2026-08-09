@@ -2211,18 +2211,40 @@ These fields are optional.
 The Driver entity should contain:
 
 - Name
+- Licence Number (optional)
 - Active Status
 - Phone Number (optional)
 - Email (optional)
+- Emergency Contact (optional)
 - Notes (optional)
 
 The current and historical Vehicle assignments of a Driver are stored through VehicleAssignment, not directly on Driver.
 
 ---
 
+## Licence Number
+
+A Driver may have a driving licence number.
+
+It is optional, because a Driver record may be created before the licence details are available.
+
+When present, the Licence Number must be unique among **active** Drivers.
+
+Uniqueness is scoped to active Drivers only, for the same reason as Vehicle and Trailer licence plates:
+
+a deactivated Driver keeps its historical value, but the number becomes available again should it ever need to be reused.
+
+The Licence Number is never used to identify a Driver inside the application.
+
+The Driver identifier remains the only identity.
+
+---
+
 ## Business Constraints
 
 Driver names do not have to be unique.
+
+A Licence Number, when present, must be unique among active Drivers.
 
 Each Driver has exactly one Active Status.
 
@@ -2238,7 +2260,7 @@ The Driver entity should support future extensions such as:
 
 - WhatsApp integration
 - Driver mobile application
-- Driving license information
+- Licence expiry dates and categories
 - Driver documents
 - GPS tracking
 - Driver statistics

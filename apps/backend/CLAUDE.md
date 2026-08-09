@@ -1,27 +1,45 @@
-# Backend Guidelines
+# Backend Development Guidelines
 
 ## Purpose
 
-The backend is the heart of the application.
+This document defines the development standards for the Backend service.
 
-All business logic belongs here.
+The Backend is the central source of truth for all business logic.
 
-The backend is responsible for making decisions.
+All other services (Parser, Pricing Engine, IMAP, Frontend) communicate through the Backend.
+
+The Backend is responsible for:
+
+- Business logic
+- Validation
+- Database access
+- Authorization
+- Audit logging
+- API contracts
+- Transactions
+
+The Backend must never become a monolith with tightly coupled code.
 
 ---
 
-# Technology
+# General Principles
 
-- NestJS
-- TypeScript
-- Prisma
-- PostgreSQL
+- Write clean, readable and maintainable code.
+- Prefer clarity over cleverness.
+- Keep files small and focused.
+- Reuse existing components whenever possible.
+- Avoid duplicate logic.
+- Follow SOLID principles.
+- Follow Clean Architecture where practical.
+- Never overengineer solutions.
+
+If a simpler solution exists without sacrificing maintainability, choose the simpler solution.
 
 ---
 
 # Architecture
 
-Always follow:
+Always follow this flow.
 
 Controller
 
@@ -35,60 +53,86 @@ Repository
 
 ↓
 
-Database
+Prisma
 
-Never bypass layers.
+Controllers must never access Prisma directly.
+
+Repositories must never contain business logic.
+
+Services contain all business logic.
 
 ---
 
 # Controllers
 
-Controllers should:
+Controllers should only:
 
-- Validate requests
-- Call services
-- Return responses
+- receive requests
+- validate input
+- call services
+- return responses
 
-Controllers should NOT:
+Controllers must never:
 
-- Access Prisma directly
-- Implement business logic
+- execute business logic
+- access Prisma
+- perform calculations
+- call external services directly
+
+Controllers should remain very small.
 
 ---
 
 # Services
 
-Services contain business logic.
+Services are responsible for:
 
-Services should remain focused.
+- business rules
+- orchestration
+- transactions
+- validation that depends on business rules
 
-One service = one responsibility.
+Services may call multiple repositories.
+
+Services may call other services only when appropriate.
+
+Avoid circular dependencies.
 
 ---
 
-# Repository
+# Repositories
 
-Repositories only access the database.
+Repositories are responsible only for database access.
 
-Repositories do not contain business logic.
+Repositories must:
+
+- use Prisma
+- hide database implementation details
+- never contain business logic
+
+Repositories should only perform CRUD and query operations.
 
 ---
 
 # DTOs
 
-Always validate incoming requests.
+Every request must use DTOs.
 
-Use DTOs.
+Every response should use DTOs where appropriate.
 
-Never expose internal entities directly.
+Never expose Prisma models directly.
 
 ---
 
-# Transactions
+# Validation
 
-Whenever multiple database updates belong together:
+Use class-validator.
 
-Use transactions.
+Validate all incoming requests.
+
+Business validation belongs inside Services.
+
+Input validation belongs inside DTOs.
 
 ---
 
@@ -96,67 +140,241 @@ Use transactions.
 
 Use structured logging.
 
-Log:
+Log important events.
 
-- authentication
-- imports
-- parser results
-- failures
-- external API calls
-- background jobs
+Examples:
 
-Do not spam logs.
+- entity created
+- entity updated
+- entity deleted
+- import started
+- import finished
+- pricing calculated
+- unexpected errors
 
----
-
-# Errors
-
-Return structured errors.
-
-Never swallow exceptions.
-
-Never ignore failures.
+Do not log sensitive information.
 
 ---
 
-# Performance
+# Error Handling
 
-Avoid unnecessary queries.
+Throw domain-specific exceptions.
 
-Prevent N+1 problems.
+Never return raw Prisma errors.
 
-Reuse services.
+Never expose internal stack traces.
+
+Return consistent API responses.
+
+---
+
+# Transactions
+
+Use Prisma transactions whenever multiple database changes must succeed together.
+
+Never perform partial updates for business operations that should be atomic.
+
+---
+
+# Dependency Injection
+
+Always use NestJS Dependency Injection.
+
+Never instantiate repositories or services manually.
+
+---
+
+# Prisma
+
+All database access must go through repositories.
+
+Never use Prisma directly inside:
+
+- Controllers
+- Guards
+- Interceptors
+- Validators
+
+---
+
+# API Design
+
+Use REST.
+
+Use nouns for endpoints.
+
+Examples:
+
+GET /drivers
+
+GET /vehicles
+
+POST /trips
+
+PATCH /settings/{key}
+
+Avoid verbs inside URLs.
+
+---
+
+# Pagination
+
+Every list endpoint should support pagination.
+
+Future endpoints should support:
+
+- page
+- pageSize
+- sorting
+- filtering
+
+---
+
+# Response Format
+
+Always use the global response envelope.
+
+Do not return inconsistent JSON structures.
+
+---
+
+# Swagger
+
+Every endpoint must contain:
+
+- summary
+- description
+- response types
+- validation documentation
+
+Swagger should remain fully synchronized with the API.
 
 ---
 
 # Security
 
-Validate authentication.
+Never trust client input.
 
-Validate authorization.
+Always validate.
 
-Never trust incoming data.
+Never expose internal identifiers unless required.
+
+Escape user input where appropriate.
+
+Prepare the codebase for future authentication and authorization.
 
 ---
 
-# Database
+# Configuration
 
-Never hardcode IDs.
+Never hardcode configuration values.
 
-Avoid duplicated data.
+Use ConfigService.
 
-Keep migrations clean.
+Configuration belongs in environment variables or Settings.
+
+---
+
+# Business Rules
+
+Never duplicate business rules inside controllers or repositories.
+
+Business rules must remain centralized inside Services.
+
+If a business rule already exists, reuse it.
 
 ---
 
 # Testing
 
-Business logic should be testable.
+Every new module should include:
 
-Prefer dependency injection.
+- unit tests for services
+- repository tests where appropriate
+- endpoint tests for controllers
+
+Critical business logic must always be tested.
 
 ---
 
-# Goal
+# Database
 
-The backend should remain the single source of truth.
+The database model is the single source of truth.
+
+Never modify entities without updating:
+
+- database_model.md
+- database_schema.md
+
+If a database change is required:
+
+Stop.
+
+Explain why.
+
+Wait for approval before changing the schema.
+
+---
+
+# Documentation
+
+Keep documentation synchronized.
+
+Whenever the Backend architecture changes, update the relevant documentation.
+
+Never let documentation become outdated.
+
+---
+
+# Performance
+
+Avoid unnecessary database queries.
+
+Prefer eager loading only when required.
+
+Avoid N+1 query problems.
+
+Keep transactions short.
+
+---
+
+# Future Compatibility
+
+Design modules so they can evolve independently.
+
+Avoid tight coupling.
+
+Prefer composition over duplication.
+
+Build reusable components.
+
+---
+
+# Before Writing Code
+
+Before implementing a new feature:
+
+1. Read the relevant documentation.
+2. Verify the database model.
+3. Verify the business rules.
+4. Explain the implementation plan.
+5. Only then begin implementation.
+
+Never make assumptions when documentation is unclear.
+
+Ask questions instead.
+
+---
+
+# Final Rule
+
+The Backend is the core of the application.
+
+Every implementation should prioritize:
+
+- correctness
+- maintainability
+- consistency
+- simplicity
+
+over speed of implementation.

@@ -18,3 +18,9 @@ allowBuilds:
   prisma: true
   "@prisma/engines": true
   esbuild: true
+  # Analytics package pulled in transitively. Its install script reports usage
+  # telemetry and nothing depends on it running, so it stays denied.
+  "@scarf/scarf": false
+  # Native module resolver used by the lint toolchain. Its install script picks
+  # the correct platform binary, so it genuinely needs to run.
+  unrs-resolver: true

@@ -1,0 +1,27 @@
+# The build context is the repository root (see apps/backend/Dockerfile).
+# Excluding these keeps the context small and prevents host-built artefacts
+# from leaking into the image.
+
+**/node_modules
+**/dist
+**/build
+**/.next
+**/coverage
+
+.git
+.github
+.vscode
+.idea
+
+# Secrets must never enter an image layer.
+.env
+.env.*
+!.env.example
+
+docs
+storage
+scripts
+database
+
+**/*.log
+**/*.tsbuildinfo
