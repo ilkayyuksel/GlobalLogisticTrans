@@ -22,7 +22,7 @@ Frontend
 
 Sprint 5
 
-Parser
+Parser + Pricing Engine
 
 Sprint 6
 

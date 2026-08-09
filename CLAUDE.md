@@ -63,6 +63,14 @@ Prefer composition over inheritance.
 
 Always think about future scalability.
 
+Never calculate prices inside:
+
+- frontend
+- parser
+- imap
+
+All pricing belongs to the Pricing Engine.
+
 ---
 
 # Simplicity
@@ -166,6 +174,15 @@ Never place business logic inside:
 The frontend should display data.
 
 The backend should make decisions.
+
+
+Never calculate prices inside:
+
+- frontend
+- parser
+- imap
+
+All pricing belongs to the Pricing Engine.
 
 ---
 
