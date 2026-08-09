@@ -1,0 +1,394 @@
+# Transport Management System (TMS)
+
+> A modern Transport Management System focused on planning, automation and fleet management.
+
+---
+
+# Overview
+
+This project aims to build a scalable Transport Management System (TMS) that automates daily transport planning and administration.
+
+The application will centralize transport orders, automatically process incoming PDF documents, organize trips, manage vehicles and maintenance, and provide a complete planning dashboard.
+
+The system is designed with scalability and maintainability in mind, allowing new modules and services to be added over time without major architectural changes.
+
+---
+
+# Goals
+
+The primary goals of this project are:
+
+- Automate repetitive administrative tasks
+- Reduce manual data entry
+- Simplify transport planning
+- Centralize all transport-related information
+- Build a modular and maintainable platform
+- Support future expansion
+
+---
+
+# Planned Features
+
+## Trip Management
+
+- Import transport orders
+- Automatic trip creation
+- Manual trip editing
+- Daily planning
+- Weekly planning
+- Monthly planning
+- Trip status management
+- Combination trip support
+- Manual overrides
+- Excel export
+- PDF storage
+
+---
+
+## PDF Processing
+
+- Automatic PDF parsing
+- Multiple PDF layouts
+- Multi-page PDF support
+- Combination order support
+- Manual validation
+- Robust parsing engine
+- Debug tools
+
+---
+
+## Email Automation
+
+- Automatic mailbox monitoring
+- PDF download
+- Duplicate detection
+- Automatic processing
+- Error handling
+
+---
+
+## Fleet Management
+
+- Vehicle management
+- Trailer management
+- Maintenance history
+- Maintenance reminders
+- Vehicle documentation
+
+---
+
+## Planning
+
+- Daily planner
+- Weekly planner
+- Monthly overview
+- Calendar
+- Personal agenda
+- Notes
+
+---
+
+## Dashboard
+
+- Active trips
+- Finished trips
+- Upcoming maintenance
+- Calendar widgets
+- Statistics
+- Search
+- Filters
+
+---
+
+## Pricing & Billing
+
+The system will include a flexible pricing engine to automatically calculate the transport price for each trip.
+
+Pricing should be configurable through user-defined business rules rather than hardcoded logic.
+
+Potential pricing factors include:
+
+- Fixed prices
+- Customer-specific pricing
+- Route-based pricing
+- Pickup and delivery locations
+- Terminal-specific pricing
+- Vehicle type
+- Trailer type
+- Container type
+- Combination trips
+- Waiting time
+- Additional stops
+- Weekend or holiday surcharges
+- Ferry or toll costs
+- Manual adjustments
+- Custom pricing rules
+
+The pricing engine should remain fully configurable so that pricing logic can evolve without requiring major changes to the application.
+
+Future functionality may include:
+
+- Rule-based pricing configuration
+- Price simulations
+- Automatic invoice preparation
+- Cost analysis
+- Profit margin calculations
+- Historical pricing reports
+- Customer-specific pricing profiles
+
+---
+
+## Communication
+
+The platform will include a communication module to simplify interaction with drivers and customers.
+
+The communication layer should remain extensible and support multiple communication channels.
+
+Potential capabilities include:
+
+- Sending trip information
+- Sending PDF transport orders
+- Sending loading instructions
+- Sending container information
+- Sending updated planning
+- Sending route changes
+- Receiving documents from drivers
+- Receiving photos
+- Receiving signed documents
+- Receiving proof of delivery (POD)
+- Receiving container numbers
+- Receiving notes from drivers
+
+Future communication channels may include:
+
+- WhatsApp Business
+- Email
+- SMS
+- Push notifications
+- Mobile application
+- Other messaging platforms
+
+The communication module should be independent from the transport planning module, allowing additional communication providers to be integrated in the future.
+
+---
+
+# Architecture
+
+The project follows a modular architecture.
+
+Each major component is isolated and communicates through well-defined APIs.
+
+Current high-level architecture:
+
+```
+                Client
+
+                  │
+
+             Reverse Proxy
+
+                  │
+
+    ┌─────────────┴─────────────┐
+
+    │                           │
+
+ Frontend                  Backend API
+
+                                │
+
+      ┌──────────────┬──────────────┬──────────────┐
+
+      │              │              │
+
+ PDF Parser      Email Service    Database
+```
+
+The implementation details may evolve over time.
+
+---
+
+# Design Principles
+
+The project should always aim to be:
+
+- Modular
+- Maintainable
+- Scalable
+- Secure
+- Testable
+- Extensible
+
+Business logic should remain independent from the user interface.
+
+---
+
+# Future Modules
+
+Potential future additions include:
+
+- Driver management
+- Customer management
+- Fuel administration
+- Invoice management
+- Route optimization
+- GPS integration
+- Notifications
+- Mobile application
+- Reporting
+- Analytics
+- Document management
+- OCR improvements
+- AI-assisted document recognition
+
+---
+
+# Project Structure
+
+The exact folder structure may evolve.
+
+Example:
+
+```
+project/
+
+docs/
+
+frontend/
+
+backend/
+
+parser/
+
+email-service/
+
+database/
+
+docker/
+
+scripts/
+
+storage/
+```
+
+---
+
+# Documentation
+
+Documentation will be maintained throughout development.
+
+Planned documentation:
+
+- Architecture
+- API
+- Database
+- Deployment
+- Parser
+- Email Processing
+- Coding Standards
+- Roadmap
+- Decisions
+- Contributing
+
+---
+
+# Development Workflow
+
+Development follows an incremental approach.
+
+Instead of building everything at once, the project is divided into small, independent milestones.
+
+Typical workflow:
+
+1. Design
+2. Implement
+3. Test
+4. Review
+5. Refactor
+6. Deploy
+
+---
+
+# Version Control
+
+Git is used for version control.
+
+Feature-based development is preferred.
+
+Example workflow:
+
+- main
+- develop
+- feature/*
+- bugfix/*
+- hotfix/*
+
+---
+
+# Coding Standards
+
+General principles:
+
+- Clean code
+- Readable code
+- Small components
+- Small services
+- Strong typing
+- Reusable modules
+- Clear naming
+- Minimal duplication
+
+---
+
+# Security
+
+Security is considered from the start.
+
+Examples include:
+
+- Authentication
+- Authorization
+- Secure API communication
+- Environment variables
+- Input validation
+- Error handling
+- Logging
+
+---
+
+# Deployment
+
+The application is intended to be containerized.
+
+Each major component should be deployable independently.
+
+Deployment targets may evolve over time.
+
+---
+
+# Roadmap
+
+The roadmap will evolve during development.
+
+Current phases:
+
+- Foundation
+- Core Backend
+- Frontend
+- PDF Processing
+- Email Automation
+- Planning
+- Fleet Management
+- Dashboard
+- Reporting
+- Production Deployment
+
+---
+
+# Philosophy
+
+The objective is not only to build software, but to create a maintainable platform that can continue to evolve as operational requirements grow.
+
+The project emphasizes long-term maintainability over short-term implementation speed.
+
+Architecture decisions should prioritize simplicity, modularity and future extensibility.
