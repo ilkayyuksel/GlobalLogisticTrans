@@ -22,6 +22,12 @@ Backend
 
 Business Logic
 
+Pricing Engine
+
+↓
+
+Provide calculated pricing.
+
 Parser
 
 ↓
@@ -51,6 +57,12 @@ The frontend displays data.
 The parser extracts data.
 
 The IMAP service orchestrates emails.
+
+The Pricing Engine must always produce deterministic results.
+
+The same input must always produce the same output.
+
+Pricing calculations must never be performed in the frontend.
 
 ---
 

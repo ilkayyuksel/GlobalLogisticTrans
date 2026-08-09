@@ -1,0 +1,20 @@
+# pnpm workspace definition.
+#
+# Only apps/* and packages/* are workspace members. The repository root is a
+# workspace member implicitly and owns the database toolchain (Prisma, seed,
+# Docker scripts) — see package.json.
+#
+# database/, docker/, docs/, scripts/ and storage/ are intentionally NOT listed:
+# they hold resources, not publishable packages.
+
+packages:
+  - "apps/*"
+  - "packages/*"
+
+# pnpm refuses to run install lifecycle scripts unless the package is approved
+# here. Prisma fetches its query engines during install, so without these the
+# CLI installs but cannot run. esbuild is a transitive dependency of tsx.
+allowBuilds:
+  prisma: true
+  "@prisma/engines": true
+  esbuild: true

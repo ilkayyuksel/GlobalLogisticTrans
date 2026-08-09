@@ -1,0 +1,47 @@
+{
+  "name": "transport-management-system",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Transport Management System — monorepo root. Owns the database toolchain only; applications live in apps/*.",
+  "license": "SEE LICENSE IN LICENSE",
+  "packageManager": "pnpm@11.21.0",
+  "engines": {
+    "node": ">=22",
+    "pnpm": ">=11"
+  },
+  "scripts": {
+    "db:up": "docker compose up -d --wait",
+    "db:down": "docker compose down",
+    "db:logs": "docker compose logs -f postgres",
+    "db:generate": "prisma generate",
+    "db:migrate": "prisma migrate dev",
+    "db:migrate:deploy": "prisma migrate deploy",
+    "db:migrate:status": "prisma migrate status",
+    "db:studio": "prisma studio",
+    "db:seed": "prisma db seed",
+    "db:seed:dev": "tsx prisma/seed-dev.ts",
+    "db:reset": "prisma migrate reset",
+    "db:validate": "prisma validate",
+    "db:format": "prisma format",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
+  },
+  "dependencies": {
+    "@prisma/adapter-pg": "^7.9.1",
+    "@prisma/client": "^7.9.1",
+    "dotenv": "^17.4.2"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^22.20.1",
+    "eslint": "^10.8.1",
+    "prettier": "^3.9.6",
+    "prisma": "^7.9.1",
+    "tsx": "^4.23.11",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.66.0"
+  }
+}

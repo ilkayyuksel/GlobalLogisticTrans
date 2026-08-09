@@ -1,0 +1,844 @@
+// ---------------------------------------------------------------------------
+// Transport Management System — Prisma Schema
+//
+// This file is a direct translation of docs/01-architecture/database_schema.md.
+// It introduces no tables, columns, relationships or constraints of its own.
+//
+// Two classes of constraint required by database_schema.md cannot be expressed
+// in Prisma's schema language and MUST be added by hand in a migration.
+// They are listed here so they are not silently lost, and repeated as a comment
+// on each model that needs them.
+//
+//   PARTIAL UNIQUE INDEXES (Prisma has no filtered-index syntax)
+//     vehicle             UNIQUE (license_plate)            WHERE is_active
+//     trailer             UNIQUE (license_plate)            WHERE is_active
+//     custom_property     UNIQUE (name)                     WHERE is_active
+//     pricing_component   UNIQUE (code)                     WHERE is_active
+//     route_pricing       UNIQUE (departure, destination)   WHERE is_active
+//     vehicle_assignment  UNIQUE (vehicle_id)               WHERE valid_to IS NULL
+//
+//   CHECK CONSTRAINTS (Prisma has no CHECK syntax)
+//     parser_run          warning_count >= 0
+//     parser_run          error_count >= 0
+//     trip                waiting_time_minutes >= 0
+//     trip                distance_km >= 0
+//     vacation            end_date >= start_date
+//     vehicle_assignment  valid_to >= valid_from
+//     maintenance         exactly one of vehicle_id / trailer_id is set
+//     maintenance         cost >= 0
+//     route_pricing       base_price >= 0
+//     trip_pricing        total_price >= 0
+//     calendar_event      end_date >= start_date
+//
+// Using a plain @@unique instead of a partial unique index would be a silent
+// behaviour change: it would permanently reserve a licence plate / property
+// name / component code, which the model explicitly allows to be reused once
+// the owning record is deactivated.
+//
+// A further set of business rules is enforced only by the Backend — see
+// database_schema.md §11 (booking-number scoping, vehicle double-booking,
+// status transitions, append-only tables, pricing totals).
+// ---------------------------------------------------------------------------
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// The connection URL is deliberately absent: Prisma 7 no longer accepts `url`
+// here. Prisma CLI / Migrate reads it from prisma.config.ts, and PrismaClient
+// receives a driver adapter at construction time.
+
+// ---------------------------------------------------------------------------
+// Enums
+//
+// Native PostgreSQL enums are used only for stable business lifecycles.
+// Concepts the model declares extensible (setting.category,
+// trip_history.event_type, pricing_component.code, calendar_event.event_type)
+// are plain String columns, so new values never require a migration.
+// ---------------------------------------------------------------------------
+
+/// CANCELLED is a business cancellation of the transport itself.
+/// DELETED is an administrative soft delete of the record and can be restored.
+/// The two are deliberately distinct and must never be collapsed.
+enum TripStatus {
+  OPEN
+  CLOSED
+  CANCELLED
+  DELETED
+
+  @@map("trip_status")
+}
+
+enum MaintenanceStatus {
+  PLANNED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+
+  @@map("maintenance_status")
+}
+
+/// Derived from the email subject prefix (NEW: / UPDATE: / CANCEL:).
+enum ImportType {
+  NEW
+  UPDATE
+  CANCEL
+
+  @@map("import_type")
+}
+
+enum ParserResult {
+  SUCCESS
+  WARNING
+  FAILED
+  PARTIAL_SUCCESS
+
+  @@map("parser_result")
+}
+
+enum PricingCalculationStatus {
+  CALCULATED
+  FAILED
+  MANUAL_OVERRIDE
+
+  @@map("pricing_calculation_status")
+}
+
+enum EmailProcessingStatus {
+  RECEIVED
+  PROCESSING
+  PROCESSED
+  FAILED
+  IGNORED
+
+  @@map("email_processing_status")
+}
+
+/// A PDF may reach the system without an email, which is why
+/// pdf_document.imported_email_id is nullable.
+enum ImportSource {
+  EMAIL
+  MANUAL_UPLOAD
+  API
+
+  @@map("import_source")
+}
+
+enum SettingValueType {
+  STRING
+  INTEGER
+  DECIMAL
+  BOOLEAN
+  DATE
+  JSON
+
+  @@map("setting_value_type")
+}
+
+// ---------------------------------------------------------------------------
+// Import Domain
+// ---------------------------------------------------------------------------
+
+/// One email received by the IMAP Service.
+/// Exists only for the email import path — manual and API imports have no row.
+model ImportedEmail {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+
+  senderEmail String    @map("sender_email") @db.Text
+  subject     String    @db.Text
+  /// RFC Message-ID. Unique so a reconnecting IMAP session cannot reprocess
+  /// the same email and create duplicate Trips.
+  messageId   String    @unique @map("message_id") @db.Text
+  receivedAt  DateTime  @map("received_at") @db.Timestamptz(6)
+  processedAt DateTime? @map("processed_at") @db.Timestamptz(6)
+
+  processingStatus EmailProcessingStatus @default(RECEIVED) @map("processing_status")
+  importType       ImportType            @map("import_type")
+
+  /// Stored only when needed for debugging a failed import.
+  body String? @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  pdfDocument PdfDocument?
+
+  @@index([processingStatus])
+  @@index([receivedAt])
+  @@map("imported_email")
+}
+
+/// One imported PDF — the immutable source of one or more Trips.
+/// The binary itself lives on disk; only metadata and a path are stored here.
+model PdfDocument {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+
+  importedEmailId String?      @unique @map("imported_email_id") @db.Uuid
+  importSource    ImportSource @map("import_source")
+
+  originalFilename String @map("original_filename") @db.Text
+  storagePath      String @map("storage_path") @db.Text
+  fileSizeBytes    BigInt @map("file_size_bytes")
+  /// Content hash used to *find* duplicates. Deliberately not unique: the same
+  /// PDF may legitimately arrive twice (for example resent with an UPDATE:).
+  fileHash         String @map("file_hash") @db.Text
+  mimeType         String @map("mime_type") @db.Text
+
+  uploadedAt DateTime @default(now()) @map("uploaded_at") @db.Timestamptz(6)
+
+  /// Redundant with parser_run.parser_version — see database_schema.md open
+  /// point O2. Kept nullable pending confirmation.
+  parserVersion String? @map("parser_version") @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  importedEmail ImportedEmail? @relation(fields: [importedEmailId], references: [id], onDelete: Restrict)
+
+  parserRuns ParserRun[]
+  trips      Trip[]
+
+  @@index([fileHash])
+  @@index([importSource])
+  @@index([uploadedAt])
+  @@map("pdf_document")
+}
+
+/// One execution of the PDF parser. Append-only.
+/// Exists independently of Trips — a run may fail before any Trip is created.
+model ParserRun {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+
+  pdfDocumentId String @map("pdf_document_id") @db.Uuid
+
+  parserVersion String    @map("parser_version") @db.Text
+  startedAt     DateTime  @map("started_at") @db.Timestamptz(6)
+  /// Null while the run is in progress, or if it crashed before finishing.
+  finishedAt    DateTime? @map("finished_at") @db.Timestamptz(6)
+  durationMs    Int?      @map("duration_ms")
+
+  result       ParserResult
+  warningCount Int          @default(0) @map("warning_count")
+  errorCount   Int          @default(0) @map("error_count")
+  errorCode    String?      @map("error_code") @db.Text
+  errorMessage String?      @map("error_message") @db.Text
+
+  /// Run-level technical diagnostics only: detected layout, confidence,
+  /// detected sections, warnings, execution statistics, debug information.
+  /// Never overwritten, because every execution inserts a new row — this is
+  /// what makes parser comparison across versions possible.
+  /// Diagnostics only: no business decision may read from this column.
+  metadata Json? @db.JsonB
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  pdfDocument PdfDocument @relation(fields: [pdfDocumentId], references: [id], onDelete: Restrict)
+
+  @@index([pdfDocumentId])
+  @@index([pdfDocumentId, startedAt])
+  @@index([result])
+  @@map("parser_run")
+}
+
+// ---------------------------------------------------------------------------
+// Planning Domain
+// ---------------------------------------------------------------------------
+
+/// Groups the Trips of a Combination transport.
+/// Holds no business data of its own — the grouping relationship is the whole
+/// purpose, and every shared value (PDF, booking number) stays on the Trips.
+model TripGroup {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  trips Trip[]
+
+  @@map("trip_group")
+}
+
+/// One physical transport movement. The central entity of the system.
+model Trip {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+
+  pdfDocumentId String  @map("pdf_document_id") @db.Uuid
+  /// Non-null means this Trip is part of a Combination.
+  /// Trip Type is derived from this column and is therefore not stored.
+  tripGroupId   String? @map("trip_group_id") @db.Uuid
+  vehicleId     String? @map("vehicle_id") @db.Uuid
+  /// Driver OVERRIDE, not the normal assignment path. When null, the Driver is
+  /// resolved through the VehicleAssignment valid on planning_date. Set only
+  /// for one-off substitutions (sickness, holiday cover), and it never alters
+  /// the underlying VehicleAssignment.
+  driverId      String? @map("driver_id") @db.Uuid
+
+  status TripStatus @default(OPEN)
+
+  /// Original PDF value. Deliberately NOT unique: both Trips of a Combination
+  /// share it, and UPDATE:/CANCEL: matching relies on finding all of them.
+  bookingNumber   String  @map("booking_number") @db.Text
+  /// Empty on a Loading until the driver reports the container.
+  containerNumber String? @map("container_number") @db.Text
+  containerType   String  @map("container_type") @db.Text
+  /// Not part of the parser's validated field set, so it may be missing.
+  terminal        String? @db.Text
+
+  /// Street level is intentionally discarded; only the normalized city and
+  /// country are business data. The raw text survives in parser_metadata.
+  destinationCity    String @map("destination_city") @db.Text
+  destinationCountry String @map("destination_country") @db.Text
+
+  /// Immutable record of the date extracted at import, kept so reporting can
+  /// compare original planning against the date the Administrator moved it to.
+  originalPlanningDate DateTime  @map("original_planning_date") @db.Date
+  planningDate         DateTime  @map("planning_date") @db.Date
+  /// Planned interval. Required by the Backend to detect a Vehicle being
+  /// double-booked; nullable because the parser does not guarantee times.
+  startTime            DateTime? @map("start_time") @db.Time(6)
+  endTime              DateTime? @map("end_time") @db.Time(6)
+  /// When the transport was actually carried out; may differ from planning.
+  executionDatetime    DateTime? @map("execution_datetime") @db.Timestamptz(6)
+
+  waitingTimeMinutes Int?     @map("waiting_time_minutes")
+  /// Manually entered. Used only by the Distance-Based pricing strategy.
+  distanceKm         Decimal? @map("distance_km") @db.Decimal(8, 2)
+
+  internalNotes String? @map("internal_notes") @db.Text
+
+  /// Raw values extracted for THIS Trip (raw terminal, destination, address,
+  /// booking number, container number, date, matched labels). Explains why the
+  /// business columns hold what they hold.
+  /// Parser-controlled: replaced on every reprocessing, never manual.
+  /// Must not hold confidence, layout, warnings, timing or parser version —
+  /// those are run-level and belong to parser_run.metadata.
+  /// Diagnostics only: no business decision may read from this column.
+  parserMetadata Json? @map("parser_metadata") @db.JsonB
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  pdfDocument PdfDocument @relation(fields: [pdfDocumentId], references: [id], onDelete: Restrict)
+  /// SetNull, because dissolving a group must leave both Trips intact.
+  tripGroup   TripGroup?  @relation(fields: [tripGroupId], references: [id], onDelete: SetNull)
+  vehicle     Vehicle?    @relation(fields: [vehicleId], references: [id], onDelete: Restrict)
+  driver      Driver?     @relation(fields: [driverId], references: [id], onDelete: Restrict)
+
+  pricing          TripPricing?
+  history          TripHistory[]
+  customProperties TripCustomProperty[]
+
+  @@index([bookingNumber])
+  @@index([planningDate])
+  @@index([status])
+  @@index([status, planningDate])
+  @@index([vehicleId, planningDate])
+  @@index([tripGroupId])
+  @@index([driverId])
+  @@index([pdfDocumentId])
+  @@map("trip")
+}
+
+/// Append-only audit trail. Never updated, never deleted — enforced by the
+/// Backend, since Prisma cannot revoke UPDATE/DELETE rights.
+model TripHistory {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+
+  tripId String @map("trip_id") @db.Uuid
+
+  /// Plain text rather than an enum: the model requires the event list to stay
+  /// extensible, and a new event type should not need a migration.
+  eventType   String   @map("event_type") @db.Text
+  occurredAt  DateTime @default(now()) @map("occurred_at") @db.Timestamptz(6)
+  /// Auth0 subject (`sub`) — stable even when a display name changes.
+  /// See database_schema.md open point O4 for system-generated events.
+  performedBy String   @map("performed_by") @db.VarChar(255)
+
+  /// JSONB so values of any column type survive without being stringified.
+  previousValue Json?   @map("previous_value") @db.JsonB
+  newValue      Json?   @map("new_value") @db.JsonB
+  description   String? @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  trip Trip @relation(fields: [tripId], references: [id], onDelete: Restrict)
+
+  @@index([tripId, occurredAt(sort: Desc)])
+  @@index([eventType])
+  @@index([performedBy])
+  @@map("trip_history")
+}
+
+/// Join table between Trip and CustomProperty.
+model TripCustomProperty {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+
+  tripId           String @map("trip_id") @db.Uuid
+  customPropertyId String @map("custom_property_id") @db.Uuid
+
+  /// Doubles as the "Added Timestamp" — a separate column would duplicate it.
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  trip           Trip           @relation(fields: [tripId], references: [id], onDelete: Restrict)
+  customProperty CustomProperty @relation(fields: [customPropertyId], references: [id], onDelete: Restrict)
+
+  @@unique([tripId, customPropertyId])
+  @@index([customPropertyId])
+  @@map("trip_custom_property")
+}
+
+// ---------------------------------------------------------------------------
+// People Domain
+// ---------------------------------------------------------------------------
+
+/// A company driver. Planning information only — authentication lives in Auth0
+/// and is deliberately not linked to this table.
+model Driver {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+
+  /// Not unique: two drivers may genuinely share a name.
+  name             String  @db.Text
+  phoneNumber      String? @map("phone_number") @db.Text
+  email            String? @db.Text
+  /// See database_schema.md open point O5.
+  emergencyContact String? @map("emergency_contact") @db.Text
+  notes            String? @db.Text
+
+  /// Soft delete. Inactive Drivers keep their historical Trips but cannot be
+  /// selected for new planning.
+  isActive Boolean @default(true) @map("is_active")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  trips              Trip[]
+  vacations          Vacation[]
+  vehicleAssignments VehicleAssignment[]
+
+  @@index([isActive])
+  @@map("driver")
+}
+
+/// A period during which a Driver is unavailable for new planning.
+/// No soft-delete flag: a vacation that was wrong is corrected or removed.
+///
+/// Requires a manual CHECK: end_date >= start_date.
+/// Non-overlap per Driver is Backend-enforced (an EXCLUDE constraint would
+/// work in PostgreSQL but cannot be expressed in Prisma).
+model Vacation {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+
+  driverId String @map("driver_id") @db.Uuid
+
+  /// Both bounds are inclusive.
+  startDate DateTime @map("start_date") @db.Date
+  endDate   DateTime @map("end_date") @db.Date
+
+  reason String? @db.Text
+  notes  String? @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  driver Driver @relation(fields: [driverId], references: [id], onDelete: Restrict)
+
+  @@index([driverId, startDate])
+  @@index([startDate, endDate])
+  @@map("vacation")
+}
+
+// ---------------------------------------------------------------------------
+// Fleet Domain
+// ---------------------------------------------------------------------------
+
+/// A company truck. Carries the planning colour used across the dashboard.
+///
+/// Requires a manual partial unique index:
+///   UNIQUE (license_plate) WHERE is_active
+model Vehicle {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+
+  licensePlate String @map("license_plate") @db.Text
+  /// Presentation only, and deliberately not unique — the Administrator may
+  /// reuse a colour.
+  displayColor String @map("display_color") @db.Text
+
+  description String? @db.Text
+  brand       String? @db.Text
+  model       String? @db.Text
+  year        Int?
+  notes       String? @db.Text
+
+  isActive Boolean @default(true) @map("is_active")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  trips              Trip[]
+  maintenanceRecords Maintenance[]
+  vehicleAssignments VehicleAssignment[]
+
+  @@index([isActive])
+  @@map("vehicle")
+}
+
+/// A company trailer. Used only for maintenance administration — there is
+/// deliberately no relationship to Trip.
+///
+/// Requires a manual partial unique index:
+///   UNIQUE (license_plate) WHERE is_active
+model Trailer {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+
+  licensePlate String @map("license_plate") @db.Text
+
+  description String? @db.Text
+  brand       String? @db.Text
+  model       String? @db.Text
+  year        Int?
+  notes       String? @db.Text
+
+  isActive Boolean @default(true) @map("is_active")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  maintenanceRecords Maintenance[]
+
+  @@index([isActive])
+  @@map("trailer")
+}
+
+/// Historized Driver-to-Vehicle link.
+///
+/// This table exists so that reassigning a licence plate to a different Driver
+/// does not silently rewrite the apparent Driver of every past Trip on that
+/// Vehicle. A Trip resolves its Driver through the assignment that was valid on
+/// its planning_date.
+///
+/// Requires a manual partial unique index:
+///   UNIQUE (vehicle_id) WHERE valid_to IS NULL   -- one active assignment
+/// Requires a manual CHECK: valid_to >= valid_from.
+/// Non-overlap per Vehicle is Backend-enforced.
+model VehicleAssignment {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+
+  vehicleId String @map("vehicle_id") @db.Uuid
+  driverId  String @map("driver_id") @db.Uuid
+
+  validFrom DateTime  @map("valid_from") @db.Date
+  /// Null marks the currently active assignment.
+  validTo   DateTime? @map("valid_to") @db.Date
+
+  notes String? @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  vehicle Vehicle @relation(fields: [vehicleId], references: [id], onDelete: Restrict)
+  driver  Driver  @relation(fields: [driverId], references: [id], onDelete: Restrict)
+
+  /// Serves the Driver-resolution lookup for a Trip's planning date.
+  @@index([vehicleId, validFrom])
+  @@index([driverId])
+  @@map("vehicle_assignment")
+}
+
+/// A maintenance event on exactly one asset — a Vehicle or a Trailer.
+///
+/// Two nullable foreign keys rather than a polymorphic asset_type/asset_id pair,
+/// so PostgreSQL keeps enforcing referential integrity. The asset type is
+/// implied by which key is populated, which is why no asset_type column exists.
+///
+/// Requires a manual CHECK: exactly one of vehicle_id / trailer_id is set.
+/// Requires a manual CHECK: cost >= 0.
+model Maintenance {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+
+  vehicleId String? @map("vehicle_id") @db.Uuid
+  trailerId String? @map("trailer_id") @db.Uuid
+
+  status          MaintenanceStatus
+  maintenanceDate DateTime          @map("maintenance_date") @db.Date
+  description     String            @db.Text
+
+  cost     Decimal? @db.Decimal(12, 2)
+  workshop String?  @db.Text
+  notes    String?  @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  vehicle Vehicle? @relation(fields: [vehicleId], references: [id], onDelete: Restrict)
+  trailer Trailer? @relation(fields: [trailerId], references: [id], onDelete: Restrict)
+
+  @@index([vehicleId, maintenanceDate])
+  @@index([trailerId, maintenanceDate])
+  @@index([status])
+  @@index([maintenanceDate])
+  @@map("maintenance")
+}
+
+// ---------------------------------------------------------------------------
+// Settings Domain
+// ---------------------------------------------------------------------------
+
+/// A configurable property assignable to Trips (TAR, Flat, Over Sint-Niklaas).
+/// May contribute a pricing component.
+///
+/// Requires a manual partial unique index:
+///   UNIQUE (name) WHERE is_active
+model CustomProperty {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+
+  name        String  @db.Text
+  description String? @db.Text
+
+  /// The value the Pricing Engine reads at calculation time. Changing it never
+  /// recalculates historical Trips — their amounts are already frozen into
+  /// trip_pricing_item.
+  defaultPrice Decimal? @map("default_price") @db.Decimal(12, 2)
+
+  displayOrder Int     @map("display_order")
+  color        String? @db.Text
+
+  isActive Boolean @default(true) @map("is_active")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  tripCustomProperties TripCustomProperty[]
+  tripPricingItems     TripPricingItem[]
+
+  @@index([isActive, displayOrder])
+  @@map("custom_property")
+}
+
+/// Generic key/value configuration store.
+/// New settings are added as rows, never as columns, so configuration changes
+/// never require a migration.
+model Setting {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+
+  /// Plain text, not an enum: the model requires new categories to be
+  /// introducible without a database change. Values are validated in the app.
+  category String @db.Text
+  key      String @db.Text
+
+  /// Held as text and cast by the application according to value_type.
+  /// PostgreSQL cannot validate that the cast will succeed.
+  value        String           @db.Text
+  valueType    SettingValueType @map("value_type")
+  description  String           @db.Text
+  defaultValue String?          @map("default_value") @db.Text
+
+  isActive Boolean @default(true) @map("is_active")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  /// Unconditional rather than active-scoped: settings are never deleted, so a
+  /// key must stay unique within its category regardless of the active flag.
+  @@unique([category, key])
+  @@index([category])
+  @@map("setting")
+}
+
+// ---------------------------------------------------------------------------
+// Pricing Configuration
+// ---------------------------------------------------------------------------
+
+/// Configured base price for one route, used by the Route-Based strategy.
+/// Trips do not reference it — the Pricing Engine selects the row during
+/// calculation and the resulting amount is frozen into trip_pricing_item.
+///
+/// Requires a manual partial unique index:
+///   UNIQUE (departure, destination) WHERE is_active
+/// Requires a manual CHECK: base_price >= 0.
+model RoutePricing {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+
+  routeName   String @map("route_name") @db.Text
+  departure   String @db.Text
+  destination String @db.Text
+
+  basePrice Decimal @map("base_price") @db.Decimal(12, 2)
+
+  notes String? @db.Text
+
+  isActive Boolean @default(true) @map("is_active")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([isActive])
+  @@map("route_pricing")
+}
+
+/// Catalog of the pricing component kinds the engine may produce.
+/// The single source of truth for classifying a TripPricingItem — there is
+/// deliberately no parallel type enum on the item itself.
+///
+/// Requires a manual partial unique index:
+///   UNIQUE (code) WHERE is_active
+model PricingComponent {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+
+  /// e.g. BASE_PRICE, FUEL_SURCHARGE, COMBINATION, WAITING_TIME, TOLL, TUNNEL,
+  /// CUSTOM_PROPERTY, MANUAL_ADJUSTMENT. Text rather than an enum because
+  /// components are database-driven records, not code constants.
+  code        String @db.Text
+  name        String @db.Text
+  description String @db.Text
+
+  displayOrder Int @map("display_order")
+
+  isActive Boolean @default(true) @map("is_active")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  tripPricingItems TripPricingItem[]
+
+  @@index([isActive, displayOrder])
+  @@map("pricing_component")
+}
+
+// ---------------------------------------------------------------------------
+// Pricing Domain
+// ---------------------------------------------------------------------------
+
+/// The calculated pricing summary for one Trip.
+///
+/// Exists only once the Trip reaches CLOSED — PostgreSQL cannot express that
+/// cross-table conditional existence, so the Backend enforces it.
+/// Reprocessing overwrites this row using current Settings; no previous
+/// version is retained.
+///
+/// Requires a manual CHECK: total_price >= 0.
+model TripPricing {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+
+  /// Unique, giving Trip a one-to-zero-or-one pricing result.
+  tripId String @unique @map("trip_id") @db.Uuid
+
+  /// Must equal the sum of the related items — a cross-table aggregate the
+  /// Backend is responsible for keeping true.
+  totalPrice Decimal @map("total_price") @db.Decimal(12, 2)
+  currency   String  @default("EUR") @db.Char(3)
+
+  calculatedAt         DateTime @map("calculated_at") @db.Timestamptz(6)
+  pricingEngineVersion String   @map("pricing_engine_version") @db.Text
+  pricingRuleVersion   String   @map("pricing_rule_version") @db.Text
+
+  calculationStatus PricingCalculationStatus @map("calculation_status")
+
+  notes String? @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  trip  Trip              @relation(fields: [tripId], references: [id], onDelete: Restrict)
+  items TripPricingItem[]
+
+  @@index([calculatedAt])
+  @@index([calculationStatus])
+  @@map("trip_pricing")
+}
+
+/// One component of a pricing calculation.
+/// Every element is its own row so a new pricing rule never requires a schema
+/// change — it only requires a new PricingComponent record.
+model TripPricingItem {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+
+  tripPricingId      String  @map("trip_pricing_id") @db.Uuid
+  pricingComponentId String  @map("pricing_component_id") @db.Uuid
+  /// Set when the item originates from a Custom Property, so the breakdown can
+  /// name exactly which property produced the amount.
+  customPropertyId   String? @map("custom_property_id") @db.Uuid
+
+  description String  @db.Text
+  /// Intentionally unconstrained in sign — database_model.md §4.14 allows
+  /// negative items. See database_schema.md open point O6.
+  amount      Decimal @db.Decimal(12, 2)
+  currency    String  @default("EUR") @db.Char(3)
+
+  /// Preserves the calculation sequence defined in pricing_rules.md.
+  /// Not unique: ordering is required, uniqueness is not.
+  calculationOrder Int @map("calculation_order")
+
+  quantity  Decimal? @db.Decimal(12, 2)
+  unitPrice Decimal? @map("unit_price") @db.Decimal(12, 2)
+  notes     String?  @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  /// Cascade, because reprocessing replaces the whole item set with its parent.
+  tripPricing      TripPricing      @relation(fields: [tripPricingId], references: [id], onDelete: Cascade)
+  pricingComponent PricingComponent @relation(fields: [pricingComponentId], references: [id], onDelete: Restrict)
+  customProperty   CustomProperty?  @relation(fields: [customPropertyId], references: [id], onDelete: Restrict)
+
+  @@index([tripPricingId, calculationOrder])
+  @@index([pricingComponentId])
+  @@index([customPropertyId])
+  @@map("trip_pricing_item")
+}
+
+// ---------------------------------------------------------------------------
+// Calendar Domain
+// ---------------------------------------------------------------------------
+
+/// An event in the Administrator's internal calendar.
+/// Fully independent from Trips, and may be physically deleted.
+///
+/// Requires a manual CHECK: end_date >= start_date.
+model CalendarEvent {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+
+  title       String  @db.Text
+  description String? @db.Text
+  /// e.g. MEETING, REMINDER, PERSONAL, MAINTENANCE, OTHER. Text rather than an
+  /// enum because the model expects new event types over time.
+  eventType   String  @map("event_type") @db.Text
+
+  startDate DateTime  @map("start_date") @db.Date
+  startTime DateTime  @map("start_time") @db.Time(6)
+  /// Null for a single-day event.
+  endDate   DateTime? @map("end_date") @db.Date
+  endTime   DateTime? @map("end_time") @db.Time(6)
+
+  color String? @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([startDate])
+  @@index([eventType])
+  @@map("calendar_event")
+}
+
+/// A free-form administrator note. Standalone, with no business relationships,
+/// and may be physically deleted.
+model Note {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+
+  title   String  @db.Text
+  content String  @db.Text
+  color   String? @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  /// Supports most-recently-edited ordering in the notes list.
+  @@index([updatedAt])
+  @@map("note")
+}

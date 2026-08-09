@@ -1,29 +1,40 @@
+# Dependencies
 node_modules/
+.pnpm-store/
+.pnpm-debug.log*
 
+# Build output
 .next/
-
 dist/
+build/
+*.tsbuildinfo
 
+# Test and tooling caches
 coverage/
+.eslintcache
 
+# Environment
+# .env.example is the committed template; real .env files never are.
 .env
-
 .env.*
-
 !.env.example
 
+# Logs
 *.log
 
+# Application storage — runtime artefacts, never committed.
 storage/pdf/
-
 storage/temp/
-
 storage/exports/
+storage/documents/
+storage/logs/
 
+# Python (parser tooling)
 __pycache__/
-
 *.pyc
 
+# Editors and OS
 .DS_Store
-
+Thumbs.db
 .vscode/settings.json
+.idea/
