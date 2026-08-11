@@ -5,11 +5,19 @@ import { APP_FILTER, APP_INTERCEPTOR } from "@nestjs/core";
 import { AllExceptionsFilter } from "./common/filters/all-exceptions.filter";
 import { ResponseInterceptor } from "./common/interceptors/response.interceptor";
 import { validateEnvironment } from "./config/environment.variables";
+import { CustomPropertyModule } from "./custom-properties/custom-property.module";
 import { DriverModule } from "./drivers/driver.module";
 import { HealthModule } from "./health/health.module";
 import { LoggerModule } from "./logger/logger.module";
+import { PricingEngineModule } from "./pricing-engine/pricing-engine.module";
 import { PrismaModule } from "./prisma/prisma.module";
+import { RoutePricingModule } from "./route-pricing/route-pricing.module";
 import { SettingsModule } from "./settings/settings.module";
+import { TripCustomPropertyModule } from "./trip-custom-properties/trip-custom-property.module";
+import { TripPricingItemModule } from "./trip-pricing-items/trip-pricing-item.module";
+import { TripPricingModule } from "./trip-pricing/trip-pricing.module";
+import { TripModule } from "./trips/trip.module";
+import { VehicleAssignmentModule } from "./vehicle-assignments/vehicle-assignment.module";
 import { VehicleModule } from "./vehicles/vehicle.module";
 
 /**
@@ -35,6 +43,14 @@ import { VehicleModule } from "./vehicles/vehicle.module";
     SettingsModule,
     DriverModule,
     VehicleModule,
+    VehicleAssignmentModule,
+    RoutePricingModule,
+    CustomPropertyModule,
+    TripModule,
+    TripPricingModule,
+    TripPricingItemModule,
+    TripCustomPropertyModule,
+    PricingEngineModule,
   ],
   providers: [
     {

@@ -242,23 +242,27 @@ async function main(): Promise<void> {
     }),
   ]);
 
+  // A route is Terminal -> Destination (pricing_rules.md, Route-Based Pricing),
+  // so `departure` must hold the same terminal name the Trips carry. Using the
+  // city "Antwerp" here left every seeded Trip unpriceable. Prices are
+  // deliberately unchanged, so the pricing snapshots below still reconcile.
   await prisma.routePricing.createMany({
     data: [
       {
-        routeName: "Antwerp - Rotterdam",
-        departure: "Antwerp",
+        routeName: "MSC PSA European Terminal - Rotterdam",
+        departure: "MSC PSA European Terminal",
         destination: "Rotterdam",
         basePrice: 380.0,
       },
       {
-        routeName: "Antwerp - Bousbecque",
-        departure: "Antwerp",
+        routeName: "DP World Antwerp Gateway - Bousbecque",
+        departure: "DP World Antwerp Gateway",
         destination: "Bousbecque",
         basePrice: 450.0,
       },
       {
-        routeName: "Antwerp - Dourges",
-        departure: "Antwerp",
+        routeName: "PSA Antwerp - Dourges",
+        departure: "PSA Antwerp",
         destination: "Dourges",
         basePrice: 520.0,
       },
@@ -303,6 +307,14 @@ async function main(): Promise<void> {
         value: "75",
         valueType: "DECIMAL",
         description: "Combination surcharge (dummy development value).",
+      },
+      {
+        category: "PRICING",
+        key: "DISTANCE_RATE_PER_KM",
+        value: "2.75",
+        valueType: "DECIMAL",
+        description:
+          "Price per kilometre for Distance-Based Pricing (dummy development value).",
       },
       {
         category: "GENERAL",
@@ -618,16 +630,22 @@ async function main(): Promise<void> {
   // --- Pricing (CLOSED Trips only) ---------------------------------------
 
   const components = await prisma.pricingComponent.findMany();
-  const componentByCode = new Map(components.map((c) => [c.code, c.id]));
+  const componentByCode = new Map(components.map((c) => [c.code, c]));
 
-  function requireComponent(code: string): string {
-    const id = componentByCode.get(code);
-    if (!id) {
+  /**
+   * The catalog carries both the identity and the position of a component.
+   *
+   * `display_order` holds the sequence defined in pricing_rules.md, which is
+   * exactly what `calculation_order` must record — see database_schema.md §9.2.
+   */
+  function requireComponent(code: string): { id: string; displayOrder: number } {
+    const component = componentByCode.get(code);
+    if (!component) {
       throw new Error(
         `Pricing component "${code}" is missing. Run \`pnpm prisma db seed\` first.`,
       );
     }
-    return id;
+    return component;
   }
 
   async function createPricing(
@@ -658,16 +676,22 @@ async function main(): Promise<void> {
     });
 
     await prisma.tripPricingItem.createMany({
-      data: items.map((item, index) => ({
-        tripPricingId: pricing.id,
-        pricingComponentId: requireComponent(item.code),
-        customPropertyId: item.customPropertyId,
-        description: item.description,
-        amount: item.amount,
-        calculationOrder: index + 1,
-        quantity: item.quantity,
-        unitPrice: item.unitPrice,
-      })),
+      data: items.map((item) => {
+        const component = requireComponent(item.code);
+
+        return {
+          tripPricingId: pricing.id,
+          pricingComponentId: component.id,
+          customPropertyId: item.customPropertyId,
+          description: item.description,
+          amount: item.amount,
+          // The component's documented position, not the array index: a Trip
+          // without a Combination surcharge still numbers Fuel as step 3.
+          calculationOrder: component.displayOrder,
+          quantity: item.quantity,
+          unitPrice: item.unitPrice,
+        };
+      }),
     });
   }
 
