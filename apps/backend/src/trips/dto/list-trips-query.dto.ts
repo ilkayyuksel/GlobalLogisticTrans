@@ -1,7 +1,13 @@
 import { ApiPropertyOptional } from "@nestjs/swagger";
 import { TripStatus } from "@prisma/client";
 import { Transform } from "class-transformer";
-import { IsEnum, IsOptional, IsString, IsUUID, MaxLength } from "class-validator";
+import {
+  IsEnum,
+  IsOptional,
+  IsString,
+  IsUUID,
+  MaxLength,
+} from "class-validator";
 
 import { PaginationQueryDto } from "../../common/dto/pagination-query.dto";
 import { trimToUndefined } from "../../common/dto/transforms";
@@ -33,7 +39,8 @@ export class ListTripsQueryDto extends PaginationQueryDto {
   status?: TripStatus;
 
   @ApiPropertyOptional({
-    description: "Trips planned on exactly this day. Overrides the range filters.",
+    description:
+      "Trips planned on exactly this day. Overrides the range filters.",
     format: "date",
     example: "2026-08-17",
   })
@@ -62,7 +69,7 @@ export class ListTripsQueryDto extends PaginationQueryDto {
 
   @ApiPropertyOptional({
     description:
-      "Exact booking number. Returns every Trip of a Combination, since they share one booking number.",
+      "Exact booking number. Each Trip carries its own, including the two Trips of a Combination, so this returns a single Trip.",
     maxLength: BOOKING_NUMBER_MAX_LENGTH,
     example: "BK-2026-0042",
   })

@@ -2982,15 +2982,97 @@ Over Sint-Niklaas
 
 ## Pricing
 
-A Custom Property may optionally define a pricing value.
+A Custom Property determines **whether** a charge applies to a Trip.
 
-When present,
+How much that charge is depends on the kind of property.
 
-the Pricing Engine includes this value during price calculation.
+### Fixed-price Custom Properties
 
-Changing the pricing value does not automatically recalculate historical Trips.
+A fixed-price Custom Property defines its own pricing value.
+
+The Pricing Engine includes this value during price calculation.
+
+The amount is the same for every Trip, independent of the route.
+
+Examples
+
+TAR
+
+Flat
+
+Over Sint-Niklaas
+
+### Route-priced Custom Properties
+
+A Custom Property may instead reference a PricingComponent.
+
+When it does, the property no longer carries its own price.
+
+It determines **only** whether the component applies to a Trip.
+
+The amount comes from the RouteCost configuration for the Trip's route.
+
+Examples
+
+Toll
+
+Tunnel
+
+The Pricing Engine combines the two:
+
+Trip
+
+↓
+
+TripCustomProperty
+
+↓
+
+RouteCost
+
+↓
+
+TripPricingItem
+
+Changing a pricing value does not automatically recalculate historical Trips.
 
 Historical Trips are only recalculated when requested by the Administrator.
+
+---
+
+## Pricing Component Reference
+
+A Custom Property may optionally reference exactly one PricingComponent.
+
+The reference determines how the property is priced and how the resulting
+pricing line is classified.
+
+No reference
+
+↓
+
+Fixed price
+
+↓
+
+Classified as the Custom Property component
+
+Reference present
+
+↓
+
+Route price
+
+↓
+
+Classified as the referenced component
+
+A route-priced property therefore appears in the pricing sequence at the
+position of its referenced component, not at the position of Custom Properties.
+
+The reference exists so the Pricing Engine never has to recognise a property by
+name. Adding a further route-priced property is a configuration change, not a
+code change.
 
 ---
 
@@ -3013,6 +3095,7 @@ A CustomProperty should contain:
 - Name
 - Description (optional)
 - Active Status
+- Pricing Component reference (optional)
 - Default Price (optional)
 - Display Order
 - Color (optional)
@@ -3028,6 +3111,18 @@ Properties are never physically deleted.
 Inactive properties remain linked to historical Trips.
 
 A Trip may contain multiple Custom Properties.
+
+A Custom Property that references a PricingComponent must not define a Default
+Price. Its amount comes from the RouteCost configuration, and a value stored
+here would never be used.
+
+A PricingComponent may be referenced by at most one active Custom Property.
+Otherwise a single component could be assigned to a Trip through two different
+properties, and the Pricing Engine would produce two pricing lines for one
+charge.
+
+Both constraints apply to active properties. A deactivated property keeps
+whatever it held, so historical Trips remain readable.
 
 ---
 
@@ -4573,7 +4668,14 @@ Both Trips belong to the same TripGroup.
 
 Both Trips originate from the same PdfDocument.
 
-Both Trips always share the same original Booking Number.
+Each Trip keeps its OWN Booking Number.
+
+The real transport orders give the two legs different numbers — for example
+DUBANR2598395 for the Delivery and ANRBEL2603249 for the Collection — so the
+TripGroup is what links them, never a shared Booking Number.
+
+Booking Number uniqueness therefore applies to each Trip independently, with no
+exception for a Combination.
 
 Container Numbers may differ.
 
@@ -4791,3 +4893,168 @@ The database must remain compatible with future features such as:
 - Route Optimization
 - Invoice Generation
 - Accounting Integration
+
+
+---
+
+# 4.22 RouteCost
+
+## Purpose
+
+The RouteCost entity defines the monetary amount of a route-dependent Pricing
+Component for one transport route.
+
+Some charges are not fixed. Their amount depends on the route a Trip takes.
+
+Toll and Tunnel costs are the first examples: whether they apply is a property
+of the Trip, but how much they cost is a property of the route.
+
+RouteCost holds that amount.
+
+---
+
+## Responsibilities
+
+The RouteCost entity is responsible for:
+
+- storing route-dependent amounts per Pricing Component
+- allowing route costs to be maintained without code changes
+- providing amounts to the Pricing Engine
+
+The entity must never contain:
+
+- calculated pricing
+- Trip information
+- applicability rules
+
+Whether a component applies to a Trip is decided by TripCustomProperty, never
+by RouteCost.
+
+---
+
+## Entity Owner
+
+Owner
+
+Backend Service
+
+RouteCost records are created and maintained by the Administrator.
+
+The Pricing Engine only reads RouteCost.
+
+---
+
+## Relationship with RoutePricing
+
+RouteCost is **independent** of RoutePricing.
+
+RoutePricing supplies the base transport price and is used only when the active
+Pricing Strategy is Route-Based Pricing.
+
+A toll is incurred whichever strategy produced the base price. If RouteCost
+belonged to RoutePricing, switching the Pricing Strategy would silently remove
+every toll and tunnel charge.
+
+RouteCost therefore identifies its route by departure and destination in its own
+right, exactly as RoutePricing does, without referencing it.
+
+A route may have a RouteCost without having a RoutePricing, and the reverse.
+
+---
+
+## Route Definition
+
+A RouteCost applies to one route, defined as:
+
+- Departure Location
+- Destination Location
+
+The departure is the Trip's Terminal and the destination is the Trip's
+Destination City, resolved the same way for every Pricing Strategy.
+
+Future versions may extend the route definition in the same directions as
+RoutePricing.
+
+---
+
+## Relationships
+
+One RouteCost
+
+↓
+
+belongs to
+
+↓
+
+Exactly one PricingComponent
+
+One PricingComponent
+
+↓
+
+may have
+
+↓
+
+Many RouteCosts, one per route
+
+Trips do not reference RouteCost directly.
+
+The Pricing Engine selects the correct RouteCost during calculation.
+
+---
+
+## Stored Information
+
+A RouteCost should contain:
+
+- Departure
+- Destination
+- Pricing Component
+- Amount
+- Active Status
+- Notes (optional)
+
+---
+
+## Missing Configuration
+
+A Trip may have a route-priced Custom Property assigned while no RouteCost is
+configured for its route.
+
+This is missing configuration, not a charge of zero.
+
+The Pricing Engine must fail the calculation with a domain exception. It must
+never skip the line silently and never price it as zero: the Administrator
+explicitly stated the charge applies, and producing a Trip price without it
+would understate the total with no visible cause.
+
+The same applies when a Trip has no resolvable route at all.
+
+---
+
+## Business Constraints
+
+A route is unique per Pricing Component among active RouteCost records.
+
+Amounts are never negative, because negative pricing is not supported.
+
+Only active RouteCost records may be used for new calculations.
+
+Historical Trip pricing must never change automatically after a RouteCost is
+modified.
+
+RouteCost records are never physically deleted.
+
+---
+
+## Future Considerations
+
+The RouteCost entity should support future extensions such as:
+
+- Effective dates
+- Customer-specific route costs
+- Container-type dependent costs
+- Vehicle-type dependent costs
+- Additional route-dependent components

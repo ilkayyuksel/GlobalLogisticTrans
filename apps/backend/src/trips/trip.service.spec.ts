@@ -1,5 +1,6 @@
 import { Prisma, Trip, TripStatus } from "@prisma/client";
 
+import { DomainEventBus } from "../common/events/domain-event-bus";
 import { DriverService } from "../drivers/driver.service";
 import { AppLoggerService } from "../logger/app-logger.service";
 import { VehicleService } from "../vehicles/vehicle.service";
@@ -70,6 +71,7 @@ describe("TripService", () => {
   let vehicleService: { findById: jest.Mock };
   let driverService: { findById: jest.Mock };
   let logger: { setContext: jest.Mock; log: jest.Mock; warn: jest.Mock };
+  let eventBus: { publish: jest.Mock };
   let service: TripService;
 
   beforeEach(() => {
@@ -98,11 +100,13 @@ describe("TripService", () => {
       findById: jest.fn().mockResolvedValue({ id: DRIVER_ID, isActive: true }),
     };
     logger = { setContext: jest.fn(), log: jest.fn(), warn: jest.fn() };
+    eventBus = { publish: jest.fn().mockResolvedValue(undefined) };
 
     service = new TripService(
       repository,
       vehicleService as unknown as VehicleService,
       driverService as unknown as DriverService,
+      eventBus as unknown as DomainEventBus,
       logger as unknown as AppLoggerService,
     );
   });
@@ -421,7 +425,9 @@ describe("TripService", () => {
     });
 
     it("re-checks eligibility only when the vehicle actually changes", async () => {
-      repository.findById.mockResolvedValue(buildTrip({ vehicleId: VEHICLE_ID }));
+      repository.findById.mockResolvedValue(
+        buildTrip({ vehicleId: VEHICLE_ID }),
+      );
 
       await service.update(TRIP_ID, { vehicleId: VEHICLE_ID });
 
@@ -440,7 +446,9 @@ describe("TripService", () => {
     });
 
     it("allows unassigning a vehicle that has since been deactivated", async () => {
-      repository.findById.mockResolvedValue(buildTrip({ vehicleId: VEHICLE_ID }));
+      repository.findById.mockResolvedValue(
+        buildTrip({ vehicleId: VEHICLE_ID }),
+      );
 
       await service.update(TRIP_ID, { vehicleId: null });
 

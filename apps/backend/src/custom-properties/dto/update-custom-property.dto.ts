@@ -5,6 +5,7 @@ import {
   IsNumber,
   IsOptional,
   IsString,
+  IsUUID,
   Matches,
   Max,
   MaxLength,
@@ -60,8 +61,18 @@ export class UpdateCustomPropertyDto {
   description?: string | null;
 
   @ApiPropertyOptional({
+    format: "uuid",
     description:
-      "Send null to remove the configured amount. Changing it never recalculates historical Trips.",
+      "Send a component id to make this property route-priced, or null to make it fixed-price again. A linked property must not carry a default price — clear the price in the same request if it has one.",
+    nullable: true,
+  })
+  @IsOptional()
+  @IsUUID()
+  pricingComponentId?: string | null;
+
+  @ApiPropertyOptional({
+    description:
+      "Send null to remove the configured amount. Changing it never recalculates historical Trips. Must be null while pricingComponentId is set.",
     minimum: 0,
     maximum: MONEY_MAX_VALUE,
     nullable: true,

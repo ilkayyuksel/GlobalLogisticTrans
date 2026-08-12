@@ -1,15 +1,12 @@
-import { Body, Controller, Get, Param, Patch, Post } from "@nestjs/common";
+import { Body, Controller, Get, Param, Patch } from "@nestjs/common";
 import {
   ApiBadRequestResponse,
-  ApiConflictResponse,
-  ApiCreatedResponse,
   ApiNotFoundResponse,
   ApiOkResponse,
   ApiOperation,
   ApiTags,
 } from "@nestjs/swagger";
 
-import { CreateTripPricingItemDto } from "./dto/create-trip-pricing-item.dto";
 import {
   TripPricingIdParamDto,
   TripPricingItemIdParamDto,
@@ -25,12 +22,22 @@ import { TripPricingItemService } from "./trip-pricing-item.service";
  * Returns plain data; ResponseInterceptor applies the envelope and
  * AllExceptionsFilter renders errors.
  *
- * This module persists the lines of a pricing breakdown. It never calculates
- * one, never sums them, and never touches the parent snapshot or the Trip.
+ * This module reads the lines of a pricing breakdown. It never calculates one
+ * and never sums them.
  *
- * There is no DELETE endpoint and no replace endpoint by design: historical
- * pricing items are never removed, and replacing a whole breakdown is a
- * reprocessing operation belonging to the future Pricing Engine.
+ * The endpoints here are READ-ONLY apart from a line's note. Lines are written
+ * exclusively by the Pricing Engine, together with their parent, in one atomic
+ * operation — database_model.md §4.14: "Only the Pricing Engine may create or
+ * update TripPricingItems."
+ *
+ * There is deliberately no POST. A line added on its own would change the sum
+ * of the breakdown without changing the parent's total, and §4.13 requires the
+ * two to be equal. Adding to a breakdown therefore means recalculating it,
+ * which is POST /trip-pricing/trip/{tripId}/reprocess.
+ *
+ * There is no DELETE endpoint and no replace endpoint either: an individual
+ * line is never removed, and replacing a whole breakdown is the Engine's
+ * reprocessing operation.
  */
 @ApiTags("Trip pricing items")
 @Controller("trip-pricing-items")
@@ -74,31 +81,6 @@ export class TripPricingItemController {
     @Param() params: TripPricingItemIdParamDto,
   ): Promise<TripPricingItemResponseDto> {
     return this.tripPricingItemService.findById(params.id);
-  }
-
-  @Post()
-  @ApiOperation({
-    summary: "Create a pricing item",
-    description:
-      "Persists one line already calculated by the Pricing Engine; no value is derived here. The snapshot must exist and the pricing component must exist and be active. A custom property reference is only valid on a CUSTOM_PROPERTY item, and the same property may be priced only once per snapshot. The currency is always EUR and is not accepted as input.",
-  })
-  @ApiCreatedResponse({ type: TripPricingItemResponseDto })
-  @ApiBadRequestResponse({
-    description:
-      "Missing or invalid field, amount, quantity, calculation order or UUID.",
-  })
-  @ApiNotFoundResponse({
-    description:
-      "The referenced pricing snapshot, pricing component or custom property does not exist.",
-  })
-  @ApiConflictResponse({
-    description:
-      "The pricing component is inactive, the custom property reference does not belong on this component, or that property is already priced in this snapshot.",
-  })
-  create(
-    @Body() dto: CreateTripPricingItemDto,
-  ): Promise<TripPricingItemResponseDto> {
-    return this.tripPricingItemService.create(dto);
   }
 
   @Patch(":id")

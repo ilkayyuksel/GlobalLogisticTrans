@@ -176,6 +176,232 @@ describe("SettingsService", () => {
       expect(repository.updateValue).not.toHaveBeenCalled();
     });
 
+    /**
+     * A few settings carry a numeric bound their value type cannot express.
+     * pricing_rules.md makes a positive waiting-time block size a configuration
+     * validation rule, because zero leaves the pricing formula undefined.
+     */
+    describe("numeric bounds", () => {
+      function blockMinutes(value: string) {
+        repository.findByCategoryAndKey.mockResolvedValue(
+          buildSetting({
+            category: "PRICING",
+            key: "WAITING_TIME_BLOCK_MINUTES",
+            valueType: SettingValueType.INTEGER,
+            value: "30",
+          }),
+        );
+
+        return service.update("PRICING", "WAITING_TIME_BLOCK_MINUTES", {
+          value,
+        });
+      }
+
+      it("rejects a waiting-time block size of zero", async () => {
+        await expect(blockMinutes("0")).rejects.toThrow(
+          InvalidSettingValueException,
+        );
+
+        expect(repository.updateValue).not.toHaveBeenCalled();
+      });
+
+      it("rejects a negative waiting-time block size", async () => {
+        await expect(blockMinutes("-30")).rejects.toThrow(
+          InvalidSettingValueException,
+        );
+      });
+
+      it("accepts the smallest usable block size", async () => {
+        repository.updateValue.mockResolvedValue(buildSetting({ value: "1" }));
+
+        await expect(blockMinutes("1")).resolves.toBeDefined();
+        expect(repository.updateValue).toHaveBeenCalled();
+      });
+
+      /**
+       * pricing_rules.md § Business Constraints: negative pricing is not
+       * supported. Each of these values feeds an amount directly.
+       */
+      describe("pricing amounts", () => {
+        const AMOUNT_KEYS = [
+          "FUEL_PERCENTAGE",
+          "COMBINATION_SURCHARGE",
+          "DISTANCE_RATE_PER_KM",
+          "WAITING_TIME_BLOCK_PRICE",
+        ];
+
+        function updateAmount(key: string, value: string) {
+          repository.findByCategoryAndKey.mockResolvedValue(
+            buildSetting({
+              category: "PRICING",
+              key,
+              valueType: SettingValueType.DECIMAL,
+              value: "15",
+            }),
+          );
+
+          return service.update("PRICING", key, { value });
+        }
+
+        it.each(AMOUNT_KEYS)("rejects a negative %s", async (key) => {
+          await expect(updateAmount(key, "-1")).rejects.toThrow(
+            InvalidSettingValueException,
+          );
+
+          expect(repository.updateValue).not.toHaveBeenCalled();
+        });
+
+        it.each(AMOUNT_KEYS)("rejects a negative decimal %s", async (key) => {
+          await expect(updateAmount(key, "-0.01")).rejects.toThrow(
+            InvalidSettingValueException,
+          );
+        });
+
+        it.each(AMOUNT_KEYS)("accepts a zero %s", async (key) => {
+          repository.updateValue.mockResolvedValue(buildSetting({ value: "0" }));
+
+          await expect(updateAmount(key, "0")).resolves.toBeDefined();
+          expect(repository.updateValue).toHaveBeenCalled();
+        });
+
+        it.each(AMOUNT_KEYS)("accepts a two-decimal zero %s", async (key) => {
+          repository.updateValue.mockResolvedValue(
+            buildSetting({ value: "0.00" }),
+          );
+
+          await expect(updateAmount(key, "0.00")).resolves.toBeDefined();
+        });
+
+        it.each(AMOUNT_KEYS)("accepts a positive decimal %s", async (key) => {
+          repository.updateValue.mockResolvedValue(
+            buildSetting({ value: "12.75" }),
+          );
+
+          await expect(updateAmount(key, "12.75")).resolves.toBeDefined();
+        });
+
+        it.each(AMOUNT_KEYS)("rejects a malformed %s", async (key) => {
+          await expect(updateAmount(key, "not-a-number")).rejects.toThrow(
+            InvalidSettingValueException,
+          );
+        });
+
+        it("reports a negative value as a bound failure, not a type failure", async () => {
+          await expect(updateAmount("FUEL_PERCENTAGE", "-1")).rejects.toThrow(
+            InvalidSettingValueException,
+          );
+
+          expect(logger.warn).toHaveBeenCalledWith(
+            "Rejected setting value",
+            expect.objectContaining({ reason: "value must be at least 0" }),
+          );
+        });
+
+        it("never writes the rejected amount into the logs", async () => {
+          await expect(
+            updateAmount("COMBINATION_SURCHARGE", "-1234.56"),
+          ).rejects.toThrow(InvalidSettingValueException);
+
+          expect(JSON.stringify(logger.warn.mock.calls)).not.toContain(
+            "1234.56",
+          );
+        });
+      });
+
+      /**
+       * pricing_rules.md states the free allowance is "zero or greater". The
+       * Pricing Engine already refused a negative allowance; this closes the
+       * gap on the write side so both layers agree.
+       */
+      describe("the waiting-time free allowance", () => {
+        function updateFreeMinutes(value: string) {
+          repository.findByCategoryAndKey.mockResolvedValue(
+            buildSetting({
+              category: "PRICING",
+              key: "WAITING_TIME_FREE_MINUTES",
+              valueType: SettingValueType.INTEGER,
+              value: "60",
+            }),
+          );
+
+          return service.update("PRICING", "WAITING_TIME_FREE_MINUTES", {
+            value,
+          });
+        }
+
+        it("rejects a negative allowance", async () => {
+          await expect(updateFreeMinutes("-60")).rejects.toThrow(
+            InvalidSettingValueException,
+          );
+
+          expect(repository.updateValue).not.toHaveBeenCalled();
+        });
+
+        it("accepts zero, which means no free allowance", async () => {
+          repository.updateValue.mockResolvedValue(buildSetting({ value: "0" }));
+
+          await expect(updateFreeMinutes("0")).resolves.toBeDefined();
+          expect(repository.updateValue).toHaveBeenCalled();
+        });
+
+        it("accepts a positive allowance", async () => {
+          repository.updateValue.mockResolvedValue(
+            buildSetting({ value: "90" }),
+          );
+
+          await expect(updateFreeMinutes("90")).resolves.toBeDefined();
+        });
+
+        it("rejects a fractional allowance as a type failure", async () => {
+          await expect(updateFreeMinutes("1.5")).rejects.toThrow(
+            InvalidSettingValueException,
+          );
+
+          expect(logger.warn).toHaveBeenCalledWith(
+            "Rejected setting value",
+            expect.objectContaining({ reason: "value must be a whole number" }),
+          );
+        });
+
+        it("rejects a malformed allowance", async () => {
+          await expect(updateFreeMinutes("not-a-number")).rejects.toThrow(
+            InvalidSettingValueException,
+          );
+        });
+      });
+
+      it("leaves settings without a bound alone", async () => {
+        // Bounds are per setting, not a blanket rule: a setting with no entry
+        // in the registry accepts any value its type allows, sign included.
+        repository.findByCategoryAndKey.mockResolvedValue(
+          buildSetting({
+            category: "GENERAL",
+            key: "SOME_UNBOUNDED_SETTING",
+            valueType: SettingValueType.DECIMAL,
+            value: "1",
+          }),
+        );
+        repository.updateValue.mockResolvedValue(buildSetting({ value: "-5" }));
+
+        await expect(
+          service.update("GENERAL", "SOME_UNBOUNDED_SETTING", { value: "-5" }),
+        ).resolves.toBeDefined();
+        expect(repository.updateValue).toHaveBeenCalled();
+      });
+
+      it("checks the type before the bound", async () => {
+        // A non-numeric value must fail as a type error, not as a bound error.
+        await expect(blockMinutes("not-a-number")).rejects.toThrow(
+          InvalidSettingValueException,
+        );
+
+        expect(logger.warn).toHaveBeenCalledWith(
+          "Rejected setting value",
+          expect.objectContaining({ reason: "value must be a whole number" }),
+        );
+      });
+    });
+
     it("throws SettingNotFoundException before validating", async () => {
       repository.findByCategoryAndKey.mockResolvedValue(null);
 

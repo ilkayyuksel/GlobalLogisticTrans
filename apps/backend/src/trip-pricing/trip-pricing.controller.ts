@@ -1,15 +1,12 @@
-import { Body, Controller, Get, Param, Patch, Post } from "@nestjs/common";
+import { Body, Controller, Get, Param, Patch } from "@nestjs/common";
 import {
   ApiBadRequestResponse,
-  ApiConflictResponse,
-  ApiCreatedResponse,
   ApiNotFoundResponse,
   ApiOkResponse,
   ApiOperation,
   ApiTags,
 } from "@nestjs/swagger";
 
-import { CreateTripPricingDto } from "./dto/create-trip-pricing.dto";
 import {
   TripIdParamDto,
   TripPricingIdParamDto,
@@ -22,10 +19,20 @@ import { TripPricingService } from "./trip-pricing.service";
  * Returns plain data; ResponseInterceptor applies the envelope and
  * AllExceptionsFilter renders errors.
  *
- * This module persists pricing snapshots. It never calculates one — the future
- * Pricing Engine performs the arithmetic and posts the outcome here.
+ * This module persists pricing snapshots. It never calculates one.
  *
- * There is no DELETE endpoint by design, and no list endpoint: a snapshot is
+ * The endpoints here are READ-ONLY apart from the calculation metadata. A
+ * snapshot is created and replaced exclusively by the Pricing Engine, through
+ * one atomic operation that writes the total and its breakdown together —
+ * database_model.md §4.13 names the Engine as the owner, and the Frontend as
+ * read-only.
+ *
+ * There is deliberately no POST. A snapshot whose total arrived from a caller
+ * could not be trusted to equal the sum of its items, which §4.13 requires;
+ * pricing is requested through POST /trip-pricing/trip/{tripId}/reprocess, which
+ * calculates the total and writes both halves in one transaction.
+ *
+ * There is no DELETE endpoint either, and no list endpoint: a snapshot is
  * always reached through its Trip or its own id, and it is never removed,
  * because historical pricing must remain explainable.
  */
@@ -65,25 +72,6 @@ export class TripPricingController {
     @Param() params: TripPricingIdParamDto,
   ): Promise<TripPricingResponseDto> {
     return this.tripPricingService.findById(params.id);
-  }
-
-  @Post()
-  @ApiOperation({
-    summary: "Create a pricing snapshot",
-    description:
-      "Persists a result already calculated by the Pricing Engine; no value is derived here. The Trip must exist, must be CLOSED, and must not already have a snapshot. The currency is always EUR and is not accepted as input.",
-  })
-  @ApiCreatedResponse({ type: TripPricingResponseDto })
-  @ApiBadRequestResponse({
-    description:
-      "Missing or invalid field, amount, timestamp, calculation status or UUID.",
-  })
-  @ApiNotFoundResponse({ description: "No Trip with that id." })
-  @ApiConflictResponse({
-    description: "The Trip is not CLOSED, or it already has a snapshot.",
-  })
-  create(@Body() dto: CreateTripPricingDto): Promise<TripPricingResponseDto> {
-    return this.tripPricingService.create(dto);
   }
 
   @Patch(":id")

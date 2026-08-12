@@ -19,10 +19,7 @@ import { buildWinstonOptions } from "./winston.config";
       useFactory: (configService: ConfigService<EnvironmentVariables, true>) =>
         buildWinstonOptions({
           NODE_ENV: configService.get("NODE_ENV", { infer: true }),
-          API_PORT: configService.get("API_PORT", { infer: true }),
-          DATABASE_URL: configService.get("DATABASE_URL", { infer: true }),
           LOG_LEVEL: configService.get("LOG_LEVEL", { infer: true }),
-          CORS_ORIGINS: configService.get("CORS_ORIGINS", { infer: true }),
         }),
     }),
   ],

@@ -13,6 +13,29 @@ import { defineConfig, env } from "prisma/config";
  *
  * Note: this file configures the CLI only. At runtime, PrismaClient is given a
  * driver adapter by the Backend; it does not read this file.
+ *
+ * ---------------------------------------------------------------------------
+ * Prisma Client generation after a migration
+ *
+ * `prisma migrate dev` does NOT regenerate Prisma Client in 7.9.1, even though
+ * its own `--help` still says it "trigger[s] generators (e.g. Prisma Client)"
+ * and the `--skip-generate` flag that existed in v6 has been removed.
+ *
+ * Verified against a scratch database: three migrations were applied and the
+ * generated client was left untouched. `prisma generate` regenerates it
+ * correctly, so this is CLI behaviour, not a pnpm or workspace problem.
+ *
+ * There is no hook for it here — PrismaConfig exposes no generator or
+ * post-migrate lifecycle option. The project therefore chains the two commands
+ * in package.json:
+ *
+ *     db:migrate  ->  prisma migrate dev && prisma generate
+ *     db:reset    ->  prisma migrate reset && prisma generate
+ *
+ * Always migrate through `pnpm db:migrate`. Calling `prisma migrate dev`
+ * directly leaves the client stale, which surfaces as a model being undefined
+ * at runtime rather than as a compile error.
+ * ---------------------------------------------------------------------------
  */
 export default defineConfig({
   schema: "prisma/schema.prisma",

@@ -1,9 +1,8 @@
 import { Injectable } from "@nestjs/common";
 
-import { MAX_PAGE_SIZE } from "../common/dto/pagination-query.dto";
-import { CustomPropertyService } from "../custom-properties/custom-property.service";
 import { AppLoggerService } from "../logger/app-logger.service";
 import { RoutePricingService } from "../route-pricing/route-pricing.service";
+import { TripCustomPropertyService } from "../trip-custom-properties/trip-custom-property.service";
 import { TripResponseDto } from "../trips/dto/trip-response.dto";
 import {
   MissingRoutePricingException,
@@ -22,7 +21,7 @@ import { PricingRuleResolver } from "./pricing-rule.resolver";
  *
  * Where PricingRuleResolver answers "what are the rules", this resolver answers
  * "what does THIS Trip price against": which base-price source the active
- * strategy selects, and which Custom Properties carry a configured price.
+ * strategy selects, and which Custom Properties the Trip actually carries.
  *
  * It resolves inputs; it never combines them. No rate is multiplied by a
  * distance and no percentage is applied here — that is the calculation phase,
@@ -33,7 +32,7 @@ import { PricingRuleResolver } from "./pricing-rule.resolver";
 export class PricingComponentResolver {
   constructor(
     private readonly routePricingService: RoutePricingService,
-    private readonly customPropertyService: CustomPropertyService,
+    private readonly tripCustomPropertyService: TripCustomPropertyService,
     private readonly ruleResolver: PricingRuleResolver,
     private readonly logger: AppLoggerService,
   ) {
@@ -60,36 +59,37 @@ export class PricingComponentResolver {
   }
 
   /**
-   * The active Custom Property catalog, with the price each would contribute.
+   * The Custom Properties this Trip carries.
    *
-   * This is the CONFIGURATION, not the Trip's assignments. The link from a Trip
-   * to its properties lives in `trip_custom_property`, which no service exposes
-   * yet, so the Custom Property calculation phase needs one more input than the
-   * Engine can currently resolve.
+   * The Trip's assignments, not the catalog. Reading the catalog would have
+   * charged every Trip for every configured property; a property contributes
+   * only because someone assigned it.
    *
-   * Only active properties are returned: an inactive property is withdrawn from
-   * use and must not enter a new calculation.
+   * Deactivated properties are kept. The assignment is a fact about this Trip,
+   * and withdrawing a property from the catalog must not silently change what
+   * an already-planned Trip is charged — TripCustomPropertyService blocks new
+   * assignments of an inactive property, which is where that rule belongs.
+   *
+   * Everything a later calculator needs travels on the returned rows, so no
+   * calculator has to reach back into a service: the component link tells it
+   * whether the property is fixed-price or route-priced, and the default price
+   * is the amount for the fixed-price case.
    */
-  async resolveActiveCustomProperties(): Promise<PricingCustomPropertyInput[]> {
-    const page = await this.customPropertyService.findAll({
-      page: 1,
-      pageSize: MAX_PAGE_SIZE,
-      isActive: true,
+  async resolveAssignedCustomProperties(
+    tripId: string,
+  ): Promise<PricingCustomPropertyInput[]> {
+    const { items } = await this.tripCustomPropertyService.findByTripId(tripId);
+
+    this.logger.log("Assigned custom properties resolved", {
+      tripId,
+      assignedCount: items.length,
     });
 
-    // A catalog larger than one page would be silently truncated, and a missing
-    // property means a missing charge. Loud rather than wrong.
-    if (page.meta.totalItems > page.items.length) {
-      this.logger.warn("Active custom property catalog exceeds one page", {
-        loaded: page.items.length,
-        totalItems: page.meta.totalItems,
-      });
-    }
-
-    return page.items.map((property) => ({
-      customPropertyId: property.id,
-      name: property.name,
-      defaultPrice: property.defaultPrice,
+    return items.map((assignment) => ({
+      customPropertyId: assignment.customProperty.id,
+      name: assignment.customProperty.name,
+      pricingComponentId: assignment.customProperty.pricingComponentId,
+      defaultPrice: assignment.customProperty.defaultPrice,
     }));
   }
 
@@ -120,11 +120,12 @@ export class PricingComponentResolver {
       );
     }
 
+    // The route itself is not repeated here: the lookup above matched departure
+    // and destination exactly, so the configured row's route is the Trip's
+    // route, and the context already carries it.
     return {
       strategy: PricingStrategy.ROUTE_BASED,
       routePricingId: routePricing.id,
-      departure: routePricing.departure,
-      destination: routePricing.destination,
       basePrice: routePricing.basePrice,
     };
   }

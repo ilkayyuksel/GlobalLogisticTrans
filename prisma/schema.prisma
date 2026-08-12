@@ -14,8 +14,11 @@
 //     vehicle             UNIQUE (license_plate)            WHERE is_active
 //     trailer             UNIQUE (license_plate)            WHERE is_active
 //     custom_property     UNIQUE (name)                     WHERE is_active
+//     custom_property     UNIQUE (pricing_component_id)     WHERE is_active
 //     pricing_component   UNIQUE (code)                     WHERE is_active
 //     route_pricing       UNIQUE (departure, destination)   WHERE is_active
+//     route_cost          UNIQUE (departure, destination, pricing_component_id)
+//                                                           WHERE is_active
 //     vehicle_assignment  UNIQUE (vehicle_id)               WHERE valid_to IS NULL
 //
 //   CHECK CONSTRAINTS (Prisma has no CHECK syntax)
@@ -28,6 +31,8 @@
 //     maintenance         exactly one of vehicle_id / trailer_id is set
 //     maintenance         cost >= 0
 //     route_pricing       base_price >= 0
+//     route_cost          amount >= 0
+//     custom_property     default_price IS NULL when pricing_component_id is set
 //     trip_pricing        total_price >= 0
 //     calendar_event      end_date >= start_date
 //
@@ -281,8 +286,11 @@ model Trip {
 
   status TripStatus @default(OPEN)
 
-  /// Original PDF value. Deliberately NOT unique: both Trips of a Combination
-  /// share it, and UPDATE:/CANCEL: matching relies on finding all of them.
+  /// Original PDF value, one per Trip — the two Trips of a Combination carry
+  /// DIFFERENT booking numbers and are linked by trip_group_id instead.
+  /// Deliberately NOT unique: a DELETED Trip releases its booking number so it
+  /// can be re-entered, which a database constraint would forbid. Uniqueness
+  /// among the statuses that hold it is enforced by TripService.
   bookingNumber   String  @map("booking_number") @db.Text
   /// Empty on a Loading until the driver reports the container.
   containerNumber String? @map("container_number") @db.Text
@@ -609,9 +617,25 @@ model CustomProperty {
   name        String  @db.Text
   description String? @db.Text
 
+  /// Null makes this a FIXED-PRICE property: its amount is default_price, and
+  /// its pricing line is classified CUSTOM_PROPERTY at order 7.
+  ///
+  /// Non-null makes it a ROUTE-PRICED property: it decides only whether the
+  /// referenced component applies to a Trip, the amount comes from route_cost
+  /// for the Trip's route, and the line is classified — and ordered — by that
+  /// component. Toll and Tunnel are the first two.
+  ///
+  /// The reference exists so the Pricing Engine never has to recognise a
+  /// property by name; a further route-priced property is configuration only.
+  pricingComponentId String? @map("pricing_component_id") @db.Uuid
+
   /// The value the Pricing Engine reads at calculation time. Changing it never
   /// recalculates historical Trips — their amounts are already frozen into
   /// trip_pricing_item.
+  ///
+  /// Must be null when pricing_component_id is set: a route-priced property
+  /// carries no price of its own, and a value here would silently never be
+  /// used. Enforced by a hand-written CHECK.
   defaultPrice Decimal? @map("default_price") @db.Decimal(12, 2)
 
   displayOrder Int     @map("display_order")
@@ -622,9 +646,16 @@ model CustomProperty {
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 
+  /// Restrict, because a component reached through a property must not vanish
+  /// from under it.
+  pricingComponent PricingComponent? @relation(fields: [pricingComponentId], references: [id], onDelete: Restrict)
+
   tripCustomProperties TripCustomProperty[]
   tripPricingItems     TripPricingItem[]
 
+  /// A partial UNIQUE (pricing_component_id) WHERE is_active is added by hand:
+  /// two active properties pointing at one component would produce two pricing
+  /// lines for a single charge.
   @@index([isActive, displayOrder])
   @@map("custom_property")
 }
@@ -714,9 +745,49 @@ model PricingComponent {
   updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   tripPricingItems TripPricingItem[]
+  customProperties CustomProperty[]
+  routeCosts       RouteCost[]
 
   @@index([isActive, displayOrder])
   @@map("pricing_component")
+}
+
+/// The amount of a route-dependent pricing component for one route.
+///
+/// Whether the component applies to a Trip is decided by trip_custom_property;
+/// this table answers only how much it costs on that route. Toll and Tunnel are
+/// the first two components priced this way.
+///
+/// Deliberately INDEPENDENT of route_pricing. A toll is incurred whichever
+/// Pricing Strategy produced the base price, and route_pricing is consulted
+/// only under Route-Based Pricing — so keying this table by the route itself
+/// keeps route costs alive when the strategy changes. A route may have a cost
+/// without a configured base price, and the reverse.
+model RouteCost {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+
+  /// Matched against trip.terminal.
+  departure   String @db.Text
+  /// Matched against trip.destination_city.
+  destination String @db.Text
+
+  pricingComponentId String @map("pricing_component_id") @db.Uuid
+
+  amount Decimal @db.Decimal(12, 2)
+  notes  String? @db.Text
+
+  isActive Boolean @default(true) @map("is_active")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  pricingComponent PricingComponent @relation(fields: [pricingComponentId], references: [id], onDelete: Restrict)
+
+  /// A partial UNIQUE (departure, destination, pricing_component_id) WHERE
+  /// is_active and a CHECK (amount >= 0) are added by hand.
+  @@index([departure, destination])
+  @@index([pricingComponentId])
+  @@map("route_cost")
 }
 
 // ---------------------------------------------------------------------------

@@ -4,7 +4,8 @@ import { Transform } from "class-transformer";
 import { IsEnum, IsOptional, IsString, MaxLength } from "class-validator";
 
 import { trimToNull } from "../../common/dto/transforms";
-import { PRICING_NOTES_MAX_LENGTH } from "./create-trip-pricing.dto";
+/** Bound for `trip_pricing.notes`, the only field this DTO can change. */
+export const PRICING_NOTES_MAX_LENGTH = 2000;
 
 /**
  * Partial update of a snapshot's CALCULATION METADATA.

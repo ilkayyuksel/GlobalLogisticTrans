@@ -233,32 +233,147 @@ Only the remaining waiting time is billable.
 
 Billable waiting time is charged in configurable time blocks.
 
-Both:
+## Settings
 
-- free period
-- billing interval
+Three Settings govern the calculation. All three live in the PRICING category.
 
-are configurable through Settings.
+| Key | Value type | Unit | Meaning |
+|---|---|---|---|
+| `WAITING_TIME_FREE_MINUTES` | INTEGER | minutes | The free allowance granted before any waiting time becomes billable. |
+| `WAITING_TIME_BLOCK_MINUTES` | INTEGER | minutes | The size of one billable block. |
+| `WAITING_TIME_BLOCK_PRICE` | DECIMAL | EUR per block | The price charged for one billable block. |
+
+`WAITING_TIME_FREE_MINUTES` is zero or greater. A value of zero means no free
+allowance: waiting is billable from the first minute.
+
+`WAITING_TIME_BLOCK_PRICE` is zero or greater, because negative pricing is not
+supported. A value of zero means waiting time is recorded and reported but never
+charged.
+
+`WAITING_TIME_BLOCK_MINUTES` must be **greater than zero**. This is a
+configuration validation rule rather than a business rule: the value is the
+divisor that converts billable minutes into blocks, so zero leaves the
+calculation undefined. The application rejects it when the Setting is updated,
+and the Pricing Engine refuses to calculate if such a value somehow reaches it.
+
+## How the free period interacts with the blocks
+
+The free allowance is applied **first**, and only what remains is divided into
+blocks. The two Settings are applied in that order and never the reverse.
+
+The free allowance is a deduction, not a threshold. Waiting time that exceeds
+the allowance is charged only for the excess; the allowance itself is never
+billed, however long the total wait becomes.
+
+Waiting time equal to or below the free allowance produces nothing billable.
+
+## How a partial block is charged
+
+Every block that is **started** is charged in full.
+
+Billable minutes that do not fill a whole block still cost one whole block. One
+minute beyond the free allowance therefore costs the same as a full block.
+
+## When a Waiting Time line is produced
+
+A Waiting Time pricing line is produced only when at least one billable block
+exists.
+
+A Trip with no recorded waiting time, or with waiting time within the free
+allowance, carries no Waiting Time line at all — the component did not apply.
+
+A Trip with at least one billable block always carries a line, including when
+`WAITING_TIME_BLOCK_PRICE` is zero. That line records an amount of zero: the
+waiting time was charged, at nothing.
+
+## Recorded values
+
+The pricing line records the number of blocks as its quantity and the configured
+block price as its unit price, so the charge can be read back without
+recalculating it.
+
+Waiting time that is not recorded on a Trip counts as zero minutes.
+
+The formula is defined in `pricing_formula.md` and worked through in
+`pricing_examples.md`.
 
 ---
 
-# Toll Costs
+# Toll and Tunnel Costs
 
-Trips may include Toll Costs.
+Toll and Tunnel are **route-dependent** costs.
 
-Toll Costs are added directly to the total.
+They share one rule, stated once here rather than twice, because they differ
+only in which Pricing Component they use.
 
-They are configurable per Trip.
+Whether they apply is decided per Trip.
 
----
+How much they cost is decided by the route.
 
-# Tunnel Costs
+These two decisions are configured separately, and the Pricing Engine combines
+them:
 
-Trips may include Tunnel Costs.
+Trip
 
-Tunnel Costs are added directly to the total.
+↓
 
-They are configurable per Trip.
+TripCustomProperty — whether the cost applies
+
+↓
+
+RouteCost — how much it costs on this route
+
+↓
+
+TripPricingItem
+
+## Applicability
+
+A route-dependent cost applies to a Trip when the corresponding Custom Property
+is assigned to that Trip.
+
+Assignment uses the same mechanism as every other optional Trip feature. The
+Administrator ticks Toll or Tunnel on the Trip exactly as they would tick TAR or
+Flat.
+
+A Custom Property that represents a route-dependent cost references a Pricing
+Component and defines no price of its own. See `database_model.md` §4.12.
+
+## Amount
+
+The amount comes from the RouteCost configured for the Trip's route and that
+Pricing Component.
+
+The route is the Trip's Terminal and Destination City, resolved the same way
+whichever Pricing Strategy is active. A route-dependent cost is incurred
+regardless of how the base price was calculated.
+
+The amount is never taken from the Custom Property, which carries none.
+
+## Missing Configuration
+
+If a route-dependent cost is assigned to a Trip and no active RouteCost exists
+for that route and component, the calculation **fails**.
+
+The cost is never skipped and never priced as zero.
+
+The Administrator stated the cost applies; pricing the Trip without it would
+understate the total with no visible cause. A missing amount is missing
+configuration, not a price of zero.
+
+The same applies when the Trip has no resolvable route.
+
+## Classification
+
+Each route-dependent cost is classified by its own Pricing Component and appears
+at that component's position in the pricing sequence — Toll at 5 and Tunnel at
+6, never at the Custom Property position.
+
+Route-dependent costs are added directly to the total. Fuel is never calculated
+on them.
+
+The formula is defined in `pricing_formula.md` and worked through in
+`pricing_examples.md`.
 
 ---
 
@@ -371,12 +486,31 @@ Examples include:
 - Fuel Percentage
 - Waiting Time Free Period
 - Waiting Time Billing Interval
+- Waiting Time Block Price
 - Combination Surcharge
 - Route Prices
+- Route Costs (Toll, Tunnel)
 - Distance Rate
 - Custom Property Prices
+- Pricing Rule Version
 
 Actual values are intentionally excluded from this document.
+
+## Pricing Rule Version
+
+`PRICING_RULE_VERSION` (STRING, PRICING category) records which version of the
+ruleset a calculation ran against. It is stamped onto every stored snapshot as
+`trip_pricing.pricing_rule_version`.
+
+It is configuration rather than code: an administrator bumps it when the pricing
+Settings change, so it travels with the rules it describes. It is distinct from
+`trip_pricing.pricing_engine_version`, which records the version of the Pricing
+Engine code that produced the snapshot and is maintained in the source. Two
+snapshots may share an engine version and differ in rule version, or the
+reverse; keeping the two apart is what makes a disputed calculation explainable.
+
+Changing this Setting never alters an existing snapshot. Only an explicit
+Reprocess Pricing produces a new one.
 
 ---
 

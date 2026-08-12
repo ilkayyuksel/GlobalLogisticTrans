@@ -40,6 +40,12 @@ const DEFAULT_API_PORT = 3000;
 const DEFAULT_CORS_ORIGINS = [CORS_ALLOW_ALL];
 
 /**
+ * Repository-relative default for imported PDFs. The directory is gitignored:
+ * customer transport orders must never reach version control.
+ */
+const DEFAULT_PDF_STORAGE_DIR = "../../storage/pdf";
+
+/**
  * A variable present but empty (`API_PORT=`) is the normal state of a freshly
  * copied .env template. Treating that as "not supplied" lets the declared
  * default apply, instead of coercing "" into 0 and failing validation with a
@@ -108,6 +114,18 @@ export class EnvironmentVariables {
   @IsArray()
   @IsString({ each: true })
   CORS_ORIGINS: string[] = DEFAULT_CORS_ORIGINS;
+
+  /**
+   * Where imported transport-order PDFs are kept.
+   *
+   * Defaults to the repository's gitignored `storage/pdf`, resolved from the
+   * backend's working directory. Configurable because a deployed backend does
+   * not run from the repository, and the files must outlive it.
+   */
+  @Transform(defaultWhenBlank(DEFAULT_PDF_STORAGE_DIR))
+  @IsString()
+  @IsNotEmpty()
+  PDF_STORAGE_DIR: string = DEFAULT_PDF_STORAGE_DIR;
 }
 
 /**

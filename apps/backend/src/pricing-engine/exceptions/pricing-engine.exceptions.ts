@@ -24,6 +24,10 @@ export const PricingEngineErrorCode = {
   UNSUPPORTED_STRATEGY: "PRICING_UNSUPPORTED_STRATEGY",
   MISSING_ROUTE_PRICING: "PRICING_MISSING_ROUTE_PRICING",
   MISSING_TRIP_INPUT: "PRICING_MISSING_TRIP_INPUT",
+  MISSING_ROUTE_COST: "PRICING_MISSING_ROUTE_COST",
+  MISSING_CUSTOM_PROPERTY_PRICE: "PRICING_MISSING_CUSTOM_PROPERTY_PRICE",
+  NEGATIVE_TOTAL: "PRICING_NEGATIVE_TOTAL",
+  UNKNOWN_PRICING_COMPONENT: "PRICING_UNKNOWN_COMPONENT",
 } as const;
 
 export type PricingEngineErrorCode =
@@ -112,6 +116,93 @@ export class MissingRoutePricingException extends PricingEngineException {
     super(
       PricingEngineErrorCode.MISSING_ROUTE_PRICING,
       `No active route pricing is configured for "${departure}" to "${destination}".`,
+    );
+  }
+}
+
+/**
+ * A Trip carries a route-priced Custom Property whose route cost is not
+ * configured.
+ *
+ * This is a configuration error, not a Trip that owes nothing. The property was
+ * assigned deliberately, so the component DOES apply; the amount is simply
+ * missing. Pricing the Trip anyway would either invent a zero charge or drop a
+ * real one silently, and both produce an invoice that is quietly wrong.
+ *
+ * The component is named by code rather than by id so the message tells an
+ * administrator what to configure. The property's name is not included: it is
+ * commercial configuration, and the component code identifies the gap.
+ */
+export class MissingRouteCostException extends PricingEngineException {
+  constructor(
+    readonly tripId: string,
+    readonly pricingComponentId: string,
+    readonly departure: string | null,
+    readonly destination: string,
+  ) {
+    super(
+      PricingEngineErrorCode.MISSING_ROUTE_COST,
+      `Trip "${tripId}" carries a route-priced custom property for pricing component "${pricingComponentId}", but no active route cost is configured for "${departure ?? "(no terminal)"}" to "${destination}".`,
+    );
+  }
+}
+
+/**
+ * A Trip carries a fixed-price Custom Property that has no configured price.
+ *
+ * A property with no Pricing Component link is priced by its own default price,
+ * so a null there leaves the charge unknown. That is a configuration error, not
+ * a property that costs nothing: pricing it at zero would silently drop a real
+ * charge, and skipping it would silently drop the whole line.
+ *
+ * The property is named by id. Its name and price are commercial configuration
+ * and never appear in a message that reaches the log.
+ */
+export class MissingCustomPropertyPriceException extends PricingEngineException {
+  constructor(
+    readonly tripId: string,
+    readonly customPropertyId: string,
+  ) {
+    super(
+      PricingEngineErrorCode.MISSING_CUSTOM_PROPERTY_PRICE,
+      `Trip "${tripId}" carries custom property "${customPropertyId}", which has no default price configured. A fixed-price custom property must define one before the Trip can be priced.`,
+    );
+  }
+}
+
+/**
+ * The calculated total came out below zero.
+ *
+ * `trip_pricing.total_price` carries a non-negative CHECK, so this would fail
+ * at the database anyway. It is refused here instead, before the transaction
+ * opens, so the failure names the pricing concept rather than surfacing as a
+ * constraint violation nobody can act on.
+ *
+ * This is a persistence guard, not a pricing rule: nothing here decides what a
+ * component is worth, and no amount is named in the message.
+ */
+export class NegativeTotalPriceException extends PricingEngineException {
+  constructor(readonly tripId: string) {
+    super(
+      PricingEngineErrorCode.NEGATIVE_TOTAL,
+      `The pricing calculated for Trip "${tripId}" totals less than zero, which cannot be stored. Review the configured amounts that produced it.`,
+    );
+  }
+}
+
+/**
+ * A calculated line names a component the catalog does not hold.
+ *
+ * Every item carries a foreign key to `pricing_component`, so a code with no
+ * catalog row cannot be persisted. Refused before the transaction opens rather
+ * than left to the foreign key, which would report a column and an id instead
+ * of the component that is actually missing.
+ */
+export class UnknownPricingComponentException extends PricingEngineException {
+  constructor(readonly componentCode: string) {
+    super(
+      PricingEngineErrorCode.UNKNOWN_PRICING_COMPONENT,
+      `Pricing component "${componentCode}" is not present in the catalog, so the calculated line cannot be stored.`,
     );
   }
 }

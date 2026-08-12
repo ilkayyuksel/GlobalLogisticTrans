@@ -67,64 +67,7 @@ describe("TripPricingItemRepository", () => {
     });
   });
 
-  describe("findByCustomProperty", () => {
-    it("scopes the search to one snapshot", async () => {
-      await repository.findByCustomProperty("pricing-1", "property-1");
-
-      expect(prisma.tripPricingItem.findFirst).toHaveBeenCalledWith({
-        where: { tripPricingId: "pricing-1", customPropertyId: "property-1" },
-      });
-    });
-  });
-
-  describe("findPricingComponentById", () => {
-    it("selects only the classification fields", async () => {
-      await repository.findPricingComponentById("component-1");
-
-      expect(prisma.pricingComponent.findUnique).toHaveBeenCalledWith({
-        where: { id: "component-1" },
-        select: { id: true, code: true, isActive: true },
-      });
-    });
-
-    it("returns null when the component does not exist", async () => {
-      expect(await repository.findPricingComponentById("component-1")).toBeNull();
-    });
-  });
-
   describe("writes", () => {
-    it("creates with the supplied data, deriving nothing", async () => {
-      const data = {
-        tripPricingId: "pricing-1",
-        pricingComponentId: "component-1",
-        customPropertyId: null,
-        description: "Fuel surcharge",
-        amount: 57.25,
-        calculationOrder: 3,
-        quantity: null,
-        unitPrice: null,
-        notes: null,
-      };
-
-      await repository.create(data);
-
-      expect(prisma.tripPricingItem.create).toHaveBeenCalledWith({ data });
-    });
-
-    it("never sets a currency, so the column default applies", async () => {
-      await repository.create({
-        tripPricingId: "pricing-1",
-        pricingComponentId: "component-1",
-        description: "Toll",
-        amount: 12,
-        calculationOrder: 5,
-      });
-
-      expect(
-        prisma.tripPricingItem.create.mock.calls[0][0].data,
-      ).not.toHaveProperty("currency");
-    });
-
     it("updates by primary key", async () => {
       await repository.update("item-1", { notes: "checked" });
 
@@ -135,8 +78,10 @@ describe("TripPricingItemRepository", () => {
     });
   });
 
-  it("exposes no delete or replace operation", () => {
-    // Items are never removed, and replacing a whole set is reprocessing.
+  it("exposes no single-item delete, only the reprocess bulk operations", () => {
+    // An individual item is never removed. `deleteByTripPricingId` and
+    // `createMany` exist solely as the two halves of the Pricing Engine's
+    // atomic snapshot replacement, and neither is reachable over REST.
     const methods = Object.getOwnPropertyNames(
       TripPricingItemRepository.prototype,
     );
@@ -145,7 +90,9 @@ describe("TripPricingItemRepository", () => {
     expect(methods).not.toContain("deleteMany");
     expect(methods).not.toContain("remove");
     expect(methods).not.toContain("replace");
-    expect(methods).not.toContain("createMany");
+
+    expect(methods).toContain("deleteByTripPricingId");
+    expect(methods).toContain("createMany");
   });
 
   it("never writes to the snapshot, the Trip or the component catalog", () => {

@@ -23,7 +23,9 @@ const SEEDED_VALUES: Record<string, string> = {
   [PricingSettingKey.COMBINATION_SURCHARGE]: "75",
   [PricingSettingKey.WAITING_TIME_FREE_MINUTES]: "60",
   [PricingSettingKey.WAITING_TIME_BLOCK_MINUTES]: "30",
+  [PricingSettingKey.WAITING_TIME_BLOCK_PRICE]: "25.00",
   [PricingSettingKey.DISTANCE_RATE_PER_KM]: "1.85",
+  [PricingSettingKey.RULE_VERSION]: "2026.1",
 };
 
 function buildSetting(
@@ -96,6 +98,8 @@ describe("PricingRuleResolver", () => {
         combinationSurcharge: "75",
         waitingTimeFreeMinutes: 60,
         waitingTimeBlockMinutes: 30,
+        waitingTimeBlockPrice: "25.00",
+        ruleVersion: "2026.1",
       });
     });
 
@@ -112,6 +116,8 @@ describe("PricingRuleResolver", () => {
         `${PRICING_SETTINGS_CATEGORY}.${PricingSettingKey.COMBINATION_SURCHARGE}`,
         `${PRICING_SETTINGS_CATEGORY}.${PricingSettingKey.WAITING_TIME_FREE_MINUTES}`,
         `${PRICING_SETTINGS_CATEGORY}.${PricingSettingKey.WAITING_TIME_BLOCK_MINUTES}`,
+        `${PRICING_SETTINGS_CATEGORY}.${PricingSettingKey.WAITING_TIME_BLOCK_PRICE}`,
+        `${PRICING_SETTINGS_CATEGORY}.${PricingSettingKey.RULE_VERSION}`,
       ]);
     });
 
@@ -155,6 +161,7 @@ describe("PricingRuleResolver", () => {
       PricingSettingKey.COMBINATION_SURCHARGE,
       PricingSettingKey.WAITING_TIME_FREE_MINUTES,
       PricingSettingKey.WAITING_TIME_BLOCK_MINUTES,
+      PricingSettingKey.WAITING_TIME_BLOCK_PRICE,
     ])("fails when %s is missing", async (key) => {
       overrideSetting(key, null);
 
@@ -207,6 +214,131 @@ describe("PricingRuleResolver", () => {
       },
     );
 
+    /**
+     * The Engine's defensive layer for pricing amounts. The Settings module
+     * rejects a negative value on update; these cover configuration that
+     * reached the database by another route.
+     */
+    describe("negative pricing amounts", () => {
+      const AMOUNT_KEYS = [
+        PricingSettingKey.FUEL_PERCENTAGE,
+        PricingSettingKey.COMBINATION_SURCHARGE,
+        PricingSettingKey.WAITING_TIME_BLOCK_PRICE,
+      ];
+
+      it.each(AMOUNT_KEYS)("refuses a negative %s", async (key) => {
+        overrideSetting(key, { value: "-1" });
+
+        await expect(resolver.resolve()).rejects.toBeInstanceOf(
+          InvalidPricingSettingException,
+        );
+      });
+
+      it.each(AMOUNT_KEYS)("refuses a negative decimal %s", async (key) => {
+        overrideSetting(key, { value: "-0.01" });
+
+        await expect(resolver.resolve()).rejects.toBeInstanceOf(
+          InvalidPricingSettingException,
+        );
+      });
+
+      it.each(AMOUNT_KEYS)("still accepts a zero %s", async (key) => {
+        overrideSetting(key, { value: "0" });
+
+        await expect(resolver.resolve()).resolves.toBeDefined();
+      });
+
+      it.each(AMOUNT_KEYS)("still accepts a decimal %s", async (key) => {
+        overrideSetting(key, { value: "12.75" });
+
+        await expect(resolver.resolve()).resolves.toBeDefined();
+      });
+
+      it("names the amount and what was expected of it", async () => {
+        overrideSetting(PricingSettingKey.FUEL_PERCENTAGE, { value: "-15" });
+
+        await expect(resolver.resolve()).rejects.toMatchObject({
+          settingKey: PricingSettingKey.FUEL_PERCENTAGE,
+          expectation: "a decimal that is zero or greater",
+        });
+      });
+
+      it("treats a negative zero as zero, exactly as the Settings bound does", async () => {
+        overrideSetting(PricingSettingKey.FUEL_PERCENTAGE, { value: "-0" });
+
+        await expect(resolver.resolve()).resolves.toBeDefined();
+      });
+
+      it("refuses a negative distance rate", async () => {
+        overrideSetting(PricingSettingKey.DISTANCE_RATE_PER_KM, {
+          value: "-2.75",
+        });
+
+        await expect(
+          resolver.resolveDistanceRatePerKm(),
+        ).rejects.toBeInstanceOf(InvalidPricingSettingException);
+      });
+
+      it("still accepts a zero distance rate", async () => {
+        overrideSetting(PricingSettingKey.DISTANCE_RATE_PER_KM, {
+          value: "0.00",
+        });
+
+        expect(await resolver.resolveDistanceRatePerKm()).toBe("0.00");
+      });
+    });
+
+    it("refuses a block size of zero, which would leave the formula undefined", async () => {
+      // pricing_rules.md makes a positive block size a configuration validation
+      // rule. This is the Engine's defensive safeguard for a value that reached
+      // the database without passing through the Settings module.
+      overrideSetting(PricingSettingKey.WAITING_TIME_BLOCK_MINUTES, {
+        value: "0",
+      });
+
+      await expect(resolver.resolve()).rejects.toBeInstanceOf(
+        InvalidPricingSettingException,
+      );
+    });
+
+    it("names the block size and what was expected of it", async () => {
+      overrideSetting(PricingSettingKey.WAITING_TIME_BLOCK_MINUTES, {
+        value: "0",
+      });
+
+      await expect(resolver.resolve()).rejects.toMatchObject({
+        settingKey: PricingSettingKey.WAITING_TIME_BLOCK_MINUTES,
+        expectation: "a whole number of minutes, greater than zero",
+      });
+    });
+
+    it("accepts the smallest usable block size", async () => {
+      overrideSetting(PricingSettingKey.WAITING_TIME_BLOCK_MINUTES, {
+        value: "1",
+      });
+
+      expect((await resolver.resolve()).waitingTimeBlockMinutes).toBe(1);
+    });
+
+    it("accepts a zero block price, which prices waiting at nothing", async () => {
+      overrideSetting(PricingSettingKey.WAITING_TIME_BLOCK_PRICE, {
+        value: "0",
+      });
+
+      expect((await resolver.resolve()).waitingTimeBlockPrice).toBe("0");
+    });
+
+    it("keeps the block price as an exact string", async () => {
+      overrideSetting(PricingSettingKey.WAITING_TIME_BLOCK_PRICE, {
+        value: "12.50",
+      });
+
+      const rules = await resolver.resolve();
+
+      expect(rules.waitingTimeBlockPrice).toBe("12.50");
+      expect(typeof rules.waitingTimeBlockPrice).toBe("string");
+    });
+
     it("accepts a zero free period, which disables the free allowance", async () => {
       overrideSetting(PricingSettingKey.WAITING_TIME_FREE_MINUTES, {
         value: "0",
@@ -247,8 +379,8 @@ describe("PricingRuleResolver", () => {
       await resolver.resolve();
       await resolver.resolve();
 
-      // Five keys, read again on the second call.
-      expect(settingsService.findOne).toHaveBeenCalledTimes(10);
+      // Seven keys, read again on the second call.
+      expect(settingsService.findOne).toHaveBeenCalledTimes(14);
     });
   });
 

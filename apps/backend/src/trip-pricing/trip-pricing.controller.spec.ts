@@ -23,7 +23,6 @@ import { TripPricingRepository } from "./trip-pricing.repository";
 import { TripPricingService } from "./trip-pricing.service";
 
 const PRICING_ID = "3f2504e0-4f89-41d3-9a0c-0305e82c3301";
-const OTHER_PRICING_ID = "9c858901-8a57-4791-81fe-4c455b099bc9";
 const TRIP_ID = "1b9d6bcd-bbfd-4b2d-9b5d-ab8dfbbd4bed";
 const BASE = "/api/v1/trip-pricing";
 
@@ -43,15 +42,6 @@ function buildTripPricing(overrides: Partial<TripPricing> = {}): TripPricing {
     ...overrides,
   };
 }
-
-const VALID_BODY = {
-  tripId: TRIP_ID,
-  totalPrice: 482.35,
-  calculatedAt: "2026-08-11T09:15:00.000Z",
-  pricingEngineVersion: "1.4.0",
-  pricingRuleVersion: "2026.08",
-  calculationStatus: "CALCULATED",
-};
 
 /**
  * Integration tests: real routing, the global ValidationPipe, the response
@@ -177,92 +167,6 @@ describe("TripPricingController (integration)", () => {
         .get(`${BASE}/trip/not-a-uuid`)
         .expect(400);
     });
-  });
-
-  describe("POST /trip-pricing", () => {
-    it("creates a snapshot", async () => {
-      const response = await request(app.getHttpServer())
-        .post(BASE)
-        .send(VALID_BODY)
-        .expect(201);
-
-      expect(response.body.data.calculationStatus).toBe(
-        PricingCalculationStatus.CALCULATED,
-      );
-    });
-
-    it("trims the version fields", async () => {
-      await request(app.getHttpServer())
-        .post(BASE)
-        .send({ ...VALID_BODY, pricingEngineVersion: "  1.4.0  " })
-        .expect(201);
-
-      expect(repository.create).toHaveBeenCalledWith(
-        expect.objectContaining({ pricingEngineVersion: "1.4.0" }),
-      );
-    });
-
-    it("returns 404 when the Trip does not exist", async () => {
-      tripService.findById.mockRejectedValue(new NotFoundException());
-
-      await request(app.getHttpServer()).post(BASE).send(VALID_BODY).expect(404);
-    });
-
-    it.each([TripStatus.OPEN, TripStatus.CANCELLED, TripStatus.DELETED])(
-      "returns 409 for a %s Trip",
-      async (status) => {
-        tripService.findById.mockResolvedValue({ id: TRIP_ID, status });
-
-        await request(app.getHttpServer())
-          .post(BASE)
-          .send(VALID_BODY)
-          .expect(409);
-      },
-    );
-
-    it("returns 409 when the Trip already has a snapshot", async () => {
-      repository.findByTripId.mockResolvedValue(
-        buildTripPricing({ id: OTHER_PRICING_ID }),
-      );
-
-      await request(app.getHttpServer()).post(BASE).send(VALID_BODY).expect(409);
-    });
-
-    it.each([
-      [{}, "an empty body"],
-      [{ ...VALID_BODY, tripId: "not-a-uuid" }, "a malformed Trip id"],
-      [{ ...VALID_BODY, totalPrice: -1 }, "a negative total"],
-      [{ ...VALID_BODY, totalPrice: 10.123 }, "three decimals"],
-      [{ ...VALID_BODY, totalPrice: "482.35" }, "a string total"],
-      [{ ...VALID_BODY, totalPrice: 10_000_000_000 }, "a total beyond the column"],
-      [{ ...VALID_BODY, calculationStatus: "PENDING" }, "an unknown status"],
-      [{ ...VALID_BODY, calculationStatus: "calculated" }, "the wrong case"],
-      [{ ...VALID_BODY, calculatedAt: "not-a-date" }, "a malformed timestamp"],
-      [{ ...VALID_BODY, pricingEngineVersion: "   " }, "a blank engine version"],
-      [{ ...VALID_BODY, pricingEngineVersion: 140 }, "a non-string version"],
-      [{ ...VALID_BODY, pricingRuleVersion: "" }, "an empty rule version"],
-      [{ ...VALID_BODY, currency: "USD" }, "a currency, which is not accepted"],
-      [{ ...VALID_BODY, unknown: 1 }, "an unknown field"],
-    ])("rejects %j (%s)", async (body, _reason) => {
-      await request(app.getHttpServer()).post(BASE).send(body).expect(400);
-    });
-
-    it("accepts a zero total, which a FAILED calculation may legitimately carry", async () => {
-      await request(app.getHttpServer())
-        .post(BASE)
-        .send({ ...VALID_BODY, totalPrice: 0, calculationStatus: "FAILED" })
-        .expect(201);
-    });
-
-    it.each(Object.values(PricingCalculationStatus))(
-      "accepts the %s status",
-      async (calculationStatus) => {
-        await request(app.getHttpServer())
-          .post(BASE)
-          .send({ ...VALID_BODY, calculationStatus })
-          .expect(201);
-      },
-    );
   });
 
   describe("PATCH /trip-pricing/:id", () => {

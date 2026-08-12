@@ -1,6 +1,5 @@
 import { Module } from "@nestjs/common";
 
-import { CustomPropertyModule } from "../custom-properties/custom-property.module";
 import { TripPricingModule } from "../trip-pricing/trip-pricing.module";
 import { TripPricingItemController } from "./trip-pricing-item.controller";
 import { TripPricingItemRepository } from "./trip-pricing-item.repository";
@@ -23,7 +22,7 @@ import { TripPricingItemService } from "./trip-pricing-item.service";
  * access stays behind a single door.
  */
 @Module({
-  imports: [TripPricingModule, CustomPropertyModule],
+  imports: [TripPricingModule],
   controllers: [TripPricingItemController],
   providers: [TripPricingItemService, TripPricingItemRepository],
   exports: [TripPricingItemService],

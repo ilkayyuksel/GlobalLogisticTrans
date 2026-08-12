@@ -23,6 +23,14 @@ export class CustomPropertyResponseDto {
   description!: string | null;
 
   @ApiPropertyOptional({
+    format: "uuid",
+    nullable: true,
+    description:
+      "Null for a fixed-price property. Set for a route-priced one, which decides only whether that component applies to a Trip; its amount comes from the route cost configuration.",
+  })
+  pricingComponentId!: string | null;
+
+  @ApiPropertyOptional({
     description: "Configured amount in EUR, with two decimals. Null when unset.",
     type: String,
     nullable: true,
@@ -65,6 +73,7 @@ export function toCustomPropertyResponse(
     id: property.id,
     name: property.name,
     description: property.description,
+    pricingComponentId: property.pricingComponentId,
     defaultPrice:
       property.defaultPrice === null
         ? null

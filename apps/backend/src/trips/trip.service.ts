@@ -3,6 +3,7 @@ import { Prisma, Trip, TripStatus } from "@prisma/client";
 
 import { changedFieldNames } from "../common/changed-fields";
 import { toUtcDate } from "../common/dates";
+import { DomainEventBus } from "../common/events/domain-event-bus";
 import { buildPaginationMeta } from "../common/dto/pagination-meta.dto";
 import { toUtcTime } from "../common/time-of-day";
 import { DriverService } from "../drivers/driver.service";
@@ -17,6 +18,8 @@ import {
   toTripResponse,
 } from "./dto/trip-response.dto";
 import { UpdateTripDto } from "./dto/update-trip.dto";
+import { TripClosedEvent } from "./events/trip-closed.event";
+import { ImportTripsCommand } from "./import-trips.command";
 import {
   AssignmentSubject,
   DuplicateBookingNumberException,
@@ -71,6 +74,7 @@ export class TripService {
     private readonly repository: TripRepository,
     private readonly vehicleService: VehicleService,
     private readonly driverService: DriverService,
+    private readonly eventBus: DomainEventBus,
     private readonly logger: AppLoggerService,
   ) {
     this.logger.setContext(TripService.name);
@@ -252,7 +256,107 @@ export class TripService {
       toStatus: changed.status,
     });
 
+    await this.announceIfClosed(changed);
+
     return toTripResponse(changed);
+  }
+
+  /**
+   * Publishes the fact that a Trip has closed, once it truly has.
+   *
+   * Deliberately AFTER the transaction has committed and after the status log.
+   * A subscriber reads the Trip for itself, and inside the transaction it would
+   * still see the previous status — so it would price a Trip the database does
+   * not yet consider closed, or price nothing at all if the commit then failed.
+   *
+   * Equally deliberately, the pricing calculation is NOT part of the status
+   * transaction. Pricing reads Settings, route configuration and properties and
+   * writes a snapshot of its own; holding the Trip row for all of that would
+   * turn a short status update into a long lock.
+   *
+   * The status is checked rather than the transition, because CLOSED is
+   * reachable only from OPEN and only through this method — trip-status.rules
+   * is the single source of that truth, and restating "from OPEN" here would
+   * duplicate the matrix.
+   *
+   * TripService knows nothing about what happens next. It announces a fact; the
+   * Pricing Engine subscribes on its own side, which is what keeps the Trip
+   * module free of any dependency on pricing.
+   */
+  private async announceIfClosed(trip: Trip): Promise<void> {
+    if (trip.status !== TripStatus.CLOSED) {
+      return;
+    }
+
+    await this.eventBus.publish(new TripClosedEvent(trip.id));
+  }
+
+  /**
+   * Creates the Trips of one imported transport order, atomically.
+   *
+   * Internal: there is no DTO and no route. An import is not a request a user
+   * composes — it is the consequence of a document — and exposing it would mean
+   * exposing `tripGroupId` and `parserMetadata`, which are the two fields the
+   * public contract deliberately withholds because only the parser may set
+   * them.
+   *
+   * ONE transaction covers the PdfDocument, the optional TripGroup and every
+   * Trip. A Combination that created one Trip and then failed would leave a
+   * group misrepresenting a two-leg order as a one-leg one, so nothing is
+   * written unless all of it can be.
+   *
+   * Every existing rule still applies: the booking number must be free, and it
+   * is checked inside the transaction, so re-importing the same document fails
+   * rather than silently duplicating a Trip.
+   *
+   * Trips are created OPEN, like every other Trip. Pricing is not this
+   * operation's concern and is never triggered here.
+   */
+  async importTrips(command: ImportTripsCommand): Promise<TripResponseDto[]> {
+    const created = await this.repository.runImportTransaction(
+      async ({ trips, pdfDocuments }) => {
+        const pdfDocument = await pdfDocuments.create(command.pdfDocument);
+
+        const tripGroup = command.asCombination
+          ? await trips.createTripGroup()
+          : null;
+
+        const written: Trip[] = [];
+
+        for (const trip of command.trips) {
+          await this.assertBookingNumberFree(trips, trip.bookingNumber);
+
+          written.push(
+            await trips.create({
+              pdfDocumentId: pdfDocument.id,
+              tripGroupId: tripGroup ? tripGroup.id : null,
+              bookingNumber: trip.bookingNumber,
+              containerNumber: trip.containerNumber,
+              containerType: trip.containerType,
+              terminal: trip.terminal,
+              destinationCity: trip.destinationCity,
+              destinationCountry: trip.destinationCountry,
+              originalPlanningDate: toUtcDate(trip.planningDate),
+              planningDate: toUtcDate(trip.planningDate),
+              startTime: trip.startTime ? toUtcTime(trip.startTime) : null,
+              endTime: trip.endTime ? toUtcTime(trip.endTime) : null,
+              parserMetadata: trip.parserMetadata,
+            }),
+          );
+        }
+
+        return written;
+      },
+    );
+
+    this.logger.log("Transport order imported", {
+      tripIds: created.map((trip) => trip.id),
+      tripGroupId: created[0]?.tripGroupId ?? null,
+      pdfDocumentId: created[0]?.pdfDocumentId ?? null,
+      tripCount: created.length,
+    });
+
+    return created.map(toTripResponse);
   }
 
   /**
@@ -363,13 +467,19 @@ export class TripService {
   }
 
   /**
-   * Booking numbers identify a transport order.
+   * A booking number identifies one Trip, and each Trip carries its own.
    *
-   * The database index is deliberately non-unique, because the two Trips of a
-   * Combination share one booking number, so this rule can only be enforced
-   * here. A DELETED Trip does not hold its booking number: soft delete is the
+   * This includes the two Trips of a Combination: the real documents give the
+   * outbound and return legs DIFFERENT booking numbers, and they are linked to
+   * each other through their shared TripGroup, never through their booking
+   * number. So uniqueness applies to every Trip independently, with no
+   * exception carved out for a Combination.
+   *
+   * The database index is deliberately non-unique all the same, because a
+   * DELETED Trip does not hold its booking number: soft delete is the
    * documented remedy for a Trip created in error, and it would be no remedy if
-   * the booking could never be re-entered.
+   * the booking could never be re-entered. A database constraint cannot express
+   * "unique among the statuses that hold it", so the rule is enforced here.
    */
   private async assertBookingNumberFree(
     repository: TripRepository,
@@ -433,11 +543,7 @@ export class TripService {
     repository: TripRepository,
     trip: Trip,
   ): Promise<void> {
-    await this.assertBookingNumberFree(
-      repository,
-      trip.bookingNumber,
-      trip.id,
-    );
+    await this.assertBookingNumberFree(repository, trip.bookingNumber, trip.id);
     await this.assertVehicleFree(
       repository,
       trip.vehicleId,
@@ -471,7 +577,9 @@ export class TripService {
     return {
       containerNumber: dto.containerNumber,
       planningDate:
-        dto.planningDate === undefined ? undefined : toUtcDate(dto.planningDate),
+        dto.planningDate === undefined
+          ? undefined
+          : toUtcDate(dto.planningDate),
       vehicleId: dto.vehicleId,
       driverId: dto.driverId,
       waitingTimeMinutes: dto.waitingTimeMinutes,

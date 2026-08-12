@@ -1,0 +1,35 @@
+{
+  "compilerOptions": {
+    // node16 rather than commonjs: pdfjs-dist v4 ships ESM only, and this is
+    // the setting that makes TypeScript preserve `await import(...)` instead of
+    // rewriting it to require(), which cannot load an ESM package.
+    "module": "node16",
+    "target": "ES2023",
+    "lib": ["ES2023"],
+    "moduleResolution": "node16",
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "declaration": true,
+    "sourceMap": true,
+
+    // Required by ts-jest whenever module is Node16/Next, and harmless for the
+    // build: every file here already compiles independently.
+    "isolatedModules": true,
+
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+
+    "strict": true,
+    "noImplicitAny": true,
+    "strictNullChecks": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noImplicitOverride": true
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist"]
+}

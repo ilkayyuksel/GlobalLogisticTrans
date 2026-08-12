@@ -1,7 +1,14 @@
 import { Injectable } from "@nestjs/common";
-import { Prisma, Trip, TripStatus } from "@prisma/client";
+import { Prisma, Trip, TripGroup, TripStatus } from "@prisma/client";
 
+import { PdfDocumentRepository } from "../pdf-documents/pdf-document.repository";
 import { PrismaService } from "../prisma/prisma.service";
+
+/** The repositories one import writes through, bound to a single transaction. */
+export interface ImportRepositories {
+  readonly trips: TripRepository;
+  readonly pdfDocuments: PdfDocumentRepository;
+}
 
 export interface FindTripsFilter {
   status?: TripStatus;
@@ -72,6 +79,42 @@ export class TripRepository {
     return this.prisma.$transaction((transaction) =>
       work(new TripRepository(transaction as unknown as PrismaService)),
     );
+  }
+
+  /**
+   * Runs `work` against transaction-scoped clones of this repository and the
+   * PdfDocument repository.
+   *
+   * Importing a transport order writes a PdfDocument, sometimes a TripGroup and
+   * one or two Trips, and none of those is meaningful without the others: a
+   * document with no Trips explains nothing, and a group with one Trip
+   * misrepresents a Combination. One transaction is what makes the import
+   * all-or-nothing.
+   *
+   * Both clones are constructed directly rather than injected, the same pattern
+   * TripPricingRepository already uses for its snapshot write.
+   */
+  runImportTransaction<TResult>(
+    work: (repositories: ImportRepositories) => Promise<TResult>,
+  ): Promise<TResult> {
+    return this.prisma.$transaction((transaction) => {
+      const scoped = transaction as unknown as PrismaService;
+
+      return work({
+        trips: new TripRepository(scoped),
+        pdfDocuments: new PdfDocumentRepository(scoped),
+      });
+    });
+  }
+
+  /**
+   * Creates the group that ties a Combination's two Trips together.
+   *
+   * `trip_group` carries no columns of its own beyond its identity — the
+   * relationship IS the data — so there is nothing to pass in.
+   */
+  createTripGroup(): Promise<TripGroup> {
+    return this.prisma.tripGroup.create({ data: {} });
   }
 
   /**

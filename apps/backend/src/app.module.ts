@@ -2,6 +2,7 @@ import { Module } from "@nestjs/common";
 import { ConfigModule } from "@nestjs/config";
 import { APP_FILTER, APP_INTERCEPTOR } from "@nestjs/core";
 
+import { EventsModule } from "./common/events/events.module";
 import { AllExceptionsFilter } from "./common/filters/all-exceptions.filter";
 import { ResponseInterceptor } from "./common/interceptors/response.interceptor";
 import { validateEnvironment } from "./config/environment.variables";
@@ -9,8 +10,12 @@ import { CustomPropertyModule } from "./custom-properties/custom-property.module
 import { DriverModule } from "./drivers/driver.module";
 import { HealthModule } from "./health/health.module";
 import { LoggerModule } from "./logger/logger.module";
+import { PdfDocumentModule } from "./pdf-documents/pdf-document.module";
+import { PdfImportModule } from "./pdf-import/pdf-import.module";
 import { PricingEngineModule } from "./pricing-engine/pricing-engine.module";
+import { PricingReprocessModule } from "./pricing-reprocess/pricing-reprocess.module";
 import { PrismaModule } from "./prisma/prisma.module";
+import { RouteCostModule } from "./route-costs/route-cost.module";
 import { RoutePricingModule } from "./route-pricing/route-pricing.module";
 import { SettingsModule } from "./settings/settings.module";
 import { TripCustomPropertyModule } from "./trip-custom-properties/trip-custom-property.module";
@@ -38,6 +43,7 @@ import { VehicleModule } from "./vehicles/vehicle.module";
       validate: validateEnvironment,
     }),
     LoggerModule,
+    EventsModule,
     PrismaModule,
     HealthModule,
     SettingsModule,
@@ -45,12 +51,16 @@ import { VehicleModule } from "./vehicles/vehicle.module";
     VehicleModule,
     VehicleAssignmentModule,
     RoutePricingModule,
+    RouteCostModule,
     CustomPropertyModule,
     TripModule,
     TripPricingModule,
     TripPricingItemModule,
     TripCustomPropertyModule,
     PricingEngineModule,
+    PricingReprocessModule,
+    PdfDocumentModule,
+    PdfImportModule,
   ],
   providers: [
     {

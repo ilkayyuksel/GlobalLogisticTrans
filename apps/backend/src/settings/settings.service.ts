@@ -1,7 +1,8 @@
 import { Injectable } from "@nestjs/common";
-import { Setting } from "@prisma/client";
+import { Setting, SettingValueType } from "@prisma/client";
 
 import { AppLoggerService } from "../logger/app-logger.service";
+import { minimumValueFor } from "./setting-value-bounds";
 import { ListSettingsQueryDto } from "./dto/list-settings-query.dto";
 import { SettingCategoryGroupDto } from "./dto/setting-category-group.dto";
 import {
@@ -72,22 +73,17 @@ export class SettingsService {
     const result = this.valueValidator.validate(dto.value, setting.valueType);
 
     if (!result.valid) {
-      // Warn rather than error: a rejected value is a client mistake, not a
-      // system failure.
-      this.logger.warn("Rejected setting value", {
-        category,
-        key,
-        valueType: setting.valueType,
-        reason: result.reason,
-      });
-
-      throw new InvalidSettingValueException(
+      this.rejectValue(
         category,
         key,
         setting.valueType,
         result.reason ?? "value is not valid for this type",
       );
     }
+
+    // Type first, bound second: a bound is only meaningful once the value is
+    // known to be a number.
+    this.assertMeetsMinimum(category, key, dto.value, setting.valueType);
 
     const updated = await this.repository.updateValue(setting.id, dto.value);
 
@@ -101,6 +97,50 @@ export class SettingsService {
     });
 
     return toSettingResponse(updated);
+  }
+
+  /**
+   * Enforces a setting's numeric bound, where it has one.
+   *
+   * A handful of settings are unusable below a certain value however well they
+   * parse — a divisor that may not be zero, for instance. The bound and its
+   * reason live in setting-value-bounds.ts.
+   */
+  private assertMeetsMinimum(
+    category: string,
+    key: string,
+    value: string,
+    valueType: SettingValueType,
+  ): void {
+    const minimum = minimumValueFor(category, key);
+
+    if (minimum === undefined || Number(value) >= minimum) {
+      return;
+    }
+
+    this.rejectValue(
+      category,
+      key,
+      valueType,
+      `value must be at least ${minimum}`,
+    );
+  }
+
+  /** Warn rather than error: a rejected value is a client mistake, not a system failure. */
+  private rejectValue(
+    category: string,
+    key: string,
+    valueType: SettingValueType,
+    reason: string,
+  ): never {
+    this.logger.warn("Rejected setting value", {
+      category,
+      key,
+      valueType,
+      reason,
+    });
+
+    throw new InvalidSettingValueException(category, key, valueType, reason);
   }
 
   private findSettings(query: ListSettingsQueryDto): Promise<Setting[]> {

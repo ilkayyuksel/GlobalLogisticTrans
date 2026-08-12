@@ -1,8 +1,8 @@
 import { TripStatus } from "@prisma/client";
 
-import { CustomPropertyService } from "../custom-properties/custom-property.service";
 import { AppLoggerService } from "../logger/app-logger.service";
 import { RoutePricingService } from "../route-pricing/route-pricing.service";
+import { TripCustomPropertyService } from "../trip-custom-properties/trip-custom-property.service";
 import { TripResponseDto } from "../trips/dto/trip-response.dto";
 import {
   MissingRoutePricingException,
@@ -53,6 +53,8 @@ function buildRules(
     combinationSurcharge: "75",
     waitingTimeFreeMinutes: 60,
     waitingTimeBlockMinutes: 30,
+    waitingTimeBlockPrice: "25.00",
+    ruleVersion: "2026.1",
     ...overrides,
   };
 }
@@ -69,9 +71,37 @@ const ROUTE_PRICING = {
   updatedAt: new Date("2026-01-01T00:00:00Z"),
 };
 
+/** One assignment, shaped as TripCustomPropertyService returns it. */
+function assignment(
+  id: string,
+  name: string,
+  pricingComponentId: string | null,
+  defaultPrice: string | null,
+  isActive = true,
+) {
+  return {
+    id: `assignment-${id}`,
+    tripId: TRIP_ID,
+    customPropertyId: id,
+    customProperty: {
+      id,
+      name,
+      description: null,
+      pricingComponentId,
+      defaultPrice,
+      displayOrder: 1,
+      color: null,
+      isActive,
+      createdAt: new Date("2026-01-01T00:00:00Z"),
+      updatedAt: new Date("2026-01-01T00:00:00Z"),
+    },
+    assignedAt: new Date("2026-08-01T00:00:00Z"),
+  };
+}
+
 describe("PricingComponentResolver", () => {
   let routePricingService: { findActiveRoute: jest.Mock };
-  let customPropertyService: { findAll: jest.Mock };
+  let tripCustomPropertyService: { findByTripId: jest.Mock };
   let ruleResolver: { resolveDistanceRatePerKm: jest.Mock };
   let logger: { setContext: jest.Mock; log: jest.Mock; warn: jest.Mock };
   let resolver: PricingComponentResolver;
@@ -80,11 +110,8 @@ describe("PricingComponentResolver", () => {
     routePricingService = {
       findActiveRoute: jest.fn().mockResolvedValue(ROUTE_PRICING),
     };
-    customPropertyService = {
-      findAll: jest.fn().mockResolvedValue({
-        items: [],
-        meta: { page: 1, pageSize: 200, totalItems: 0, totalPages: 0 },
-      }),
+    tripCustomPropertyService = {
+      findByTripId: jest.fn().mockResolvedValue({ items: [] }),
     };
     ruleResolver = {
       resolveDistanceRatePerKm: jest.fn().mockResolvedValue("1.85"),
@@ -93,7 +120,7 @@ describe("PricingComponentResolver", () => {
 
     resolver = new PricingComponentResolver(
       routePricingService as unknown as RoutePricingService,
-      customPropertyService as unknown as CustomPropertyService,
+      tripCustomPropertyService as unknown as TripCustomPropertyService,
       ruleResolver as unknown as PricingRuleResolver,
       logger as unknown as AppLoggerService,
     );
@@ -118,10 +145,18 @@ describe("PricingComponentResolver", () => {
       expect(source).toEqual({
         strategy: PricingStrategy.ROUTE_BASED,
         routePricingId: ROUTE_ID,
-        departure: "Antwerp",
-        destination: "Rotterdam",
         basePrice: "380.00",
       });
+    });
+
+    it("carries no route, which belongs to the Trip rather than the strategy", async () => {
+      const source = await resolver.resolveBaseSource(
+        buildTrip(),
+        buildRules(),
+      );
+
+      expect(source).not.toHaveProperty("departure");
+      expect(source).not.toHaveProperty("destination");
     });
 
     it("fails when no active route pricing is configured", async () => {
@@ -202,50 +237,98 @@ describe("PricingComponentResolver", () => {
     });
   });
 
-  describe("active custom properties", () => {
-    it("requests only active properties, one full page", async () => {
-      await resolver.resolveActiveCustomProperties();
+  /**
+   * The Engine prices what a Trip CARRIES, not what the catalog offers. Reading
+   * the catalog would have charged every Trip for every configured property.
+   */
+  describe("assigned custom properties", () => {
+    it("asks for this Trip's assignments", async () => {
+      await resolver.resolveAssignedCustomProperties(TRIP_ID);
 
-      expect(customPropertyService.findAll).toHaveBeenCalledWith({
-        page: 1,
-        pageSize: 200,
-        isActive: true,
-      });
-    });
-
-    it("maps each property to its configured price", async () => {
-      customPropertyService.findAll.mockResolvedValue({
-        items: [
-          { id: "property-1", name: "TAR", defaultPrice: "35.00" },
-          { id: "property-2", name: "Flat", defaultPrice: null },
-        ],
-        meta: { page: 1, pageSize: 200, totalItems: 2, totalPages: 1 },
-      });
-
-      expect(await resolver.resolveActiveCustomProperties()).toEqual([
-        { customPropertyId: "property-1", name: "TAR", defaultPrice: "35.00" },
-        { customPropertyId: "property-2", name: "Flat", defaultPrice: null },
-      ]);
-    });
-
-    it("warns rather than silently truncating an oversized catalog", async () => {
-      customPropertyService.findAll.mockResolvedValue({
-        items: [{ id: "property-1", name: "TAR", defaultPrice: "35.00" }],
-        meta: { page: 1, pageSize: 200, totalItems: 250, totalPages: 2 },
-      });
-
-      await resolver.resolveActiveCustomProperties();
-
-      expect(logger.warn).toHaveBeenCalledWith(
-        "Active custom property catalog exceeds one page",
-        { loaded: 1, totalItems: 250 },
+      expect(tripCustomPropertyService.findByTripId).toHaveBeenCalledWith(
+        TRIP_ID,
       );
     });
 
-    it("does not warn when the catalog fits", async () => {
-      await resolver.resolveActiveCustomProperties();
+    it("returns an empty list for a Trip that carries none", async () => {
+      expect(await resolver.resolveAssignedCustomProperties(TRIP_ID)).toEqual(
+        [],
+      );
+    });
 
-      expect(logger.warn).not.toHaveBeenCalled();
+    it("carries everything a later calculator needs, so it never looks anything up", async () => {
+      tripCustomPropertyService.findByTripId.mockResolvedValue({
+        items: [
+          assignment("property-1", "TAR", null, "35.00"),
+          assignment("property-2", "Toll", "component-toll", null),
+        ],
+      });
+
+      expect(await resolver.resolveAssignedCustomProperties(TRIP_ID)).toEqual([
+        {
+          customPropertyId: "property-1",
+          name: "TAR",
+          pricingComponentId: null,
+          defaultPrice: "35.00",
+        },
+        {
+          customPropertyId: "property-2",
+          name: "Toll",
+          pricingComponentId: "component-toll",
+          defaultPrice: null,
+        },
+      ]);
+    });
+
+    it("keeps a property that has since been deactivated", async () => {
+      // The Trip carries it. Withdrawing a property from the catalog must not
+      // silently change what an already-planned Trip is charged.
+      tripCustomPropertyService.findByTripId.mockResolvedValue({
+        items: [assignment("property-1", "TAR", null, "35.00", false)],
+      });
+
+      const resolved = await resolver.resolveAssignedCustomProperties(TRIP_ID);
+
+      expect(resolved).toHaveLength(1);
+      expect(resolved[0].customPropertyId).toBe("property-1");
+    });
+
+    it("preserves the order the service returned", async () => {
+      tripCustomPropertyService.findByTripId.mockResolvedValue({
+        items: [
+          assignment("property-2", "Second", null, null),
+          assignment("property-1", "First", null, null),
+        ],
+      });
+
+      const resolved = await resolver.resolveAssignedCustomProperties(TRIP_ID);
+
+      expect(resolved.map((property) => property.customPropertyId)).toEqual([
+        "property-2",
+        "property-1",
+      ]);
+    });
+
+    it("never reads the catalog", async () => {
+      await resolver.resolveAssignedCustomProperties(TRIP_ID);
+
+      const source = PricingComponentResolver.prototype.constructor.toString();
+
+      expect(source).not.toContain("customPropertyService");
+      expect(source).not.toContain("findAll");
+    });
+
+    it("logs a count only, never a property name or price", async () => {
+      tripCustomPropertyService.findByTripId.mockResolvedValue({
+        items: [assignment("property-1", "TAR", null, "35.00")],
+      });
+
+      await resolver.resolveAssignedCustomProperties(TRIP_ID);
+
+      const logged = JSON.stringify(logger.log.mock.calls);
+
+      expect(logged).not.toContain("TAR");
+      expect(logged).not.toContain("35.00");
     });
   });
 

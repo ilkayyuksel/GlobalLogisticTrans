@@ -16,12 +16,19 @@ export const PricingSettingKey = {
   COMBINATION_SURCHARGE: "COMBINATION_SURCHARGE",
   WAITING_TIME_FREE_MINUTES: "WAITING_TIME_FREE_MINUTES",
   WAITING_TIME_BLOCK_MINUTES: "WAITING_TIME_BLOCK_MINUTES",
+  WAITING_TIME_BLOCK_PRICE: "WAITING_TIME_BLOCK_PRICE",
   /**
    * Only required when the active strategy is DISTANCE_BASED, which is why it
    * is not part of the seeded configuration. A system switched to that strategy
    * without adding this Setting fails validation with a message naming the key.
    */
   DISTANCE_RATE_PER_KM: "DISTANCE_RATE_PER_KM",
+  /**
+   * The version of the RULESET a calculation ran against, stored on every
+   * snapshot. An administrator bumps it when the pricing configuration changes,
+   * which is why it lives with the rules it describes rather than in the code.
+   */
+  RULE_VERSION: "PRICING_RULE_VERSION",
 } as const;
 
 /**

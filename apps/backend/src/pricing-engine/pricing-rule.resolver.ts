@@ -48,17 +48,23 @@ export class PricingRuleResolver {
 
     return {
       strategy,
-      fuelPercentage: await this.requireDecimal(
+      fuelPercentage: await this.requireNonNegativeDecimal(
         PricingSettingKey.FUEL_PERCENTAGE,
       ),
-      combinationSurcharge: await this.requireDecimal(
+      combinationSurcharge: await this.requireNonNegativeDecimal(
         PricingSettingKey.COMBINATION_SURCHARGE,
       ),
       waitingTimeFreeMinutes: await this.requireWholeMinutes(
         PricingSettingKey.WAITING_TIME_FREE_MINUTES,
       ),
-      waitingTimeBlockMinutes: await this.requireWholeMinutes(
+      waitingTimeBlockMinutes: await this.requirePositiveWholeMinutes(
         PricingSettingKey.WAITING_TIME_BLOCK_MINUTES,
+      ),
+      waitingTimeBlockPrice: await this.requireNonNegativeDecimal(
+        PricingSettingKey.WAITING_TIME_BLOCK_PRICE,
+      ),
+      ruleVersion: await this.requireNonEmptyText(
+        PricingSettingKey.RULE_VERSION,
       ),
     };
   }
@@ -70,7 +76,7 @@ export class PricingRuleResolver {
    * configure a rate it does not use.
    */
   async resolveDistanceRatePerKm(): Promise<string> {
-    return this.requireDecimal(PricingSettingKey.DISTANCE_RATE_PER_KM);
+    return this.requireNonNegativeDecimal(PricingSettingKey.DISTANCE_RATE_PER_KM);
   }
 
   private async resolveStrategy(): Promise<PricingStrategy> {
@@ -91,12 +97,54 @@ export class PricingRuleResolver {
     return configured;
   }
 
-  private async requireDecimal(settingKey: string): Promise<string> {
+  /**
+   * A pricing amount: a percentage, a surcharge, a rate or a block price.
+   *
+   * Every decimal this Engine reads feeds an amount directly, and
+   * pricing_rules.md § Business Constraints states that negative pricing is not
+   * supported — so a negative value here would produce a negative pricing line
+   * and could drive a total below the non-negative CHECK on trip_pricing.
+   * Zero stays valid and means the component charges nothing.
+   *
+   * The Settings module rejects a negative value when it is updated. This is
+   * the Engine's defensive safeguard for configuration that reached the
+   * database by some other route — a manual SQL edit, a restored backup, an
+   * older seed.
+   *
+   * The sign is checked numerically rather than by pattern, so it agrees
+   * exactly with the bound the Settings module applies: "-0" is zero to both.
+   */
+  private async requireNonNegativeDecimal(
+    settingKey: string,
+  ): Promise<string> {
     const setting = await this.requireSetting(settingKey);
     const value = setting.value.trim();
 
     if (!isDecimalSettingValue(value)) {
       this.rejectSetting(settingKey, "a decimal with at most two decimals");
+    }
+
+    if (Number(value) < 0) {
+      this.rejectSetting(settingKey, "a decimal that is zero or greater");
+    }
+
+    return value;
+  }
+
+  /**
+   * A free-text Setting that must actually say something.
+   *
+   * Used for the rule version, which is stamped onto every snapshot. A blank
+   * value would store an empty version string and quietly destroy the audit
+   * trail the field exists for, so it is refused like any other unusable
+   * configuration. The value itself is never logged.
+   */
+  private async requireNonEmptyText(settingKey: string): Promise<string> {
+    const setting = await this.requireSetting(settingKey);
+    const value = setting.value.trim();
+
+    if (value.length === 0) {
+      this.rejectSetting(settingKey, "a non-empty value");
     }
 
     return value;
@@ -111,6 +159,34 @@ export class PricingRuleResolver {
     }
 
     return Number(value);
+  }
+
+  /**
+   * A minute count that may not be zero.
+   *
+   * The Engine's defensive safeguard for the block size. pricing_rules.md makes
+   * a positive block size a configuration validation rule, not a business rule:
+   * it is the divisor that converts billable minutes into blocks, so zero
+   * leaves the calculation undefined. The Settings module rejects zero when the
+   * value is updated; this catches configuration that reached the database by
+   * some other route — a manual SQL edit, a restored backup, an old seed.
+   *
+   * Refusing to calculate is the only safe response. Producing a price from an
+   * undefined formula would be worse than producing none.
+   */
+  private async requirePositiveWholeMinutes(
+    settingKey: string,
+  ): Promise<number> {
+    const minutes = await this.requireWholeMinutes(settingKey);
+
+    if (minutes === 0) {
+      this.rejectSetting(
+        settingKey,
+        "a whole number of minutes, greater than zero",
+      );
+    }
+
+    return minutes;
   }
 
   /**

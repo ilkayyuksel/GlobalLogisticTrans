@@ -23,16 +23,31 @@ export interface PricingLine {
   /** How many units the line charges for. Null when the line is a flat amount. */
   readonly quantity: Prisma.Decimal | null;
   readonly unitPrice: Prisma.Decimal | null;
+
+  /**
+   * Which configured Custom Property produced this charge.
+   *
+   * Set only by the Custom Property step, and null on every other line. That is
+   * not an omission: it is the one component whose amount comes from a
+   * specific configured property, so the reference is what explains the charge.
+   * A Toll or Tunnel line leaves it null even though a property made the
+   * component apply — the amount there is the route's, and pointing at the
+   * property would suggest it came from there.
+   *
+   * Required rather than optional, so a future step has to state which of the
+   * two it is instead of leaving the field off by accident.
+   */
+  readonly customPropertyId: string | null;
 }
 
 /**
  * The component codes this Engine can currently produce.
  *
- * Only the codes actually implemented appear here. The catalog holds eight, but
- * listing the six that no step produces yet would suggest they are supported.
- * Each future phase adds its own.
+ * Only the codes actually implemented appear here. The catalog holds eight; the
+ * one that no step produces yet — MANUAL_ADJUSTMENT — is deliberately absent,
+ * because listing it would suggest it is supported.
  *
- * Both codes are the ones seeded in `pricing_component` and required by
+ * Every code is the one seeded in `pricing_component` and required by
  * database_schema.md §8.2, which names the catalog the single source of truth
  * for classifying a pricing item. pricing_rules.md uses longer prose names —
  * "Base Route Price", "Combination Surcharge" — but the catalog code is what
@@ -42,6 +57,11 @@ export interface PricingLine {
 export const PricingComponentCode = {
   BASE_PRICE: "BASE_PRICE",
   COMBINATION: "COMBINATION",
+  FUEL_SURCHARGE: "FUEL_SURCHARGE",
+  WAITING_TIME: "WAITING_TIME",
+  TOLL: "TOLL",
+  TUNNEL: "TUNNEL",
+  CUSTOM_PROPERTY: "CUSTOM_PROPERTY",
 } as const;
 
 export type PricingComponentCode =

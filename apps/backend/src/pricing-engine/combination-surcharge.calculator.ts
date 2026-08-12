@@ -74,6 +74,7 @@ export class CombinationSurchargeCalculator implements PricingCalculationStep {
       calculationOrder: COMBINATION_CALCULATION_ORDER,
       quantity: null,
       unitPrice: null,
+      customPropertyId: null,
     };
   }
 }

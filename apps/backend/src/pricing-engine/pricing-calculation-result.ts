@@ -1,3 +1,5 @@
+import { PricingCalculationStatus, Prisma } from "@prisma/client";
+
 import { PricingCalculationContext } from "./pricing-calculation-context";
 import { PricingLine } from "./pricing-line";
 
@@ -25,17 +27,39 @@ export interface PricingPreparation {
 }
 
 /**
- * The outcome of one Pricing Engine run.
+ * The outcome of one Pricing Engine run: a complete snapshot, not yet stored.
+ *
+ * Everything `trip_pricing` and its items need is here, which is what keeps
+ * CALCULATION and PERSISTENCE separate. A caller can inspect a finished result,
+ * compare it with what is already stored, and decide whether to keep it —
+ * writing is a distinct operation, performed by the snapshot writer.
  *
  * `lines` holds what the calculation steps produced, in the order
- * pricing_rules.md defines. Each line maps onto a future `trip_pricing_item`
- * field for field.
+ * pricing_rules.md defines. Each line maps onto a `trip_pricing_item` field for
+ * field, so persistence is a mechanical mapping with no arithmetic left in it.
  *
- * There is deliberately no total. The Final Total is step 9 of the sequence and
- * belongs to its own phase; deriving it here would quietly implement a step
- * this phase does not own, and a caller could not tell a real total from a
- * running subtotal of the components implemented so far.
+ * `totalPrice` is the exact Decimal sum of those line amounts and nothing else.
+ * No component is recalculated to produce it.
  */
 export interface PricingCalculationResult extends PricingPreparation {
   readonly lines: readonly PricingLine[];
+
+  /** The exact Decimal sum of every line amount. */
+  readonly totalPrice: Prisma.Decimal;
+
+  /** When the calculation finished — the instant the snapshot describes. */
+  readonly calculatedAt: Date;
+
+  /** The Engine code that produced this result. */
+  readonly pricingEngineVersion: string;
+
+  /** The configured ruleset it was calculated against. */
+  readonly pricingRuleVersion: string;
+
+  /**
+   * CALCULATED for a run that produced a result. The FAILED and
+   * MANUAL_OVERRIDE states belong to workflows this phase does not implement;
+   * a run that cannot produce a result throws instead of returning one.
+   */
+  readonly calculationStatus: PricingCalculationStatus;
 }

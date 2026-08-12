@@ -26,7 +26,8 @@ function buildDevelopmentFormat() {
     format.colorize({ all: false }),
     format.printf(({ timestamp, level, message, context, stack, ...meta }) => {
       const scope = typeof context === "string" ? `[${context}] ` : "";
-      const extra = Object.keys(meta).length > 0 ? ` ${JSON.stringify(meta)}` : "";
+      const extra =
+        Object.keys(meta).length > 0 ? ` ${JSON.stringify(meta)}` : "";
       const trace = typeof stack === "string" ? `\n${stack}` : "";
 
       return `${String(timestamp)} ${level} ${scope}${String(message)}${extra}${trace}`;
@@ -42,8 +43,20 @@ function buildProductionFormat() {
   );
 }
 
+/**
+ * Only the two variables logging actually reads.
+ *
+ * Narrower than the whole environment on purpose: the caller has to hand over
+ * exactly what is used, so adding an unrelated variable — a storage directory,
+ * a queue URL — cannot break this factory.
+ */
+export type LoggingEnvironment = Pick<
+  EnvironmentVariables,
+  "NODE_ENV" | "LOG_LEVEL"
+>;
+
 export function buildWinstonOptions(
-  environment: EnvironmentVariables,
+  environment: LoggingEnvironment,
 ): WinstonModuleOptions {
   const isProduction = environment.NODE_ENV === NodeEnvironment.Production;
 

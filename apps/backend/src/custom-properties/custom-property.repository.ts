@@ -109,6 +109,42 @@ export class CustomPropertyRepository {
     return highest?.displayOrder ?? null;
   }
 
+  /**
+   * The active property already linked to a component, if one exists.
+   *
+   * Uses the partial unique index on (pricing_component_id) WHERE is_active.
+   */
+  findActiveByPricingComponent(
+    pricingComponentId: string,
+    excludeCustomPropertyId?: string,
+  ): Promise<CustomProperty | null> {
+    return this.prisma.customProperty.findFirst({
+      where: {
+        pricingComponentId,
+        isActive: true,
+        ...(excludeCustomPropertyId
+          ? { id: { not: excludeCustomPropertyId } }
+          : {}),
+      },
+    });
+  }
+
+  /**
+   * Existence check for a referenced PricingComponent.
+   *
+   * Read-only and deliberately narrow: the pricing-configuration domain has no
+   * module yet, and inventing one for a single lookup would be an abstraction
+   * built for a later phase. The foreign key remains the real guard.
+   */
+  async pricingComponentExists(pricingComponentId: string): Promise<boolean> {
+    const component = await this.prisma.pricingComponent.findUnique({
+      where: { id: pricingComponentId },
+      select: { id: true },
+    });
+
+    return component !== null;
+  }
+
   create(data: CreateCustomPropertyData): Promise<CustomProperty> {
     return this.prisma.customProperty.create({ data });
   }

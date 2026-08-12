@@ -5,6 +5,7 @@ import {
   IsNumber,
   IsOptional,
   IsString,
+  IsUUID,
   Matches,
   Max,
   MaxLength,
@@ -50,8 +51,18 @@ export class CreateCustomPropertyDto {
   description?: string | null;
 
   @ApiPropertyOptional({
+    format: "uuid",
     description:
-      "Amount the Pricing Engine will read at calculation time. Stored as configuration only — nothing is calculated here.",
+      "Links this property to a Pricing Component, making it ROUTE-PRICED: it then decides only whether the component applies to a Trip, and the amount comes from the route cost configuration. Omit for a normal fixed-price property. A linked property must not define a default price, and a component may be linked by at most one active property.",
+    nullable: true,
+  })
+  @IsOptional()
+  @IsUUID()
+  pricingComponentId?: string | null;
+
+  @ApiPropertyOptional({
+    description:
+      "Amount the Pricing Engine will read at calculation time. Stored as configuration only — nothing is calculated here. Must be omitted when pricingComponentId is set.",
     minimum: 0,
     maximum: MONEY_MAX_VALUE,
     nullable: true,

@@ -78,7 +78,8 @@ export class TripController {
     description: "Missing or invalid field, date, time, distance or UUID.",
   })
   @ApiNotFoundResponse({
-    description: "The referenced PDF document, Vehicle or Driver does not exist.",
+    description:
+      "The referenced PDF document, Vehicle or Driver does not exist.",
   })
   @ApiConflictResponse({
     description:
@@ -96,10 +97,12 @@ export class TripController {
   })
   @ApiOkResponse({ type: TripResponseDto })
   @ApiBadRequestResponse({
-    description: "Invalid field, UUID, date, distance, or an immutable field was sent.",
+    description:
+      "Invalid field, UUID, date, distance, or an immutable field was sent.",
   })
   @ApiNotFoundResponse({
-    description: "No Trip with that id, or the referenced Vehicle or Driver does not exist.",
+    description:
+      "No Trip with that id, or the referenced Vehicle or Driver does not exist.",
   })
   @ApiConflictResponse({
     description:
@@ -120,7 +123,9 @@ export class TripController {
       "Allowed moves: OPEN to CLOSED, OPEN to CANCELLED, and CANCELLED back to OPEN. CLOSED is terminal. DELETED is not reachable here — use the deletion endpoint, because a business cancellation and an administrative soft delete are distinct states. Requesting the current status is idempotent.",
   })
   @ApiOkResponse({ type: TripResponseDto })
-  @ApiBadRequestResponse({ description: "Unknown or unsupported target status." })
+  @ApiBadRequestResponse({
+    description: "Unknown or unsupported target status.",
+  })
   @ApiNotFoundResponse({ description: "No Trip with that id." })
   @ApiConflictResponse({
     description:

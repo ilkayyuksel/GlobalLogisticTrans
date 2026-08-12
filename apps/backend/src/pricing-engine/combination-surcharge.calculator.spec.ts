@@ -19,6 +19,7 @@ const BASE_LINE: PricingLine = {
   calculationOrder: 1,
   quantity: null,
   unitPrice: null,
+  customPropertyId: null,
 };
 
 function buildContext(
@@ -32,11 +33,10 @@ function buildContext(
     planningDate: "2026-08-17",
     isCombination,
     waitingTimeMinutes: 0,
+    route: { departure: "PSA Antwerp", destination: "Dourges" },
     baseSource: {
       strategy: PricingStrategy.ROUTE_BASED,
       routePricingId: "route-1",
-      departure: "PSA Antwerp",
-      destination: "Dourges",
       basePrice: "520.00",
     },
     rules: {
@@ -45,8 +45,11 @@ function buildContext(
       combinationSurcharge,
       waitingTimeFreeMinutes: 60,
       waitingTimeBlockMinutes: 30,
+    waitingTimeBlockPrice: "25.00",
+    ruleVersion: "2026.1",
     },
-    activeCustomProperties: [],
+    assignedCustomProperties: [],
+    routeCosts: [],
     existingSnapshot: null,
     preparedAt: new Date("2026-08-17T09:00:00.000Z"),
   };
@@ -278,7 +281,9 @@ describe("CombinationSurchargeCalculator", () => {
       expect(source).not.toContain("fuelPercentage");
       expect(source).not.toContain("waitingTime");
       expect(source).not.toContain("basePrice");
-      expect(source).not.toContain("customPropert");
+      // The read, not the field: every line now sets customPropertyId, and
+      // only the Custom Property step reads the assignments.
+      expect(source).not.toContain("assignedCustomProperties");
     });
   });
 });

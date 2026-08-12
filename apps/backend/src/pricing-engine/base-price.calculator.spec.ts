@@ -8,13 +8,20 @@ import {
 import {
   PricingBaseSource,
   PricingCalculationContext,
+  PricingRouteIdentity,
 } from "./pricing-calculation-context";
 import { PricingComponentCode } from "./pricing-line";
 import { PricingStrategy } from "./pricing-settings";
 
 const TRIP_ID = "3f2504e0-4f89-41d3-9a0c-0305e82c3301";
 
-function buildContext(baseSource: PricingBaseSource): PricingCalculationContext {
+function buildContext(
+  baseSource: PricingBaseSource,
+  route: PricingRouteIdentity = {
+    departure: "Antwerp",
+    destination: "Rotterdam",
+  },
+): PricingCalculationContext {
   return {
     tripId: TRIP_ID,
     bookingNumber: "BK-2026-0042",
@@ -22,6 +29,7 @@ function buildContext(baseSource: PricingBaseSource): PricingCalculationContext 
     planningDate: "2026-08-17",
     isCombination: false,
     waitingTimeMinutes: 0,
+    route,
     baseSource,
     rules: {
       strategy: baseSource.strategy,
@@ -29,8 +37,11 @@ function buildContext(baseSource: PricingBaseSource): PricingCalculationContext 
       combinationSurcharge: "75",
       waitingTimeFreeMinutes: 60,
       waitingTimeBlockMinutes: 30,
+    waitingTimeBlockPrice: "25.00",
+    ruleVersion: "2026.1",
     },
-    activeCustomProperties: [],
+    assignedCustomProperties: [],
+    routeCosts: [],
     existingSnapshot: null,
     preparedAt: new Date("2026-08-17T09:00:00.000Z"),
   };
@@ -40,8 +51,6 @@ function routeSource(basePrice: string): PricingBaseSource {
   return {
     strategy: PricingStrategy.ROUTE_BASED,
     routePricingId: "route-1",
-    departure: "Antwerp",
-    destination: "Rotterdam",
     basePrice,
   };
 }
@@ -332,6 +341,8 @@ describe("BasePriceCalculator", () => {
     expect(source).not.toContain("fuelPercentage");
     expect(source).not.toContain("combinationSurcharge");
     expect(source).not.toContain("waitingTime");
-    expect(source).not.toContain("customPropert");
+    // The read, not the field: every line now sets customPropertyId, and only
+    // the Custom Property step reads the assignments.
+    expect(source).not.toContain("assignedCustomProperties");
   });
 });

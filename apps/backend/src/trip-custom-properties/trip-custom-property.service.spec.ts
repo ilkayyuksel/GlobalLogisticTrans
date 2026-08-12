@@ -25,6 +25,7 @@ function buildProperty(overrides: Partial<CustomProperty> = {}): CustomProperty 
     id: PROPERTY_ID,
     name: "TAR",
     description: null,
+    pricingComponentId: null,
     defaultPrice: new Prisma.Decimal("35.00"),
     displayOrder: 1,
     color: "#f59e0b",

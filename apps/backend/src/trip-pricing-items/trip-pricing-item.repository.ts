@@ -18,12 +18,14 @@ export interface PricingComponentClassification {
 /**
  * Database access for the TripPricingItem domain.
  *
- * Contains no business rules and performs no arithmetic: the reference-entity
- * rule, the active-component rule and the duplicate policy belong to
- * TripPricingItemService, and every amount is produced by the future Pricing
- * Engine. There is no delete method — historical pricing items are never
- * removed, and replacing a whole item set belongs to reprocessing, which this
- * module does not implement.
+ * Contains no business rules and performs no arithmetic: every amount is
+ * produced by the Pricing Engine.
+ *
+ * The two write methods here — `createMany` and `deleteByTripPricingId` — are
+ * the halves of the Engine's atomic snapshot replacement and are used only from
+ * inside its transaction. Neither is reachable over REST, and there is no
+ * single-item create or delete, because a line written on its own would leave
+ * `trip_pricing.total_price` disagreeing with the sum of its items.
  */
 @Injectable()
 export class TripPricingItemRepository {
@@ -46,34 +48,48 @@ export class TripPricingItemRepository {
     });
   }
 
-  /** An existing item in this snapshot already pricing a given Custom Property. */
-  findByCustomProperty(
-    tripPricingId: string,
-    customPropertyId: string,
-  ): Promise<TripPricingItem | null> {
-    return this.prisma.tripPricingItem.findFirst({
-      where: { tripPricingId, customPropertyId },
-    });
-  }
-
   /**
-   * Classification lookup for the owning PricingComponent.
+   * The catalog rows for a set of component codes.
+   *
+   * Every item carries a foreign key to `pricing_component`, and a calculated
+   * line names its component by CODE. One query resolves them all, so the
+   * number of lookups does not grow with the size of a breakdown.
    *
    * Read-only and deliberately narrow: the pricing-configuration domain has no
-   * module yet, and inventing one for a single lookup would be an abstraction
-   * built for a later phase. The foreign key remains the real guard.
+   * module yet, and inventing one for a lookup would be an abstraction built
+   * for a later phase.
    */
-  findPricingComponentById(
-    pricingComponentId: string,
-  ): Promise<PricingComponentClassification | null> {
-    return this.prisma.pricingComponent.findUnique({
-      where: { id: pricingComponentId },
+  findPricingComponentsByCodes(
+    codes: readonly string[],
+  ): Promise<PricingComponentClassification[]> {
+    return this.prisma.pricingComponent.findMany({
+      where: { code: { in: [...codes] } },
       select: { id: true, code: true, isActive: true },
     });
   }
 
-  create(data: CreateTripPricingItemData): Promise<TripPricingItem> {
-    return this.prisma.tripPricingItem.create({ data });
+  /**
+   * Writes a whole breakdown in one statement.
+   *
+   * Used only by the Pricing Engine's snapshot write, where the items are
+   * always created together with — or alongside — their parent. Inserting them
+   * one by one would multiply the round trips inside a transaction that should
+   * stay as short as possible.
+   */
+  createMany(data: CreateTripPricingItemData[]): Promise<{ count: number }> {
+    return this.prisma.tripPricingItem.createMany({ data });
+  }
+
+  /**
+   * Discards a snapshot's entire breakdown.
+   *
+   * Reprocessing replaces the whole item set, so the old lines go before the
+   * new ones arrive — otherwise a component that no longer applies would
+   * survive as a stale charge. Deliberately not exposed through the REST API:
+   * this is one half of an atomic replacement, never an operation of its own.
+   */
+  deleteByTripPricingId(tripPricingId: string): Promise<{ count: number }> {
+    return this.prisma.tripPricingItem.deleteMany({ where: { tripPricingId } });
   }
 
   update(

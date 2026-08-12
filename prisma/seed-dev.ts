@@ -71,6 +71,7 @@ async function clearTransactionalData(): Promise<void> {
 
   await prisma.customProperty.deleteMany();
   await prisma.routePricing.deleteMany();
+  await prisma.routeCost.deleteMany();
   await prisma.setting.deleteMany();
   await prisma.calendarEvent.deleteMany();
   await prisma.note.deleteMany();
@@ -242,6 +243,46 @@ async function main(): Promise<void> {
     }),
   ]);
 
+  // Route-priced Custom Properties. They decide only WHETHER the component
+  // applies to a Trip; the amount comes from route_cost for the Trip's route,
+  // which is why defaultPrice is absent — the CHECK constraint forbids one.
+  const componentsForProperties = await prisma.pricingComponent.findMany({
+    where: { code: { in: ["TOLL", "TUNNEL"] } },
+  });
+
+  function requireComponentId(code: string): string {
+    const component = componentsForProperties.find((c) => c.code === code);
+
+    if (!component) {
+      throw new Error(
+        `Pricing component "${code}" is missing. Run \`pnpm prisma db seed\` first.`,
+      );
+    }
+
+    return component.id;
+  }
+
+  const [propertyToll, propertyTunnel] = await Promise.all([
+    prisma.customProperty.create({
+      data: {
+        name: "Toll",
+        description: "Toll charge for the Trip's route.",
+        pricingComponentId: requireComponentId("TOLL"),
+        displayOrder: 4,
+        color: "#64748b",
+      },
+    }),
+    prisma.customProperty.create({
+      data: {
+        name: "Tunnel",
+        description: "Tunnel charge for the Trip's route.",
+        pricingComponentId: requireComponentId("TUNNEL"),
+        displayOrder: 5,
+        color: "#0ea5e9",
+      },
+    }),
+  ]);
+
   // A route is Terminal -> Destination (pricing_rules.md, Route-Based Pricing),
   // so `departure` must hold the same terminal name the Trips carry. Using the
   // city "Antwerp" here left every seeded Trip unpriceable. Prices are
@@ -265,6 +306,42 @@ async function main(): Promise<void> {
         departure: "PSA Antwerp",
         destination: "Dourges",
         basePrice: 520.0,
+      },
+    ],
+  });
+
+  // Route-dependent costs. Keyed by the route itself rather than by a
+  // route_pricing row, so they survive a change of Pricing Strategy.
+  //
+  // The Rotterdam tunnel amount deliberately matches the TUNNEL pricing item
+  // already stored for BK-2026-1003, so that historical snapshot finally has a
+  // configuration that could have produced it.
+  await prisma.routeCost.createMany({
+    data: [
+      {
+        departure: "MSC PSA European Terminal",
+        destination: "Rotterdam",
+        pricingComponentId: requireComponentId("TUNNEL"),
+        amount: 12.5,
+        notes: "Liefkenshoek tunnel.",
+      },
+      {
+        departure: "MSC PSA European Terminal",
+        destination: "Rotterdam",
+        pricingComponentId: requireComponentId("TOLL"),
+        amount: 9.75,
+      },
+      {
+        departure: "PSA Antwerp",
+        destination: "Dourges",
+        pricingComponentId: requireComponentId("TOLL"),
+        amount: 18.0,
+      },
+      {
+        departure: "DP World Antwerp Gateway",
+        destination: "Bousbecque",
+        pricingComponentId: requireComponentId("TOLL"),
+        amount: 14.25,
       },
     ],
   });
@@ -303,6 +380,14 @@ async function main(): Promise<void> {
       },
       {
         category: "PRICING",
+        key: "WAITING_TIME_BLOCK_PRICE",
+        value: "25.00",
+        valueType: "DECIMAL",
+        description:
+          "Price per billable waiting block (dummy development value).",
+      },
+      {
+        category: "PRICING",
         key: "COMBINATION_SURCHARGE",
         value: "75",
         valueType: "DECIMAL",
@@ -315,6 +400,14 @@ async function main(): Promise<void> {
         valueType: "DECIMAL",
         description:
           "Price per kilometre for Distance-Based Pricing (dummy development value).",
+      },
+      {
+        category: "PRICING",
+        key: "PRICING_RULE_VERSION",
+        value: "2026.1",
+        valueType: "STRING",
+        description:
+          "Version of the pricing ruleset, stamped onto every calculated snapshot. Bumped when the pricing configuration changes.",
       },
       {
         category: "GENERAL",
@@ -572,6 +665,12 @@ async function main(): Promise<void> {
         tripId: tripOpenTwo.id,
         customPropertyId: propertySintNiklaas.id,
       },
+      // Gives the TUNNEL pricing item already stored for this Trip a source:
+      // the Trip carries the property, and the route carries the amount.
+      { tripId: tripClosedTwo.id, customPropertyId: propertyTunnel.id },
+      // An OPEN Trip on a route that has a configured toll. It has no pricing
+      // snapshot yet, so it demonstrates the path without contradicting one.
+      { tripId: tripCombinationB.id, customPropertyId: propertyToll.id },
     ],
   });
 
@@ -810,6 +909,7 @@ async function main(): Promise<void> {
     tripPricing: await prisma.tripPricing.count(),
     tripPricingItems: await prisma.tripPricingItem.count(),
     routePricing: await prisma.routePricing.count(),
+    routeCosts: await prisma.routeCost.count(),
     settings: await prisma.setting.count(),
     calendarEvents: await prisma.calendarEvent.count(),
     notes: await prisma.note.count(),

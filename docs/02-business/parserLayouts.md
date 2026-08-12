@@ -348,9 +348,10 @@ They share
 
 PDF
 
-Booking Number
-
 Trip Group
+
+They do NOT share a Booking Number: each leg carries its own, one inbound and
+one outbound. The Trip Group is what links them.
 
 They remain independent afterwards.
 

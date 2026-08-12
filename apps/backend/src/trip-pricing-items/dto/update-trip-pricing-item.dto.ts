@@ -3,7 +3,8 @@ import { Transform } from "class-transformer";
 import { IsOptional, IsString, MaxLength } from "class-validator";
 
 import { trimToNull } from "../../common/dto/transforms";
-import { ITEM_NOTES_MAX_LENGTH } from "./create-trip-pricing-item.dto";
+/** Bound for `trip_pricing_item.notes`, the only mutable field of a line. */
+export const ITEM_NOTES_MAX_LENGTH = 2000;
 
 /**
  * Partial update of a pricing line's NOTE. Nothing else.

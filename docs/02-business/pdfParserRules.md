@@ -99,9 +99,12 @@ Rules:
 
 Always required.
 
-Always unique.
+Always unique — per Trip.
 
-Combination trips share the same Booking Number.
+Combination trips do NOT share a Booking Number. Each leg carries its own; the
+real documents pair an inbound with an outbound booking (for example
+DUBANR2598395 for the Delivery and ANRBEL2603249 for the Collection). The two
+legs are linked by their Trip Group, never by the Booking Number.
 
 The parser must fail if no Booking Number can be found.
 

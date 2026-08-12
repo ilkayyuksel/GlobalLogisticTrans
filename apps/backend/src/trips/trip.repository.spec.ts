@@ -397,14 +397,17 @@ describe("TripRepository", () => {
       });
     });
 
-    it.each(Object.values(TripStatus))("setStatus writes only %s", async (status) => {
-      await repository.setStatus("trip-1", status);
+    it.each(Object.values(TripStatus))(
+      "setStatus writes only %s",
+      async (status) => {
+        await repository.setStatus("trip-1", status);
 
-      expect(prisma.trip.update).toHaveBeenCalledWith({
-        where: { id: "trip-1" },
-        data: { status },
-      });
-    });
+        expect(prisma.trip.update).toHaveBeenCalledWith({
+          where: { id: "trip-1" },
+          data: { status },
+        });
+      },
+    );
   });
 
   it("exposes no delete operation, because Trips are never removed", () => {

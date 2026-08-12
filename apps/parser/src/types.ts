@@ -1,0 +1,107 @@
+/**
+ * The parser's public contract.
+ *
+ * A ParsedTrip is a statement of what the document says, nothing more. It
+ * carries no price, no status, no identifiers from our database and no
+ * decisions — the Backend validates these facts and decides what to do with
+ * them.
+ */
+
+export type LayoutType =
+  "SINGLE_ONE_PAGE" | "SINGLE_TWO_PAGE" | "COMBINATION_TWO_PAGE";
+
+export type Direction = "COLLECTION" | "DELIVERY";
+
+/**
+ * What the document actually said, kept beside the normalized value.
+ *
+ * Diagnostics are the whole purpose: when a city comes out wrong, the raw
+ * address is what shows whether the parser or the document was at fault. Only
+ * the handful of values that get normalized are kept — not the whole page,
+ * which would bloat every stored Trip for no diagnostic gain.
+ */
+export interface ParsedTripRaw {
+  readonly rawAddress: string | null;
+  readonly rawTerminal: string | null;
+  readonly rawDate: string | null;
+  readonly rawBooking: string | null;
+  /** Labels this trip was actually built from, in the order they were used. */
+  readonly matchedLabels: string[];
+  readonly sections: ParsedTripSections;
+}
+
+export interface ParsedTripSections {
+  readonly page: number;
+  /** The address section this trip was read from: `LOADING 1` or `DELIVERY 1`. */
+  readonly addressSection: string | null;
+  /** Section headers seen on the page, for diagnosing an unexpected document. */
+  readonly detected: string[];
+}
+
+export interface ParsedTrip {
+  readonly bookingNumber: string;
+  readonly containerType: string;
+  readonly containerNumber: string | null;
+  /**
+   * The terminal exactly as the document names it — `PSA Quay 869`,
+   * `Quay 869`. Null when the document names none.
+   *
+   * Normalized, never renamed. This is NOT guaranteed to match a configured
+   * route: translating a document's terminal into the operator's own naming is
+   * an unresolved business decision, and it belongs to the Backend's import
+   * layer, which is the only side that knows the configured names.
+   */
+  readonly terminal: string | null;
+  readonly destinationCity: string;
+  readonly destinationCountry: string;
+  /** ISO calendar date, `YYYY-MM-DD`. */
+  readonly date: string;
+  /** `HH:mm`, or null when the document states no time. */
+  readonly startTime: string | null;
+  readonly endTime: string | null;
+  readonly direction: Direction;
+  /**
+   * Ties the two trips of a Combination together. Temporary parser metadata:
+   * the Backend replaces it with a real Trip Group. Null for a single trip.
+   */
+  readonly groupKey: string | null;
+  readonly raw: ParsedTripRaw;
+}
+
+export interface ParseMetadata {
+  readonly pageCount: number;
+  readonly fragmentCount: number;
+  /** Section headers found across the document. */
+  readonly detectedSections: string[];
+}
+
+export type ParseFailureReason =
+  | "INVALID_PDF"
+  | "UNREADABLE_PDF"
+  | "UNSUPPORTED_LAYOUT"
+  | "MISSING_REQUIRED_FIELD"
+  | "INCONSISTENT_BOOKING_NUMBER"
+  | "INVALID_DATE_TIME"
+  | "MALFORMED_ADDRESS"
+  | "UNSUPPORTED_COMBINATION";
+
+export interface ParseSuccess {
+  readonly ok: true;
+  readonly layout: LayoutType;
+  readonly parserVersion: string;
+  readonly trips: ParsedTrip[];
+  readonly metadata: ParseMetadata;
+}
+
+export interface ParseFailure {
+  readonly ok: false;
+  readonly reason: ParseFailureReason;
+  /** Human-readable detail. Never a stack trace. */
+  readonly message: string;
+  readonly missingFields: string[];
+  /** Labels that WERE found, so a diagnosis can start from what is present. */
+  readonly detectedLabels: string[];
+  readonly metadata: ParseMetadata;
+}
+
+export type ParseResult = ParseSuccess | ParseFailure;

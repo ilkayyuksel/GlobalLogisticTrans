@@ -2,7 +2,7 @@ import { ApiProperty, ApiPropertyOptional } from "@nestjs/swagger";
 import { Prisma, TripPricingItem } from "@prisma/client";
 
 import { MONEY_DECIMAL_PLACES } from "../../common/dto/money";
-import { QUANTITY_DECIMAL_PLACES } from "./create-trip-pricing-item.dto";
+
 
 /**
  * Public shape of one line of a pricing breakdown.
@@ -106,7 +106,7 @@ export function toTripPricingItemResponse(
     amount: item.amount.toFixed(MONEY_DECIMAL_PLACES),
     currency: item.currency,
     calculationOrder: item.calculationOrder,
-    quantity: toFixedOrNull(item.quantity, QUANTITY_DECIMAL_PLACES),
+    quantity: toFixedOrNull(item.quantity, MONEY_DECIMAL_PLACES),
     unitPrice: toFixedOrNull(item.unitPrice, MONEY_DECIMAL_PLACES),
     notes: item.notes,
     createdAt: item.createdAt,

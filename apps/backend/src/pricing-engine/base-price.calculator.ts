@@ -3,7 +3,10 @@ import { Prisma } from "@prisma/client";
 
 import { MONEY_DECIMAL_PLACES } from "../common/dto/money";
 import { AppLoggerService } from "../logger/app-logger.service";
-import { PricingCalculationContext } from "./pricing-calculation-context";
+import {
+  PricingCalculationContext,
+  PricingRouteIdentity,
+} from "./pricing-calculation-context";
 import {
   PricingCalculationStep,
   PricingComponentCode,
@@ -58,7 +61,7 @@ export class BasePriceCalculator implements PricingCalculationStep {
 
     const line =
       context.baseSource.strategy === PricingStrategy.ROUTE_BASED
-        ? this.fromConfiguredRoute(context.baseSource)
+        ? this.fromConfiguredRoute(context.baseSource, context.route)
         : this.fromDistance(context.baseSource);
 
     this.logger.log("Base price calculation completed", {
@@ -76,20 +79,26 @@ export class BasePriceCalculator implements PricingCalculationStep {
    * No arithmetic at all, so the configured amount reaches the breakdown
    * untouched. Quantity and unit price stay null — a flat route price is not
    * charged per unit of anything.
+   *
+   * The description names the route from the context rather than from the
+   * configured row. The two are the same text: the configuration was looked up
+   * by matching departure and destination exactly.
    */
   private fromConfiguredRoute(
     baseSource: Extract<
       PricingCalculationContext["baseSource"],
       { strategy: typeof PricingStrategy.ROUTE_BASED }
     >,
+    route: PricingRouteIdentity,
   ): PricingLine {
     return {
       component: PricingComponentCode.BASE_PRICE,
-      description: `${baseSource.departure} - ${baseSource.destination}`,
+      description: this.describeRoute(route),
       amount: this.toStorableAmount(new Prisma.Decimal(baseSource.basePrice)),
       calculationOrder: BASE_PRICE_CALCULATION_ORDER,
       quantity: null,
       unitPrice: null,
+      customPropertyId: null,
     };
   }
 
@@ -116,7 +125,22 @@ export class BasePriceCalculator implements PricingCalculationStep {
       calculationOrder: BASE_PRICE_CALCULATION_ORDER,
       quantity: distanceKm,
       unitPrice: ratePerKm,
+      customPropertyId: null,
     };
+  }
+
+  /**
+   * Names the route on the breakdown line.
+   *
+   * `departure` is nullable because `trip.terminal` is. Route-Based Pricing
+   * cannot reach this method without a terminal — resolving its base source
+   * rejects a Trip that has none — but the type permits it, so the destination
+   * alone is named rather than printing an empty half of the route.
+   */
+  private describeRoute(route: PricingRouteIdentity): string {
+    return route.departure === null
+      ? route.destination
+      : `${route.departure} - ${route.destination}`;
   }
 
   /** Reduces an exact result to the precision the amount column can hold. */

@@ -1,10 +1,9 @@
 import { Injectable } from "@nestjs/common";
-import { Prisma, TripPricing, TripStatus } from "@prisma/client";
+import { PricingCalculationStatus, Prisma, TripPricing } from "@prisma/client";
 
 import { changedFieldNames } from "../common/changed-fields";
 import { AppLoggerService } from "../logger/app-logger.service";
 import { TripService } from "../trips/trip.service";
-import { CreateTripPricingDto } from "./dto/create-trip-pricing.dto";
 import {
   TripPricingResponseDto,
   toTripPricingResponse,
@@ -12,7 +11,6 @@ import {
 import { UpdateTripPricingDto } from "./dto/update-trip-pricing.dto";
 import {
   DuplicateTripPricingException,
-  TripNotClosedException,
   TripPricingNotFoundException,
 } from "./exceptions/trip-pricing.exceptions";
 import { TripPricingRepository } from "./trip-pricing.repository";
@@ -20,8 +18,33 @@ import { TripPricingRepository } from "./trip-pricing.repository";
 /** Prisma's unique-constraint violation code. */
 const PRISMA_UNIQUE_VIOLATION = "P2002";
 
-/** A pricing snapshot may only exist once its Trip has reached this status. */
-const PRICEABLE_TRIP_STATUS = TripStatus.CLOSED;
+/** One calculated line, ready to be stored. No arithmetic remains. */
+export interface PricingSnapshotItemData {
+  readonly pricingComponentId: string;
+  readonly customPropertyId: string | null;
+  readonly description: string;
+  readonly amount: Prisma.Decimal;
+  readonly calculationOrder: number;
+  readonly quantity: Prisma.Decimal | null;
+  readonly unitPrice: Prisma.Decimal | null;
+}
+
+/**
+ * A complete snapshot to store, parent and breakdown together.
+ *
+ * Carries no DTO and passes through no validation pipe: this is an internal
+ * command from the Pricing Engine, not a request. Every amount is already
+ * calculated and rounded, and nothing here is recomputed.
+ */
+export interface ReplacePricingSnapshotCommand {
+  readonly tripId: string;
+  readonly totalPrice: Prisma.Decimal;
+  readonly calculatedAt: Date;
+  readonly pricingEngineVersion: string;
+  readonly pricingRuleVersion: string;
+  readonly calculationStatus: PricingCalculationStatus;
+  readonly items: readonly PricingSnapshotItemData[];
+}
 
 /**
  * Stores pricing snapshots. It never calculates one.
@@ -69,38 +92,88 @@ export class TripPricingService {
   }
 
   /**
-   * Persists a snapshot produced by the Pricing Engine.
+   * Stores a complete snapshot produced by the Pricing Engine, atomically.
    *
-   * Both preconditions come from the model: a snapshot only exists for a CLOSED
-   * Trip, and a Trip has at most one. Neither can be expressed as a database
-   * constraint on its own — the first is a cross-table conditional existence,
-   * and the second is only half-covered by the unique index, which cannot
-   * produce a useful message on its own.
+   * Parent and breakdown are written in ONE transaction, so a failure anywhere
+   * leaves the database exactly as it was. That is what makes the stored total
+   * trustworthy: `trip_pricing.total_price` must equal the sum of its items,
+   * and a half-written snapshot would break that invariant while looking
+   * perfectly valid to a reader.
+   *
+   * A first calculation creates the parent; a reprocess UPDATES the existing
+   * one, so the snapshot keeps its identity and anything referring to it stays
+   * valid. Its items are discarded and rewritten in full — a component that no
+   * longer applies must not survive as a stale charge.
+   *
+   * Internal to the application. There is deliberately no REST route to this:
+   * replacing a breakdown is one indivisible operation, and exposing its halves
+   * would let a caller create exactly the inconsistent state the transaction
+   * exists to prevent.
+   *
+   * The Trip's status is not re-checked here. The Engine validates it before
+   * calculating anything, and re-reading the Trip inside the transaction would
+   * add a second source of truth and lengthen a transaction that should stay
+   * short.
+   *
+   * Currency is left to the column default, which is EUR for both tables. It is
+   * defined in one place, and pricing is EUR by rule rather than by choice.
    */
-  async create(dto: CreateTripPricingDto): Promise<TripPricingResponseDto> {
-    await this.assertTripIsPriceable(dto.tripId);
-    await this.assertTripHasNoPricing(dto.tripId);
+  async replaceSnapshot(
+    command: ReplacePricingSnapshotCommand,
+  ): Promise<TripPricingResponseDto> {
+    const stored = await this.runGuardingTrip(command.tripId, () =>
+      this.repository.runInTransaction(async ({ pricing, items }) => {
+        const existing = await pricing.findByTripId(command.tripId);
 
-    const created = await this.runGuardingTrip(dto.tripId, () =>
-      this.repository.create({
-        tripId: dto.tripId,
-        totalPrice: dto.totalPrice,
-        calculatedAt: new Date(dto.calculatedAt),
-        pricingEngineVersion: dto.pricingEngineVersion,
-        pricingRuleVersion: dto.pricingRuleVersion,
-        calculationStatus: dto.calculationStatus,
-        notes: dto.notes ?? null,
+        const parent = existing
+          ? await pricing.update(existing.id, {
+              totalPrice: command.totalPrice,
+              calculatedAt: command.calculatedAt,
+              pricingEngineVersion: command.pricingEngineVersion,
+              pricingRuleVersion: command.pricingRuleVersion,
+              calculationStatus: command.calculationStatus,
+            })
+          : await pricing.create({
+              tripId: command.tripId,
+              totalPrice: command.totalPrice,
+              calculatedAt: command.calculatedAt,
+              pricingEngineVersion: command.pricingEngineVersion,
+              pricingRuleVersion: command.pricingRuleVersion,
+              calculationStatus: command.calculationStatus,
+            });
+
+        if (existing) {
+          await items.deleteByTripPricingId(parent.id);
+        }
+
+        await items.createMany(
+          command.items.map((item) => ({
+            tripPricingId: parent.id,
+            pricingComponentId: item.pricingComponentId,
+            customPropertyId: item.customPropertyId,
+            description: item.description,
+            amount: item.amount,
+            calculationOrder: item.calculationOrder,
+            quantity: item.quantity,
+            unitPrice: item.unitPrice,
+          })),
+        );
+
+        return { parent, wasReplaced: existing !== null };
       }),
     );
 
-    // The total is never logged: it is commercial information.
-    this.logger.log("Pricing snapshot created", {
-      tripPricingId: created.id,
-      tripId: created.tripId,
-      calculationStatus: created.calculationStatus,
+    // Neither the total nor any line amount is logged: both are commercial
+    // information. The counts are what an administrator traces.
+    this.logger.log("Pricing snapshot stored", {
+      tripPricingId: stored.parent.id,
+      tripId: stored.parent.tripId,
+      calculationStatus: stored.parent.calculationStatus,
+      itemCount: command.items.length,
+      wasReplaced: stored.wasReplaced,
     });
 
-    return toTripPricingResponse(created);
+    return toTripPricingResponse(stored.parent);
   }
 
   /**
@@ -140,37 +213,6 @@ export class TripPricingService {
     }
 
     return tripPricing;
-  }
-
-  /** Verifies the Trip exists and has reached the status that permits pricing. */
-  private async assertTripIsPriceable(tripId: string): Promise<void> {
-    const trip = await this.tripService.findById(tripId);
-
-    if (trip.status !== PRICEABLE_TRIP_STATUS) {
-      this.logger.warn("Rejected pricing snapshot for a Trip that is not closed", {
-        tripId,
-        tripStatus: trip.status,
-      });
-
-      throw new TripNotClosedException(
-        tripId,
-        trip.status,
-        PRICEABLE_TRIP_STATUS,
-      );
-    }
-  }
-
-  private async assertTripHasNoPricing(tripId: string): Promise<void> {
-    const existing = await this.repository.findByTripId(tripId);
-
-    if (existing) {
-      this.logger.warn("Rejected duplicate pricing snapshot", {
-        tripId,
-        conflictingTripPricingId: existing.id,
-      });
-
-      throw new DuplicateTripPricingException(tripId);
-    }
   }
 
   /**

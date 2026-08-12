@@ -101,7 +101,7 @@ If future requirements introduce multiple parser implementations, OCR providers,
 ## Soft Delete
 
 - `trip` uses `status = 'DELETED'`.
-- Configurable entities (`driver`, `vehicle`, `trailer`, `custom_property`, `route_pricing`, `pricing_component`, `setting`) use `is_active BOOLEAN NOT NULL DEFAULT TRUE`.
+- Configurable entities (`driver`, `vehicle`, `trailer`, `custom_property`, `route_pricing`, `pricing_component`, `route_cost`, `setting`) use `is_active BOOLEAN NOT NULL DEFAULT TRUE`.
 - `vacation` has **no** soft delete flag.
 
 ## Active-Scoped Uniqueness
@@ -166,10 +166,11 @@ Two exceptions:
 | 15 | `setting` | Settings |
 | 16 | `route_pricing` | Pricing configuration |
 | 17 | `pricing_component` | Pricing configuration |
-| 18 | `trip_pricing` | Pricing |
-| 19 | `trip_pricing_item` | Pricing |
-| 20 | `calendar_event` | Calendar |
-| 21 | `note` | Calendar |
+| 18 | `route_cost` | Pricing configuration |
+| 19 | `trip_pricing` | Pricing |
+| 20 | `trip_pricing_item` | Pricing |
+| 21 | `calendar_event` | Calendar |
+| 22 | `note` | Calendar |
 
 ---
 
@@ -363,7 +364,7 @@ None. The relationship is owned by `trip.trip_group_id`.
 - A persisted group contains **at least two** Trips; a group reduced to one Trip is dissolved.
 - Currently a maximum of two Trips.
 - All Trips in a group originate from the same `pdf_document_id`.
-- All Trips in a group share the same `booking_number`.
+- Each Trip in a group keeps its **own** `booking_number`. The real transport orders give the two legs different numbers (for example `DUBANR2598395` for the Delivery and `ANRBEL2603249` for the Collection), so `trip_group_id` — never a shared booking number — is what links them.
 
 ---
 
@@ -383,7 +384,7 @@ The central entity. Represents one physical transport movement.
 | `vehicle_id` | `UUID` | YES | `NULL` | Manually assigned |
 | `driver_id` | `UUID` | YES | `NULL` | **Driver override.** When `NULL`, the Driver is resolved through `vehicle_assignment` |
 | `status` | `trip_status` | NO | `'OPEN'` | |
-| `booking_number` | `TEXT` | NO | — | Original PDF value; shared within a Combination |
+| `booking_number` | `TEXT` | NO | — | Original PDF value. Per Trip, including each leg of a Combination |
 | `container_number` | `TEXT` | YES | `NULL` | Empty for Loading until entered manually |
 | `container_type` | `TEXT` | NO | — | e.g. `20TK`, `45PH` |
 | `terminal` | `TEXT` | YES | `NULL` | Not guaranteed by the parser |
@@ -440,7 +441,7 @@ No `CHECK` on `end_time >= start_time`: the model does not state whether a plann
 | Index | Columns | Type | Purpose |
 |---|---|---|---|
 | PK | `id` | Primary key | |
-| Lookup | `booking_number` | B-tree, **not unique** | Matching `UPDATE:` / `CANCEL:` documents to all Trips of a booking |
+| Lookup | `booking_number` | B-tree, **not unique** | Matching `UPDATE:` / `CANCEL:` documents to their Trip. Not unique because a `DELETED` Trip releases its booking number so it can be re-entered; uniqueness among the statuses that hold it is enforced by `TripService` |
 | Lookup | `planning_date` | B-tree | Daily/weekly planning views and exports |
 | Lookup | `status` | B-tree | Filtering out `DELETED` / `CANCELLED` |
 | Lookup | `status`, `planning_date` | B-tree | Primary planning-board query |
@@ -856,22 +857,33 @@ Configurable property that can be assigned to Trips and may contribute a pricing
 | Column | Type | Nullable | Default | Notes |
 |---|---|---|---|---|
 | `id` | `UUID` | NO | `gen_random_uuid()` | Primary key |
-| `name` | `TEXT` | NO | — | e.g. `TAR`, `Flat`, `Over Sint-Niklaas` |
+| `name` | `TEXT` | NO | — | e.g. `TAR`, `Flat`, `Over Sint-Niklaas`, `Toll`, `Tunnel` |
 | `description` | `TEXT` | YES | `NULL` | |
-| `default_price` | `NUMERIC(12,2)` | YES | `NULL` | Optional pricing value |
+| `pricing_component_id` | `UUID` | YES | `NULL` | `NULL` ⇒ fixed-price. Non-null ⇒ route-priced; the amount comes from `route_cost` |
+| `default_price` | `NUMERIC(12,2)` | YES | `NULL` | Optional pricing value. Must be `NULL` when `pricing_component_id` is set |
 | `display_order` | `INTEGER` | NO | — | |
 | `color` | `TEXT` | YES | `NULL` | |
 | `is_active` | `BOOLEAN` | NO | `TRUE` | |
 | `created_at` | `TIMESTAMPTZ` | NO | `now()` | |
 | `updated_at` | `TIMESTAMPTZ` | NO | `now()` | |
 
+A property with a `pricing_component_id` determines only **whether** the
+component applies to a Trip. Its amount is resolved from `route_cost` for the
+Trip's route, and the resulting pricing item is classified by the referenced
+component — so it appears at that component's position in the sequence, not at
+the Custom Property position.
+
 ### Constraints
 
 - Partial `UNIQUE (name)` where `is_active = TRUE`.
+- Partial `UNIQUE (pricing_component_id)` where `is_active = TRUE` — a component may be reached through at most one active property, otherwise one charge would produce two pricing lines. `NULL` values are distinct in PostgreSQL, so any number of fixed-price properties may exist.
+- `CHECK` — `default_price` must be `NULL` when `pricing_component_id` is not `NULL`. A route-priced property never carries a price of its own, and a value stored here would silently never be used.
 
 ### Foreign Keys
 
-None.
+| Column | References | On Delete |
+|---|---|---|
+| `pricing_component_id` | `pricing_component(id)` | `RESTRICT` |
 
 ### Indexes
 
@@ -879,6 +891,7 @@ None.
 |---|---|---|
 | PK | `id` | Primary key |
 | Unique (partial) | `name` where `is_active = TRUE` | Unique |
+| Unique (partial) | `pricing_component_id` where `is_active = TRUE` | Unique |
 | Lookup | `is_active`, `display_order` | B-tree — ordered selection list |
 
 ### Application-enforced rules
@@ -886,6 +899,7 @@ None.
 - Never physically deleted.
 - Inactive properties cannot be selected for new Trips but remain visible on historical Trips.
 - Changing `default_price` never recalculates historical Trips automatically.
+- A referenced `pricing_component` must be active when the property is used for a new calculation.
 
 ---
 
@@ -1021,6 +1035,65 @@ None.
 
 - Inactive components cannot be used for new calculations; historical `trip_pricing_item` rows keep referencing them.
 - The components required by `pricing_rules.md` (Base Price, Combination Surcharge, Fuel Surcharge, Waiting Time, Toll, Tunnel, Custom Property, Manual Adjustment) must be seeded.
+
+---
+
+## 8.3 `route_cost`
+
+### Purpose
+
+The amount of a route-dependent pricing component for one route. Whether the
+component applies to a Trip is decided by `trip_custom_property`; this table
+answers only how much it costs on that route.
+
+Deliberately **independent of `route_pricing`**: a toll is incurred whichever
+Pricing Strategy produced the base price, and `route_pricing` is consulted only
+under Route-Based Pricing. Keying this table by the route itself, rather than by
+`route_pricing_id`, keeps route costs alive when the strategy changes.
+
+### Columns
+
+| Column | Type | Nullable | Default | Notes |
+|---|---|---|---|---|
+| `id` | `UUID` | NO | `gen_random_uuid()` | Primary key |
+| `departure` | `TEXT` | NO | — | Matched against `trip.terminal` |
+| `destination` | `TEXT` | NO | — | Matched against `trip.destination_city` |
+| `pricing_component_id` | `UUID` | NO | — | The component this amount belongs to |
+| `amount` | `NUMERIC(12,2)` | NO | — | |
+| `notes` | `TEXT` | YES | `NULL` | |
+| `is_active` | `BOOLEAN` | NO | `TRUE` | |
+| `created_at` | `TIMESTAMPTZ` | NO | `now()` | |
+| `updated_at` | `TIMESTAMPTZ` | NO | `now()` | |
+
+The route is identified the same way `route_pricing` identifies it, so the two
+stay comparable, but neither references the other.
+
+### Constraints
+
+- Partial `UNIQUE (departure, destination, pricing_component_id)` where `is_active = TRUE` — one active amount per component per route.
+- `CHECK` — `amount` must be greater than or equal to zero (negative pricing is not supported).
+
+### Foreign Keys
+
+| Column | References | On Delete |
+|---|---|---|
+| `pricing_component_id` | `pricing_component(id)` | `RESTRICT` |
+
+### Indexes
+
+| Index | Columns | Type | Purpose |
+|---|---|---|---|
+| PK | `id` | Primary key | |
+| Unique (partial) | `departure`, `destination`, `pricing_component_id` where `is_active = TRUE` | Unique | Route uniqueness per component |
+| Lookup | `departure`, `destination` | B-tree | **Resolving every route cost for a Trip's route in one query** |
+| Lookup | `pricing_component_id` | B-tree | Per-component reporting and maintenance |
+
+### Application-enforced rules
+
+- Only active records may be used for new calculations.
+- Modifying an amount never changes historical Trip pricing automatically.
+- Records are never physically deleted.
+- A Trip carrying a route-priced Custom Property whose route has no active `route_cost` for that component **fails the calculation**. It is never skipped and never priced as zero — see `pricing_rules.md`.
 
 ---
 
@@ -1240,6 +1313,8 @@ The following business rules require Backend enforcement. They are listed togeth
 | `setting.value` must parse per `value_type` | §4.17 | Generic value column |
 | `trip_history` and `parser_run` are append-only | §4.3, §4.6 | Requires revoked UPDATE/DELETE rights or triggers |
 | Trips, Drivers, Vehicles, Trailers, Settings are never physically deleted | §6 | Enforced by `ON DELETE RESTRICT` plus Backend policy |
+| A route-priced Custom Property must resolve a `route_cost` for the Trip's route | §4.22 | Cross-table conditional existence, dependent on the Trip's route |
+| A referenced `pricing_component` must be active for a new calculation | §4.12 | Applies to new calculations only; historical rows must stay valid |
 
 ---
 

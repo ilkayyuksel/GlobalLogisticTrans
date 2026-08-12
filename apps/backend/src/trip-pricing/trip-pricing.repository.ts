@@ -2,9 +2,23 @@ import { Injectable } from "@nestjs/common";
 import { Prisma, TripPricing } from "@prisma/client";
 
 import { PrismaService } from "../prisma/prisma.service";
+import { TripPricingItemRepository } from "../trip-pricing-items/trip-pricing-item.repository";
 
 export type CreateTripPricingData = Prisma.TripPricingUncheckedCreateInput;
 export type UpdateTripPricingData = Prisma.TripPricingUncheckedUpdateInput;
+
+/**
+ * The two repositories a snapshot write needs, bound to one transaction.
+ *
+ * A snapshot IS its parent plus its breakdown: `trip_pricing_item` cascades
+ * from `trip_pricing` and has no lifecycle of its own, so the two tables are
+ * written as a single unit. Handing both out together is what lets a service
+ * replace a whole snapshot without ever seeing a Prisma client.
+ */
+export interface PricingSnapshotRepositories {
+  readonly pricing: TripPricingRepository;
+  readonly items: TripPricingItemRepository;
+}
 
 /**
  * Database access for the TripPricing domain.
@@ -18,6 +32,33 @@ export type UpdateTripPricingData = Prisma.TripPricingUncheckedUpdateInput;
 @Injectable()
 export class TripPricingRepository {
   constructor(private readonly prisma: PrismaService) {}
+
+  /**
+   * Runs `work` against transaction-scoped clones of this repository and the
+   * item repository.
+   *
+   * The service never sees a Prisma client: it receives repositories bound to
+   * the transaction, so the layering rule holds while the parent and its whole
+   * breakdown are written as one unit. A failure anywhere inside rolls back
+   * everything, which is the only way a stored total can be guaranteed to equal
+   * the sum of its own items.
+   *
+   * Both clones are constructed directly rather than injected, following the
+   * pattern Trip and VehicleAssignment already use: they are the same classes,
+   * differing only in the client they hold.
+   */
+  runInTransaction<TResult>(
+    work: (repositories: PricingSnapshotRepositories) => Promise<TResult>,
+  ): Promise<TResult> {
+    return this.prisma.$transaction((transaction) => {
+      const scoped = transaction as unknown as PrismaService;
+
+      return work({
+        pricing: new TripPricingRepository(scoped),
+        items: new TripPricingItemRepository(scoped),
+      });
+    });
+  }
 
   findById(id: string): Promise<TripPricing | null> {
     return this.prisma.tripPricing.findUnique({ where: { id } });

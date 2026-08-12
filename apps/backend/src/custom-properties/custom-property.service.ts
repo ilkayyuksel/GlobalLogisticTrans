@@ -15,7 +15,10 @@ import { ListCustomPropertiesQueryDto } from "./dto/list-custom-properties-query
 import { UpdateCustomPropertyDto } from "./dto/update-custom-property.dto";
 import {
   CustomPropertyNotFoundException,
+  DuplicateComponentLinkException,
   DuplicateCustomPropertyNameException,
+  LinkedPropertyMustHaveNoPriceException,
+  UnknownPricingComponentException,
 } from "./exceptions/custom-property.exceptions";
 
 /** Prisma's unique-constraint violation code. */
@@ -75,19 +78,30 @@ export class CustomPropertyService {
     // name is a conflict.
     await this.assertNameAvailable(dto.name);
 
-    const created = await this.runGuardingName(dto.name, () =>
-      this.repository.runInTransaction(async (repository) => {
-        const displayOrder =
-          dto.displayOrder ?? (await this.nextDisplayOrder(repository));
+    const pricingComponentId = dto.pricingComponentId ?? null;
 
-        return repository.create({
-          name: dto.name,
-          description: dto.description ?? null,
-          defaultPrice: dto.defaultPrice ?? null,
-          displayOrder,
-          color: dto.color ?? null,
-        });
-      }),
+    await this.assertComponentLinkUsable(
+      pricingComponentId,
+      dto.defaultPrice ?? null,
+    );
+
+    const created = await this.runGuardingUniqueness(
+      dto.name,
+      pricingComponentId,
+      () =>
+        this.repository.runInTransaction(async (repository) => {
+          const displayOrder =
+            dto.displayOrder ?? (await this.nextDisplayOrder(repository));
+
+          return repository.create({
+            name: dto.name,
+            description: dto.description ?? null,
+            pricingComponentId,
+            defaultPrice: dto.defaultPrice ?? null,
+            displayOrder,
+            color: dto.color ?? null,
+          });
+        }),
     );
 
     // Business values are never logged — the name, price and description are
@@ -114,8 +128,32 @@ export class CustomPropertyService {
       await this.assertNameAvailable(name, id);
     }
 
-    const updated = await this.runGuardingName(name, () =>
-      this.repository.update(id, this.toUpdateData(dto)),
+    // Both rules read the values the row will HOLD after the update, not the
+    // ones the request happens to mention: linking a component to a property
+    // that already carries a price must fail just as surely as adding a price
+    // to a property that is already linked.
+    const pricingComponentId =
+      dto.pricingComponentId === undefined
+        ? existing.pricingComponentId
+        : dto.pricingComponentId;
+    const defaultPrice =
+      dto.defaultPrice === undefined
+        ? toNullableNumber(existing.defaultPrice)
+        : dto.defaultPrice;
+
+    await this.assertComponentLinkUsable(
+      pricingComponentId,
+      defaultPrice,
+      id,
+      // The link is only contested when it moves, or when an inactive property
+      // is being edited into a component that may since have been taken.
+      pricingComponentId !== existing.pricingComponentId && existing.isActive,
+    );
+
+    const updated = await this.runGuardingUniqueness(
+      name,
+      pricingComponentId,
+      () => this.repository.update(id, this.toUpdateData(dto)),
     );
 
     this.logger.log("Custom property updated", {
@@ -139,8 +177,16 @@ export class CustomPropertyService {
 
     await this.assertNameAvailable(property.name, id);
 
-    const activated = await this.runGuardingName(property.name, () =>
-      this.repository.setActive(id, true),
+    // Reactivating can resurrect a second clash: another property may have
+    // taken this one's component while it was inactive.
+    if (property.pricingComponentId !== null) {
+      await this.assertComponentLinkFree(property.pricingComponentId, id);
+    }
+
+    const activated = await this.runGuardingUniqueness(
+      property.name,
+      property.pricingComponentId,
+      () => this.repository.setActive(id, true),
     );
 
     this.logger.log("Custom property activated", { customPropertyId: id });
@@ -208,8 +254,73 @@ export class CustomPropertyService {
    * be atomic. The partial unique index is the real guard, so its violation is
    * translated here rather than escaping as a raw Prisma error.
    */
-  private async runGuardingName<TResult>(
+  /**
+   * Rejects a component link that cannot be used.
+   *
+   * Two rules, both from database_model.md §4.12 and both also enforced by the
+   * database: a linked property carries no price of its own, and a component is
+   * reachable through at most one active property.
+   */
+  private async assertComponentLinkUsable(
+    pricingComponentId: string | null,
+    defaultPrice: number | null,
+    excludeCustomPropertyId?: string,
+    checkAvailability = true,
+  ): Promise<void> {
+    if (pricingComponentId === null) {
+      return;
+    }
+
+    if (defaultPrice !== null) {
+      this.logger.warn("Rejected a priced custom property with a component", {
+        pricingComponentId,
+      });
+
+      throw new LinkedPropertyMustHaveNoPriceException(pricingComponentId);
+    }
+
+    if (!(await this.repository.pricingComponentExists(pricingComponentId))) {
+      throw new UnknownPricingComponentException(pricingComponentId);
+    }
+
+    if (checkAvailability) {
+      await this.assertComponentLinkFree(
+        pricingComponentId,
+        excludeCustomPropertyId,
+      );
+    }
+  }
+
+  private async assertComponentLinkFree(
+    pricingComponentId: string,
+    excludeCustomPropertyId?: string,
+  ): Promise<void> {
+    const holder = await this.repository.findActiveByPricingComponent(
+      pricingComponentId,
+      excludeCustomPropertyId,
+    );
+
+    if (holder) {
+      this.logger.warn("Rejected duplicate pricing component link", {
+        pricingComponentId,
+        conflictingCustomPropertyId: holder.id,
+      });
+
+      throw new DuplicateComponentLinkException(pricingComponentId);
+    }
+  }
+
+  /**
+   * Translates a unique-index violation into the right domain exception.
+   *
+   * Two partial unique indexes can fire here — one on the name, one on the
+   * component link — so the index named in the error decides which conflict is
+   * reported. Guessing would tell an administrator the name is taken when in
+   * fact the component is.
+   */
+  private async runGuardingUniqueness<TResult>(
     name: string,
+    pricingComponentId: string | null,
     operation: () => Promise<TResult>,
   ): Promise<TResult> {
     try {
@@ -219,6 +330,10 @@ export class CustomPropertyService {
         error instanceof Prisma.PrismaClientKnownRequestError &&
         error.code === PRISMA_UNIQUE_VIOLATION
       ) {
+        if (pricingComponentId !== null && violatedComponentIndex(error)) {
+          throw new DuplicateComponentLinkException(pricingComponentId);
+        }
+
         throw new DuplicateCustomPropertyNameException(name);
       }
 
@@ -236,9 +351,25 @@ export class CustomPropertyService {
     return {
       name: dto.name,
       description: dto.description,
+      pricingComponentId: dto.pricingComponentId,
       defaultPrice: dto.defaultPrice,
       displayOrder: dto.displayOrder,
       color: dto.color,
     };
   }
+}
+
+/** Prisma returns money as a Decimal; the rules compare plain numbers. */
+function toNullableNumber(value: Prisma.Decimal | null): number | null {
+  return value === null ? null : Number(value);
+}
+
+/** True when the failing index is the one on the component link. */
+function violatedComponentIndex(
+  error: Prisma.PrismaClientKnownRequestError,
+): boolean {
+  const target = error.meta?.target;
+  const named = Array.isArray(target) ? target.join(",") : String(target ?? "");
+
+  return named.includes("pricing_component");
 }

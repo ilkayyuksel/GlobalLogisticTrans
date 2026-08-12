@@ -8,17 +8,11 @@ import {
 
 import { AppLoggerService } from "../logger/app-logger.service";
 import { TripService } from "../trips/trip.service";
-import { CreateTripPricingDto } from "./dto/create-trip-pricing.dto";
-import {
-  DuplicateTripPricingException,
-  TripNotClosedException,
-  TripPricingNotFoundException,
-} from "./exceptions/trip-pricing.exceptions";
+import { TripPricingNotFoundException } from "./exceptions/trip-pricing.exceptions";
 import { TripPricingRepository } from "./trip-pricing.repository";
 import { TripPricingService } from "./trip-pricing.service";
 
 const PRICING_ID = "3f2504e0-4f89-41d3-9a0c-0305e82c3301";
-const OTHER_PRICING_ID = "9c858901-8a57-4791-81fe-4c455b099bc9";
 const TRIP_ID = "1b9d6bcd-bbfd-4b2d-9b5d-ab8dfbbd4bed";
 
 function buildTripPricing(overrides: Partial<TripPricing> = {}): TripPricing {
@@ -34,20 +28,6 @@ function buildTripPricing(overrides: Partial<TripPricing> = {}): TripPricing {
     notes: null,
     createdAt: new Date("2026-08-11T09:15:00.000Z"),
     updatedAt: new Date("2026-08-11T09:15:00.000Z"),
-    ...overrides,
-  };
-}
-
-function buildCreateDto(
-  overrides: Partial<CreateTripPricingDto> = {},
-): CreateTripPricingDto {
-  return {
-    tripId: TRIP_ID,
-    totalPrice: 482.35,
-    calculatedAt: "2026-08-11T09:15:00.000Z",
-    pricingEngineVersion: "1.4.0",
-    pricingRuleVersion: "2026.08",
-    calculationStatus: PricingCalculationStatus.CALCULATED,
     ...overrides,
   };
 }
@@ -124,106 +104,6 @@ describe("TripPricingService", () => {
       });
 
       expect(await service.findByTripId(TRIP_ID)).toBeNull();
-    });
-  });
-
-  describe("create", () => {
-    it("stores every supplied value verbatim", async () => {
-      await service.create(buildCreateDto({ notes: "manual check" }));
-
-      expect(repository.create).toHaveBeenCalledWith({
-        tripId: TRIP_ID,
-        totalPrice: 482.35,
-        calculatedAt: new Date("2026-08-11T09:15:00.000Z"),
-        pricingEngineVersion: "1.4.0",
-        pricingRuleVersion: "2026.08",
-        calculationStatus: PricingCalculationStatus.CALCULATED,
-        notes: "manual check",
-      });
-    });
-
-    it("never derives, adjusts or rounds the total", async () => {
-      await service.create(buildCreateDto({ totalPrice: 0 }));
-
-      expect(repository.create.mock.calls[0][0].totalPrice).toBe(0);
-    });
-
-    it("never sets a currency, leaving the EUR column default to apply", async () => {
-      await service.create(buildCreateDto());
-
-      expect(repository.create.mock.calls[0][0]).not.toHaveProperty("currency");
-    });
-
-    it("normalises an omitted note to null rather than undefined", async () => {
-      await service.create(buildCreateDto());
-
-      expect(repository.create.mock.calls[0][0].notes).toBeNull();
-    });
-
-    it.each([TripStatus.OPEN, TripStatus.CANCELLED, TripStatus.DELETED])(
-      "refuses to price a %s Trip",
-      async (status) => {
-        tripService.findById.mockResolvedValue({ id: TRIP_ID, status });
-
-        await expect(service.create(buildCreateDto())).rejects.toBeInstanceOf(
-          TripNotClosedException,
-        );
-        expect(repository.create).not.toHaveBeenCalled();
-      },
-    );
-
-    it("propagates the Trip's 404 when the Trip does not exist", async () => {
-      tripService.findById.mockRejectedValue(new NotFoundException());
-
-      await expect(service.create(buildCreateDto())).rejects.toBeInstanceOf(
-        NotFoundException,
-      );
-      expect(repository.create).not.toHaveBeenCalled();
-    });
-
-    it("refuses a second snapshot for the same Trip", async () => {
-      repository.findByTripId.mockResolvedValue(
-        buildTripPricing({ id: OTHER_PRICING_ID }),
-      );
-
-      await expect(service.create(buildCreateDto())).rejects.toBeInstanceOf(
-        DuplicateTripPricingException,
-      );
-      expect(repository.create).not.toHaveBeenCalled();
-    });
-
-    it("translates the unique-index violation that wins a concurrent race", async () => {
-      // The pre-check cannot be atomic; the index is the real guard.
-      repository.create.mockRejectedValue(
-        new Prisma.PrismaClientKnownRequestError("Unique constraint failed", {
-          code: "P2002",
-          clientVersion: "7.0.0",
-        }),
-      );
-
-      await expect(service.create(buildCreateDto())).rejects.toBeInstanceOf(
-        DuplicateTripPricingException,
-      );
-    });
-
-    it("rethrows any other Prisma error untouched", async () => {
-      const failure = new Prisma.PrismaClientKnownRequestError(
-        "Foreign key constraint failed",
-        { code: "P2003", clientVersion: "7.0.0" },
-      );
-      repository.create.mockRejectedValue(failure);
-
-      await expect(service.create(buildCreateDto())).rejects.toBe(failure);
-    });
-
-    it("logs identifiers and the status, never the amount", async () => {
-      await service.create(buildCreateDto({ notes: "commercially sensitive" }));
-
-      expect(logger.log).toHaveBeenCalledWith("Pricing snapshot created", {
-        tripPricingId: PRICING_ID,
-        tripId: TRIP_ID,
-        calculationStatus: PricingCalculationStatus.CALCULATED,
-      });
     });
   });
 

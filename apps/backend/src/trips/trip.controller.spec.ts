@@ -8,6 +8,7 @@ import { Test } from "@nestjs/testing";
 import { Prisma, Trip, TripStatus } from "@prisma/client";
 import request from "supertest";
 
+import { DomainEventBus } from "../common/events/domain-event-bus";
 import { AllExceptionsFilter } from "../common/filters/all-exceptions.filter";
 import { ResponseInterceptor } from "../common/interceptors/response.interceptor";
 import { DriverService } from "../drivers/driver.service";
@@ -94,7 +95,9 @@ describe("TripController (integration)", () => {
     vehicleService = {
       findById: jest.fn().mockResolvedValue({ id: VEHICLE_ID, isActive: true }),
     };
-    driverService = { findById: jest.fn().mockResolvedValue({ isActive: true }) };
+    driverService = {
+      findById: jest.fn().mockResolvedValue({ isActive: true }),
+    };
 
     const logger = {
       setContext: jest.fn(),
@@ -112,6 +115,12 @@ describe("TripController (integration)", () => {
         { provide: TripRepository, useValue: repository },
         { provide: VehicleService, useValue: vehicleService },
         { provide: DriverService, useValue: driverService },
+        // The Trip lifecycle announces TripClosed; nothing subscribes here, so
+        // the HTTP behaviour is exercised in isolation from pricing.
+        {
+          provide: DomainEventBus,
+          useValue: { publish: jest.fn().mockResolvedValue(undefined) },
+        },
         { provide: AppLoggerService, useValue: logger },
         { provide: APP_FILTER, useClass: AllExceptionsFilter },
         { provide: APP_INTERCEPTOR, useClass: ResponseInterceptor },
@@ -269,7 +278,10 @@ describe("TripController (integration)", () => {
     it("returns 404 when the PDF document does not exist", async () => {
       repository.pdfDocumentExists.mockResolvedValue(false);
 
-      await request(app.getHttpServer()).post(BASE).send(VALID_BODY).expect(404);
+      await request(app.getHttpServer())
+        .post(BASE)
+        .send(VALID_BODY)
+        .expect(404);
     });
 
     it("returns 409 for a booking number already in use", async () => {
@@ -277,7 +289,10 @@ describe("TripController (integration)", () => {
         buildTrip({ id: OTHER_TRIP_ID }),
       );
 
-      await request(app.getHttpServer()).post(BASE).send(VALID_BODY).expect(409);
+      await request(app.getHttpServer())
+        .post(BASE)
+        .send(VALID_BODY)
+        .expect(409);
     });
 
     it("returns 409 for an inactive vehicle", async () => {
@@ -324,7 +339,10 @@ describe("TripController (integration)", () => {
       [{ ...VALID_BODY, waitingTimeMinutes: -1 }, "negative waiting time"],
       [{ ...VALID_BODY, waitingTimeMinutes: 1.5 }, "fractional waiting time"],
       [{ ...VALID_BODY, status: "CLOSED" }, "a status, which is not settable"],
-      [{ ...VALID_BODY, tripGroupId: PDF_ID }, "a trip group, not managed here"],
+      [
+        { ...VALID_BODY, tripGroupId: PDF_ID },
+        "a trip group, not managed here",
+      ],
       [{ ...VALID_BODY, parserMetadata: {} }, "parser metadata"],
       [{ ...VALID_BODY, unknown: 1 }, "an unknown field"],
     ])("rejects %j (%s)", async (body, _reason) => {
@@ -537,7 +555,9 @@ describe("TripController (integration)", () => {
 
   describe("DELETE /trips/:id", () => {
     it("is not routed, because Trips are never physically removed", async () => {
-      await request(app.getHttpServer()).delete(`${BASE}/${TRIP_ID}`).expect(404);
+      await request(app.getHttpServer())
+        .delete(`${BASE}/${TRIP_ID}`)
+        .expect(404);
     });
   });
 

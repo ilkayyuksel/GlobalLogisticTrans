@@ -19,6 +19,7 @@ function buildProperty(
     id: PROPERTY_ID,
     name: "TAR",
     description: null,
+    pricingComponentId: null,
     defaultPrice: new Prisma.Decimal("35.00"),
     displayOrder: 1,
     color: "#f59e0b",
@@ -46,6 +47,8 @@ describe("CustomPropertyService", () => {
       findPage: jest.fn().mockResolvedValue({ items: [], totalItems: 0 }),
       findById: jest.fn().mockResolvedValue(null),
       findActiveByName: jest.fn().mockResolvedValue(null),
+      findActiveByPricingComponent: jest.fn().mockResolvedValue(null),
+      pricingComponentExists: jest.fn().mockResolvedValue(true),
       findHighestDisplayOrder: jest.fn().mockResolvedValue(null),
       create: jest.fn().mockResolvedValue(buildProperty()),
       update: jest.fn().mockResolvedValue(buildProperty()),
@@ -123,6 +126,7 @@ describe("CustomPropertyService", () => {
         "id",
         "isActive",
         "name",
+        "pricingComponentId",
         "updatedAt",
       ]);
     });
@@ -189,6 +193,7 @@ describe("CustomPropertyService", () => {
       expect(repository.create).toHaveBeenCalledWith({
         name: "TAR",
         description: null,
+        pricingComponentId: null,
         defaultPrice: null,
         displayOrder: 1,
         color: null,

@@ -26,3 +26,24 @@ export const MONEY_ROUNDING = Prisma.Decimal.ROUND_HALF_UP;
 export function toStorableAmount(amount: Prisma.Decimal): Prisma.Decimal {
   return amount.toDecimalPlaces(MONEY_DECIMAL_PLACES, MONEY_ROUNDING);
 }
+
+/**
+ * The Final Total: the exact Decimal sum of the amounts already on the lines.
+ *
+ * Nothing is recalculated and nothing is rounded again. Every line was rounded
+ * once by the step that produced it, and the total is the sum of exactly those
+ * stored figures — so the breakdown a reader adds up by hand always equals the
+ * total printed beside it. Summing unrounded intermediates instead would differ
+ * by a cent and make the invoice look wrong even though it was right.
+ *
+ * Decimal throughout. A JavaScript number cannot hold 0.1 + 0.2 exactly, and a
+ * total is the one figure a customer checks.
+ */
+export function sumLineAmounts(
+  amounts: readonly Prisma.Decimal[],
+): Prisma.Decimal {
+  return amounts.reduce(
+    (running, amount) => running.plus(amount),
+    new Prisma.Decimal(0),
+  );
+}
