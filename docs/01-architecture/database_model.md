@@ -1031,7 +1031,7 @@ A Trip may have many History records.
 
 A Trip may contain multiple Custom Properties.
 
-Booking Number is unique per Trip, except that Trips belonging to the same TripGroup share the same original Booking Number.
+Booking Number is unique per Trip, with no exception for a TripGroup: the two Trips of a Combination carry different Booking Numbers and are linked by the group instead.
 
 A Vehicle cannot be assigned to two Trips with overlapping planned time intervals.
 
@@ -1260,9 +1260,12 @@ If a TripGroup would be reduced to one Trip, the TripGroup must be dissolved rat
 
 Trips inside a group must originate from the same imported PDF.
 
-Trips inside a group always share the same original Booking Number.
+Trips inside a group each keep their OWN original Booking Number.
 
-Booking Number is therefore not globally unique across all Trips.
+Booking Number is still not enforced unique by the database, but for a different
+reason: a DELETED Trip releases its Booking Number so it can be re-entered, and
+that condition cannot be expressed as a database constraint. Uniqueness among
+the statuses that hold a Booking Number is enforced by the Backend.
 
 Trips may have different Container Numbers.
 
@@ -2717,11 +2720,27 @@ A Maintenance record should contain:
 - Asset Type
 - Asset Reference
 - Status
+- Maintenance Type (optional, free text)
 - Maintenance Date
 - Description
+- Mileage (optional)
 - Cost (optional)
 - Workshop (optional)
+- Next Maintenance Date (optional)
+- Next Maintenance Mileage (optional)
 - Notes (optional)
+
+Mileage and Next Maintenance Mileage are entered by the Administrator. The system
+does not track a vehicle's current mileage, so Mileage records what the odometer read
+at that maintenance and nothing more.
+
+## Maintenance Due
+
+A maintenance is due when Next Maintenance Date is set and has arrived.
+
+A mileage-based due date cannot be determined, because no current mileage exists for a
+vehicle. Next Maintenance Mileage is stored and displayed as a plan; it never produces a
+warning.
 
 ---
 

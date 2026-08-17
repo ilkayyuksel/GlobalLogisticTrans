@@ -1,7 +1,9 @@
 import { Module } from "@nestjs/common";
 import { ConfigModule } from "@nestjs/config";
 import { APP_FILTER, APP_INTERCEPTOR } from "@nestjs/core";
+import { ScheduleModule } from "@nestjs/schedule";
 
+import { AuthModule } from "./auth/auth.module";
 import { EventsModule } from "./common/events/events.module";
 import { AllExceptionsFilter } from "./common/filters/all-exceptions.filter";
 import { ResponseInterceptor } from "./common/interceptors/response.interceptor";
@@ -9,7 +11,9 @@ import { validateEnvironment } from "./config/environment.variables";
 import { CustomPropertyModule } from "./custom-properties/custom-property.module";
 import { DriverModule } from "./drivers/driver.module";
 import { HealthModule } from "./health/health.module";
+import { ImapModule } from "./imap/imap.module";
 import { LoggerModule } from "./logger/logger.module";
+import { MaintenanceModule } from "./maintenance/maintenance.module";
 import { PdfDocumentModule } from "./pdf-documents/pdf-document.module";
 import { PdfImportModule } from "./pdf-import/pdf-import.module";
 import { PricingEngineModule } from "./pricing-engine/pricing-engine.module";
@@ -43,6 +47,12 @@ import { VehicleModule } from "./vehicles/vehicle.module";
       validate: validateEnvironment,
     }),
     LoggerModule,
+    // Registers the global access-token guard, so every controller below is
+    // protected the moment it is added.
+    AuthModule,
+    // Provides SchedulerRegistry. It registers no jobs of its own — the mailbox
+    // scan adds one at startup, and only when IMAP is enabled.
+    ScheduleModule.forRoot(),
     EventsModule,
     PrismaModule,
     HealthModule,
@@ -50,6 +60,7 @@ import { VehicleModule } from "./vehicles/vehicle.module";
     DriverModule,
     VehicleModule,
     VehicleAssignmentModule,
+    MaintenanceModule,
     RoutePricingModule,
     RouteCostModule,
     CustomPropertyModule,
@@ -61,6 +72,7 @@ import { VehicleModule } from "./vehicles/vehicle.module";
     PricingReprocessModule,
     PdfDocumentModule,
     PdfImportModule,
+    ImapModule,
   ],
   providers: [
     {

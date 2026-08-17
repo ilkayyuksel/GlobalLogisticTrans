@@ -30,6 +30,11 @@ export class PdfDocumentRepository {
     return this.prisma.pdfDocument.findFirst({ where: { fileHash } });
   }
 
+  /** The document behind a request to view or download its bytes. */
+  findById(id: string): Promise<PdfDocument | null> {
+    return this.prisma.pdfDocument.findUnique({ where: { id } });
+  }
+
   create(data: CreatePdfDocumentData): Promise<PdfDocument> {
     return this.prisma.pdfDocument.create({ data });
   }

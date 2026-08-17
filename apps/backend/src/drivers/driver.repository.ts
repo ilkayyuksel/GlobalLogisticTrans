@@ -54,6 +54,20 @@ export class DriverRepository {
   }
 
   /**
+   * Several Drivers in one query, for callers resolving a page of records.
+   *
+   * Returns only the ids that exist; a caller decides what a missing one means.
+   * Exists so a list never issues one lookup per row.
+   */
+  findManyByIds(ids: readonly string[]): Promise<Driver[]> {
+    if (ids.length === 0) {
+      return Promise.resolve([]);
+    }
+
+    return this.prisma.driver.findMany({ where: { id: { in: [...ids] } } });
+  }
+
+  /**
    * Finds an active driver holding this licence number.
    *
    * `excludeDriverId` lets an update ignore the row being edited, so saving a

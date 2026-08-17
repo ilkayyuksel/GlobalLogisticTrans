@@ -4,11 +4,16 @@ import { join } from "node:path";
 import { PARSER_VERSION, ParseResult, ParseSuccess, parse } from "../src/index";
 
 /**
- * Golden-file regression against the three real transport orders.
+ * Golden-file regression against the three real NEW transport orders.
  *
  * These are the documents the business actually receives, so they — not the
  * specification — decide what correct means. Every expected value below was
  * read off the PDF itself.
+ *
+ * Fixture names include their folder (`NEW/`, `CANCEL/`, `UPDATE/`), which is
+ * how the business files them: by the kind of email they arrived in. That
+ * folder is filing, not evidence — what a document IS gets decided from its own
+ * text, in `real-documents.spec.ts`, which covers all of them.
  */
 
 const FIXTURES = join(__dirname, "..", "..", "..", "docs", "06-pdf");
@@ -33,7 +38,7 @@ describe("parse — 1page.pdf (Layout 1: single collection, one page)", () => {
   let result: ParseSuccess;
 
   beforeAll(async () => {
-    result = await parseFixture("1page.pdf");
+    result = await parseFixture("NEW/1page.pdf");
   });
 
   it("detects the one-page single layout", () => {
@@ -89,7 +94,7 @@ describe("parse — 2pages.pdf (Layout 2: single collection, two pages)", () => 
   let result: ParseSuccess;
 
   beforeAll(async () => {
-    result = await parseFixture("2pages.pdf");
+    result = await parseFixture("NEW/2pages.pdf");
   });
 
   it("detects the two-page single layout", () => {
@@ -139,7 +144,7 @@ describe("parse — combination.pdf (Layout 3: combination, two pages)", () => {
   let result: ParseSuccess;
 
   beforeAll(async () => {
-    result = await parseFixture("combination.pdf");
+    result = await parseFixture("NEW/combination.pdf");
   });
 
   it("detects the combination layout", () => {
@@ -225,7 +230,7 @@ describe("parse — combination.pdf (Layout 3: combination, two pages)", () => {
 });
 
 describe("determinism", () => {
-  it.each(["1page.pdf", "2pages.pdf", "combination.pdf"])(
+  it.each(["NEW/1page.pdf", "NEW/2pages.pdf", "NEW/combination.pdf"])(
     "%s parsed twice produces an identical result",
     async (name) => {
       const first = await parse(load(name));
@@ -236,9 +241,40 @@ describe("determinism", () => {
   );
 
   it("stamps the parser version on every success", async () => {
-    const result = await parseFixture("1page.pdf");
+    const result = await parseFixture("NEW/1page.pdf");
 
     expect(result.parserVersion).toBe(PARSER_VERSION);
+  });
+
+  /**
+   * Reading a document must not destroy it.
+   *
+   * pdfjs takes ownership of the buffer it is handed and detaches it, so
+   * passing the caller's array straight through would leave that caller with an
+   * unusable Uint8Array. The Backend reads exactly these bytes AFTER parsing —
+   * to hash the PDF and write it to storage — so a detached input breaks every
+   * import of a real document.
+   */
+  it("leaves the caller's bytes intact and usable", async () => {
+    const source = load("NEW/1page.pdf");
+    const byteLength = source.byteLength;
+
+    await parse(source);
+
+    expect(source.byteLength).toBe(byteLength);
+    // Constructing from the array is what a caller writing the file does, and
+    // it is the operation that throws once the buffer has been detached.
+    expect(() => new Uint8Array(source)).not.toThrow();
+  });
+
+  it("can parse the same array twice", async () => {
+    const source = load("NEW/combination.pdf");
+
+    const first = await parse(source);
+    const second = await parse(source);
+
+    expect(second.ok).toBe(true);
+    expect(JSON.stringify(second)).toBe(JSON.stringify(first));
   });
 });
 
@@ -273,7 +309,7 @@ describe("malformed input returns a structured failure", () => {
   });
 
   it("reports a truncated PDF", async () => {
-    const truncated = load("1page.pdf").slice(0, 400);
+    const truncated = load("NEW/1page.pdf").slice(0, 400);
 
     const result = await expectFailure(truncated);
 
@@ -303,24 +339,29 @@ describe("malformed input returns a structured failure", () => {
 
 describe("what the parser refuses to do", () => {
   it("returns plain data with no class instances", async () => {
-    const result = await parseFixture("1page.pdf");
+    const result = await parseFixture("NEW/1page.pdf");
 
     expect(JSON.parse(JSON.stringify(result))).toEqual(result);
   });
 
-  it("produces no pricing, status or database field", async () => {
-    const result = await parseFixture("combination.pdf");
+  it("produces no pricing or database field", async () => {
+    const result = await parseFixture("NEW/combination.pdf");
     const serialised = JSON.stringify(result);
 
-    for (const forbidden of [
-      "price",
-      "amount",
-      "total",
-      "status",
-      "tripId",
-      'id":',
-    ]) {
+    for (const forbidden of ["price", "amount", "total", "tripId", 'id":']) {
       expect(serialised.toLowerCase()).not.toContain(forbidden.toLowerCase());
     }
+  });
+
+  /**
+   * `documentStatus` is the one status the parser states, and it is a statement
+   * about the DOCUMENT — the stamp printed on the order. A Trip's status is the
+   * Backend's, and no trip may carry one.
+   */
+  it("gives no trip a status of its own", async () => {
+    const result = await parseFixture("NEW/combination.pdf");
+
+    expect(JSON.stringify(result.trips).toLowerCase()).not.toContain("status");
+    expect(result.documentStatus).toBe("PLANNED");
   });
 });

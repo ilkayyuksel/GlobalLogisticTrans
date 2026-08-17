@@ -117,7 +117,14 @@ describe("TripPricingRepository", () => {
     expect(source).not.toContain("prisma.trip.");
     expect(source).not.toContain("tripPricingItem");
     expect(source).not.toContain("routePricing");
-    expect(source).not.toContain("pricingComponent");
+    /*
+     * `pricingComponent` appears once, as an `include` on the export read: a
+     * line's CODE is what says it is a toll rather than a fuel surcharge, and
+     * it is loaded with the line rather than looked up per row. It is a
+     * projection of a foreign key this table already owns, not a write to the
+     * pricing-configuration domain.
+     */
+    expect(source).not.toMatch(/prisma\.pricingComponent\./);
   });
 
   it("performs no arithmetic — it stores what it is given", () => {

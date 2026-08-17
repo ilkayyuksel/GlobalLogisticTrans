@@ -3,6 +3,12 @@ import { Prisma, TripPricing } from "@prisma/client";
 
 import { PrismaService } from "../prisma/prisma.service";
 import { TripPricingItemRepository } from "../trip-pricing-items/trip-pricing-item.repository";
+import type { TripPricingItemWithComponent } from "../trip-pricing-items/dto/trip-pricing-item-response.dto";
+
+/** A snapshot together with its breakdown, as one read returns it. */
+export type TripPricingWithItems = TripPricing & {
+  items: TripPricingItemWithComponent[];
+};
 
 export type CreateTripPricingData = Prisma.TripPricingUncheckedCreateInput;
 export type UpdateTripPricingData = Prisma.TripPricingUncheckedUpdateInput;
@@ -65,6 +71,27 @@ export class TripPricingRepository {
   }
 
   /** Unique on trip_id, so a Trip resolves to at most one snapshot. */
+  /**
+   * The snapshots of many Trips, with their lines, in one query.
+   *
+   * Trips without a snapshot are simply absent: an unpriced Trip is an ordinary
+   * state, and an empty row would be indistinguishable from a priced one whose
+   * total happens to be zero.
+   */
+  findManyByTripIds(
+    tripIds: readonly string[],
+  ): Promise<TripPricingWithItems[]> {
+    return this.prisma.tripPricing.findMany({
+      where: { tripId: { in: [...tripIds] } },
+      include: {
+        items: {
+          include: { pricingComponent: { select: { code: true } } },
+          orderBy: [{ calculationOrder: "asc" }, { id: "asc" }],
+        },
+      },
+    });
+  }
+
   findByTripId(tripId: string): Promise<TripPricing | null> {
     return this.prisma.tripPricing.findUnique({ where: { tripId } });
   }

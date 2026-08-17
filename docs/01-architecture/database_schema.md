@@ -804,10 +804,14 @@ A maintenance event belonging to exactly one asset — a Vehicle **or** a Traile
 | `vehicle_id` | `UUID` | YES | `NULL` | Set only for Vehicle maintenance |
 | `trailer_id` | `UUID` | YES | `NULL` | Set only for Trailer maintenance |
 | `status` | `maintenance_status` | NO | — | |
+| `maintenance_type` | `TEXT` | YES | `NULL` | Free text — Onderhoud, Herstelling, Banden. Deliberately not an enum |
 | `maintenance_date` | `DATE` | NO | — | |
 | `description` | `TEXT` | NO | — | |
+| `mileage` | `INTEGER` | YES | `NULL` | Odometer reading AT THIS maintenance, entered by the Administrator. Never the vehicle's current mileage |
 | `cost` | `NUMERIC(12,2)` | YES | `NULL` | |
-| `workshop` | `TEXT` | YES | `NULL` | |
+| `workshop` | `TEXT` | YES | `NULL` | Shown in the UI as "Garage" |
+| `next_maintenance_date` | `DATE` | YES | `NULL` | Planned next maintenance. The Administrator's plan; nothing derives it |
+| `next_maintenance_mileage` | `INTEGER` | YES | `NULL` | Planned next odometer reading. Whether it has been reached is NOT evaluable — see below |
 | `notes` | `TEXT` | YES | `NULL` | |
 | `created_at` | `TIMESTAMPTZ` | NO | `now()` | |
 | `updated_at` | `TIMESTAMPTZ` | NO | `now()` | |
@@ -818,6 +822,8 @@ The conceptual "Asset Type" field is not stored — the asset type is implied by
 
 - `CHECK` — exactly one of `vehicle_id` and `trailer_id` must be non-null (an exclusive-or over the two null-tests).
 - `CHECK` — `cost`, when present, must be greater than or equal to zero.
+- `CHECK` — `mileage`, when present, must be greater than or equal to zero.
+- `CHECK` — `next_maintenance_mileage`, when present, must be greater than or equal to zero.
 
 ### Foreign Keys
 
@@ -835,12 +841,17 @@ The conceptual "Asset Type" field is not stored — the asset type is implied by
 | Lookup | `trailer_id`, `maintenance_date` | B-tree | Trailer maintenance history |
 | Lookup | `status` | B-tree | Planned/open maintenance overview |
 | Lookup | `maintenance_date` | B-tree | Scheduling overview |
+| Lookup | `next_maintenance_date` | B-tree | Due-maintenance warnings |
 
 ### Application-enforced rules
 
 - Records are never reassigned to another asset.
 - Records are immutable after completion.
-- Maintenance history is never removed.
+- Maintenance history is never removed; work that will not happen is set to `CANCELLED`.
+- **Mileage is entered by hand and is never derived.** The system holds no current odometer
+  reading for a vehicle, so a maintenance is considered due only when `next_maintenance_date`
+  is set and has arrived. `next_maintenance_mileage` is stored and displayed, but whether it
+  has been reached cannot be answered and must never be presented as a warning.
 
 ---
 
@@ -1298,8 +1309,8 @@ The following business rules require Backend enforcement. They are listed togeth
 
 | Rule | Source | Reason it cannot be a simple constraint |
 |---|---|---|
-| Booking Number unique per Trip, shared within a TripGroup | `database_model.md` §4.1, §4.2 | Conditional cross-row invariant |
-| All Trips in a TripGroup share the same PDF and Booking Number | §4.2 | Cross-row invariant; `trip_group` stores neither value |
+| Booking Number unique per Trip, including each leg of a Combination | `database_model.md` §4.1, §4.2 | A `DELETED` Trip releases its Booking Number, so uniqueness holds only among the statuses that hold it |
+| All Trips in a TripGroup share the same PDF | §4.2 | Cross-row invariant; `trip_group` stores no PDF reference |
 | A TripGroup contains at least two Trips; dissolves at one | §4.2 | Requires counting sibling rows on removal |
 | A Vehicle may not be assigned to overlapping Trips | §4.1, §4.8 | Interval overlap across `planning_date` + `start_time`/`end_time` |
 | Vacation periods must not overlap per Driver | §4.11 | Range exclusion; not representable in Prisma |

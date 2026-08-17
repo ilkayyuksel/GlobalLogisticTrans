@@ -275,6 +275,169 @@ describe("address", () => {
       ),
     ).toThrow(/country mapping/);
   });
+
+  /**
+   * ── VARIATION 1 — the country spelled out ─────────────────────────────────
+   * A real order prints its postcode only in the bracketed reference and ends
+   * the address with the country as a word. The word is what the document
+   * states, so it decides, and the line above it is the city.
+   * ──────────────────────────────────────────────────────────────────────────
+   */
+  describe("an address whose country is a word", () => {
+    it("reads the city from the line above the country", () => {
+      const result = extractAddress(
+        addressBlock([
+          "[9130]",
+          "Kato KTN BHSA REPL",
+          "Oudedijk 1 Blokveld 44",
+          "Kallo",
+          "Belgium",
+        ]),
+        header,
+      );
+
+      expect(result.destinationCity).toBe("Kallo");
+      expect(result.destinationCountry).toBe("Belgium");
+    });
+
+    it("accepts the country in the languages the documents print", () => {
+      for (const [word, country] of [
+        ["Belgium", "Belgium"],
+        ["België", "Belgium"],
+        ["Frankrijk", "France"],
+        ["Nederland", "Netherlands"],
+      ] as const) {
+        const result = extractAddress(
+          addressBlock(["[1000]", "Somewhere BV", "Ergens", word]),
+          header,
+        );
+
+        expect(result.destinationCountry).toBe(country);
+      }
+    });
+
+    it("keeps the country word out of the city", () => {
+      const result = extractAddress(
+        addressBlock(["[9130]", "Kato KTN", "Kallo", "Belgium"]),
+        header,
+      );
+
+      expect(result.destinationCity).not.toContain("Belgium");
+    });
+
+    /*
+     * The normal form still wins. A block with both a prefixed postcode line
+     * and a country word must read the postcode line, exactly as before.
+     */
+    it("never overrides a proper postcode line", () => {
+      const result = extractAddress(
+        addressBlock([
+          "[59166]",
+          "WEPA France SAS",
+          "FR-59166 Bousbecque",
+          "France",
+        ]),
+        header,
+      );
+
+      expect(result.destinationCity).toBe("Bousbecque");
+    });
+
+    it("refuses a country word with no city above it", () => {
+      expect(() =>
+        extractAddress(addressBlock(["Belgium"]), header),
+      ).toThrow(ExtractionError);
+    });
+  });
+
+  /**
+   * ── VARIATION 2 — a bare postcode ─────────────────────────────────────────
+   * `2040 Antwerpen` names no country. A four-digit postcode exists in many
+   * countries, so it is resolved ONLY from an explicit `CC-<same postcode>`
+   * printed elsewhere in the document — in the real order, the depot line
+   * `BE-2040 Antwerp`. Never from the number itself.
+   * ──────────────────────────────────────────────────────────────────────────
+   */
+  describe("an address whose postcode has no country prefix", () => {
+    /** The depot line the real document prints further down the page. */
+    function withDepotLine(lines: string[], depot: string): Fragment[] {
+      return [
+        ...addressBlock(lines),
+        { page: 1, x: 98, y: 120, text: depot },
+      ];
+    }
+
+    it("takes the country from the same postcode stated elsewhere", () => {
+      const result = extractAddress(
+        withDepotLine(
+          [
+            "[2040]",
+            "Ineos Styrolution gate 6",
+            "scheldelaan 600 - tor 6",
+            "2040 Antwerpen",
+          ],
+          "BE-2040 Antwerp",
+        ),
+        header,
+      );
+
+      expect(result.destinationCity).toBe("Antwerpen");
+      expect(result.destinationCountry).toBe("Belgium");
+    });
+
+    it("refuses when no line states that postcode's country", () => {
+      expect(() =>
+        extractAddress(
+          addressBlock(["[2040]", "Ineos Styrolution", "2040 Antwerpen"]),
+          header,
+        ),
+      ).toThrow(ExtractionError);
+    });
+
+    it("refuses when a different postcode is the only prefixed one", () => {
+      expect(() =>
+        extractAddress(
+          withDepotLine(
+            ["[2040]", "Ineos Styrolution", "2040 Antwerpen"],
+            "BE-9130 Kallo",
+          ),
+          header,
+        ),
+      ).toThrow(ExtractionError);
+    });
+
+    /*
+     * A document contradicting itself is a document nobody can trust. It is
+     * refused rather than resolved by preferring one of the two.
+     */
+    it("refuses when the document states two countries for that postcode", () => {
+      const fragments = [
+        ...withDepotLine(
+          ["[2040]", "Ineos Styrolution", "2040 Antwerpen"],
+          "BE-2040 Antwerp",
+        ),
+        { page: 1, x: 98, y: 100, text: "NL-2040 Zandvoort" },
+      ];
+
+      expect(() => extractAddress(fragments, header)).toThrow(ExtractionError);
+    });
+  });
+
+  /**
+   * The whole point of the two variations is that they are NARROW. A block
+   * with nothing city-shaped in it must still be refused.
+   */
+  describe("what is still refused", () => {
+    it.each([
+      ["only a company and a street", ["[62119]", "ONTEX", "Quai du Rivage"]],
+      ["a reference that is not a place", ["[1] ", "Ref 12345", "ID = 8781"]],
+      ["nothing at all", []],
+    ])("refuses %s", (_what, lines) => {
+      expect(() => extractAddress(addressBlock(lines), header)).toThrow(
+        ExtractionError,
+      );
+    });
+  });
 });
 
 describe("country mapping", () => {

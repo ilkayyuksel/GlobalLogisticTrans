@@ -1,7 +1,10 @@
 import { Injectable } from "@nestjs/common";
-import { Prisma, VehicleAssignment } from "@prisma/client";
+import { Driver, Prisma, VehicleAssignment } from "@prisma/client";
 
 import { PrismaService } from "../prisma/prisma.service";
+
+/** An assignment with the Driver it points at, loaded in the same query. */
+export type AssignmentWithDriver = VehicleAssignment & { driver: Driver };
 
 export interface FindAssignmentsFilter {
   vehicleId?: string;
@@ -140,6 +143,42 @@ export class VehicleAssignmentRepository {
   ): Promise<VehicleAssignment | null> {
     return this.prisma.vehicleAssignment.findFirst({
       where: this.inEffectOn(onDate, { driverId }),
+      orderBy: { validFrom: "desc" },
+    });
+  }
+
+  /**
+   * Every assignment of these vehicles that could touch the given date span.
+   *
+   * ONE query for a whole page of Trips, which is what keeps driver resolution
+   * off the N+1 path: a page of 25 Trips costs this single round trip rather
+   * than 25 lookups.
+   *
+   * The date bounds are a FETCH BOUND, not the rule. They exist only to stop
+   * this loading a vehicle's entire history; which assignment actually governs
+   * a particular Trip is decided by `assignmentInEffect`, so the rule itself
+   * stays in one place. A row returned here may well govern none of the Trips.
+   *
+   * The driver is included because the caller always needs the name, and a
+   * second query to fetch drivers by id would reintroduce exactly the extra
+   * round trip this method exists to avoid.
+   */
+  findCoveringVehicles(
+    vehicleIds: readonly string[],
+    from: Date,
+    to: Date,
+  ): Promise<AssignmentWithDriver[]> {
+    if (vehicleIds.length === 0) {
+      return Promise.resolve([]);
+    }
+
+    return this.prisma.vehicleAssignment.findMany({
+      where: {
+        vehicleId: { in: [...vehicleIds] },
+        validFrom: { lte: to },
+        OR: [{ validTo: null }, { validTo: { gte: from } }],
+      },
+      include: { driver: true },
       orderBy: { validFrom: "desc" },
     });
   }

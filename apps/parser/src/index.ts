@@ -1,4 +1,5 @@
 import { ExtractionError } from "./errors";
+import { extractDocumentStatus } from "./fields/document-status";
 import { detectLayout } from "./layout/detect";
 import { detectedSections } from "./layout/page-trip";
 import { parseCombination } from "./layout/combination";
@@ -74,7 +75,16 @@ export async function parse(source: Uint8Array): Promise<ParseResult> {
         ? parseCombination(document.fragments, groupKeyFor(document))
         : parseSingle(document.fragments);
 
-    return { ok: true, layout, parserVersion: PARSER_VERSION, trips, metadata };
+    return {
+      ok: true,
+      layout,
+      // What the document says about itself, independent of any email that
+      // carried it and of what the Backend decides to do about it.
+      documentStatus: extractDocumentStatus(document.fragments),
+      parserVersion: PARSER_VERSION,
+      trips,
+      metadata,
+    };
   } catch (error: unknown) {
     if (error instanceof ExtractionError) {
       return failure(

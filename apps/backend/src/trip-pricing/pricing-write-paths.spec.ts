@@ -213,6 +213,8 @@ describe("Pricing write paths (integration)", () => {
         id: ITEM_ID,
         tripPricingId: PRICING_ID,
         pricingComponentId: COMPONENT_ID,
+        // Loaded with the line, as every read of one now does.
+        pricingComponent: { code: "TOLL" },
         customPropertyId: null,
         description: "Toll",
         amount: { toFixed: () => "9.75" },

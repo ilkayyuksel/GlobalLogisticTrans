@@ -4,6 +4,8 @@ import { PricingCalculationStatus, Prisma, TripPricing } from "@prisma/client";
 import { changedFieldNames } from "../common/changed-fields";
 import { AppLoggerService } from "../logger/app-logger.service";
 import { TripService } from "../trips/trip.service";
+import { toTripPricingItemResponse } from "../trip-pricing-items/dto/trip-pricing-item-response.dto";
+import { PricingSnapshotDto } from "./dto/pricing-snapshot.dto";
 import {
   TripPricingResponseDto,
   toTripPricingResponse,
@@ -89,6 +91,29 @@ export class TripPricingService {
     const tripPricing = await this.repository.findByTripId(tripId);
 
     return tripPricing ? toTripPricingResponse(tripPricing) : null;
+  }
+
+  /**
+   * The stored pricing of many Trips, for an export.
+   *
+   * Existence of each Trip is deliberately NOT checked: this is a bulk read for
+   * a set of Trips the caller already has, and one 404 would fail a whole
+   * export because a Trip was deleted between listing and exporting. A Trip
+   * that is unknown or unpriced is simply absent from the result, which is the
+   * same answer either way — there is no pricing to show.
+   *
+   * Nothing is calculated. These are the lines the Pricing Engine already
+   * wrote.
+   */
+  async findManyByTripIds(
+    tripIds: readonly string[],
+  ): Promise<PricingSnapshotDto[]> {
+    const snapshots = await this.repository.findManyByTripIds(tripIds);
+
+    return snapshots.map((snapshot) => ({
+      pricing: toTripPricingResponse(snapshot),
+      items: snapshot.items.map(toTripPricingItemResponse),
+    }));
   }
 
   /**

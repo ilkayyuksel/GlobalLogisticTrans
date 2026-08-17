@@ -1,6 +1,7 @@
 import { Controller, Get, VERSION_NEUTRAL } from "@nestjs/common";
 import { ApiOkResponse, ApiOperation, ApiTags } from "@nestjs/swagger";
 
+import { Public } from "../auth/public.decorator";
 import { HealthReport, HealthService } from "./health.service";
 
 /**
@@ -21,6 +22,9 @@ export class HealthController {
    * reachable process, which is exactly what a liveness probe asks.
    */
   @Get()
+  // An orchestrator probes this before anyone has signed in, and it reports
+  // reachability rather than business data.
+  @Public()
   @ApiOperation({ summary: "Service and dependency health" })
   @ApiOkResponse({ description: "Current health report" })
   check(): Promise<HealthReport> {

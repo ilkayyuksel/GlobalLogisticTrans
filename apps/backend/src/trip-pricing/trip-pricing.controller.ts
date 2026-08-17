@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Patch } from "@nestjs/common";
+import { Body, Controller, Get, Param, Patch, Query } from "@nestjs/common";
 import {
   ApiBadRequestResponse,
   ApiNotFoundResponse,
@@ -11,6 +11,11 @@ import {
   TripIdParamDto,
   TripPricingIdParamDto,
 } from "./dto/trip-pricing-params.dto";
+import {
+  MAX_SNAPSHOT_TRIP_IDS,
+  PricingSnapshotsQueryDto,
+} from "./dto/pricing-snapshots-query.dto";
+import { PricingSnapshotDto } from "./dto/pricing-snapshot.dto";
 import { TripPricingResponseDto } from "./dto/trip-pricing-response.dto";
 import { UpdateTripPricingDto } from "./dto/update-trip-pricing.dto";
 import { TripPricingService } from "./trip-pricing.service";
@@ -40,6 +45,25 @@ import { TripPricingService } from "./trip-pricing.service";
 @Controller("trip-pricing")
 export class TripPricingController {
   constructor(private readonly tripPricingService: TripPricingService) {}
+
+  /**
+   * Declared before ":id" so the literal path wins the route match.
+   */
+  @Get("snapshots")
+  @ApiOperation({
+    summary: "The stored pricing of several Trips",
+    description:
+      "A bulk READ for exports and reports: it returns the snapshots and their lines exactly as the Pricing Engine stored them, and calculates nothing. Trips with no snapshot are absent from the result rather than reported as an error, because an unpriced Trip is an ordinary state. Reading pricing never causes a Trip to be priced.",
+  })
+  @ApiOkResponse({ type: [PricingSnapshotDto] })
+  @ApiBadRequestResponse({
+    description: `An id is not a valid UUID, the list is empty, or it holds more than ${MAX_SNAPSHOT_TRIP_IDS} ids.`,
+  })
+  findManyByTripIds(
+    @Query() query: PricingSnapshotsQueryDto,
+  ): Promise<PricingSnapshotDto[]> {
+    return this.tripPricingService.findManyByTripIds(query.tripIds);
+  }
 
   /**
    * Declared before the ":id" route for readability; the two-segment path could

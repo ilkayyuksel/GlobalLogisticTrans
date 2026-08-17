@@ -1,7 +1,8 @@
 import { Injectable } from "@nestjs/common";
-import { Prisma, TripPricingItem } from "@prisma/client";
+import { Prisma } from "@prisma/client";
 
 import { PrismaService } from "../prisma/prisma.service";
+import type { TripPricingItemWithComponent } from "./dto/trip-pricing-item-response.dto";
 
 export type CreateTripPricingItemData =
   Prisma.TripPricingItemUncheckedCreateInput;
@@ -31,8 +32,11 @@ export interface PricingComponentClassification {
 export class TripPricingItemRepository {
   constructor(private readonly prisma: PrismaService) {}
 
-  findById(id: string): Promise<TripPricingItem | null> {
-    return this.prisma.tripPricingItem.findUnique({ where: { id } });
+  findById(id: string): Promise<TripPricingItemWithComponent | null> {
+    return this.prisma.tripPricingItem.findUnique({
+      where: { id },
+      include: { pricingComponent: { select: { code: true } } },
+    });
   }
 
   /**
@@ -41,9 +45,14 @@ export class TripPricingItemRepository {
    * `calculation_order` is deliberately not unique, so `id` breaks ties and
    * keeps the sequence stable across requests.
    */
-  findByTripPricingId(tripPricingId: string): Promise<TripPricingItem[]> {
+  findByTripPricingId(
+    tripPricingId: string,
+  ): Promise<TripPricingItemWithComponent[]> {
     return this.prisma.tripPricingItem.findMany({
       where: { tripPricingId },
+      // The component's code travels with the line: without it a reader cannot
+      // tell a fuel surcharge from a toll.
+      include: { pricingComponent: { select: { code: true } } },
       orderBy: [{ calculationOrder: "asc" }, { id: "asc" }],
     });
   }
@@ -95,7 +104,11 @@ export class TripPricingItemRepository {
   update(
     id: string,
     data: UpdateTripPricingItemData,
-  ): Promise<TripPricingItem> {
-    return this.prisma.tripPricingItem.update({ where: { id }, data });
+  ): Promise<TripPricingItemWithComponent> {
+    return this.prisma.tripPricingItem.update({
+      where: { id },
+      data,
+      include: { pricingComponent: { select: { code: true } } },
+    });
   }
 }

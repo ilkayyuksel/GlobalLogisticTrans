@@ -26,6 +26,13 @@ export class TripPricingItemResponseDto {
   })
   pricingComponentId!: string;
 
+  @ApiProperty({
+    example: "FUEL_SURCHARGE",
+    description:
+      "The component's stable code — what this line MEANS. Present so a client can tell a base price from a toll without resolving the component id against a catalog it has no endpoint for.",
+  })
+  pricingComponentCode!: string;
+
   @ApiPropertyOptional({
     format: "uuid",
     nullable: true,
@@ -86,6 +93,17 @@ export class TripPricingBreakdownDto {
   items!: TripPricingItemResponseDto[];
 }
 
+/**
+ * A line together with the component that classifies it.
+ *
+ * The relation is loaded by the repository rather than looked up per line: a
+ * breakdown has a handful of lines, and one join costs less than one query
+ * each.
+ */
+export type TripPricingItemWithComponent = TripPricingItem & {
+  pricingComponent: { code: string };
+};
+
 /** Explicit null check, not truthiness: an amount of exactly 0 is a value. */
 function toFixedOrNull(
   value: Prisma.Decimal | null,
@@ -95,12 +113,13 @@ function toFixedOrNull(
 }
 
 export function toTripPricingItemResponse(
-  item: TripPricingItem,
+  item: TripPricingItemWithComponent,
 ): TripPricingItemResponseDto {
   return {
     id: item.id,
     tripPricingId: item.tripPricingId,
     pricingComponentId: item.pricingComponentId,
+    pricingComponentCode: item.pricingComponent.code,
     customPropertyId: item.customPropertyId,
     description: item.description,
     amount: item.amount.toFixed(MONEY_DECIMAL_PLACES),

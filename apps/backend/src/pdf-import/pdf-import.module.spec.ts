@@ -7,10 +7,15 @@ import { AppLoggerService } from "../logger/app-logger.service";
 import { PdfDocumentService } from "../pdf-documents/pdf-document.service";
 import { PrismaService } from "../prisma/prisma.service";
 import { TripService } from "../trips/trip.service";
+import { PdfImportController } from "./pdf-import.controller";
 import { PdfImportModule } from "./pdf-import.module";
 import { PdfTripImporter } from "./pdf-trip-importer.service";
+import { PdfUploadService } from "./pdf-upload.service";
 
 jest.mock("@tms/parser", () => ({ parse: jest.fn() }));
+
+/** Any value: what matters is that the module asks configuration for it. */
+const UPLOAD_LIMIT_MEGABYTES = 7;
 
 /**
  * Stands in for the four global modules the application provides at boot:
@@ -27,7 +32,15 @@ jest.mock("@tms/parser", () => ({ parse: jest.fn() }));
       provide: AppLoggerService,
       useValue: { setContext: jest.fn(), log: jest.fn(), warn: jest.fn() },
     },
-    { provide: ConfigService, useValue: { getOrThrow: () => "storage/pdf" } },
+    {
+      provide: ConfigService,
+      useValue: {
+        getOrThrow: () => "storage/pdf",
+        // The multipart module reads the upload size limit at construction.
+        get: (key: string) =>
+          key === "PDF_UPLOAD_MAX_SIZE_MB" ? UPLOAD_LIMIT_MEGABYTES : undefined,
+      },
+    },
     { provide: DomainEventBus, useValue: { publish: jest.fn() } },
   ],
   exports: [PrismaService, AppLoggerService, ConfigService, DomainEventBus],
@@ -61,6 +74,19 @@ describe("PdfImportModule", () => {
     expect(moduleRef.get(PdfDocumentService)).toBeInstanceOf(
       PdfDocumentService,
     );
+
+    await moduleRef.close();
+  });
+
+  it("resolves the upload endpoint and its service", async () => {
+    const moduleRef = await Test.createTestingModule({
+      imports: [GlobalStubsModule, PdfImportModule],
+    }).compile();
+
+    expect(moduleRef.get(PdfImportController)).toBeInstanceOf(
+      PdfImportController,
+    );
+    expect(moduleRef.get(PdfUploadService)).toBeInstanceOf(PdfUploadService);
 
     await moduleRef.close();
   });

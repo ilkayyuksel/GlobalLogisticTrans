@@ -104,6 +104,16 @@ export class PricingComponentResolver {
       this.rejectMissingInput(trip.id, "terminal", PricingStrategy.ROUTE_BASED);
     }
 
+    // A route has two ends. A Trip created by hand may not have been given a
+    // destination yet, and half a route matches nothing.
+    if (!trip.destinationCity) {
+      this.rejectMissingInput(
+        trip.id,
+        "destinationCity",
+        PricingStrategy.ROUTE_BASED,
+      );
+    }
+
     const routePricing = await this.routePricingService.findActiveRoute(
       trip.terminal,
       trip.destinationCity,

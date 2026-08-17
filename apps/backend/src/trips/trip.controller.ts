@@ -22,6 +22,7 @@ import {
 import { ChangeTripStatusDto } from "./dto/change-trip-status.dto";
 import { CreateTripDto } from "./dto/create-trip.dto";
 import { ListTripsQueryDto } from "./dto/list-trips-query.dto";
+import { RemoveTripFromGroupDto } from "./dto/remove-trip-from-group.dto";
 import { TripIdParamDto } from "./dto/trip-id-param.dto";
 import { PaginatedTripsDto, TripResponseDto } from "./dto/trip-response.dto";
 import { UpdateTripDto } from "./dto/update-trip.dto";
@@ -55,6 +56,20 @@ export class TripController {
     return this.tripService.findAll(query);
   }
 
+  /**
+   * Declared before ":id" so the literal path cannot be read as an identifier.
+   */
+  @Get("terminals")
+  @ApiOperation({
+    summary: "The terminals Trips actually carry",
+    description:
+      "Distinct terminal strings from the Trips themselves, alphabetically, so a filter can offer the values that really exist. There is no terminal master data: a terminal is the string the transport order printed, and this endpoint reports what is stored rather than a configured list. DELETED Trips are excluded.",
+  })
+  @ApiOkResponse({ type: [String] })
+  findTerminals(): Promise<string[]> {
+    return this.tripService.findTerminals();
+  }
+
   @Get(":id")
   @ApiOperation({
     summary: "Get one Trip",
@@ -71,7 +86,7 @@ export class TripController {
   @ApiOperation({
     summary: "Create a Trip manually",
     description:
-      "Trips are created OPEN. Every Trip originates from exactly one PDF, so an existing pdfDocumentId is required. The booking number must be free, and an assigned Vehicle must be active and not already booked for an overlapping interval.",
+      "Trips are created OPEN. An imported Trip references the PDF it came from; a Trip created by hand may omit the document, the booking number, the container type, the destination and both dates, and each is then stored as null rather than as a placeholder. Values that ARE supplied are still validated: the PDF must exist, a booking number must be free, and an assigned Vehicle must be active. Creating a Trip never prices it.",
   })
   @ApiCreatedResponse({ type: TripResponseDto })
   @ApiBadRequestResponse({
@@ -83,7 +98,7 @@ export class TripController {
   })
   @ApiConflictResponse({
     description:
-      "The booking number is in use, the Vehicle or Driver is inactive, or the Vehicle is already booked for that interval.",
+      "The booking number is in use, or the Vehicle or Driver is inactive.",
   })
   create(@Body() dto: CreateTripDto): Promise<TripResponseDto> {
     return this.tripService.create(dto);
@@ -164,7 +179,7 @@ export class TripController {
   @ApiOperation({
     summary: "Restore a deleted Trip",
     description:
-      "Returns a DELETED Trip to OPEN. Fails if another Trip has taken its booking number, or if its Vehicle has since been booked for an overlapping interval.",
+      "Returns a DELETED Trip to OPEN. Fails if another Trip has taken its booking number. A Trip with no booking number has none to reclaim.",
   })
   @ApiOkResponse({ type: TripResponseDto })
   @ApiNotFoundResponse({ description: "No Trip with that id." })
@@ -174,5 +189,33 @@ export class TripController {
   })
   restore(@Param() params: TripIdParamDto): Promise<TripResponseDto> {
     return this.tripService.restore(params.id);
+  }
+
+  /**
+   * The group membership of one Trip, as its own sub-resource.
+   *
+   * Only clearing is offered. JOINING a group happens through
+   * POST /trip-groups, which is where the rules about a group as a whole live;
+   * allowing a Trip to be pointed at an arbitrary group id here would let one
+   * Trip quietly change what another group means.
+   */
+  @Patch(":id/group")
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: "Remove a Trip from its group",
+    description:
+      "Clears the Trip's group. The Trip itself is untouched, and so are the other members — a group is allowed to remain with a single Trip, which stays visible and is never deleted automatically. Send tripGroupId as null; joining a group is done through POST /trip-groups.",
+  })
+  @ApiOkResponse({ type: TripResponseDto })
+  @ApiBadRequestResponse({
+    description: "The id is not a valid UUID, or tripGroupId is not null.",
+  })
+  @ApiNotFoundResponse({ description: "No Trip with that id." })
+  @ApiConflictResponse({ description: "The Trip belongs to no group." })
+  removeFromGroup(
+    @Param() params: TripIdParamDto,
+    @Body() _dto: RemoveTripFromGroupDto,
+  ): Promise<TripResponseDto> {
+    return this.tripService.removeFromGroup(params.id);
   }
 }

@@ -125,9 +125,11 @@ export interface ExistingPricingSnapshot {
 
 export interface PricingCalculationContext {
   readonly tripId: string;
-  readonly bookingNumber: string;
+  /** Null on a manual Trip whose booking number is not known yet. */
+  readonly bookingNumber: string | null;
   readonly tripStatus: TripStatus;
-  readonly planningDate: string;
+  /** Null on a Trip that has not been scheduled. */
+  readonly planningDate: string | null;
 
   /** Only a Trip in a TripGroup is eligible for the Combination Surcharge. */
   readonly isCombination: boolean;

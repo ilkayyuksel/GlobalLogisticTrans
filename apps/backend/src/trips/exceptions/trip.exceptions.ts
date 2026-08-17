@@ -1,4 +1,8 @@
-import { ConflictException, NotFoundException } from "@nestjs/common";
+import {
+  BadRequestException,
+  ConflictException,
+  NotFoundException,
+} from "@nestjs/common";
 import { TripStatus } from "@prisma/client";
 
 /**
@@ -37,6 +41,35 @@ export class DuplicateBookingNumberException extends ConflictException {
     super(
       `Booking number "${bookingNumber}" is already used by Trip "${conflictingTripId}".`,
     );
+  }
+}
+
+/**
+ * A Trip named in a grouping request already belongs to a group.
+ *
+ * Moving it is deliberately NOT a side effect of grouping: a Trip that silently
+ * left its Combination would take the meaning of that Combination with it. The
+ * operator unlinks it first, which is one explicit action with a visible
+ * result, and only then can it join another group.
+ */
+export class TripAlreadyGroupedException extends ConflictException {
+  constructor(tripId: string, tripGroupId: string) {
+    super(
+      `Trip "${tripId}" already belongs to group "${tripGroupId}". Remove it from that group before adding it to another.`,
+    );
+  }
+}
+
+/** Grouping is a relationship, and one Trip is not a relationship. */
+export class TooFewTripsToGroupException extends BadRequestException {
+  constructor(minimumTrips: number) {
+    super(`A group needs at least ${minimumTrips} Trips.`);
+  }
+}
+
+export class TripNotInGroupException extends ConflictException {
+  constructor(tripId: string) {
+    super(`Trip "${tripId}" does not belong to a group.`);
   }
 }
 

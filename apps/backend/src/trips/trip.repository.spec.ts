@@ -4,8 +4,6 @@ import { PrismaService } from "../prisma/prisma.service";
 import { TripRepository } from "./trip.repository";
 
 const PLANNING_DATE = new Date("2026-08-17T00:00:00.000Z");
-const START_TIME = new Date("1970-01-01T08:00:00.000Z");
-const END_TIME = new Date("1970-01-01T12:00:00.000Z");
 
 /**
  * Verifies the exact Prisma calls. A wrong `where` here returns the wrong Trips
@@ -69,12 +67,23 @@ describe("TripRepository", () => {
       expect(prisma.trip.count).toHaveBeenCalledTimes(1);
     });
 
-    it("orders by planning date descending with a stable tie-break", async () => {
+    /**
+     * Four keys: the day, then the truck, then the chosen time, then the id.
+     * The last one is what makes paging stable — without a total order two
+     * tied Trips can swap places between requests and a page can repeat or
+     * drop a row.
+     */
+    it("orders by date, then vehicle, then time, then id", async () => {
       await repository.findPage({ skip: 0, take: 25 });
 
       expect(prisma.trip.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
-          orderBy: [{ planningDate: "desc" }, { id: "asc" }],
+          orderBy: [
+            { planningDate: "desc" },
+            { vehicle: { licensePlate: "asc" } },
+            { startTime: { sort: "asc", nulls: "last" } },
+            { id: "asc" },
+          ],
           skip: 0,
           take: 25,
         }),
@@ -175,6 +184,46 @@ describe("TripRepository", () => {
             containerNumber: "MSKU1",
             vehicleId: "vehicle-1",
             driverId: "driver-1",
+          },
+        }),
+      );
+    });
+
+    /**
+     * The only way to list a Combination's legs: a Trip response carries the
+     * id of its group but not the ids of its siblings.
+     */
+    it("matches every Trip of one TripGroup", async () => {
+      await repository.findPage({
+        tripGroupId: "97777777-7777-4777-8777-777777777777",
+        skip: 0,
+        take: 25,
+      });
+
+      expect(prisma.trip.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { tripGroupId: "97777777-7777-4777-8777-777777777777" },
+        }),
+      );
+    });
+
+    /**
+     * Through the relation, so the database narrows the whole result set —
+     * a filter applied to the loaded page would be wrong past page one.
+     */
+    it("matches Trips carrying a Custom Property", async () => {
+      await repository.findPage({
+        customPropertyId: "b36469b0-37ec-40ba-81da-9bc272e05d60",
+        skip: 0,
+        take: 25,
+      });
+
+      expect(prisma.trip.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            customProperties: {
+              some: { customPropertyId: "b36469b0-37ec-40ba-81da-9bc272e05d60" },
+            },
           },
         }),
       );
@@ -296,61 +345,6 @@ describe("TripRepository", () => {
     });
   });
 
-  describe("findVehicleOverlaps", () => {
-    it("compares half-open intervals on the same day for the same vehicle", async () => {
-      await repository.findVehicleOverlaps({
-        vehicleId: "vehicle-1",
-        planningDate: PLANNING_DATE,
-        startTime: START_TIME,
-        endTime: END_TIME,
-        statuses: [TripStatus.OPEN, TripStatus.CLOSED],
-      });
-
-      expect(prisma.trip.findMany).toHaveBeenCalledWith({
-        where: {
-          vehicleId: "vehicle-1",
-          planningDate: PLANNING_DATE,
-          status: { in: [TripStatus.OPEN, TripStatus.CLOSED] },
-          // Strict comparisons: touching intervals do not collide.
-          startTime: { not: null, lt: END_TIME },
-          endTime: { not: null, gt: START_TIME },
-        },
-        orderBy: { startTime: "asc" },
-      });
-    });
-
-    it("excludes Trips without both times, whose interval is unknown", async () => {
-      await repository.findVehicleOverlaps({
-        vehicleId: "vehicle-1",
-        planningDate: PLANNING_DATE,
-        startTime: START_TIME,
-        endTime: END_TIME,
-        statuses: [TripStatus.OPEN],
-      });
-
-      const where = prisma.trip.findMany.mock.calls[0][0].where;
-
-      expect(where.startTime.not).toBeNull();
-      expect(where.endTime.not).toBeNull();
-    });
-
-    it("excludes the Trip being moved", async () => {
-      await repository.findVehicleOverlaps({
-        vehicleId: "vehicle-1",
-        planningDate: PLANNING_DATE,
-        startTime: START_TIME,
-        endTime: END_TIME,
-        statuses: [TripStatus.OPEN],
-        excludeTripId: "self",
-      });
-
-      expect(prisma.trip.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: expect.objectContaining({ id: { not: "self" } }),
-        }),
-      );
-    });
-  });
 
   describe("pdfDocumentExists", () => {
     it("selects only the id, because nothing else is needed", async () => {

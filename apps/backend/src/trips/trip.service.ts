@@ -25,36 +25,35 @@ import {
   DuplicateBookingNumberException,
   InactiveAssignmentException,
   InvalidTripStatusTransitionException,
+  TooFewTripsToGroupException,
+  TripAlreadyGroupedException,
   TripNotDeletableException,
   TripNotDeletedException,
   TripNotFoundException,
+  TripNotInGroupException,
   UnknownPdfDocumentException,
-  VehicleAlreadyBookedException,
 } from "./exceptions/trip.exceptions";
 import {
   BOOKING_NUMBER_HOLDING_STATUSES,
   DELETABLE_FROM_STATUS,
   RESTORED_STATUS,
-  VEHICLE_OCCUPYING_STATUSES,
   allowedTransitionsFrom,
   canTransition,
 } from "./trip-status.rules";
+import { TripPlanningDataService } from "./trip-planning-data.service";
 import { TripRepository } from "./trip.repository";
+
+/**
+ * A group is a relationship, and one Trip is not a relationship.
+ *
+ * Only a lower bound: a manual group has no upper one, because an operator
+ * deciding that five Trips belong together is not a mistake the system needs to
+ * prevent.
+ */
+const MINIMUM_TRIPS_PER_GROUP = 2;
 
 /** DELETED Trips must not appear in normal planning views. */
 const HIDDEN_BY_DEFAULT_STATUSES: readonly TripStatus[] = [TripStatus.DELETED];
-
-/**
- * The planned interval of a Trip, once both ends are known.
- *
- * A Trip missing either end has no interval that can be compared, so it takes
- * no part in overlap detection.
- */
-interface PlannedInterval {
-  planningDate: Date;
-  startTime: Date;
-  endTime: Date;
-}
 
 /**
  * Manual Trip management.
@@ -74,10 +73,44 @@ export class TripService {
     private readonly repository: TripRepository,
     private readonly vehicleService: VehicleService,
     private readonly driverService: DriverService,
+    private readonly planningData: TripPlanningDataService,
     private readonly eventBus: DomainEventBus,
     private readonly logger: AppLoggerService,
   ) {
     this.logger.setContext(TripService.name);
+  }
+
+  /**
+   * One Trip as a response, with its Vehicle and effective Driver resolved.
+   *
+   * Every path that returns a Trip goes through here or through `toResponses`,
+   * so `effectiveDriver` always means "resolved and this is the answer" — never
+   * "nobody looked". A client cannot tell those apart, so they must not both be
+   * possible.
+   */
+  private async toResponse(trip: Trip): Promise<TripResponseDto> {
+    return toTripResponse(trip, await this.planningData.resolveOne(trip));
+  }
+
+  /**
+   * A page of Trips, resolved together.
+   *
+   * The batch is the point: resolving a page costs a fixed handful of queries
+   * rather than one per Trip.
+   */
+  private async toResponses(trips: readonly Trip[]): Promise<TripResponseDto[]> {
+    const planning = await this.planningData.resolveMany(trips);
+
+    return trips.map((trip) =>
+      toTripResponse(
+        trip,
+        planning.get(trip.id) ?? {
+          vehicle: null,
+          effectiveDriver: null,
+          customProperties: [],
+        },
+      ),
+    );
   }
 
   async findAll(query: ListTripsQueryDto): Promise<PaginatedTripsDto> {
@@ -97,6 +130,16 @@ export class TripService {
       containerNumber: query.containerNumber,
       driverId: query.driverId,
       vehicleId: query.vehicleId,
+      tripGroupId: query.tripGroupId,
+      customPropertyId: query.customPropertyId,
+      // Absent means the default reading order; the repository owns what that
+      // is, so an unsorted request and a sorted one take the same path.
+      sort: query.sortBy
+        ? {
+            field: query.sortBy,
+            direction: query.sortDirection ?? "asc",
+          }
+        : undefined,
       terminal: query.terminal,
       destinationCity: query.destinationCity,
       destinationCountry: query.destinationCountry,
@@ -106,51 +149,90 @@ export class TripService {
     });
 
     return {
-      items: items.map(toTripResponse),
+      items: await this.toResponses(items),
       meta: buildPaginationMeta(totalItems, query.page, query.pageSize),
     };
   }
 
   async findById(id: string): Promise<TripResponseDto> {
-    return toTripResponse(await this.requireTrip(id));
+    return this.toResponse(await this.requireTrip(id));
+  }
+
+  /**
+   * The terminals a filter may offer.
+   *
+   * The values Trips actually carry, not master data — there is none, and the
+   * terminal is the string the transport order printed.
+   */
+  findTerminals(): Promise<string[]> {
+    return this.repository.findDistinctTerminals(HIDDEN_BY_DEFAULT_STATUSES);
   }
 
   /**
    * Creates a Trip by hand.
    *
+   * ── A MANUAL TRIP MAY BE ALMOST EMPTY ───────────────────────────────────────
+   * A Trip used to be, by construction, the product of a parsed transport
+   * order. One entered by hand is not: a phone call announces a job and the
+   * booking number, container, destination and date follow later. So the PDF,
+   * the booking number, the container type, the destination and both dates may
+   * all be absent, and absence is stored as null — never as an invented
+   * placeholder, which would be a value the business would then have to
+   * recognise and strip everywhere.
+   *
+   * What has NOT been relaxed is the checking of values that ARE given: a
+   * supplied PDF must exist, a supplied Vehicle must be active, and a supplied
+   * booking number must be free. Optional means "may be absent", not
+   * "unvalidated".
+   * ────────────────────────────────────────────────────────────────────────────
+   *
    * Everything that can be checked without writing is checked first, so a
-   * rejected request never leaves a partially valid row behind. The booking and
-   * overlap checks then run inside the transaction that performs the insert,
-   * keeping the window in which a concurrent write could slip between them as
-   * small as the database allows.
+   * rejected request never leaves a partially valid row behind. The booking
+   * check then runs inside the transaction that performs the insert, keeping
+   * the window in which a concurrent write could slip between them as small as
+   * the database allows.
    */
   async create(dto: CreateTripDto): Promise<TripResponseDto> {
-    await this.assertPdfDocumentExists(dto.pdfDocumentId);
+    const pdfDocumentId = dto.pdfDocumentId ?? null;
+    const bookingNumber = dto.bookingNumber ?? null;
+
+    if (pdfDocumentId !== null) {
+      await this.assertPdfDocumentExists(pdfDocumentId);
+    }
+
     await this.assertAssignable("vehicle", dto.vehicleId);
     await this.assertAssignable("driver", dto.driverId);
 
-    const planningDate = toUtcDate(dto.planningDate);
+    const planningDate = toNullableDate(dto.planningDate);
     const startTime = toNullableTime(dto.startTime);
     const endTime = toNullableTime(dto.endTime);
 
+    /*
+     * The original planning date records what was planned BEFORE anyone moved
+     * the Trip. For a Trip created now, that is the date it is being created
+     * with — so it defaults to the planning date rather than being asked for
+     * twice, and stays null when there is no date at all.
+     */
+    const originalPlanningDate =
+      dto.originalPlanningDate === undefined || dto.originalPlanningDate === null
+        ? planningDate
+        : toUtcDate(dto.originalPlanningDate);
+
     const created = await this.repository.runInTransaction(
       async (repository) => {
-        await this.assertBookingNumberFree(repository, dto.bookingNumber);
-        await this.assertVehicleFree(
-          repository,
-          dto.vehicleId ?? null,
-          toPlannedInterval(planningDate, startTime, endTime),
-        );
+        if (bookingNumber !== null) {
+          await this.assertBookingNumberFree(repository, bookingNumber);
+        }
 
         return repository.create({
-          pdfDocumentId: dto.pdfDocumentId,
-          bookingNumber: dto.bookingNumber,
+          pdfDocumentId,
+          bookingNumber,
           containerNumber: dto.containerNumber ?? null,
-          containerType: dto.containerType,
+          containerType: dto.containerType ?? null,
           terminal: dto.terminal ?? null,
-          destinationCity: dto.destinationCity,
-          destinationCountry: dto.destinationCountry,
-          originalPlanningDate: toUtcDate(dto.originalPlanningDate),
+          destinationCity: dto.destinationCity ?? null,
+          destinationCountry: dto.destinationCountry ?? null,
+          originalPlanningDate,
           planningDate,
           startTime,
           endTime,
@@ -170,7 +252,7 @@ export class TripService {
       pdfDocumentId: created.pdfDocumentId,
     });
 
-    return toTripResponse(created);
+    return this.toResponse(created);
   }
 
   /**
@@ -191,34 +273,14 @@ export class TripService {
       await this.assertAssignable("driver", dto.driverId);
     }
 
-    const planningDate =
-      dto.planningDate === undefined
-        ? existing.planningDate
-        : toUtcDate(dto.planningDate);
-    const vehicleId =
-      dto.vehicleId === undefined ? existing.vehicleId : dto.vehicleId;
-
-    const updated = await this.repository.runInTransaction(
-      async (repository) => {
-        // The interval itself cannot be edited here, but moving the Trip to
-        // another day or onto another Vehicle re-opens the booking question.
-        await this.assertVehicleFree(
-          repository,
-          vehicleId,
-          toPlannedInterval(planningDate, existing.startTime, existing.endTime),
-          id,
-        );
-
-        return repository.update(id, this.toUpdateData(dto));
-      },
-    );
+    const updated = await this.repository.update(id, this.toUpdateData(dto));
 
     this.logger.log("Trip updated", {
       tripId: id,
       changedFields: changedFieldNames(dto),
     });
 
-    return toTripResponse(updated);
+    return this.toResponse(updated);
   }
 
   /**
@@ -235,7 +297,7 @@ export class TripService {
     const trip = await this.requireTrip(id);
 
     if (trip.status === dto.status) {
-      return toTripResponse(trip);
+      return this.toResponse(trip);
     }
 
     this.assertTransitionAllowed(trip.status, dto.status);
@@ -258,7 +320,7 @@ export class TripService {
 
     await this.announceIfClosed(changed);
 
-    return toTripResponse(changed);
+    return this.toResponse(changed);
   }
 
   /**
@@ -340,6 +402,7 @@ export class TripService {
               planningDate: toUtcDate(trip.planningDate),
               startTime: trip.startTime ? toUtcTime(trip.startTime) : null,
               endTime: trip.endTime ? toUtcTime(trip.endTime) : null,
+              direction: trip.direction,
               parserMetadata: trip.parserMetadata,
             }),
           );
@@ -356,7 +419,111 @@ export class TripService {
       tripCount: created.length,
     });
 
-    return created.map(toTripResponse);
+    return this.toResponses(created);
+  }
+
+  /**
+   * Puts several Trips into one group, by hand.
+   *
+   * ── A MANUAL GROUP IS NOT A COMBINATION ─────────────────────────────────────
+   * A Combination comes from one PDF and means something specific: two legs of
+   * one transport, one collection and one delivery. THIS does not. It is an
+   * operator saying "these belong together", and the system holds no opinion
+   * about how many Trips that is beyond two, which directions they carry, which
+   * days they fall on or which statuses they hold.
+   *
+   * Both kinds are the same row, because the schema has one: `trip_group` has
+   * no columns beyond its identity, and adding a type would be inventing a
+   * distinction nothing yet reads.
+   * ────────────────────────────────────────────────────────────────────────────
+   *
+   * The whole operation is one transaction: the group and every assignment
+   * commit together, so a rejected Trip leaves no empty group behind.
+   */
+  async createGroup(tripIds: readonly string[]): Promise<TripResponseDto[]> {
+    if (tripIds.length < MINIMUM_TRIPS_PER_GROUP) {
+      throw new TooFewTripsToGroupException(MINIMUM_TRIPS_PER_GROUP);
+    }
+
+    const grouped = await this.repository.runInTransaction(
+      async (repository) => {
+        const trips = await repository.findManyByIds(tripIds);
+
+        this.assertAllTripsExist(tripIds, trips);
+        this.assertNoneAlreadyGrouped(trips);
+
+        const group = await repository.createTripGroup();
+
+        await repository.assignToGroup(tripIds, group.id);
+
+        // Re-read inside the transaction: the rows now carry the group, and the
+        // response must show what was actually written rather than what was
+        // asked for.
+        return repository.findManyByIds(tripIds);
+      },
+    );
+
+    this.logger.log("Trips grouped", {
+      tripGroupId: grouped[0]?.tripGroupId ?? null,
+      tripIds: grouped.map((trip) => trip.id),
+      tripCount: grouped.length,
+    });
+
+    return this.toResponses(grouped);
+  }
+
+  /**
+   * Takes one Trip out of its group, leaving the group and the others alone.
+   *
+   * A group may be left with a single member, and that is deliberate: deleting
+   * it automatically would be a second, hidden decision about data the operator
+   * can still see and act on. An empty group is simply unreferenced.
+   */
+  async removeFromGroup(id: string): Promise<TripResponseDto> {
+    const trip = await this.requireTrip(id);
+
+    if (!trip.tripGroupId) {
+      throw new TripNotInGroupException(id);
+    }
+
+    const updated = await this.repository.update(id, { tripGroupId: null });
+
+    this.logger.log("Trip removed from its group", {
+      tripId: id,
+      previousTripGroupId: trip.tripGroupId,
+    });
+
+    return this.toResponse(updated);
+  }
+
+  private assertAllTripsExist(
+    requestedIds: readonly string[],
+    found: readonly Trip[],
+  ): void {
+    const foundIds = new Set(found.map((trip) => trip.id));
+    const missing = requestedIds.find((id) => !foundIds.has(id));
+
+    if (missing) {
+      throw new TripNotFoundException(missing);
+    }
+  }
+
+  /**
+   * Grouping never moves a Trip out of an existing group.
+   *
+   * Doing so silently would change the meaning of the group it left — a
+   * Combination missing a leg is no longer a Combination. Unlinking is a
+   * separate, deliberate action.
+   */
+  private assertNoneAlreadyGrouped(trips: readonly Trip[]): void {
+    const grouped = trips.find((trip) => trip.tripGroupId !== null);
+
+    if (grouped) {
+      throw new TripAlreadyGroupedException(
+        grouped.id,
+        grouped.tripGroupId as string,
+      );
+    }
   }
 
   /**
@@ -372,7 +539,7 @@ export class TripService {
     const trip = await this.requireTrip(id);
 
     if (trip.status === TripStatus.DELETED) {
-      return toTripResponse(trip);
+      return this.toResponse(trip);
     }
 
     if (trip.status !== DELETABLE_FROM_STATUS) {
@@ -387,7 +554,7 @@ export class TripService {
 
     this.logger.log("Trip deleted", { tripId: id, fromStatus: trip.status });
 
-    return toTripResponse(deleted);
+    return this.toResponse(deleted);
   }
 
   /**
@@ -417,7 +584,7 @@ export class TripService {
       toStatus: restored.status,
     });
 
-    return toTripResponse(restored);
+    return this.toResponse(restored);
   }
 
   private async requireTrip(id: string): Promise<Trip> {
@@ -502,54 +669,40 @@ export class TripService {
     }
   }
 
-  /**
-   * A Vehicle cannot serve two Trips whose planned intervals overlap.
+  /*
+   * ── THERE IS DELIBERATELY NO VEHICLE-OVERLAP RULE ─────────────────────────
+   * A Vehicle used to be refused when another Trip already occupied its
+   * planned interval. That rule is gone, by an explicit decision of the
+   * business: real planning legitimately overlaps — a truck is re-planned
+   * mid-shift, two legs are entered before their times are settled, an
+   * administrator is correcting history — and a refusal at the moment of
+   * saving forced the planner to fight the system rather than plan with it.
    *
-   * Only Trips that actually occupy the Vehicle count: a cancelled transport
-   * has released it and a deleted record never held it. A Trip without both
-   * times has no comparable interval, so it neither blocks nor is blocked —
-   * the model does not define what an open-ended planned interval occupies.
+   * Deciding whether an overlap is intentional is the planner's job, not this
+   * service's. Nothing else about assignment was relaxed: the Vehicle must
+   * exist and be active, and every other Trip rule still applies.
+   * ──────────────────────────────────────────────────────────────────────────
    */
-  private async assertVehicleFree(
-    repository: TripRepository,
-    vehicleId: string | null,
-    interval: PlannedInterval | null,
-    excludeTripId?: string,
-  ): Promise<void> {
-    if (!vehicleId || !interval) {
-      return;
-    }
 
-    const [conflict] = await repository.findVehicleOverlaps({
-      vehicleId,
-      ...interval,
-      statuses: VEHICLE_OCCUPYING_STATUSES,
-      excludeTripId,
-    });
-
-    if (conflict) {
-      this.logger.warn("Rejected overlapping vehicle booking", {
-        tripId: excludeTripId,
-        vehicleId,
-        conflictingTripId: conflict.id,
-      });
-
-      throw new VehicleAlreadyBookedException(vehicleId, conflict.id);
-    }
-  }
-
-  /** Re-acquires the booking number and Vehicle slot a Trip gave up. */
+  /**
+   * Re-acquires the booking number a Trip gave up.
+   *
+   * Only the booking number: a Vehicle is no longer exclusive to one interval,
+   * so a restored Trip cannot be refused on the grounds that its truck has
+   * since been planned elsewhere.
+   */
   private async assertReclaimable(
     repository: TripRepository,
     trip: Trip,
   ): Promise<void> {
+    // A Trip with no booking number has none to re-acquire. Uniqueness applies
+    // to the booking numbers that exist, and absence is not a value that can
+    // collide.
+    if (trip.bookingNumber === null) {
+      return;
+    }
+
     await this.assertBookingNumberFree(repository, trip.bookingNumber, trip.id);
-    await this.assertVehicleFree(
-      repository,
-      trip.vehicleId,
-      toPlannedInterval(trip.planningDate, trip.startTime, trip.endTime),
-      trip.id,
-    );
   }
 
   private assertTransitionAllowed(from: TripStatus, to: TripStatus): void {
@@ -593,17 +746,8 @@ export class TripService {
   }
 }
 
-/** An interval exists only when both ends are known. */
-function toPlannedInterval(
-  planningDate: Date,
-  startTime: Date | null,
-  endTime: Date | null,
-): PlannedInterval | null {
-  if (!startTime || !endTime) {
-    return null;
-  }
-
-  return { planningDate, startTime, endTime };
+function toNullableDate(value: string | null | undefined): Date | null {
+  return value ? toUtcDate(value) : null;
 }
 
 function toNullableTime(value: string | null | undefined): Date | null {

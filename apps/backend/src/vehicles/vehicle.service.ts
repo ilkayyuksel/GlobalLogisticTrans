@@ -48,6 +48,22 @@ export class VehicleService {
     return toVehicleResponse(await this.requireVehicle(id));
   }
 
+  /**
+   * Several Vehicles by id, as records rather than responses.
+   *
+   * Returns the Prisma rows so a caller can build whatever shape it needs — a
+   * summary embedded in another response, for instance — without this service
+   * guessing at that shape. Missing ids are simply absent from the map, because
+   * a batch lookup has no single subject to raise a 404 about.
+   *
+   * Exists to keep list endpoints off the N+1 path.
+   */
+  async findManyByIds(ids: readonly string[]): Promise<Map<string, Vehicle>> {
+    const found = await this.repository.findManyByIds(ids);
+
+    return new Map(found.map((record) => [record.id, record]));
+  }
+
   async create(dto: CreateVehicleDto): Promise<VehicleResponseDto> {
     // New vehicles are always active, so any existing active holder of either
     // identifier is a conflict.

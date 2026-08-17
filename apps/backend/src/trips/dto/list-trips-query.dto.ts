@@ -3,6 +3,7 @@ import { TripStatus } from "@prisma/client";
 import { Transform } from "class-transformer";
 import {
   IsEnum,
+  IsIn,
   IsOptional,
   IsString,
   IsUUID,
@@ -19,7 +20,25 @@ import {
   TERMINAL_MAX_LENGTH,
 } from "./create-trip.dto";
 
+import type {
+  SortDirection,
+  TripSortField,
+} from "../trip.repository";
+
 export const TRIP_SEARCH_MAX_LENGTH = 200;
+
+/**
+ * The accepted sort values, as arrays because `@IsIn` needs runtime values
+ * while the repository's union types exist only at compile time. Kept next to
+ * each other so a new sort field cannot be added to one and forgotten in the
+ * other.
+ */
+export const TripSortFieldValues: readonly TripSortField[] = [
+  "startTime",
+  "endTime",
+];
+
+export const SortDirectionValues: readonly SortDirection[] = ["asc", "desc"];
 
 /**
  * Filters for the Trip list.
@@ -105,6 +124,24 @@ export class ListTripsQueryDto extends PaginationQueryDto {
   vehicleId?: string;
 
   @ApiPropertyOptional({
+    format: "uuid",
+    description:
+      "The TripGroup a Trip belongs to. Returns every leg of that Combination, which is the only way to list a group's members — a Trip response carries the group's id but not its siblings.",
+  })
+  @IsOptional()
+  @IsUUID()
+  tripGroupId?: string;
+
+  @ApiPropertyOptional({
+    format: "uuid",
+    description:
+      "Trips carrying this Custom Property. Filtered in the database through the assignment relation, so it narrows the whole result set rather than one page.",
+  })
+  @IsOptional()
+  @IsUUID()
+  customPropertyId?: string;
+
+  @ApiPropertyOptional({
     description: "Exact terminal.",
     maxLength: TERMINAL_MAX_LENGTH,
     example: "Antwerp Gateway",
@@ -148,4 +185,21 @@ export class ListTripsQueryDto extends PaginationQueryDto {
   @IsString()
   @MaxLength(TRIP_SEARCH_MAX_LENGTH)
   search?: string;
+  @ApiPropertyOptional({
+    enum: TripSortFieldValues,
+    description:
+      "Which time to order a day's Trips by. The planning date always stays the first ordering key, and a Vehicle's Trips stay together within a day — this chooses the order inside that grouping. Trips without the chosen time are listed last, in both directions.",
+  })
+  @IsOptional()
+  @IsIn(TripSortFieldValues)
+  sortBy?: TripSortField;
+
+  @ApiPropertyOptional({
+    enum: SortDirectionValues,
+    description:
+      "Direction of the time ordering. Applies to sortBy only: the date keeps its own order so the Day, Week and Month sections stay intact.",
+  })
+  @IsOptional()
+  @IsIn(SortDirectionValues)
+  sortDirection?: SortDirection;
 }

@@ -15,6 +15,8 @@
  * reports an unreadable PDF rather than reaching for image recognition.
  */
 
+import { pathToFileURL } from "node:url";
+
 /** One positioned run of text, exactly as the PDF's text layer stores it. */
 export interface Fragment {
   readonly page: number;
@@ -51,7 +53,12 @@ export async function extractDocument(
   let document;
   try {
     document = await pdfjs.getDocument({
-      data: source,
+      // A COPY, never the caller's array. pdfjs takes ownership of the buffer
+      // it is given and detaches it, which would leave the caller holding an
+      // unusable Uint8Array — and the Backend reads those same bytes AFTER
+      // parsing, to write the PDF to storage. Reading a document must not
+      // destroy it.
+      data: new Uint8Array(source),
       // Everything below keeps extraction local, deterministic and text-only.
       useWorkerFetch: false,
       isEvalSupported: false,
@@ -141,10 +148,37 @@ const importEsm = new Function(
   "return import(specifier);",
 ) as (specifier: string) => Promise<unknown>;
 
+/** The build that runs under Node, without a browser worker. */
+const PDFJS_SPECIFIER = "pdfjs-dist/legacy/build/pdf.mjs";
+
+/**
+ * pdfjs, resolved from THIS package rather than from whoever called it.
+ *
+ * The `new Function` above is opaque to the compilers, which is what makes the
+ * import survive — but it is opaque to Node's resolver too: the import is
+ * resolved against the caller's context, not against this module. So a bare
+ * specifier only worked while the package manager happened to hoist
+ * `pdfjs-dist` somewhere the caller could also see it. When that hoisting
+ * changed, every PDF in the backend suddenly read as unreadable, with nothing
+ * in this package having changed.
+ *
+ * `require.resolve` runs in this file's own CommonJS context and therefore
+ * finds the copy declared in THIS package's dependencies. Converting it to a
+ * file URL is what lets an absolute Windows path be imported at all.
+ *
+ * The bare specifier remains as a fallback for a bundler that rewrites
+ * `require.resolve` away.
+ */
 async function loadPdfjs(): Promise<PdfjsModule> {
-  return (await importEsm(
-    "pdfjs-dist/legacy/build/pdf.mjs",
-  )) as PdfjsModule;
+  let specifier = PDFJS_SPECIFIER;
+
+  try {
+    specifier = pathToFileURL(require.resolve(PDFJS_SPECIFIER)).href;
+  } catch {
+    // Falls through to the bare specifier below.
+  }
+
+  return (await importEsm(specifier)) as PdfjsModule;
 }
 
 interface PdfjsModule {

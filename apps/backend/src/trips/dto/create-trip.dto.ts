@@ -1,4 +1,4 @@
-import { ApiProperty, ApiPropertyOptional } from "@nestjs/swagger";
+import { ApiPropertyOptional } from "@nestjs/swagger";
 import { Transform } from "class-transformer";
 import {
   IsDateString,
@@ -13,7 +13,7 @@ import {
   MinLength,
 } from "class-validator";
 
-import { rawValueOf, trim, trimToNull } from "../../common/dto/transforms";
+import { rawValueOf, trimToNull } from "../../common/dto/transforms";
 import { IsCalendarDateString } from "../../common/validators/is-calendar-date-string.validator";
 import { IsClockTimeString } from "../../common/validators/is-clock-time-string.validator";
 
@@ -53,75 +53,90 @@ export function toRawNumber(params: Parameters<typeof rawValueOf>[0]): unknown {
  * PDF and carries cross-row invariants that this phase does not implement.
  */
 export class CreateTripDto {
-  @ApiProperty({
+  @ApiPropertyOptional({
     format: "uuid",
+    nullable: true,
     description:
-      "The PDF this Trip originates from. Every Trip belongs to exactly one PDF, so an existing document must be referenced.",
+      "The PDF this Trip originates from. Required for an imported Trip and omitted for one created by hand, which has no source document. When supplied, the document must exist.",
   })
+  @IsOptional()
   @IsUUID()
-  pdfDocumentId!: string;
+  pdfDocumentId?: string | null;
 
-  @ApiProperty({
+  @ApiPropertyOptional({
+    nullable: true,
     description:
-      "Primary business identifier from the transport order. Immutable once the Trip exists.",
+      "Primary business identifier from the transport order. May be absent on a Trip entered by hand before its paperwork arrives; uniqueness is enforced only among the Trips that have one.",
     maxLength: BOOKING_NUMBER_MAX_LENGTH,
     example: "BK-2026-0042",
   })
-  @Transform(trim)
+  @Transform(trimToNull)
+  @IsOptional()
   @IsString()
   @MinLength(1)
   @MaxLength(BOOKING_NUMBER_MAX_LENGTH)
-  bookingNumber!: string;
+  bookingNumber?: string | null;
 
-  @ApiProperty({
+  @ApiPropertyOptional({
+    nullable: true,
     description: "Container type code.",
     maxLength: CONTAINER_TYPE_MAX_LENGTH,
     example: "45PH",
   })
-  @Transform(trim)
+  @Transform(trimToNull)
+  @IsOptional()
   @IsString()
   @MinLength(1)
   @MaxLength(CONTAINER_TYPE_MAX_LENGTH)
-  containerType!: string;
+  containerType?: string | null;
 
-  @ApiProperty({
+  @ApiPropertyOptional({
+    nullable: true,
     description: "Destination city. Street level is not stored.",
     maxLength: DESTINATION_MAX_LENGTH,
     example: "Bousbecque",
   })
-  @Transform(trim)
+  @Transform(trimToNull)
+  @IsOptional()
   @IsString()
   @MinLength(1)
   @MaxLength(DESTINATION_MAX_LENGTH)
-  destinationCity!: string;
+  destinationCity?: string | null;
 
-  @ApiProperty({
+  @ApiPropertyOptional({
+    nullable: true,
     description: "Destination country.",
     maxLength: DESTINATION_MAX_LENGTH,
     example: "France",
   })
-  @Transform(trim)
+  @Transform(trimToNull)
+  @IsOptional()
   @IsString()
   @MinLength(1)
   @MaxLength(DESTINATION_MAX_LENGTH)
-  destinationCountry!: string;
+  destinationCountry?: string | null;
 
-  @ApiProperty({
+  @ApiPropertyOptional({
+    nullable: true,
     description:
-      "The originally planned date. Immutable: it preserves what was planned before any administrator moved the Trip.",
+      "The originally planned date. Immutable: it preserves what was planned before any administrator moved the Trip. Defaults to the planning date when one is given, because that IS what was originally planned; null when neither is.",
     format: "date",
     example: "2026-08-17",
   })
+  @IsOptional()
   @IsCalendarDateString()
-  originalPlanningDate!: string;
+  originalPlanningDate?: string | null;
 
-  @ApiProperty({
-    description: "The date the Trip is currently planned on. May be moved later.",
+  @ApiPropertyOptional({
+    nullable: true,
+    description:
+      "The date the Trip is currently planned on. May be moved later, and may be absent on a Trip that has not been scheduled yet — in which case no driver can be resolved for it either.",
     format: "date",
     example: "2026-08-17",
   })
+  @IsOptional()
   @IsCalendarDateString()
-  planningDate!: string;
+  planningDate?: string | null;
 
   @ApiPropertyOptional({
     description: "Terminal the container is collected from or returned to.",

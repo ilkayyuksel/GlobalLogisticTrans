@@ -1,5 +1,7 @@
 import { Injectable } from "@nestjs/common";
-import { VehicleAssignment } from "@prisma/client";
+import { Driver, VehicleAssignment } from "@prisma/client";
+
+import { assignmentInEffect } from "./assignment-period";
 
 import { changedFieldNames } from "../common/changed-fields";
 import { addDays, toIsoDate, toUtcDate, todayUtc } from "../common/dates";
@@ -23,7 +25,26 @@ import {
   VehicleAssignmentNotFoundException,
   VehicleAssignmentOverlapException,
 } from "./exceptions/vehicle-assignment.exceptions";
-import { VehicleAssignmentRepository } from "./vehicle-assignment.repository";
+import {
+  type AssignmentWithDriver,
+  VehicleAssignmentRepository,
+} from "./vehicle-assignment.repository";
+
+/** One "who drove this vehicle on this day?" question. */
+export interface VehicleOnDate {
+  readonly vehicleId: string;
+  readonly onDate: Date;
+}
+
+/**
+ * Keys the answer to one such question.
+ *
+ * Exported so a caller builds the same key it will look up, rather than
+ * assuming a format that could change here.
+ */
+export function assignmentKey(vehicleId: string, onDate: Date): string {
+  return `${vehicleId}@${onDate.toISOString().slice(0, 10)}`;
+}
 
 @Injectable()
 export class VehicleAssignmentService {
@@ -85,6 +106,69 @@ export class VehicleAssignmentService {
     );
 
     return assignment ? toVehicleAssignmentResponse(assignment) : null;
+  }
+
+  /**
+   * The driver each vehicle was assigned to on a given date.
+   *
+   * Answers many (vehicle, date) questions with ONE database query, which is
+   * what a page of Trips needs: without it, resolving 25 Trips would mean 25
+   * lookups. The result is keyed by `assignmentKey` so a caller can ask about
+   * the same vehicle on several different dates.
+   *
+   * A pair with no assignment covering that date is simply absent from the map,
+   * which is how "this vehicle had no driver that day" is expressed.
+   *
+   * An INACTIVE driver is still returned. Deactivating a driver does not
+   * retroactively rewrite who drove a Trip last month, and the Trip domain
+   * already takes this position: it re-checks active state only when an
+   * assignment CHANGES, so a Trip carrying a since-deactivated driver stays
+   * valid. The driver's `isActive` flag travels with the answer so a caller can
+   * show the state rather than having to infer it.
+   */
+  async findDriversForVehiclesOnDates(
+    requests: readonly VehicleOnDate[],
+  ): Promise<Map<string, Driver>> {
+    if (requests.length === 0) {
+      return new Map();
+    }
+
+    const vehicleIds = [...new Set(requests.map((request) => request.vehicleId))];
+    const times = requests.map((request) => request.onDate.getTime());
+
+    const assignments = await this.repository.findCoveringVehicles(
+      vehicleIds,
+      new Date(Math.min(...times)),
+      new Date(Math.max(...times)),
+    );
+
+    const byVehicle = new Map<string, AssignmentWithDriver[]>();
+
+    for (const assignment of assignments) {
+      const existing = byVehicle.get(assignment.vehicleId);
+
+      if (existing) {
+        existing.push(assignment);
+      } else {
+        byVehicle.set(assignment.vehicleId, [assignment]);
+      }
+    }
+
+    const resolved = new Map<string, Driver>();
+
+    for (const request of requests) {
+      const candidates = byVehicle.get(request.vehicleId) ?? [];
+      const governing = assignmentInEffect(candidates, request.onDate);
+
+      if (governing) {
+        resolved.set(
+          assignmentKey(request.vehicleId, request.onDate),
+          (governing as AssignmentWithDriver).driver,
+        );
+      }
+    }
+
+    return resolved;
   }
 
   /**

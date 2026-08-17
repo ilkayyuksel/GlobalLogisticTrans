@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from "@nestjs/swagger";
-import { Trip, TripStatus } from "@prisma/client";
+import { Trip, TripDirection, TripStatus } from "@prisma/client";
 
 import { toIsoDate } from "../../common/dates";
 import { PaginationMetaDto } from "../../common/dto/pagination-meta.dto";
@@ -22,15 +22,120 @@ import { DISTANCE_DECIMAL_PLACES } from "./create-trip.dto";
  * `parserMetadata` is deliberately not exposed. It is diagnostics-only, no
  * business decision may read from it, and this phase has no parser to fill it.
  */
+/**
+ * Just enough of a Vehicle to put it on a screen.
+ *
+ * A summary rather than the whole Vehicle: a planning view needs to identify
+ * the truck and colour its row, and embedding brand, model, year and notes in
+ * every Trip of every page would multiply the payload for data nobody reads
+ * there. The full record stays one request away at /vehicles/{id}.
+ */
+export class TripVehicleSummaryDto {
+  @ApiProperty({ format: "uuid" })
+  id!: string;
+
+  @ApiProperty({ example: "1-ABC-123" })
+  licensePlate!: string;
+
+  /** The Vehicle's own colour, so a board can keep one truck visually stable. */
+  @ApiProperty({ example: "#2563EB" })
+  displayColor!: string;
+
+  @ApiProperty({
+    description:
+      "False when the Vehicle has since been deactivated. The Trip keeps it.",
+  })
+  isActive!: boolean;
+}
+
+/** How a Trip's driver was arrived at. */
+export enum EffectiveDriverSource {
+  /** trip.driver_id — an explicit override for this Trip alone. */
+  Override = "OVERRIDE",
+  /** The VehicleAssignment covering the Trip's planning date. */
+  VehicleAssignment = "VEHICLE_ASSIGNMENT",
+}
+
+/**
+ * The driver actually responsible for a Trip.
+ *
+ * Resolved by the Backend, because the rule is a business rule: a Trip's
+ * `driverId` is only an OVERRIDE, and when it is absent the driver comes from
+ * the VehicleAssignment in effect on the Trip's planning date. A client that
+ * worked this out for itself would be running that rule in a second place, and
+ * would get it wrong the moment assignments have gaps or boundaries.
+ *
+ * `source` is included because the distinction is operationally meaningful: an
+ * override was chosen deliberately for this Trip, an assignment is the standing
+ * arrangement, and a planner treats the two differently.
+ */
+export class EffectiveDriverDto {
+  @ApiProperty({ format: "uuid" })
+  id!: string;
+
+  @ApiProperty({ example: "Jan Peeters" })
+  name!: string;
+
+  @ApiProperty({
+    description:
+      "False when the Driver has since been deactivated. Deactivation does not rewrite who drove a past Trip.",
+  })
+  isActive!: boolean;
+
+  @ApiProperty({ enum: EffectiveDriverSource })
+  source!: EffectiveDriverSource;
+}
+
+/**
+ * A Custom Property as a Trip carries it.
+ *
+ * Name and active state only: a list needs to say "TAR, Flat" and to mark one
+ * that has since been deactivated. The configured price is deliberately absent
+ * — what a property contributed to THIS Trip is a line in its pricing snapshot,
+ * and showing a configuration amount beside a Trip would invite reading it as
+ * the charge.
+ */
+export class TripCustomPropertySummaryDto {
+  @ApiProperty({ format: "uuid" })
+  id!: string;
+
+  @ApiProperty({ example: "TAR" })
+  name!: string;
+
+  @ApiProperty({
+    description:
+      "False when the property was deactivated after it was assigned. The assignment stands.",
+  })
+  isActive!: boolean;
+}
+
+/**
+ * The resolved companions of a Trip, supplied by the service.
+ *
+ * A required parameter of `toTripResponse` rather than an optional one on
+ * purpose: if it could be omitted, a caller that forgot would return
+ * `effectiveDriver: null`, which a client cannot tell apart from "this Trip
+ * genuinely has no driver". Making it required turns that mistake into a
+ * compile error.
+ */
+export interface TripPlanningData {
+  vehicle: TripVehicleSummaryDto | null;
+  effectiveDriver: EffectiveDriverDto | null;
+  /** In the properties' configured display order. Empty when none are assigned. */
+  customProperties: TripCustomPropertySummaryDto[];
+}
+
 export class TripResponseDto {
   @ApiProperty({ format: "uuid" })
   id!: string;
 
-  @ApiProperty({
+  @ApiPropertyOptional({
     format: "uuid",
-    description: "The PDF this Trip originates from. Immutable.",
+    nullable: true,
+    description:
+      "The PDF this Trip originates from, and immutable when there is one. Null for a Trip created by hand, which has no source document.",
   })
-  pdfDocumentId!: string;
+  pdfDocumentId!: string | null;
 
   @ApiPropertyOptional({
     format: "uuid",
@@ -51,37 +156,66 @@ export class TripResponseDto {
   })
   driverId!: string | null;
 
+  @ApiProperty({
+    type: [TripCustomPropertySummaryDto],
+    description:
+      "The Custom Properties assigned to this Trip, embedded so a list needs no request per row.",
+  })
+  customProperties!: TripCustomPropertySummaryDto[];
+
   @ApiProperty({ enum: TripStatus })
   status!: TripStatus;
 
-  @ApiProperty({ example: "BK-2026-0042" })
-  bookingNumber!: string;
+  @ApiPropertyOptional({
+    enum: TripDirection,
+    nullable: true,
+    description:
+      "Which half of the transport this Trip is, as the transport order stated it: COLLECTION fetches a container, DELIVERY brings one. Null on a Trip created by hand, and on Trips imported before this was recorded.",
+  })
+  direction!: TripDirection | null;
+
+  @ApiPropertyOptional({
+    nullable: true,
+    example: "BK-2026-0042",
+    description:
+      "From the transport order. Null on a manual Trip whose booking number is not known yet.",
+  })
+  bookingNumber!: string | null;
 
   @ApiPropertyOptional({ nullable: true, example: "MSKU1234567" })
   containerNumber!: string | null;
 
-  @ApiProperty({ example: "45PH" })
-  containerType!: string;
+  @ApiPropertyOptional({ nullable: true, example: "45PH" })
+  containerType!: string | null;
 
   @ApiPropertyOptional({ nullable: true, example: "Antwerp Gateway" })
   terminal!: string | null;
 
-  @ApiProperty({ example: "Bousbecque" })
-  destinationCity!: string;
+  @ApiPropertyOptional({ nullable: true, example: "Bousbecque" })
+  destinationCity!: string | null;
 
-  @ApiProperty({ example: "France" })
-  destinationCountry!: string;
+  @ApiPropertyOptional({ nullable: true, example: "France" })
+  destinationCountry!: string | null;
 
-  @ApiProperty({
+  @ApiPropertyOptional({
     type: String,
     format: "date",
-    description: "Immutable date extracted at import.",
+    nullable: true,
+    description:
+      "Immutable date extracted at import. Null on a manual Trip, which was never imported.",
     example: "2026-08-17",
   })
-  originalPlanningDate!: string;
+  originalPlanningDate!: string | null;
 
-  @ApiProperty({ type: String, format: "date", example: "2026-08-18" })
-  planningDate!: string;
+  @ApiPropertyOptional({
+    type: String,
+    format: "date",
+    nullable: true,
+    example: "2026-08-18",
+    description:
+      "The day this Trip is planned for. Null when it has not been scheduled yet, which also means no driver can be resolved for it.",
+  })
+  planningDate!: string | null;
 
   @ApiPropertyOptional({ type: String, nullable: true, example: "08:00:00" })
   startTime!: string | null;
@@ -106,6 +240,22 @@ export class TripResponseDto {
   @ApiPropertyOptional({ nullable: true })
   internalNotes!: string | null;
 
+  @ApiPropertyOptional({
+    type: TripVehicleSummaryDto,
+    nullable: true,
+    description:
+      "The assigned Vehicle, summarised. Null when none is assigned. Embedded so a planning view does not need one request per Trip.",
+  })
+  vehicle!: TripVehicleSummaryDto | null;
+
+  @ApiPropertyOptional({
+    type: EffectiveDriverDto,
+    nullable: true,
+    description:
+      "Who is actually driving: the override if one is set, otherwise the Driver from the VehicleAssignment covering planningDate. Null when neither exists.",
+  })
+  effectiveDriver!: EffectiveDriverDto | null;
+
   @ApiProperty({ format: "date-time" })
   createdAt!: Date;
 
@@ -122,7 +272,10 @@ export class PaginatedTripsDto {
   meta!: PaginationMetaDto;
 }
 
-export function toTripResponse(trip: Trip): TripResponseDto {
+export function toTripResponse(
+  trip: Trip,
+  planning: TripPlanningData,
+): TripResponseDto {
   return {
     id: trip.id,
     pdfDocumentId: trip.pdfDocumentId,
@@ -130,14 +283,19 @@ export function toTripResponse(trip: Trip): TripResponseDto {
     vehicleId: trip.vehicleId,
     driverId: trip.driverId,
     status: trip.status,
+    direction: trip.direction,
     bookingNumber: trip.bookingNumber,
     containerNumber: trip.containerNumber,
     containerType: trip.containerType,
     terminal: trip.terminal,
     destinationCity: trip.destinationCity,
     destinationCountry: trip.destinationCountry,
-    originalPlanningDate: toIsoDate(trip.originalPlanningDate),
-    planningDate: toIsoDate(trip.planningDate),
+    originalPlanningDate:
+      trip.originalPlanningDate === null
+        ? null
+        : toIsoDate(trip.originalPlanningDate),
+    planningDate:
+      trip.planningDate === null ? null : toIsoDate(trip.planningDate),
     startTime: trip.startTime === null ? null : toClockTime(trip.startTime),
     endTime: trip.endTime === null ? null : toClockTime(trip.endTime),
     executionDatetime: trip.executionDatetime,
@@ -149,6 +307,9 @@ export function toTripResponse(trip: Trip): TripResponseDto {
         ? null
         : trip.distanceKm.toFixed(DISTANCE_DECIMAL_PLACES),
     internalNotes: trip.internalNotes,
+    vehicle: planning.vehicle,
+    effectiveDriver: planning.effectiveDriver,
+    customProperties: planning.customProperties,
     createdAt: trip.createdAt,
     updatedAt: trip.updatedAt,
   };

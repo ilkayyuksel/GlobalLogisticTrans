@@ -6,6 +6,7 @@ import { TripResponseDto } from "../trips/dto/trip-response.dto";
 import { TripService } from "../trips/trip.service";
 import {
   MissingRouteCostException,
+  MissingTripPricingInputException,
   NegativeTotalPriceException,
   TripNotFoundForPricingException,
   TripNotPriceableException,
@@ -245,8 +246,27 @@ export class PricingEngineService {
     const trip = await this.requirePriceableTrip(tripId);
     const rules = await this.ruleResolver.resolve();
 
-    // The route is read straight off the Trip and does not depend on the
-    // strategy: a Trip runs one route however its base price is derived.
+    /*
+     * The route is read straight off the Trip and does not depend on the
+     * strategy: a Trip runs one route however its base price is derived.
+     *
+     * A destination is required to have one at all. A manually created Trip
+     * may not have been given one yet, and that is refused here — through the
+     * same "missing input" report the engine already uses — rather than being
+     * carried as a null into calculators that all assume a route exists.
+     */
+    if (!trip.destinationCity) {
+      this.logger.warn("Pricing requested for a Trip with no destination", {
+        tripId,
+      });
+
+      throw new MissingTripPricingInputException(
+        tripId,
+        "destinationCity",
+        rules.strategy,
+      );
+    }
+
     const route: PricingRouteIdentity = {
       departure: trip.terminal,
       destination: trip.destinationCity,

@@ -1,4 +1,4 @@
-import { Prisma } from "@prisma/client";
+import { Prisma, TripDirection } from "@prisma/client";
 
 import { CreatePdfDocumentData } from "../pdf-documents/pdf-document.repository";
 
@@ -41,12 +41,26 @@ export interface ImportedTripData {
   readonly bookingNumber: string;
   readonly containerNumber: string | null;
   readonly containerType: string;
-  readonly terminal: string;
+  /**
+   * Exactly as the PDF named it. Null when the document names none.
+   *
+   * Stored verbatim: this string IS the Trip's terminal and the key that
+   * RoutePricing and RouteCost are configured under, so nothing translates it.
+   */
+  readonly terminal: string | null;
   readonly destinationCity: string;
   readonly destinationCountry: string;
   readonly planningDate: string;
   readonly startTime: string | null;
   readonly endTime: string | null;
+
+  /**
+   * Which half of the transport this Trip is, as the document stated it.
+   *
+   * Business data: the Combination export labels a leg's start and end points
+   * by it. Null only where a document said nothing.
+   */
+  readonly direction: TripDirection | null;
 
   /** Diagnostics only. No business decision may read from this. */
   readonly parserMetadata: Prisma.InputJsonValue;

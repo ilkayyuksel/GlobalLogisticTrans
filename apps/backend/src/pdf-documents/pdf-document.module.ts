@@ -1,12 +1,13 @@
 import { Module } from "@nestjs/common";
 
+import { PdfDocumentController } from "./pdf-document.controller";
 import { PdfDocumentRepository } from "./pdf-document.repository";
 import { PdfDocumentService } from "./pdf-document.service";
 
 /**
- * No controller: a PdfDocument is created by an import, never by a request, so
- * there is nothing for a client to call. A read API can be added when something
- * actually needs to list documents.
+ * One controller, and it serves content only: a PdfDocument is created by an
+ * import, never by a request, so there is nothing to create, update or list
+ * here. What a client can do is read the transport order behind a Trip.
  *
  * Only the service is exported. TripRepository reaches this module's repository
  * by constructing it against the transaction client — the same way
@@ -14,6 +15,7 @@ import { PdfDocumentService } from "./pdf-document.service";
  * provider from here.
  */
 @Module({
+  controllers: [PdfDocumentController],
   providers: [PdfDocumentService, PdfDocumentRepository],
   exports: [PdfDocumentService],
 })

@@ -57,6 +57,20 @@ export class VehicleRepository {
   }
 
   /**
+   * Several Vehicles in one query, for callers resolving a page of records.
+   *
+   * Returns only the ids that exist; a caller decides what a missing one means.
+   * Exists so a list never issues one lookup per row.
+   */
+  findManyByIds(ids: readonly string[]): Promise<Vehicle[]> {
+    if (ids.length === 0) {
+      return Promise.resolve([]);
+    }
+
+    return this.prisma.vehicle.findMany({ where: { id: { in: [...ids] } } });
+  }
+
+  /**
    * `excludeVehicleId` lets an update ignore the row being edited, so saving a
    * vehicle without changing its plate never conflicts with itself.
    */

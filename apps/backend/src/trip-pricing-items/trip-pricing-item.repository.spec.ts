@@ -42,6 +42,7 @@ describe("TripPricingItemRepository", () => {
 
       expect(prisma.tripPricingItem.findUnique).toHaveBeenCalledWith({
         where: { id: "item-1" },
+        include: { pricingComponent: { select: { code: true } } },
       });
     });
   });
@@ -52,6 +53,8 @@ describe("TripPricingItemRepository", () => {
 
       expect(prisma.tripPricingItem.findMany).toHaveBeenCalledWith({
         where: { tripPricingId: "pricing-1" },
+        // The component's code travels with the line.
+        include: { pricingComponent: { select: { code: true } } },
         // calculation_order is not unique, so id keeps the sequence stable.
         orderBy: [{ calculationOrder: "asc" }, { id: "asc" }],
       });
@@ -74,6 +77,8 @@ describe("TripPricingItemRepository", () => {
       expect(prisma.tripPricingItem.update).toHaveBeenCalledWith({
         where: { id: "item-1" },
         data: { notes: "checked" },
+        // The updated line comes back classified, like every other read.
+        include: { pricingComponent: { select: { code: true } } },
       });
     });
   });

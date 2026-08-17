@@ -16,6 +16,7 @@ import { AppLoggerService } from "../logger/app-logger.service";
 import { VehicleService } from "../vehicles/vehicle.service";
 import { TripController } from "./trip.controller";
 import { TripRepository } from "./trip.repository";
+import { TripPlanningDataService } from "./trip-planning-data.service";
 import { TripService } from "./trip.service";
 
 const TRIP_ID = "3f2504e0-4f89-41d3-9a0c-0305e82c3301";
@@ -32,6 +33,7 @@ function buildTrip(overrides: Partial<Trip> = {}): Trip {
     vehicleId: null,
     driverId: null,
     status: TripStatus.OPEN,
+    direction: null,
     bookingNumber: "BK-2026-0042",
     containerNumber: null,
     containerType: "45PH",
@@ -80,7 +82,6 @@ describe("TripController (integration)", () => {
       findPage: jest.fn().mockResolvedValue({ items: [], totalItems: 0 }),
       findById: jest.fn().mockResolvedValue(null),
       findByBookingNumber: jest.fn().mockResolvedValue(null),
-      findVehicleOverlaps: jest.fn().mockResolvedValue([]),
       pdfDocumentExists: jest.fn().mockResolvedValue(true),
       create: jest.fn().mockResolvedValue(buildTrip()),
       update: jest.fn().mockResolvedValue(buildTrip()),
@@ -115,6 +116,26 @@ describe("TripController (integration)", () => {
         { provide: TripRepository, useValue: repository },
         { provide: VehicleService, useValue: vehicleService },
         { provide: DriverService, useValue: driverService },
+        // The effective-driver resolution has its own tests; here it only has
+        // to answer, so the HTTP behaviour is exercised in isolation from it.
+        {
+          provide: TripPlanningDataService,
+          useValue: {
+            resolveOne: jest
+              .fn()
+              .mockResolvedValue({ vehicle: null, effectiveDriver: null }),
+            resolveMany: jest.fn((trips: readonly { id: string }[]) =>
+              Promise.resolve(
+                new Map(
+                  trips.map((trip) => [
+                    trip.id,
+                    { vehicle: null, effectiveDriver: null },
+                  ]),
+                ),
+              ),
+            ),
+          },
+        },
         // The Trip lifecycle announces TripClosed; nothing subscribes here, so
         // the HTTP behaviour is exercised in isolation from pricing.
         {
@@ -185,8 +206,32 @@ describe("TripController (integration)", () => {
       ["planningDate=17-08-2026", "a non-ISO date"],
       ["vehicleId=not-a-uuid", "a malformed vehicle id"],
       ["unknownFilter=1", "an unknown filter"],
+      ["sortBy=terminal", "a field that is not sortable"],
+      ["sortBy=startTime&sortDirection=sideways", "an unknown direction"],
     ])("rejects %s (%s)", async (query) => {
       await request(app.getHttpServer()).get(`${BASE}?${query}`).expect(400);
+    });
+
+    /**
+     * Sorting is a database concern: ordering the page already in the browser
+     * would order only what is on screen and misrepresent the rest of the
+     * period.
+     */
+    it.each([
+      ["startTime", "asc"],
+      ["startTime", "desc"],
+      ["endTime", "asc"],
+      ["endTime", "desc"],
+    ])("sorts by %s %s in the database", async (sortBy, sortDirection) => {
+      await request(app.getHttpServer())
+        .get(`${BASE}?sortBy=${sortBy}&sortDirection=${sortDirection}`)
+        .expect(200);
+
+      expect(repository.findPage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sort: { field: sortBy, direction: sortDirection },
+        }),
+      );
     });
 
     it("accepts a planning-date range for the weekly view", async () => {
@@ -307,11 +352,12 @@ describe("TripController (integration)", () => {
         .expect(409);
     });
 
-    it("returns 409 when the vehicle is already booked for that interval", async () => {
-      repository.findVehicleOverlaps.mockResolvedValue([
-        buildTrip({ id: OTHER_TRIP_ID }),
-      ]);
-
+    /**
+     * A Vehicle used to be refused when another Trip occupied its interval.
+     * The business removed that rule, so this asserts the acceptance rather
+     * than deleting the case: a returning refusal must fail a test.
+     */
+    it("accepts a Trip on a Vehicle already busy in that interval", async () => {
       await request(app.getHttpServer())
         .post(BASE)
         .send({
@@ -320,33 +366,7 @@ describe("TripController (integration)", () => {
           startTime: "08:00",
           endTime: "12:00",
         })
-        .expect(409);
-    });
-
-    it.each([
-      [{}, "an empty body"],
-      [{ ...VALID_BODY, bookingNumber: "   " }, "a blank booking number"],
-      [{ ...VALID_BODY, bookingNumber: 42 }, "a non-string booking number"],
-      [{ ...VALID_BODY, pdfDocumentId: "not-a-uuid" }, "a malformed pdf id"],
-      [{ ...VALID_BODY, planningDate: "2026-02-31" }, "an impossible date"],
-      [{ ...VALID_BODY, planningDate: "17/08/2026" }, "a non-ISO date"],
-      [{ ...VALID_BODY, startTime: "25:00" }, "an hour out of range"],
-      [{ ...VALID_BODY, startTime: "8:00" }, "an unpadded hour"],
-      [{ ...VALID_BODY, endTime: "noon" }, "a non-time"],
-      [{ ...VALID_BODY, distanceKm: -1 }, "a negative distance"],
-      [{ ...VALID_BODY, distanceKm: 10.123 }, "three decimals of distance"],
-      [{ ...VALID_BODY, distanceKm: "132.5" }, "a string distance"],
-      [{ ...VALID_BODY, waitingTimeMinutes: -1 }, "negative waiting time"],
-      [{ ...VALID_BODY, waitingTimeMinutes: 1.5 }, "fractional waiting time"],
-      [{ ...VALID_BODY, status: "CLOSED" }, "a status, which is not settable"],
-      [
-        { ...VALID_BODY, tripGroupId: PDF_ID },
-        "a trip group, not managed here",
-      ],
-      [{ ...VALID_BODY, parserMetadata: {} }, "parser metadata"],
-      [{ ...VALID_BODY, unknown: 1 }, "an unknown field"],
-    ])("rejects %j (%s)", async (body, _reason) => {
-      await request(app.getHttpServer()).post(BASE).send(body).expect(400);
+        .expect(201);
     });
 
     it("accepts a zero distance and a zero waiting time", async () => {

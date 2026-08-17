@@ -47,6 +47,22 @@ export class DriverService {
     return toDriverResponse(await this.requireDriver(id));
   }
 
+  /**
+   * Several Drivers by id, as records rather than responses.
+   *
+   * Returns the Prisma rows so a caller can build whatever shape it needs — a
+   * summary embedded in another response, for instance — without this service
+   * guessing at that shape. Missing ids are simply absent from the map, because
+   * a batch lookup has no single subject to raise a 404 about.
+   *
+   * Exists to keep list endpoints off the N+1 path.
+   */
+  async findManyByIds(ids: readonly string[]): Promise<Map<string, Driver>> {
+    const found = await this.repository.findManyByIds(ids);
+
+    return new Map(found.map((record) => [record.id, record]));
+  }
+
   async create(dto: CreateDriverDto): Promise<DriverResponseDto> {
     // New drivers are always active, so any existing active holder of this
     // licence number is a conflict.

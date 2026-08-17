@@ -1,0 +1,128 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/**
+ * The TRAXO palette.
+ *
+ * Defined once, as RGB channel triples so Tailwind can apply opacity to any of
+ * them. Components reference the tokens — never a hex value — so the brand can
+ * change here and propagate everywhere.
+ *
+ * Official product colours:
+ *   #0B1220  dark navy       navigation
+ *   #17233A  secondary navy  raised navigation surfaces
+ *   #2563EB  electric blue   primary actions
+ *   #60A5FA  light blue      the interactive accent on dark
+ *   #F8FAFC  background      the content area
+ *   #FFFFFF  cards
+ */
+:root {
+  /* Brand constants — identical in both themes. */
+  --brand-navy: 11 18 32; /* #0B1220 */
+  --brand-navy-raised: 23 35 58; /* #17233A */
+  --brand-blue: 37 99 235; /* #2563EB */
+  --brand-blue-light: 96 165 250; /* #60A5FA */
+
+  /* Navigation is dark navy in BOTH themes: it is the brand surface, and a
+     header that inverts with the theme stops reading as the same product. */
+  --color-navigation: var(--brand-navy);
+  --color-navigation-raised: var(--brand-navy-raised);
+  --color-navigation-text: 248 250 252;
+  --color-navigation-muted: 148 163 184;
+  --color-navigation-border: 30 41 59;
+
+  --color-primary: var(--brand-blue);
+  --color-primary-hover: 29 78 216; /* #1D4ED8 */
+  --color-primary-pressed: 30 64 175; /* #1E40AF */
+
+  --color-success: 22 163 74; /* #16A34A */
+  --color-warning: 245 158 11; /* #F59E0B */
+  --color-danger: 220 38 38; /* #DC2626 */
+  --color-info: 2 132 199; /* #0284C7 */
+
+  /* Light theme: very light content area, white cards, subtle borders. */
+  --color-background: 248 250 252; /* #F8FAFC */
+  --color-card: 255 255 255; /* #FFFFFF */
+  --color-sidebar: 255 255 255;
+  --color-border: 226 232 240; /* #E2E8F0 */
+  --color-text-primary: 15 23 42; /* #0F172A */
+  --color-text-secondary: 71 85 105; /* #475569 */
+  --color-text-muted: 148 163 184; /* #94A3B8 */
+  --color-hover: 241 245 249; /* #F1F5F9 */
+
+  /*
+   * Combination colours.
+   *
+   * A TripGroup has no colour of its own in the database, and inventing one per
+   * group would be inventing business data. These six are presentation only:
+   * the group's id picks one deterministically, so the two legs of the same
+   * Combination always read as a pair and two groups on one screen stay
+   * distinguishable. They are hues no status badge uses, so a group marker can
+   * never be mistaken for a state.
+   */
+  --color-combination-1: 124 58 237; /* violet */
+  --color-combination-2: 13 148 136; /* teal */
+  --color-combination-3: 217 119 6; /* amber */
+  --color-combination-4: 219 39 119; /* pink */
+  --color-combination-5: 79 70 229; /* indigo */
+  --color-combination-6: 101 163 13; /* lime */
+}
+
+/**
+ * Dark theme.
+ *
+ * Stays in the navy family rather than going to pure black: the content area is
+ * a lighter navy than the navigation, so the two surfaces remain distinguishable
+ * and long tables stay comfortable to read.
+ *
+ * The light blue becomes the interactive accent here — electric blue on a dark
+ * navy card does not carry enough contrast to be a reliable action colour.
+ */
+.dark {
+  --color-primary: var(--brand-blue-light);
+  --color-primary-hover: 147 197 253; /* #93C5FD */
+  --color-primary-pressed: 191 219 254; /* #BFDBFE */
+
+  --color-background: 15 23 42; /* #0F172A — navy, not black */
+  --color-card: 23 35 58; /* #17233A — the secondary navy */
+  --color-sidebar: 11 18 32; /* #0B1220 */
+  --color-border: 51 65 85; /* #334155 */
+  --color-text-primary: 248 250 252; /* #F8FAFC */
+  --color-text-secondary: 203 213 225; /* #CBD5E1 */
+  --color-text-muted: 148 163 184; /* #94A3B8 */
+  --color-hover: 51 65 85; /* #334155 */
+
+  /* The same six hues, lightened so they carry on a navy surface. */
+  --color-combination-1: 167 139 250;
+  --color-combination-2: 45 212 191;
+  --color-combination-3: 251 191 36;
+  --color-combination-4: 244 114 182;
+  --color-combination-5: 129 140 248;
+  --color-combination-6: 163 230 53;
+}
+
+body {
+  @apply bg-background text-foreground;
+}
+
+/* Keyboard users must always be able to see what is focused. */
+:focus-visible {
+  @apply outline-none ring-2 ring-primary ring-offset-2 ring-offset-background;
+}
+
+/**
+ * The login background.
+ *
+ * A neutral navy wash stands in for the artwork that will be supplied later.
+ * Replacing it is one line: set `--login-background-image` to a url(...) and
+ * the layer picks it up — no component changes, no external URL in the source.
+ */
+:root {
+  --login-background-image: linear-gradient(
+    160deg,
+    rgb(var(--brand-navy)) 0%,
+    rgb(var(--brand-navy-raised)) 55%,
+    rgb(30 58 138) 100%
+  );
+}

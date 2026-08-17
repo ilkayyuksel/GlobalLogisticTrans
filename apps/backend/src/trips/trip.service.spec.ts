@@ -13,10 +13,10 @@ import {
   TripNotDeletedException,
   TripNotFoundException,
   UnknownPdfDocumentException,
-  VehicleAlreadyBookedException,
 } from "./exceptions/trip.exceptions";
 import { TripRepository } from "./trip.repository";
 import { TripService } from "./trip.service";
+import { TripPlanningDataService } from "./trip-planning-data.service";
 
 const TRIP_ID = "3f2504e0-4f89-41d3-9a0c-0305e82c3301";
 const OTHER_TRIP_ID = "9c858901-8a57-4791-81fe-4c455b099bc9";
@@ -32,6 +32,7 @@ function buildTrip(overrides: Partial<Trip> = {}): Trip {
     vehicleId: null,
     driverId: null,
     status: TripStatus.OPEN,
+    direction: null,
     bookingNumber: "BK-2026-0042",
     containerNumber: null,
     containerType: "45PH",
@@ -79,7 +80,6 @@ describe("TripService", () => {
       findPage: jest.fn().mockResolvedValue({ items: [], totalItems: 0 }),
       findById: jest.fn().mockResolvedValue(null),
       findByBookingNumber: jest.fn().mockResolvedValue(null),
-      findVehicleOverlaps: jest.fn().mockResolvedValue([]),
       pdfDocumentExists: jest.fn().mockResolvedValue(true),
       create: jest.fn().mockResolvedValue(buildTrip()),
       update: jest.fn().mockResolvedValue(buildTrip()),
@@ -106,6 +106,19 @@ describe("TripService", () => {
       repository,
       vehicleService as unknown as VehicleService,
       driverService as unknown as DriverService,
+      {
+        resolveOne: () =>
+          Promise.resolve({ vehicle: null, effectiveDriver: null }),
+        resolveMany: (trips: readonly { id: string }[]) =>
+          Promise.resolve(
+            new Map(
+              trips.map((trip) => [
+                trip.id,
+                { vehicle: null, effectiveDriver: null },
+              ]),
+            ),
+          ),
+      } as unknown as TripPlanningDataService,
       eventBus as unknown as DomainEventBus,
       logger as unknown as AppLoggerService,
     );
@@ -134,6 +147,20 @@ describe("TripService", () => {
           planningDate: new Date("2026-08-17T00:00:00.000Z"),
           planningDateFrom: new Date("2026-08-10T00:00:00.000Z"),
           planningDateTo: new Date("2026-08-23T00:00:00.000Z"),
+        }),
+      );
+    });
+
+    it("passes the TripGroup filter through to the repository", async () => {
+      await service.findAll({
+        page: 1,
+        pageSize: 25,
+        tripGroupId: "97777777-7777-4777-8777-777777777777",
+      });
+
+      expect(repository.findPage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          tripGroupId: "97777777-7777-4777-8777-777777777777",
         }),
       );
     });
@@ -287,11 +314,15 @@ describe("TripService", () => {
       expect(driverService.findById).not.toHaveBeenCalled();
     });
 
-    it("rejects a vehicle already booked for an overlapping interval", async () => {
-      repository.findVehicleOverlaps.mockResolvedValue([
-        buildTrip({ id: OTHER_TRIP_ID }),
-      ]);
-
+    /**
+     * ── OVERLAPPING IS ALLOWED, DELIBERATELY ────────────────────────────────
+     * A Vehicle used to be refused when another Trip already occupied its
+     * interval. The business removed that rule: real planning overlaps, and
+     * deciding whether an overlap is intentional is the planner's job. These
+     * tests exist so the refusal cannot quietly return.
+     * ────────────────────────────────────────────────────────────────────────
+     */
+    it("accepts a Trip on a Vehicle already busy in that interval", async () => {
       await expect(
         service.create(
           buildCreateDto({
@@ -300,28 +331,12 @@ describe("TripService", () => {
             endTime: "12:00",
           }),
         ),
-      ).rejects.toBeInstanceOf(VehicleAlreadyBookedException);
-    });
+      ).resolves.toBeDefined();
 
-    it("skips the overlap check when the interval is incomplete", async () => {
-      // An unknown interval cannot be shown to overlap, so it must not block.
-      await service.create(
-        buildCreateDto({ vehicleId: VEHICLE_ID, startTime: "08:00" }),
-      );
-
-      expect(repository.findVehicleOverlaps).not.toHaveBeenCalled();
       expect(repository.create).toHaveBeenCalled();
     });
 
-    it("skips the overlap check when no vehicle is assigned", async () => {
-      await service.create(
-        buildCreateDto({ startTime: "08:00", endTime: "12:00" }),
-      );
-
-      expect(repository.findVehicleOverlaps).not.toHaveBeenCalled();
-    });
-
-    it("only counts Trips that actually occupy the vehicle", async () => {
+    it("never asks the database whether the Vehicle is free", async () => {
       await service.create(
         buildCreateDto({
           vehicleId: VEHICLE_ID,
@@ -330,11 +345,19 @@ describe("TripService", () => {
         }),
       );
 
-      expect(repository.findVehicleOverlaps).toHaveBeenCalledWith(
-        expect.objectContaining({
-          statuses: [TripStatus.OPEN, TripStatus.CLOSED],
-        }),
-      );
+      expect("findVehicleOverlaps" in repository).toBe(false);
+    });
+
+    /** Everything else about assignment still applies. */
+    it("still refuses an inactive Vehicle", async () => {
+      vehicleService.findById.mockResolvedValue({
+        id: VEHICLE_ID,
+        isActive: false,
+      } as never);
+
+      await expect(
+        service.create(buildCreateDto({ vehicleId: VEHICLE_ID })),
+      ).rejects.toBeInstanceOf(InactiveAssignmentException);
     });
 
     it("runs the checks and the insert in one transaction", async () => {
@@ -456,24 +479,16 @@ describe("TripService", () => {
       expect(repository.update).toHaveBeenCalled();
     });
 
-    it("re-checks the vehicle booking when the Trip moves to another day", async () => {
-      repository.findById.mockResolvedValue(
-        buildTrip({
-          vehicleId: VEHICLE_ID,
-          startTime: new Date("1970-01-01T08:00:00.000Z"),
-          endTime: new Date("1970-01-01T12:00:00.000Z"),
-        }),
-      );
-      repository.findVehicleOverlaps.mockResolvedValue([
-        buildTrip({ id: OTHER_TRIP_ID }),
-      ]);
-
+    /** Moving a Trip onto a busy truck, or onto a busy day, is the planner's call. */
+    it("moves a Trip onto a Vehicle that is already busy", async () => {
       await expect(
-        service.update(TRIP_ID, { planningDate: "2026-08-18" }),
-      ).rejects.toBeInstanceOf(VehicleAlreadyBookedException);
+        service.update(TRIP_ID, { vehicleId: VEHICLE_ID }),
+      ).resolves.toBeDefined();
+
+      expect(repository.update).toHaveBeenCalled();
     });
 
-    it("excludes the Trip itself from its own overlap check", async () => {
+    it("moves a Trip to another day without a booking check", async () => {
       repository.findById.mockResolvedValue(
         buildTrip({
           vehicleId: VEHICLE_ID,
@@ -484,9 +499,7 @@ describe("TripService", () => {
 
       await service.update(TRIP_ID, { planningDate: "2026-08-18" });
 
-      expect(repository.findVehicleOverlaps).toHaveBeenCalledWith(
-        expect.objectContaining({ excludeTripId: TRIP_ID }),
-      );
+      expect(repository.update).toHaveBeenCalled();
     });
 
     it("logs the changed field names but never their values", async () => {
@@ -574,22 +587,14 @@ describe("TripService", () => {
       ).rejects.toBeInstanceOf(DuplicateBookingNumberException);
     });
 
-    it("rejects reopening when the vehicle slot was taken", async () => {
+    it("reopens a Trip even when its Vehicle is busy elsewhere", async () => {
       repository.findById.mockResolvedValue(
-        buildTrip({
-          status: TripStatus.CANCELLED,
-          vehicleId: VEHICLE_ID,
-          startTime: new Date("1970-01-01T08:00:00.000Z"),
-          endTime: new Date("1970-01-01T12:00:00.000Z"),
-        }),
+        buildTrip({ status: TripStatus.CANCELLED, vehicleId: VEHICLE_ID }),
       );
-      repository.findVehicleOverlaps.mockResolvedValue([
-        buildTrip({ id: OTHER_TRIP_ID }),
-      ]);
 
       await expect(
         service.changeStatus(TRIP_ID, { status: TripStatus.OPEN }),
-      ).rejects.toBeInstanceOf(VehicleAlreadyBookedException);
+      ).resolves.toBeDefined();
     });
 
     it("does not re-check anything when leaving OPEN", async () => {
@@ -598,7 +603,6 @@ describe("TripService", () => {
       await service.changeStatus(TRIP_ID, { status: TripStatus.CLOSED });
 
       expect(repository.findByBookingNumber).not.toHaveBeenCalled();
-      expect(repository.findVehicleOverlaps).not.toHaveBeenCalled();
     });
 
     it("logs both ends of the transition", async () => {
@@ -703,25 +707,15 @@ describe("TripService", () => {
       expect(repository.setStatus).not.toHaveBeenCalled();
     });
 
-    it("refuses when the vehicle slot was taken meanwhile", async () => {
+    it("restores a Trip whose Vehicle is now busy elsewhere", async () => {
       repository.findById.mockResolvedValue(
-        buildTrip({
-          status: TripStatus.DELETED,
-          vehicleId: VEHICLE_ID,
-          startTime: new Date("1970-01-01T08:00:00.000Z"),
-          endTime: new Date("1970-01-01T12:00:00.000Z"),
-        }),
+        buildTrip({ status: TripStatus.DELETED, vehicleId: VEHICLE_ID }),
       );
-      repository.findVehicleOverlaps.mockResolvedValue([
-        buildTrip({ id: OTHER_TRIP_ID }),
-      ]);
 
-      await expect(service.restore(TRIP_ID)).rejects.toBeInstanceOf(
-        VehicleAlreadyBookedException,
-      );
+      await expect(service.restore(TRIP_ID)).resolves.toBeDefined();
     });
 
-    it("excludes itself from both reclaim checks", async () => {
+    it("excludes itself from the booking-number reclaim check", async () => {
       repository.findById.mockResolvedValue(
         buildTrip({
           status: TripStatus.DELETED,
@@ -734,9 +728,6 @@ describe("TripService", () => {
       await service.restore(TRIP_ID);
 
       expect(repository.findByBookingNumber).toHaveBeenCalledWith(
-        expect.objectContaining({ excludeTripId: TRIP_ID }),
-      );
-      expect(repository.findVehicleOverlaps).toHaveBeenCalledWith(
         expect.objectContaining({ excludeTripId: TRIP_ID }),
       );
     });

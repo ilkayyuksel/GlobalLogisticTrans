@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdir, unlink, writeFile } from "node:fs/promises";
+import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import { isAbsolute, join, resolve } from "node:path";
 
 /**
@@ -56,6 +56,40 @@ export async function storePdf(
     fileHash,
     fileSizeBytes: content.byteLength,
   };
+}
+
+/**
+ * Reads a stored PDF back, or null when the file is no longer there.
+ *
+ * Null rather than an exception because "the row exists, the bytes do not" is a
+ * state the caller has to report differently from "no such document" — one is a
+ * storage problem, the other is a wrong id.
+ *
+ * The path is built from the storage root and the recorded `storagePath`, which
+ * is always a content hash written by `storePdf`. Nothing a client sends
+ * reaches this function.
+ */
+export async function readStoredPdf(
+  storageDirectory: string,
+  storagePath: string,
+): Promise<Buffer | null> {
+  try {
+    return await readFile(join(resolveStorageRoot(storageDirectory), storagePath));
+  } catch (error: unknown) {
+    if (isFileNotFound(error)) {
+      return null;
+    }
+
+    throw error;
+  }
+}
+
+function isFileNotFound(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    (error as NodeJS.ErrnoException).code === "ENOENT"
+  );
 }
 
 /**

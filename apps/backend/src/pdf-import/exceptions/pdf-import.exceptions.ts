@@ -17,6 +17,7 @@ export const PdfImportErrorCode = {
   NO_TRIPS_FOUND: "IMPORT_NO_TRIPS_FOUND",
   UNKNOWN_TERMINAL: "IMPORT_UNKNOWN_TERMINAL",
   INVALID_COMBINATION: "IMPORT_INVALID_COMBINATION",
+  REVISION_REFUSED: "IMPORT_REVISION_REFUSED",
 } as const;
 
 export type PdfImportErrorCode =
@@ -100,6 +101,30 @@ export class InvalidCombinationException extends PdfImportException {
     super(
       PdfImportErrorCode.INVALID_COMBINATION,
       `Combination [${bookingNumbers.join(", ")}] cannot be imported: ${reason}`,
+    );
+  }
+}
+
+/**
+ * A revised transport order could not be applied.
+ *
+ * Every reason is a business exception rather than a defect: the Trip it
+ * revises does not exist, or it is CLOSED, or it was cancelled. None of them is
+ * something the system can resolve on its own — creating the Trip would turn a
+ * correction into unplanned work, and rewriting a closed one would falsify what
+ * was invoiced — so the document is refused and a person decides.
+ *
+ * Refusing is also what leaves an emailed revision unread, so it is offered
+ * again rather than quietly lost.
+ */
+export class RevisionRefusedException extends PdfImportException {
+  constructor(
+    readonly bookingNumber: string,
+    readonly reason: string,
+  ) {
+    super(
+      PdfImportErrorCode.REVISION_REFUSED,
+      `The revised order for booking "${bookingNumber}" was not applied: ${reason}`,
     );
   }
 }

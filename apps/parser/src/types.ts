@@ -13,6 +13,19 @@ export type LayoutType =
 export type Direction = "COLLECTION" | "DELIVERY";
 
 /**
+ * What the document says about itself.
+ *
+ * PLANNED is an ordinary transport order. CANCELLED is one the sender has
+ * stamped as cancelled, and the stamp is printed on the order itself — it is
+ * not the same thing as a `CANCEL:` email, which is an instruction rather than
+ * a document state. Both exist, and the Backend treats them as separate inputs.
+ *
+ * There is no UPDATE: no document carries a revision marker, so an update can
+ * only ever be an email action.
+ */
+export type DocumentStatus = "PLANNED" | "CANCELLED";
+
+/**
  * What the document actually said, kept beside the normalized value.
  *
  * Diagnostics are the whole purpose: when a city comes out wrong, the raw
@@ -88,6 +101,12 @@ export type ParseFailureReason =
 export interface ParseSuccess {
   readonly ok: true;
   readonly layout: LayoutType;
+  /**
+   * What the document states about itself. A property of the DOCUMENT, not of
+   * a trip: the stamp is printed on every page, so both legs of a Combination
+   * share it.
+   */
+  readonly documentStatus: DocumentStatus;
   readonly parserVersion: string;
   readonly trips: ParsedTrip[];
   readonly metadata: ParseMetadata;

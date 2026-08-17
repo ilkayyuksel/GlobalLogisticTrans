@@ -1,5 +1,4 @@
 import { Injectable } from "@nestjs/common";
-import { TripPricingItem } from "@prisma/client";
 
 import { changedFieldNames } from "../common/changed-fields";
 import { AppLoggerService } from "../logger/app-logger.service";
@@ -8,6 +7,7 @@ import {
   TripPricingBreakdownDto,
   TripPricingItemResponseDto,
   toTripPricingItemResponse,
+  type TripPricingItemWithComponent,
 } from "./dto/trip-pricing-item-response.dto";
 import { UpdateTripPricingItemDto } from "./dto/update-trip-pricing-item.dto";
 import { TripPricingItemNotFoundException } from "./exceptions/trip-pricing-item.exceptions";
@@ -111,7 +111,7 @@ export class TripPricingItemService {
     );
   }
 
-  private async requireItem(id: string): Promise<TripPricingItem> {
+  private async requireItem(id: string): Promise<TripPricingItemWithComponent> {
     const item = await this.repository.findById(id);
 
     if (!item) {

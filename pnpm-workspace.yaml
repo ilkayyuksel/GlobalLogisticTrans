@@ -24,3 +24,6 @@ allowBuilds:
   # Native module resolver used by the lint toolchain. Its install script picks
   # the correct platform binary, so it genuinely needs to run.
   unrs-resolver: true
+  # Next.js image optimiser. The frontend serves no images, so the native build
+  # is dead weight; Next falls back to its JavaScript path without it.
+  sharp: false

@@ -10,6 +10,7 @@ import { VehicleService } from "../vehicles/vehicle.service";
 import { TRIP_CLOSED_EVENT, TripClosedEvent } from "./events/trip-closed.event";
 import { TripRepository } from "./trip.repository";
 import { TripService } from "./trip.service";
+import { TripPlanningDataService } from "./trip-planning-data.service";
 
 const TRIP_ID = "3f2504e0-4f89-41d3-9a0c-0305e82c3301";
 
@@ -90,6 +91,19 @@ describe("TripService — TripClosed event", () => {
       repository,
       { findById: jest.fn() } as unknown as VehicleService,
       { findById: jest.fn() } as unknown as DriverService,
+      {
+        resolveOne: () =>
+          Promise.resolve({ vehicle: null, effectiveDriver: null }),
+        resolveMany: (trips: readonly { id: string }[]) =>
+          Promise.resolve(
+            new Map(
+              trips.map((trip) => [
+                trip.id,
+                { vehicle: null, effectiveDriver: null },
+              ]),
+            ),
+          ),
+      } as unknown as TripPlanningDataService,
       eventBus as unknown as DomainEventBus,
       logger as unknown as AppLoggerService,
     );

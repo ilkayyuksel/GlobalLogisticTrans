@@ -21,10 +21,15 @@ export interface FindTripsFilter {
   containerNumber?: string;
   driverId?: string;
   vehicleId?: string;
+  tripGroupId?: string;
+  /** Trips carrying this Custom Property. */
+  customPropertyId?: string;
   terminal?: string;
   destinationCity?: string;
   destinationCountry?: string;
   search?: string;
+  /** How to order within a day. Absent means the default reading order. */
+  sort?: TripSort;
   skip: number;
   take: number;
 }
@@ -41,13 +46,58 @@ export interface BookingNumberQuery {
   excludeTripId?: string;
 }
 
-export interface VehicleOverlapQuery {
-  vehicleId: string;
-  planningDate: Date;
-  startTime: Date;
-  endTime: Date;
-  statuses: readonly TripStatus[];
-  excludeTripId?: string;
+/** The time a planner asked to sort a day's work by. */
+export type TripSortField = "startTime" | "endTime";
+export type SortDirection = "asc" | "desc";
+
+export interface TripSort {
+  field: TripSortField;
+  direction: SortDirection;
+}
+
+/**
+ * The order a planning list is read in.
+ *
+ * ── FOUR KEYS, AND WHY EACH IS WHERE IT IS ──────────────────────────────────
+ * 1. planningDate  A day is the unit of planning. It stays the first key
+ *                  whatever the operator sorts by, because the Day/Week/Month
+ *                  views are built from date sections — sorting globally by
+ *                  time would scatter one day's work across the whole period.
+ *
+ * 2. the vehicle   So one truck's Trips read as a block. Ordered by PLATE
+ *                  rather than by id: a UUID groups just as well but presents
+ *                  the trucks in an order nobody recognises. Trips with no
+ *                  vehicle sort last — Postgres puts NULLs last in ASC, which
+ *                  is exactly the wanted "unassigned at the bottom".
+ *
+ * 3. the chosen    Start or end time, ascending or descending as asked. Nulls
+ *    time          are pinned LAST in both directions: a Trip with no time is
+ *                  not early, it is unknown, and floating it to the top of a
+ *                  descending list would read as "latest".
+ *
+ * 4. id            A total order. Without it two Trips that tie on every key
+ *                  above could swap places between two requests, which makes
+ *                  paging drop or repeat rows.
+ * ────────────────────────────────────────────────────────────────────────────
+ *
+ * The date keeps the descending order the list has always had — newest day
+ * first — so which Trips fall on which page does not change under anyone's
+ * feet. `sortDirection` applies to the TIME within a day, which is what the
+ * operator is actually choosing; the Day/Week/Month sections are ordered by the
+ * frontend from the date range it asked for.
+ */
+export function buildOrderBy(
+  sort: TripSort | undefined,
+): Prisma.TripOrderByWithRelationInput[] {
+  const direction: SortDirection = sort?.direction ?? "asc";
+  const timeKey: TripSortField = sort?.field ?? "startTime";
+
+  return [
+    { planningDate: "desc" },
+    { vehicle: { licensePlate: "asc" } },
+    { [timeKey]: { sort: direction, nulls: "last" } },
+    { id: "asc" },
+  ];
 }
 
 export type CreateTripData = Prisma.TripUncheckedCreateInput;
@@ -127,9 +177,7 @@ export class TripRepository {
     const [items, totalItems] = await this.prisma.$transaction([
       this.prisma.trip.findMany({
         where,
-        // Planning is read day by day, newest first; id breaks ties so paging
-        // stays stable across requests.
-        orderBy: [{ planningDate: "desc" }, { id: "asc" }],
+        orderBy: buildOrderBy(filter.sort),
         skip: filter.skip,
         take: filter.take,
       }),
@@ -155,28 +203,6 @@ export class TripRepository {
   }
 
   /**
-   * Trips whose planned interval collides with the candidate on the same day.
-   *
-   * Half-open comparison: two intervals overlap when each starts before the
-   * other ends, so a Trip ending at 12:00 and one starting at 12:00 do not
-   * collide. Trips without both times are excluded by the null checks, because
-   * an unknown interval cannot be shown to overlap.
-   */
-  findVehicleOverlaps(query: VehicleOverlapQuery): Promise<Trip[]> {
-    return this.prisma.trip.findMany({
-      where: {
-        vehicleId: query.vehicleId,
-        planningDate: query.planningDate,
-        status: { in: [...query.statuses] },
-        ...(query.excludeTripId ? { id: { not: query.excludeTripId } } : {}),
-        startTime: { not: null, lt: query.endTime },
-        endTime: { not: null, gt: query.startTime },
-      },
-      orderBy: { startTime: "asc" },
-    });
-  }
-
-  /**
    * Existence check for the owning PDF.
    *
    * Read-only and deliberately narrow: the Import domain has no module yet, and
@@ -190,6 +216,70 @@ export class TripRepository {
     });
 
     return pdfDocument !== null;
+  }
+
+  /**
+   * The distinct terminals Trips actually carry, alphabetically.
+   *
+   * Read from the Trips themselves rather than from master data, because there
+   * is none: the terminal is the string the PDF printed, and this endpoint
+   * exists only so a filter can offer the values that are really there.
+   * DELETED Trips are excluded — a filter must not offer a value that returns
+   * nothing in the normal list.
+   */
+  async findDistinctTerminals(
+    excludeStatuses: readonly TripStatus[],
+  ): Promise<string[]> {
+    const rows = await this.prisma.trip.findMany({
+      where: {
+        terminal: { not: null },
+        status: { notIn: [...excludeStatuses] },
+      },
+      distinct: ["terminal"],
+      select: { terminal: true },
+      orderBy: { terminal: "asc" },
+    });
+
+    return rows
+      .map((row) => row.terminal)
+      .filter((terminal): terminal is string => terminal !== null);
+  }
+
+  /**
+   * The Custom Properties of a page of Trips, in one query.
+   *
+   * Keyed by Trip id so the caller can attach them without looping over the
+   * database. The join row carries the property, so nothing is fetched twice.
+   */
+  findCustomPropertiesForTrips(tripIds: readonly string[]) {
+    return this.prisma.tripCustomProperty.findMany({
+      where: { tripId: { in: [...tripIds] } },
+      include: { customProperty: true },
+      orderBy: { customProperty: { displayOrder: "asc" } },
+    });
+  }
+
+  /**
+   * The Trips a manual grouping request names.
+   *
+   * Returned unordered and possibly shorter than the list asked for; deciding
+   * what a missing one means is the service's job, not this one's.
+   */
+  findManyByIds(ids: readonly string[]): Promise<Trip[]> {
+    return this.prisma.trip.findMany({ where: { id: { in: [...ids] } } });
+  }
+
+  /** Puts every named Trip in one group, in a single statement. */
+  async assignToGroup(
+    ids: readonly string[],
+    tripGroupId: string,
+  ): Promise<number> {
+    const { count } = await this.prisma.trip.updateMany({
+      where: { id: { in: [...ids] } },
+      data: { tripGroupId },
+    });
+
+    return count;
   }
 
   create(data: CreateTripData): Promise<Trip> {
@@ -215,6 +305,16 @@ export class TripRepository {
         : {}),
       ...(filter.driverId ? { driverId: filter.driverId } : {}),
       ...(filter.vehicleId ? { vehicleId: filter.vehicleId } : {}),
+      ...(filter.tripGroupId ? { tripGroupId: filter.tripGroupId } : {}),
+      // A relation filter rather than a join in the service: the database
+      // narrows the whole result set, so paging and counts stay correct.
+      ...(filter.customPropertyId
+        ? {
+            customProperties: {
+              some: { customPropertyId: filter.customPropertyId },
+            },
+          }
+        : {}),
       ...(filter.terminal ? { terminal: filter.terminal } : {}),
       ...(filter.destinationCity
         ? { destinationCity: filter.destinationCity }

@@ -284,28 +284,51 @@ async function main(): Promise<void> {
   ]);
 
   // A route is Terminal -> Destination (pricing_rules.md, Route-Based Pricing),
-  // so `departure` must hold the same terminal name the Trips carry. Using the
-  // city "Antwerp" here left every seeded Trip unpriceable. Prices are
-  // deliberately unchanged, so the pricing snapshots below still reconcile.
+  // and `departure` must hold the SAME string the Trips carry, because the
+  // Pricing Engine matches routes by exact equality.
+  //
+  // The departures below are the terminals the real transport orders actually
+  // print — `PSA Quay 869` and `Quay 869`. They were previously fabricated
+  // names ("PSA Antwerp", "DP World Antwerp Gateway", "MSC PSA European
+  // Terminal") that appear in no document, which left every imported Trip
+  // unpriceable. There is no alias layer: the PDF's terminal IS the route key.
+  //
+  // Amounts are carried over unchanged from the routes they replace.
   await prisma.routePricing.createMany({
     data: [
+      // Destination unchanged; only the departure is corrected.
       {
-        routeName: "MSC PSA European Terminal - Rotterdam",
-        departure: "MSC PSA European Terminal",
-        destination: "Rotterdam",
-        basePrice: 380.0,
+        routeName: "PSA Quay 869 - Dourges",
+        departure: "PSA Quay 869",
+        destination: "Dourges",
+        basePrice: 520.0,
       },
       {
-        routeName: "DP World Antwerp Gateway - Bousbecque",
-        departure: "DP World Antwerp Gateway",
+        routeName: "PSA Quay 869 - Bousbecque",
+        departure: "PSA Quay 869",
         destination: "Bousbecque",
         basePrice: 450.0,
       },
       {
-        routeName: "PSA Antwerp - Dourges",
-        departure: "PSA Antwerp",
-        destination: "Dourges",
-        basePrice: 520.0,
+        routeName: "Quay 869 - Rotterdam",
+        departure: "Quay 869",
+        destination: "Rotterdam",
+        basePrice: 380.0,
+      },
+      // The two legs of combination.pdf. Added so that fixture is priceable
+      // end to end; each reuses the amount of the other route sharing its
+      // departure, rather than introducing an invented figure.
+      {
+        routeName: "Quay 869 - Kallo",
+        departure: "Quay 869",
+        destination: "Kallo",
+        basePrice: 380.0,
+      },
+      {
+        routeName: "PSA Quay 869 - Warneton",
+        departure: "PSA Quay 869",
+        destination: "Warneton",
+        basePrice: 450.0,
       },
     ],
   });
@@ -319,26 +342,26 @@ async function main(): Promise<void> {
   await prisma.routeCost.createMany({
     data: [
       {
-        departure: "MSC PSA European Terminal",
+        departure: "Quay 869",
         destination: "Rotterdam",
         pricingComponentId: requireComponentId("TUNNEL"),
         amount: 12.5,
         notes: "Liefkenshoek tunnel.",
       },
       {
-        departure: "MSC PSA European Terminal",
+        departure: "Quay 869",
         destination: "Rotterdam",
         pricingComponentId: requireComponentId("TOLL"),
         amount: 9.75,
       },
       {
-        departure: "PSA Antwerp",
+        departure: "PSA Quay 869",
         destination: "Dourges",
         pricingComponentId: requireComponentId("TOLL"),
         amount: 18.0,
       },
       {
-        departure: "DP World Antwerp Gateway",
+        departure: "PSA Quay 869",
         destination: "Bousbecque",
         pricingComponentId: requireComponentId("TOLL"),
         amount: 14.25,
@@ -389,9 +412,9 @@ async function main(): Promise<void> {
       {
         category: "PRICING",
         key: "COMBINATION_SURCHARGE",
-        value: "75",
+        value: "50",
         valueType: "DECIMAL",
-        description: "Combination surcharge (dummy development value).",
+        description: "Combination surcharge per Trip: both legs receive it.",
       },
       {
         category: "PRICING",
@@ -502,7 +525,7 @@ async function main(): Promise<void> {
   );
 
   const parserMetadata = {
-    rawTerminal: "Return to Terminal: DP World Antwerp Gateway",
+    rawTerminal: "Return to Terminal: PSA Quay 869",
     rawAddress: "FR-59166 Bousbecque",
     rawDate: "27.07.2026",
     matchedLabels: ["Booking", "Container", "Startpoint"],
@@ -518,7 +541,7 @@ async function main(): Promise<void> {
       bookingNumber: "BK-2026-1001",
       containerNumber: "MSCU1234567",
       containerType: "40HC",
-      terminal: "DP World Antwerp Gateway",
+      terminal: "PSA Quay 869",
       destinationCity: "Bousbecque",
       destinationCountry: "France",
       originalPlanningDate: dayOffset(-10),
@@ -546,7 +569,7 @@ async function main(): Promise<void> {
       bookingNumber: "BK-2026-1002",
       containerNumber: "TGHU7654321",
       containerType: "20TK",
-      terminal: "PSA Antwerp",
+      terminal: "PSA Quay 869",
       destinationCity: "Dourges",
       destinationCountry: "France",
       originalPlanningDate: dayOffset(-7),
@@ -567,7 +590,7 @@ async function main(): Promise<void> {
       status: "OPEN",
       bookingNumber: "BK-2026-1002",
       containerType: "20TK",
-      terminal: "PSA Antwerp",
+      terminal: "PSA Quay 869",
       destinationCity: "Dourges",
       destinationCountry: "France",
       originalPlanningDate: dayOffset(-7),
@@ -587,7 +610,7 @@ async function main(): Promise<void> {
       bookingNumber: "BK-2026-1003",
       containerNumber: "CMAU4455667",
       containerType: "45PH",
-      terminal: "MSC PSA European Terminal",
+      terminal: "Quay 869",
       destinationCity: "Rotterdam",
       destinationCountry: "Netherlands",
       originalPlanningDate: dayOffset(-4),
@@ -609,7 +632,7 @@ async function main(): Promise<void> {
       status: "OPEN",
       bookingNumber: "BK-2026-1004",
       containerType: "20FL",
-      terminal: "DP World Antwerp Gateway",
+      terminal: "PSA Quay 869",
       destinationCity: "Antwerp",
       destinationCountry: "Belgium",
       originalPlanningDate: dayOffset(1),
@@ -629,7 +652,7 @@ async function main(): Promise<void> {
       bookingNumber: "BK-2026-1005",
       containerNumber: "HLXU9988776",
       containerType: "40HC",
-      terminal: "PSA Antwerp",
+      terminal: "PSA Quay 869",
       destinationCity: "Gent",
       destinationCountry: "Belgium",
       originalPlanningDate: dayOffset(2),
@@ -647,7 +670,7 @@ async function main(): Promise<void> {
       status: "CANCELLED",
       bookingNumber: "BK-2026-1006",
       containerType: "20TK",
-      terminal: "PSA Antwerp",
+      terminal: "PSA Quay 869",
       destinationCity: "Lille",
       destinationCountry: "France",
       originalPlanningDate: dayOffset(-1),
@@ -878,7 +901,7 @@ async function main(): Promise<void> {
       {
         title: "Terminal opening hours",
         content:
-          "DP World Antwerp Gateway: 06:00-22:00 on weekdays, closed Sundays.",
+          "PSA Quay 869: 06:00-22:00 on weekdays, closed Sundays.",
         color: "#f59e0b",
       },
       {

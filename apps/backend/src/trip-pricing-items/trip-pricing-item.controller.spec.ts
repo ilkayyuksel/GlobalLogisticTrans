@@ -6,7 +6,9 @@ import {
 } from "@nestjs/common";
 import { APP_FILTER, APP_INTERCEPTOR } from "@nestjs/core";
 import { Test } from "@nestjs/testing";
-import { Prisma, TripPricingItem } from "@prisma/client";
+import { Prisma } from "@prisma/client";
+
+import type { TripPricingItemWithComponent } from "./dto/trip-pricing-item-response.dto";
 import request from "supertest";
 
 import { AllExceptionsFilter } from "../common/filters/all-exceptions.filter";
@@ -25,8 +27,13 @@ const COMPONENT_ID = "2c9d6bcd-bbfd-4b2d-9b5d-ab8dfbbd4bed";
 const PROPERTY_ID = "4d9d6bcd-bbfd-4b2d-9b5d-ab8dfbbd4bed";
 const BASE = "/api/v1/trip-pricing-items";
 
-function buildItem(overrides: Partial<TripPricingItem> = {}): TripPricingItem {
+function buildItem(
+  overrides: Partial<TripPricingItemWithComponent> = {},
+): TripPricingItemWithComponent {
   return {
+    // Loaded with the line: the code is what says a line IS a fuel
+    // surcharge rather than a toll.
+    pricingComponent: { code: "BASE_PRICE" },
     id: ITEM_ID,
     tripPricingId: PRICING_ID,
     pricingComponentId: COMPONENT_ID,

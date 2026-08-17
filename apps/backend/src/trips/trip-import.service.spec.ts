@@ -9,6 +9,7 @@ import { DuplicateBookingNumberException } from "./exceptions/trip.exceptions";
 import { ImportTripsCommand, ImportedTripData } from "./import-trips.command";
 import { TripRepository } from "./trip.repository";
 import { TripService } from "./trip.service";
+import { TripPlanningDataService } from "./trip-planning-data.service";
 
 /**
  * The internal import path.
@@ -29,6 +30,7 @@ function buildTrip(overrides: Partial<Trip> = {}): Trip {
     vehicleId: null,
     driverId: null,
     status: TripStatus.OPEN,
+    direction: null,
     bookingNumber: "ANRDUB2602247",
     containerNumber: null,
     containerType: "45PH",
@@ -63,6 +65,9 @@ function buildImportedTrip(
     planningDate: "2025-05-22",
     startTime: "10:00",
     endTime: "16:00",
+    // The document said which half of the transport this is. It is stored on
+    // the Trip AND kept in parser_metadata as evidence.
+    direction: "COLLECTION",
     parserMetadata: { direction: "COLLECTION" },
     ...overrides,
   };
@@ -127,6 +132,19 @@ describe("TripService.importTrips", () => {
       repository,
       {} as unknown as VehicleService,
       {} as unknown as DriverService,
+      {
+        resolveOne: () =>
+          Promise.resolve({ vehicle: null, effectiveDriver: null }),
+        resolveMany: (trips: readonly { id: string }[]) =>
+          Promise.resolve(
+            new Map(
+              trips.map((trip) => [
+                trip.id,
+                { vehicle: null, effectiveDriver: null },
+              ]),
+            ),
+          ),
+      } as unknown as TripPlanningDataService,
       eventBus as unknown as DomainEventBus,
       logger as unknown as AppLoggerService,
     );

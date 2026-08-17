@@ -1,17 +1,16 @@
+import { ImportSource } from "@prisma/client";
 import type { ParseResult, ParsedTrip } from "@tms/parser";
 
 import { AppLoggerService } from "../logger/app-logger.service";
 import { PdfDocumentService } from "../pdf-documents/pdf-document.service";
+import { TripRevisionService } from "../trips/trip-revision.service";
 import { TripService } from "../trips/trip.service";
 import {
   InvalidCombinationException,
   NoTripsFoundException,
-  PdfImportErrorCode,
-  UnknownTerminalException,
   UnreadablePdfException,
 } from "./exceptions/pdf-import.exceptions";
 import { PdfTripImporter } from "./pdf-trip-importer.service";
-import { TerminalMapping } from "./terminal-mapping";
 
 /**
  * The parser is mocked throughout. Its own suite already proves it reads real
@@ -24,19 +23,6 @@ const parse = jest.fn<Promise<ParseResult>, [Uint8Array]>();
 jest.mock("@tms/parser", () => ({
   parse: (source: Uint8Array) => parse(source),
 }));
-
-/**
- * A mapping that exists only in this file.
- *
- * The shipped table is empty and must stay empty until the real terminal pairs
- * are supplied, so the mapped path is proved with a table the test owns. These
- * pairs are test fixtures, not a proposal: nothing here should ever be copied
- * into the shipped mapping.
- */
-const TEST_TERMINAL_MAPPING: TerminalMapping = {
-  "Test Quay 1": "Test Terminal One",
-  "Test Quay 2": "Test Terminal Two",
-};
 
 function buildParsedTrip(overrides: Partial<ParsedTrip> = {}): ParsedTrip {
   return {
@@ -67,6 +53,8 @@ function buildSuccess(trips: ParsedTrip[]): ParseResult {
   return {
     ok: true,
     layout: trips.length > 1 ? "COMBINATION_TWO_PAGE" : "SINGLE_ONE_PAGE",
+    // An ordinary order. The cancelled path has its own tests.
+    documentStatus: "PLANNED",
     parserVersion: "1.0.0",
     trips,
     metadata: { pageCount: 1, fragmentCount: 120, detectedSections: [] },
@@ -96,6 +84,10 @@ const CONTENT = new Uint8Array([0x25, 0x50, 0x44, 0x46]);
 
 describe("PdfTripImporter", () => {
   let tripService: { importTrips: jest.Mock };
+  let tripRevision: {
+    cancelByBookingNumber: jest.Mock;
+    applyDocumentRevision: jest.Mock;
+  };
   let pdfDocumentService: { store: jest.Mock; discard: jest.Mock };
   let logger: {
     setContext: jest.Mock;
@@ -127,101 +119,91 @@ describe("PdfTripImporter", () => {
       error: jest.fn(),
     };
 
+    tripRevision = {
+      cancelByBookingNumber: jest.fn().mockResolvedValue("CANCELLED"),
+      applyDocumentRevision: jest.fn(),
+    };
+
     importer = new PdfTripImporter(
       tripService as unknown as TripService,
+      tripRevision as unknown as TripRevisionService,
       pdfDocumentService as unknown as PdfDocumentService,
       logger as unknown as AppLoggerService,
     );
   });
 
-  describe("the shipped terminal mapping", () => {
+  describe("the terminal the document names", () => {
     /**
-     * These two tests are the reason the mapping can stay empty. They must keep
-     * passing after the real pairs are added, so neither names a terminal.
+     * The PDF's terminal IS the Trip's terminal. It is also the key that
+     * RoutePricing and RouteCost are configured under, so translating it here
+     * would break the exact match pricing depends on.
      */
-    it("refuses the import when the printed terminal is not mapped", async () => {
+    it("stores the printed terminal exactly as extracted", async () => {
+      parse.mockResolvedValue(
+        buildSuccess([buildParsedTrip({ terminal: "PSA Quay 869" })]),
+      );
+
+      await importer.import(CONTENT, "order.pdf");
+
+      expect(tripService.importTrips).toHaveBeenCalledWith(
+        expect.objectContaining({
+          trips: [expect.objectContaining({ terminal: "PSA Quay 869" })],
+        }),
+      );
+    });
+
+    it("does not canonicalise a terminal into another name", async () => {
+      parse.mockResolvedValue(
+        buildSuccess([buildParsedTrip({ terminal: "Quay 869" })]),
+      );
+
+      await importer.import(CONTENT, "order.pdf");
+
+      const [command] = tripService.importTrips.mock.calls[0];
+
+      expect(command.trips[0].terminal).toBe("Quay 869");
+      expect(command.trips[0].terminal).not.toBe("PSA Antwerp");
+    });
+
+    /** An unfamiliar terminal is unconfigured, not invalid. */
+    it("imports a terminal it has never seen before", async () => {
+      parse.mockResolvedValue(
+        buildSuccess([buildParsedTrip({ terminal: "Some New Quay 42" })]),
+      );
+
       await expect(
         importer.import(CONTENT, "order.pdf"),
-      ).rejects.toBeInstanceOf(UnknownTerminalException);
+      ).resolves.toBeDefined();
     });
 
-    it("reports the raw terminal and the booking, so the mapping can be fixed", async () => {
-      const failure = await importer
-        .import(CONTENT, "order.pdf")
-        .catch((error: UnknownTerminalException) => error);
-
-      expect(failure).toBeInstanceOf(UnknownTerminalException);
-      expect((failure as UnknownTerminalException).code).toBe(
-        PdfImportErrorCode.UNKNOWN_TERMINAL,
-      );
-      expect((failure as UnknownTerminalException).documentTerminal).toBe(
-        "Test Quay 1",
-      );
-      expect((failure as UnknownTerminalException).bookingNumber).toBe(
-        "ANRDUB2602247",
-      );
-    });
-
-    it("never falls back to the raw terminal text", async () => {
-      await expect(importer.import(CONTENT, "order.pdf")).rejects.toThrow();
-
-      expect(tripService.importTrips).not.toHaveBeenCalled();
-    });
-
-    it("refuses a document that names no terminal at all", async () => {
+    /** Pricing reports a missing route; the import does not refuse one. */
+    it("stores null when the document names no terminal", async () => {
       parse.mockResolvedValue(
         buildSuccess([buildParsedTrip({ terminal: null })]),
       );
 
-      await expect(
-        importer.import(CONTENT, "order.pdf", TEST_TERMINAL_MAPPING),
-      ).rejects.toBeInstanceOf(UnknownTerminalException);
+      await importer.import(CONTENT, "order.pdf");
+
+      const [command] = tripService.importTrips.mock.calls[0];
+
+      expect(command.trips[0].terminal).toBeNull();
     });
   });
 
-  describe("an unmapped terminal leaves nothing behind", () => {
-    it("stores no file, because the terminal is resolved first", async () => {
-      await expect(importer.import(CONTENT, "order.pdf")).rejects.toThrow();
-
-      expect(pdfDocumentService.store).not.toHaveBeenCalled();
-    });
-
-    it("writes no document and no Trip", async () => {
-      await expect(importer.import(CONTENT, "order.pdf")).rejects.toThrow();
-
-      expect(tripService.importTrips).not.toHaveBeenCalled();
-    });
-
-    it("refuses the whole Combination when only one leg is unmapped", async () => {
-      const [delivery, collection] = buildCombination();
-
-      parse.mockResolvedValue(
-        buildSuccess([delivery, { ...collection, terminal: "Unmapped Quay" }]),
-      );
-
-      await expect(
-        importer.import(CONTENT, "order.pdf", TEST_TERMINAL_MAPPING),
-      ).rejects.toBeInstanceOf(UnknownTerminalException);
-
-      expect(pdfDocumentService.store).not.toHaveBeenCalled();
-      expect(tripService.importTrips).not.toHaveBeenCalled();
-    });
-  });
-
-  describe("with a mapping supplied", () => {
-    it("imports a single Trip under its mapped terminal name", async () => {
-      await importer.import(CONTENT, "order.pdf", TEST_TERMINAL_MAPPING);
+  describe("what reaches the Trip domain", () => {
+    it("imports a single Trip under the terminal the document printed", async () => {
+      await importer.import(CONTENT, "order.pdf");
 
       expect(tripService.importTrips).toHaveBeenCalledWith(
         expect.objectContaining({
           asCombination: false,
-          trips: [expect.objectContaining({ terminal: "Test Terminal One" })],
+          trips: [expect.objectContaining({ terminal: "Test Quay 1" })],
         }),
       );
     });
 
     it("passes the parser's values through unchanged", async () => {
-      await importer.import(CONTENT, "order.pdf", TEST_TERMINAL_MAPPING);
+      await importer.import(CONTENT, "order.pdf");
 
       const [command] = tripService.importTrips.mock.calls[0];
 
@@ -238,7 +220,7 @@ describe("PdfTripImporter", () => {
     });
 
     it("keeps what the parser saw as diagnostics", async () => {
-      await importer.import(CONTENT, "order.pdf", TEST_TERMINAL_MAPPING);
+      await importer.import(CONTENT, "order.pdf");
 
       const [command] = tripService.importTrips.mock.calls[0];
 
@@ -250,12 +232,47 @@ describe("PdfTripImporter", () => {
     });
 
     it("records the parser version on the document", async () => {
-      await importer.import(CONTENT, "order.pdf", TEST_TERMINAL_MAPPING);
+      await importer.import(CONTENT, "order.pdf");
 
       expect(pdfDocumentService.store).toHaveBeenCalledWith(
         CONTENT,
         "order.pdf",
         "1.0.0",
+        undefined,
+      );
+    });
+
+    /**
+     * A caller that says nothing about where the PDF came from gets the
+     * behaviour that existed before mailboxes did: a manual upload. The default
+     * lives in PdfDocumentService, so the importer passes the absence through
+     * rather than inventing a source of its own.
+     */
+    it("passes no provenance when the caller supplies none", async () => {
+      await importer.import(CONTENT, "order.pdf");
+
+      const [, , , provenance] = (pdfDocumentService.store as jest.Mock).mock
+        .calls[0];
+
+      expect(provenance).toBeUndefined();
+    });
+
+    it("passes provenance through to the document when given", async () => {
+      await importer.import(CONTENT, "order.pdf", {
+        provenance: {
+          importSource: ImportSource.EMAIL,
+          importedEmailId: "e1111111-1111-4111-8111-111111111111",
+        },
+      });
+
+      expect(pdfDocumentService.store).toHaveBeenCalledWith(
+        CONTENT,
+        "order.pdf",
+        "1.0.0",
+        {
+          importSource: ImportSource.EMAIL,
+          importedEmailId: "e1111111-1111-4111-8111-111111111111",
+        },
       );
     });
   });
@@ -264,11 +281,7 @@ describe("PdfTripImporter", () => {
     it("imports both grouped Trips as one Combination", async () => {
       parse.mockResolvedValue(buildSuccess(buildCombination()));
 
-      const result = await importer.import(
-        CONTENT,
-        "order.pdf",
-        TEST_TERMINAL_MAPPING,
-      );
+      const result = await importer.import(CONTENT, "order.pdf");
 
       expect(result.combination).toBe(true);
       expect(tripService.importTrips).toHaveBeenCalledWith(
@@ -287,7 +300,7 @@ describe("PdfTripImporter", () => {
       );
 
       await expect(
-        importer.import(CONTENT, "order.pdf", TEST_TERMINAL_MAPPING),
+        importer.import(CONTENT, "order.pdf"),
       ).rejects.toBeInstanceOf(InvalidCombinationException);
     });
 
@@ -304,7 +317,7 @@ describe("PdfTripImporter", () => {
       parse.mockResolvedValue(buildSuccess(trips));
 
       await expect(
-        importer.import(CONTENT, "order.pdf", TEST_TERMINAL_MAPPING),
+        importer.import(CONTENT, "order.pdf"),
       ).rejects.toBeInstanceOf(InvalidCombinationException);
     });
 
@@ -316,7 +329,7 @@ describe("PdfTripImporter", () => {
       );
 
       await expect(
-        importer.import(CONTENT, "order.pdf", TEST_TERMINAL_MAPPING),
+        importer.import(CONTENT, "order.pdf"),
       ).rejects.toBeInstanceOf(InvalidCombinationException);
     });
 
@@ -328,7 +341,7 @@ describe("PdfTripImporter", () => {
         ]),
       );
 
-      await importer.import(CONTENT, "order.pdf", TEST_TERMINAL_MAPPING);
+      await importer.import(CONTENT, "order.pdf");
 
       expect(tripService.importTrips).toHaveBeenCalledWith(
         expect.objectContaining({ asCombination: false }),
@@ -348,7 +361,7 @@ describe("PdfTripImporter", () => {
       });
 
       await expect(
-        importer.import(CONTENT, "order.pdf", TEST_TERMINAL_MAPPING),
+        importer.import(CONTENT, "order.pdf"),
       ).rejects.toBeInstanceOf(UnreadablePdfException);
     });
 
@@ -363,7 +376,7 @@ describe("PdfTripImporter", () => {
       });
 
       await expect(
-        importer.import(CONTENT, "order.pdf", TEST_TERMINAL_MAPPING),
+        importer.import(CONTENT, "order.pdf"),
       ).rejects.toThrow();
 
       expect(pdfDocumentService.store).not.toHaveBeenCalled();
@@ -374,7 +387,7 @@ describe("PdfTripImporter", () => {
       parse.mockResolvedValue(buildSuccess([]));
 
       await expect(
-        importer.import(CONTENT, "order.pdf", TEST_TERMINAL_MAPPING),
+        importer.import(CONTENT, "order.pdf"),
       ).rejects.toBeInstanceOf(NoTripsFoundException);
     });
   });
@@ -386,7 +399,7 @@ describe("PdfTripImporter", () => {
 
     it("removes the file the failed import wrote", async () => {
       await expect(
-        importer.import(CONTENT, "order.pdf", TEST_TERMINAL_MAPPING),
+        importer.import(CONTENT, "order.pdf"),
       ).rejects.toThrow("insert failed");
 
       expect(pdfDocumentService.discard).toHaveBeenCalledTimes(1);
@@ -396,7 +409,7 @@ describe("PdfTripImporter", () => {
       pdfDocumentService.discard.mockRejectedValue(new Error("unlink failed"));
 
       await expect(
-        importer.import(CONTENT, "order.pdf", TEST_TERMINAL_MAPPING),
+        importer.import(CONTENT, "order.pdf"),
       ).rejects.toThrow("insert failed");
 
       expect(logger.error).toHaveBeenCalled();
@@ -404,7 +417,7 @@ describe("PdfTripImporter", () => {
   });
 
   it("does not price the imported Trips", async () => {
-    await importer.import(CONTENT, "order.pdf", TEST_TERMINAL_MAPPING);
+    await importer.import(CONTENT, "order.pdf");
 
     // Pricing runs when a Trip is CLOSED, through the Trip domain's own event.
     // The importer has no pricing dependency at all, and must not acquire one.
@@ -412,7 +425,7 @@ describe("PdfTripImporter", () => {
   });
 
   it("logs the filename and counts, never the booking or destination", async () => {
-    await importer.import(CONTENT, "order.pdf", TEST_TERMINAL_MAPPING);
+    await importer.import(CONTENT, "order.pdf");
 
     const logged = JSON.stringify(logger.log.mock.calls);
 
