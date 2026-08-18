@@ -22,6 +22,14 @@
 # Every dependency, dev ones included: nest build and prisma generate need them.
 FROM node:22-bookworm-slim AS dependencies
 
+# openssl is what Prisma inspects to decide WHICH engine binary to download.
+# Without it the slim image reports no version, Prisma falls back to the
+# OpenSSL 1.1 build, and `migrate deploy` then tries to fetch the 3.0 one over
+# the internet at startup — from a container that is deliberately on an
+# offline network. Installing it here is what makes the right engine land in
+# the image at build time.
+RUN apt-get update   && apt-get install --no-install-recommends --yes ca-certificates openssl   && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 
 # corepack ships with Node and pins pnpm to the version package.json names, so
@@ -61,19 +69,6 @@ RUN DATABASE_URL="postgresql://placeholder:placeholder@127.0.0.1:5432/placeholde
 
 RUN pnpm --filter @tms/backend build
 
-# ── Dev dependencies are removed from this same tree ────────────────────────
-# NOT re-installed in a separate stage, and that is deliberate. Prisma 7
-# generates its client INTO the @prisma/client package inside pnpm's store, so a
-# fresh production install would produce a tree with no generated client in it
-# and no stable path to copy one from — the store directory carries a content
-# hash. Pruning keeps the tree that was generated into and removes what
-# production does not run.
-#
-# CI=true answers pnpm's "replace node_modules?" prompt, which a build has no
-# terminal for.
-ENV CI=true
-RUN pnpm prune --prod
-
 # ── Stage 3: the parser smoke test ──────────────────────────────────────────
 # A real transport order, parsed by the real parser, inside the image that will
 # run it. This is the check that pdfjs-dist resolves here — a build that passes
@@ -87,18 +82,44 @@ RUN pnpm prune --prod
 FROM build AS smoke-test
 
 COPY docs/06-pdf ./docs/06-pdf
+COPY docker/parser-smoke-test.cjs ./
 
-RUN node -e " \
-  const { readFileSync } = require('node:fs'); \
-  const { parse } = require('./apps/parser/dist/index.js'); \
-  parse(new Uint8Array(readFileSync('docs/06-pdf/NEW/1page.pdf'))).then((result) => { \
-    if (!result.ok) { throw new Error('parser smoke test failed: ' + result.reason + ' ' + result.message); } \
-    if (result.trips[0].bookingNumber !== 'ANRDUB2602247') { throw new Error('parser smoke test read the wrong booking: ' + result.trips[0].bookingNumber); } \
-    console.log(result.layout + ' ' + result.documentStatus + ' ' + result.trips[0].bookingNumber); \
-  }).catch((error) => { console.error(error.message); process.exit(1); }); \
-" | tee /parser-smoke.txt
+# No pipe: the build must fail when the parser does, and a pipeline would
+# report the exit code of the last command instead.
+RUN node parser-smoke-test.cjs
 
-# ── Stage 4: runtime ────────────────────────────────────────────────────────
+# ── Stage 4: production dependencies ────────────────────────────────────────
+# A clean install with the dev dependencies left out, and the Prisma client
+# generated INTO it.
+#
+# Two things this deliberately does not do, both learned from failures the smoke
+# test above caught:
+#
+#   * it does not prune the build tree. `pnpm prune --prod` at the workspace
+#     root removed apps/parser/node_modules/pdfjs-dist, and the parser then
+#     could not read a PDF at all;
+#   * it does not copy the generated client out of the build stage. Prisma 7
+#     generates into the @prisma/client package inside pnpm's store, whose
+#     directory name carries a content hash — there is no stable path to copy.
+#
+# Generating here instead is what makes the runtime tree both complete and free
+# of build tooling. The CLI is available because it is a production dependency:
+# `prisma migrate deploy` runs from this image.
+FROM dependencies AS production-dependencies
+
+# CI=true answers pnpm's "replace node_modules?" prompt, which a build has no
+# terminal for.
+ENV CI=true
+
+RUN pnpm install --frozen-lockfile --prod
+
+COPY prisma ./prisma
+COPY prisma.config.ts ./
+
+RUN DATABASE_URL="postgresql://placeholder:placeholder@127.0.0.1:5432/placeholder" \
+  pnpm exec prisma generate
+
+# ── Stage 5: runtime ────────────────────────────────────────────────────────
 FROM node:22-bookworm-slim AS runtime
 
 # Trust store for outbound TLS — the mailbox connection and Auth0's JWKS
@@ -121,21 +142,22 @@ COPY --chown=node:node package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY --chown=node:node apps/backend/package.json ./apps/backend/
 COPY --chown=node:node apps/parser/package.json ./apps/parser/
 
-# The pruned tree, with the generated Prisma client and the workspace links
-# intact. pnpm's node_modules is a tree of symlinks into node_modules/.pnpm, so
-# it is copied whole — copying only the top level would leave dangling links.
-COPY --chown=node:node --from=build /app/node_modules ./node_modules
-COPY --chown=node:node --from=build /app/apps/backend/node_modules ./apps/backend/node_modules
-COPY --chown=node:node --from=build /app/apps/parser/node_modules ./apps/parser/node_modules
+# The production tree, with the generated Prisma client and every workspace
+# dependency — pdfjs-dist among them — intact. pnpm's node_modules is a tree of
+# symlinks into node_modules/.pnpm, so each is copied whole: copying only the
+# top level would leave dangling links.
+COPY --chown=node:node --from=production-dependencies /app/node_modules ./node_modules
+COPY --chown=node:node --from=production-dependencies /app/apps/backend/node_modules ./apps/backend/node_modules
+COPY --chown=node:node --from=production-dependencies /app/apps/parser/node_modules ./apps/parser/node_modules
 
 COPY --chown=node:node --from=build /app/apps/parser/dist ./apps/parser/dist
 COPY --chown=node:node --from=build /app/apps/backend/dist ./apps/backend/dist
 
 # The schema and migrations: `prisma migrate deploy` runs from this image, as a
 # separate one-shot container before the backend starts. The CLI is a runtime
-# dependency for exactly that reason, so it survives the prune above.
-COPY --chown=node:node --from=build /app/prisma ./prisma
-COPY --chown=node:node --from=build /app/prisma.config.ts ./prisma.config.ts
+# dependency for exactly that reason, so the production install keeps it.
+COPY --chown=node:node --from=production-dependencies /app/prisma ./prisma
+COPY --chown=node:node --from=production-dependencies /app/prisma.config.ts ./prisma.config.ts
 
 # What the smoke test read, carried into the image.
 #
