@@ -36,6 +36,7 @@ Worked examples are in `pricing_examples.md`.
 | Symbol | Source | Type |
 |---|---|---|
 | `waited` | `trip.waiting_time_minutes` | whole minutes; not recorded counts as `0` |
+| `threshold` | Setting `PRICING.WAITING_TIME_THRESHOLD_MINUTES` | whole minutes, `>= 0` |
 | `free` | Setting `PRICING.WAITING_TIME_FREE_MINUTES` | whole minutes, `>= 0` |
 | `blockMinutes` | Setting `PRICING.WAITING_TIME_BLOCK_MINUTES` | whole minutes, `> 0` |
 | `blockPrice` | Setting `PRICING.WAITING_TIME_BLOCK_PRICE` | EUR, `>= 0` |
@@ -43,10 +44,14 @@ Worked examples are in `pricing_examples.md`.
 ## Formula
 
 ```
-billableMinutes = max(0, waited - free)
+billableMinutes = waited < threshold ? 0 : max(0, waited - free)
 blocks          = ceil(billableMinutes / blockMinutes)
 amount          = blocks * blockPrice
 ```
+
+The threshold decides WHETHER waiting is charged; the allowance decides HOW MUCH
+of it is chargeable. A wait short of the threshold produces no line at all, even
+where it already exceeds the allowance.
 
 A pricing line is produced only when `blocks >= 1`.
 

@@ -217,8 +217,9 @@ async function main(): Promise<void> {
     prisma.customProperty.create({
       data: {
         name: "TAR",
-        description: "Terminal Access Regulation surcharge.",
-        defaultPrice: 35.0,
+        description:
+          "Terminal Access Regulation surcharge. Applied automatically by the Pricing Engine — see the AUTOMATIC_CUSTOM_PROPERTY_ID setting.",
+        defaultPrice: 20.0,
         displayOrder: 1,
         color: "#f59e0b",
       },
@@ -390,24 +391,40 @@ async function main(): Promise<void> {
       {
         category: "PRICING",
         key: "WAITING_TIME_FREE_MINUTES",
-        value: "60",
+        value: "120",
         valueType: "INTEGER",
-        description: "Free waiting period per Trip (dummy development value).",
+        description:
+          "The first two hours of waiting are never charged. Deducted from the total wait once the threshold is reached.",
+      },
+      {
+        category: "PRICING",
+        key: "WAITING_TIME_THRESHOLD_MINUTES",
+        value: "150",
+        valueType: "INTEGER",
+        description:
+          "Charging begins at two and a half hours. A shorter wait costs nothing, even where it already exceeds the free allowance.",
       },
       {
         category: "PRICING",
         key: "WAITING_TIME_BLOCK_MINUTES",
-        value: "30",
+        value: "15",
         valueType: "INTEGER",
-        description: "Billing block size (dummy development value).",
+        description: "Billable waiting is charged per quarter of an hour.",
       },
       {
         category: "PRICING",
         key: "WAITING_TIME_BLOCK_PRICE",
-        value: "25.00",
+        value: "13.75",
         valueType: "DECIMAL",
+        description: "EUR 55.00 per chargeable hour, in quarter-hour blocks.",
+      },
+      {
+        category: "PRICING",
+        key: "AUTOMATIC_CUSTOM_PROPERTY_ID",
+        value: propertyTar.id,
+        valueType: "STRING",
         description:
-          "Price per billable waiting block (dummy development value).",
+          "The Custom Property the Pricing Engine applies without anyone assigning it: TAR. Every Trip pays it, except the DELIVERY leg of a genuine Combination — the pair pays it once, on the COLLECTION. The amount is the property's own configured price.",
       },
       {
         category: "PRICING",

@@ -277,7 +277,7 @@ export class PricingEngineService {
       rules,
     );
     const assignedCustomProperties =
-      await this.componentResolver.resolveAssignedCustomProperties(trip.id);
+      await this.componentResolver.resolveAssignedCustomProperties(trip, rules);
     const routeCosts = await this.routeCostResolver.resolve(trip.id, route);
 
     // Both halves of every route-priced component are now known, so the pairing

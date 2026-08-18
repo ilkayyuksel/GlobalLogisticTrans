@@ -54,8 +54,14 @@ export class PricingRuleResolver {
       combinationSurcharge: await this.requireNonNegativeDecimal(
         PricingSettingKey.COMBINATION_SURCHARGE,
       ),
+      automaticCustomPropertyId: await this.requireNonEmptyText(
+        PricingSettingKey.AUTOMATIC_CUSTOM_PROPERTY_ID,
+      ),
       waitingTimeFreeMinutes: await this.requireWholeMinutes(
         PricingSettingKey.WAITING_TIME_FREE_MINUTES,
+      ),
+      waitingTimeThresholdMinutes: await this.requireWholeMinutes(
+        PricingSettingKey.WAITING_TIME_THRESHOLD_MINUTES,
       ),
       waitingTimeBlockMinutes: await this.requirePositiveWholeMinutes(
         PricingSettingKey.WAITING_TIME_BLOCK_MINUTES,

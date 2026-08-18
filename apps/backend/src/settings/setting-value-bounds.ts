@@ -34,6 +34,11 @@ function settingIdentity(category: string, key: string): string {
  * line. Zero remains valid for all four and means the component is configured
  * but charges nothing — pricing_examples.md example 9 relies on exactly that.
  *
+ * `PRICING.WAITING_TIME_THRESHOLD_MINUTES` — the wait at which charging begins.
+ * Bounded at zero for the same reason as the allowance: a negative threshold
+ * would describe charging before any waiting had happened. Zero means there is
+ * no threshold, and charging begins as soon as the allowance is exceeded.
+ *
  * `PRICING.WAITING_TIME_FREE_MINUTES` — pricing_rules.md states the free
  * allowance is "zero or greater". A negative allowance would make waiting time
  * billable before it was even incurred. Zero remains valid and means there is
@@ -46,6 +51,7 @@ const MINIMUM_BY_SETTING: ReadonlyMap<string, number> = new Map([
   [settingIdentity("PRICING", "DISTANCE_RATE_PER_KM"), 0],
   [settingIdentity("PRICING", "WAITING_TIME_BLOCK_PRICE"), 0],
   [settingIdentity("PRICING", "WAITING_TIME_FREE_MINUTES"), 0],
+  [settingIdentity("PRICING", "WAITING_TIME_THRESHOLD_MINUTES"), 0],
 ]);
 
 /** The inclusive minimum for a setting, or undefined when it has no bound. */

@@ -358,11 +358,111 @@ Examples include:
 
 # Deployment
 
-The application is intended to be containerized.
+The whole application runs from one Docker Compose stack. A server needs Docker
+and nothing else — no Node, no pnpm, no Prisma CLI, no build step by hand.
 
-Each major component should be deployable independently.
+## Prerequisites
 
-Deployment targets may evolve over time.
+- Docker Engine with the Compose plugin
+- DNS A records for `trano.be`, `www.trano.be` and `api.trano.be` pointing at the
+  server, before the first start: certificates are issued over HTTP, so the
+  names must already resolve here
+- Ports 80 and 443 reachable from the internet
+
+## Environment
+
+    cp .env.example .env
+
+Then fill it in. Every variable is marked `[PRODUCTION]`, `[OPTIONAL]` or
+`[DEVELOPMENT]` in that file. The ones a deployment cannot start without:
+
+| Variable | What it is |
+|---|---|
+| `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB` | the database, created on first start |
+| `APP_HOST`, `APP_HOST_WWW`, `API_HOST` | the hostnames the proxy answers on |
+| `ACME_EMAIL` | where Let's Encrypt sends expiry warnings |
+| `APP_BASE_URL` | `https://trano.be` — Auth0 builds its callback and logout URLs from it |
+| `NEXT_PUBLIC_API_URL` | `https://api.trano.be` — where the browser calls the API |
+| `AUTH0_DOMAIN`, `AUTH0_AUDIENCE` | verified by the backend on every request |
+| `AUTH0_CLIENT_ID`, `AUTH0_CLIENT_SECRET`, `AUTH0_SECRET` | the frontend's login flow |
+
+`.env` is never committed. It holds the database password, the Auth0 secret and
+the mailbox password.
+
+`NEXT_PUBLIC_API_URL` is a **build-time** value: Next inlines it into the
+JavaScript the browser downloads. Changing it needs
+`docker compose build frontend`, not just a restart.
+
+## Build and start
+
+    docker compose build          # first time, or after pulling changes
+    docker compose up -d
+
+That single command starts everything in order: PostgreSQL, then the migrations,
+then the API once they succeeded, then the web application, then the proxy.
+
+## Everyday commands
+
+    docker compose ps             # what is running, and whether it is healthy
+    docker compose logs -f        # follow everything
+    docker compose logs -f backend
+    docker compose restart backend
+    docker compose down           # stop everything; DATA IS KEPT
+    docker compose up -d          # start it again
+
+## Migrations
+
+Applied automatically on every `up`, by a one-shot `migrate` container that runs
+`prisma migrate deploy` and exits. The API waits for it to succeed, so no
+request is ever served against an unmigrated schema.
+
+`migrate deploy` only applies migrations that have not run yet. It never resets,
+never drops and never seeds. The development seeds are not part of this stack:
+a deployment starts from the data it already has.
+
+## Volumes
+
+| Volume | Holds | Lost if deleted |
+|---|---|---|
+| `traxo-postgres-data` | the entire database | every Trip, price and setting |
+| `traxo-pdf-storage` | uploaded and emailed transport orders | the original PDFs |
+| `traxo-letsencrypt` | issued certificates | re-issued on next start, subject to Let's Encrypt rate limits |
+
+They survive `docker compose down`, image rebuilds and container replacement.
+
+## Backups
+
+Both volumes matter, and a database dump alone is not a backup — the PDFs live
+outside it:
+
+    docker compose exec postgres pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB" > backup.sql
+    docker run --rm -v traxo-pdf-storage:/data -v "$PWD:/backup" alpine \
+      tar czf /backup/pdf-storage.tar.gz -C /data .
+
+## Destructive commands
+
+    docker compose down -v
+
+**Deletes the volumes**: the database, every stored transport order and the
+certificates. There is no undo and no confirmation prompt.
+
+    docker volume rm traxo-postgres-data
+
+The same, for one volume.
+
+Neither is ever run by the stack itself. Nothing in this repository resets a
+database automatically.
+
+## Local development
+
+Development still runs from source, against its own database:
+
+    pnpm db:up          # docker-compose.dev.yml — PostgreSQL and pgadmin
+    pnpm dev:backend
+    pnpm dev:frontend
+
+The two stacks share no volumes, so deploying can never touch a developer's
+database.
 
 ---
 

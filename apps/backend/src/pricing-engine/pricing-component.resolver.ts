@@ -1,10 +1,18 @@
 import { Injectable } from "@nestjs/common";
 
+import { CustomPropertyService } from "../custom-properties/custom-property.service";
 import { AppLoggerService } from "../logger/app-logger.service";
 import { RoutePricingService } from "../route-pricing/route-pricing.service";
 import { TripCustomPropertyService } from "../trip-custom-properties/trip-custom-property.service";
 import { TripResponseDto } from "../trips/dto/trip-response.dto";
+import { TripService } from "../trips/trip.service";
 import {
+  CombinationLeg,
+  CombinationMember,
+  combinationLegOf,
+} from "./combination-leg";
+import {
+  InvalidCombinationForPricingException,
   MissingRoutePricingException,
   MissingTripPricingInputException,
 } from "./exceptions/pricing-engine.exceptions";
@@ -33,6 +41,8 @@ export class PricingComponentResolver {
   constructor(
     private readonly routePricingService: RoutePricingService,
     private readonly tripCustomPropertyService: TripCustomPropertyService,
+    private readonly customPropertyService: CustomPropertyService,
+    private readonly tripService: TripService,
     private readonly ruleResolver: PricingRuleResolver,
     private readonly logger: AppLoggerService,
   ) {
@@ -76,21 +86,140 @@ export class PricingComponentResolver {
    * is the amount for the fixed-price case.
    */
   async resolveAssignedCustomProperties(
-    tripId: string,
+    trip: TripResponseDto,
+    rules: PricingRuleConfiguration,
   ): Promise<PricingCustomPropertyInput[]> {
-    const { items } = await this.tripCustomPropertyService.findByTripId(tripId);
+    const { items } = await this.tripCustomPropertyService.findByTripId(trip.id);
 
-    this.logger.log("Assigned custom properties resolved", {
-      tripId,
-      assignedCount: items.length,
-    });
-
-    return items.map((assignment) => ({
+    const assigned: PricingCustomPropertyInput[] = items.map((assignment) => ({
       customPropertyId: assignment.customProperty.id,
       name: assignment.customProperty.name,
       pricingComponentId: assignment.customProperty.pricingComponentId,
       defaultPrice: assignment.customProperty.defaultPrice,
     }));
+
+    const resolved = await this.withAutomaticProperty(trip, rules, assigned);
+
+    this.logger.log("Custom properties resolved", {
+      tripId: trip.id,
+      assignedCount: assigned.length,
+      resolvedCount: resolved.length,
+    });
+
+    return resolved;
+  }
+
+  /**
+   * Applies the automatic property — TAR — to the Trips that owe it.
+   *
+   * ── WHY THE ASSIGNMENTS ARE OVERRULED, NOT TRUSTED ────────────────────────
+   * The automatic property is removed from the assignments first and then added
+   * back only where the rule says it belongs. Doing it in that order is what
+   * makes every starting state produce the same answer:
+   *
+   *   nobody assigned it            -> it is applied anyway
+   *   somebody assigned it          -> it is applied once, not twice
+   *   it sits on the wrong leg      -> it moves to the right one
+   *   it sits on both legs          -> one charge, on the collection
+   *
+   * The operator therefore never has to tick it, and a stale tick left over
+   * from before this rule existed cannot produce a second charge.
+   *
+   * Only NEW calculations are affected. A stored snapshot is a record of what
+   * was charged and is never rewritten by a rule change; a reprocess is how an
+   * administrator asks for the current rules to be applied.
+   * ──────────────────────────────────────────────────────────────────────────
+   *
+   * ── WHICH TRIPS OWE IT ────────────────────────────────────────────────────
+   * Every Trip, except the DELIVERY leg of a genuine Combination: the pair is
+   * one movement and carries the charge once, on the collection. A manual group
+   * is not a Combination, so its Trips each owe it — see `combination-leg.ts`.
+   * ──────────────────────────────────────────────────────────────────────────
+   */
+  private async withAutomaticProperty(
+    trip: TripResponseDto,
+    rules: PricingRuleConfiguration,
+    assigned: readonly PricingCustomPropertyInput[],
+  ): Promise<PricingCustomPropertyInput[]> {
+    const withoutIt = assigned.filter(
+      (property) =>
+        property.customPropertyId !== rules.automaticCustomPropertyId,
+    );
+
+    const leg = await this.resolveCombinationLeg(trip);
+
+    if (leg === CombinationLeg.INVALID) {
+      this.logger.warn("Pricing refused a malformed Combination", {
+        tripId: trip.id,
+        tripGroupId: trip.tripGroupId,
+      });
+
+      throw new InvalidCombinationForPricingException(
+        trip.id,
+        trip.tripGroupId as string,
+        await this.directionsOfGroup(trip),
+      );
+    }
+
+    if (leg === CombinationLeg.DELIVERY) {
+      return withoutIt;
+    }
+
+    return [...withoutIt, await this.automaticProperty(rules)];
+  }
+
+  /** The configured automatic property, as the calculator reads any other. */
+  private async automaticProperty(
+    rules: PricingRuleConfiguration,
+  ): Promise<PricingCustomPropertyInput> {
+    const property = await this.customPropertyService.findById(
+      rules.automaticCustomPropertyId,
+    );
+
+    return {
+      customPropertyId: property.id,
+      name: property.name,
+      pricingComponentId: property.pricingComponentId,
+      // The configured price, whatever it currently is. Never a literal.
+      defaultPrice: property.defaultPrice,
+    };
+  }
+
+  /**
+   * Which leg of a genuine Combination this Trip is.
+   *
+   * The group is read only when the Trip is in one, so an ordinary Trip costs
+   * no extra query.
+   */
+  private async resolveCombinationLeg(
+    trip: TripResponseDto,
+  ): Promise<CombinationLeg> {
+    if (trip.tripGroupId === null || trip.pdfDocumentId === null) {
+      return CombinationLeg.NONE;
+    }
+
+    return combinationLegOf(trip, await this.groupMembers(trip));
+  }
+
+  private async groupMembers(
+    trip: TripResponseDto,
+  ): Promise<CombinationMember[]> {
+    const { items } = await this.tripService.findByGroupId(
+      trip.tripGroupId as string,
+    );
+
+    return items;
+  }
+
+  /** For the refusal message, so the fault can be seen without a query. */
+  private async directionsOfGroup(
+    trip: TripResponseDto,
+  ): Promise<(string | null)[]> {
+    const members = await this.groupMembers(trip);
+
+    return members
+      .filter((member) => member.pdfDocumentId === trip.pdfDocumentId)
+      .map((member) => member.direction);
   }
 
   /**

@@ -15,9 +15,9 @@
     "test": "pnpm -r test",
     "dev:backend": "pnpm --filter @tms/backend start:dev",
     "dev:frontend": "pnpm --filter @tms/frontend dev",
-    "db:up": "docker compose up -d --wait",
-    "db:down": "docker compose down",
-    "db:logs": "docker compose logs -f postgres",
+    "db:up": "docker compose -f docker-compose.dev.yml up -d --wait",
+    "db:down": "docker compose -f docker-compose.dev.yml down",
+    "db:logs": "docker compose -f docker-compose.dev.yml logs -f postgres",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev && prisma generate",
     "db:migrate:deploy": "prisma migrate deploy",
@@ -35,6 +35,7 @@
   },
   "dependencies": {
     "@prisma/adapter-pg": "^7.9.1",
+    "prisma": "^7.9.1",
     "@prisma/client": "^7.9.1",
     "dotenv": "^17.4.2"
   },
@@ -44,7 +45,6 @@
     "eslint": "^10.8.1",
     "eslint-plugin-react-hooks": "^7.1.1",
     "prettier": "^3.9.6",
-    "prisma": "^7.9.1",
     "tsx": "^4.23.11",
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.66.0"

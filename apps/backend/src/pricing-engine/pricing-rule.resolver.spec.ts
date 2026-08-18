@@ -21,7 +21,9 @@ const SEEDED_VALUES: Record<string, string> = {
   [PricingSettingKey.STRATEGY]: PricingStrategy.ROUTE_BASED,
   [PricingSettingKey.FUEL_PERCENTAGE]: "15",
   [PricingSettingKey.COMBINATION_SURCHARGE]: "75",
+  [PricingSettingKey.AUTOMATIC_CUSTOM_PROPERTY_ID]: "property-tar",
   [PricingSettingKey.WAITING_TIME_FREE_MINUTES]: "60",
+  [PricingSettingKey.WAITING_TIME_THRESHOLD_MINUTES]: "0",
   [PricingSettingKey.WAITING_TIME_BLOCK_MINUTES]: "30",
   [PricingSettingKey.WAITING_TIME_BLOCK_PRICE]: "25.00",
   [PricingSettingKey.DISTANCE_RATE_PER_KM]: "1.85",
@@ -96,7 +98,9 @@ describe("PricingRuleResolver", () => {
         strategy: PricingStrategy.ROUTE_BASED,
         fuelPercentage: "15",
         combinationSurcharge: "75",
+        automaticCustomPropertyId: "property-tar",
         waitingTimeFreeMinutes: 60,
+        waitingTimeThresholdMinutes: 0,
         waitingTimeBlockMinutes: 30,
         waitingTimeBlockPrice: "25.00",
         ruleVersion: "2026.1",
@@ -114,7 +118,9 @@ describe("PricingRuleResolver", () => {
         `${PRICING_SETTINGS_CATEGORY}.${PricingSettingKey.STRATEGY}`,
         `${PRICING_SETTINGS_CATEGORY}.${PricingSettingKey.FUEL_PERCENTAGE}`,
         `${PRICING_SETTINGS_CATEGORY}.${PricingSettingKey.COMBINATION_SURCHARGE}`,
+        `${PRICING_SETTINGS_CATEGORY}.${PricingSettingKey.AUTOMATIC_CUSTOM_PROPERTY_ID}`,
         `${PRICING_SETTINGS_CATEGORY}.${PricingSettingKey.WAITING_TIME_FREE_MINUTES}`,
+        `${PRICING_SETTINGS_CATEGORY}.${PricingSettingKey.WAITING_TIME_THRESHOLD_MINUTES}`,
         `${PRICING_SETTINGS_CATEGORY}.${PricingSettingKey.WAITING_TIME_BLOCK_MINUTES}`,
         `${PRICING_SETTINGS_CATEGORY}.${PricingSettingKey.WAITING_TIME_BLOCK_PRICE}`,
         `${PRICING_SETTINGS_CATEGORY}.${PricingSettingKey.RULE_VERSION}`,
@@ -159,7 +165,9 @@ describe("PricingRuleResolver", () => {
       PricingSettingKey.STRATEGY,
       PricingSettingKey.FUEL_PERCENTAGE,
       PricingSettingKey.COMBINATION_SURCHARGE,
+      PricingSettingKey.AUTOMATIC_CUSTOM_PROPERTY_ID,
       PricingSettingKey.WAITING_TIME_FREE_MINUTES,
+      PricingSettingKey.WAITING_TIME_THRESHOLD_MINUTES,
       PricingSettingKey.WAITING_TIME_BLOCK_MINUTES,
       PricingSettingKey.WAITING_TIME_BLOCK_PRICE,
     ])("fails when %s is missing", async (key) => {
@@ -380,7 +388,7 @@ describe("PricingRuleResolver", () => {
       await resolver.resolve();
 
       // Seven keys, read again on the second call.
-      expect(settingsService.findOne).toHaveBeenCalledTimes(14);
+      expect(settingsService.findOne).toHaveBeenCalledTimes(18);
     });
   });
 

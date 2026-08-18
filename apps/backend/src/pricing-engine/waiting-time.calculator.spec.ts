@@ -13,6 +13,7 @@ const TRIP_ID = "3f2504e0-4f89-41d3-9a0c-0305e82c3301";
 
 /** The configuration used by pricing_examples.md and by the development seed. */
 const FREE_MINUTES = 60;
+const THRESHOLD_MINUTES = 0;
 const BLOCK_MINUTES = 30;
 const BLOCK_PRICE = "25.00";
 
@@ -20,6 +21,7 @@ function buildContext(
   waitingTimeMinutes: number,
   overrides: {
     free?: number;
+    threshold?: number;
     blockMinutes?: number;
     blockPrice?: string;
   } = {},
@@ -41,7 +43,9 @@ function buildContext(
       strategy: PricingStrategy.ROUTE_BASED,
       fuelPercentage: "15",
       combinationSurcharge: "75",
+      automaticCustomPropertyId: "property-tar",
       waitingTimeFreeMinutes: overrides.free ?? FREE_MINUTES,
+      waitingTimeThresholdMinutes: overrides.threshold ?? THRESHOLD_MINUTES,
       waitingTimeBlockMinutes: overrides.blockMinutes ?? BLOCK_MINUTES,
       waitingTimeBlockPrice: overrides.blockPrice ?? BLOCK_PRICE,
       ruleVersion: "2026.1",
@@ -351,5 +355,142 @@ describe("WaitingTimeCalculator", () => {
       expect(source).not.toContain("combinationSurcharge");
       expect(source).not.toContain("basePrice");
     });
+  });
+});
+
+/**
+ * ── THE OPERATOR'S WAITING-TIME RULE ────────────────────────────────────────
+ * Stated by the business in hours and minutes:
+ *
+ *   the first 2 hours are free;
+ *   2h15 is still entirely free;
+ *   charging starts at 2h30, and then covers everything past the 2 hours;
+ *   €55.00 per chargeable hour.
+ *
+ * Expressed in the configuration the Pricing Engine already has:
+ *
+ *   WAITING_TIME_THRESHOLD_MINUTES = 150   charging starts at 2h30
+ *   WAITING_TIME_FREE_MINUTES      = 120   the first 2 hours are never charged
+ *   WAITING_TIME_BLOCK_MINUTES     = 15    a quarter of an hour
+ *   WAITING_TIME_BLOCK_PRICE       = 13.75 €55.00 per hour
+ *
+ * Both the threshold and the allowance are needed. Without the threshold, 2h15
+ * would cost a block; without the allowance, 2h30 would be charged for its full
+ * two and a half hours.
+ * ────────────────────────────────────────────────────────────────────────────
+ */
+describe("the waiting-time rule as the business stated it", () => {
+  const RULE = {
+    threshold: 150,
+    free: 120,
+    blockMinutes: 15,
+    blockPrice: "13.75",
+  };
+
+  let calculator: WaitingTimeCalculator;
+
+  beforeEach(() => {
+    calculator = new WaitingTimeCalculator({
+      setContext: jest.fn(),
+      log: jest.fn(),
+      warn: jest.fn(),
+    } as unknown as AppLoggerService);
+  });
+
+  /** The amount for a wait, or null when the component did not apply. */
+  function amountFor(minutes: number): string | null {
+    const lines = calculator.calculate(buildContext(minutes, RULE));
+
+    return lines.length === 0 ? null : lines[0].amount.toFixed(2);
+  }
+
+  /*
+   * Every value the business listed, and the boundaries either side of the
+   * threshold. A wait short of 2h30 produces NO line at all — not a line of
+   * zero: the component did not apply.
+   */
+  it.each([
+    [0, null],
+    [60, null],
+    [120, null],
+    [129, null],
+    [135, null],
+    [139, null],
+    [140, null],
+    [149, null],
+    [150, "27.50"],
+    [165, "41.25"],
+    [180, "55.00"],
+    [195, "68.75"],
+    [210, "82.50"],
+  ])("charges %i minutes of waiting as %s", (minutes, expected) => {
+    expect(amountFor(minutes)).toBe(expected);
+  });
+
+  it("charges nothing for a wait one minute short of the threshold", () => {
+    expect(amountFor(149)).toBeNull();
+    expect(amountFor(150)).toBe("27.50");
+  });
+
+  /*
+   * The threshold does not become the deduction. At 2h30 the charge covers the
+   * 30 minutes past the 2-hour allowance — not the 0 minutes past the
+   * threshold, which would be free, and not the full 150 minutes.
+   */
+  it("deducts the allowance, not the threshold", () => {
+    const [line] = calculator.calculate(buildContext(150, RULE));
+
+    expect(line.description).toBe("30 billable minutes");
+    expect(line.quantity?.toFixed(0)).toBe("2");
+    expect(line.unitPrice?.toFixed(2)).toBe("13.75");
+  });
+
+  it("prices a whole extra hour at exactly 55.00", () => {
+    expect(amountFor(180)).toBe("55.00");
+    expect(amountFor(240)).toBe("110.00");
+  });
+
+  /*
+   * Money is Decimal from end to end. 13.75 is not representable in binary
+   * floating point, and 5 blocks of it is where a float implementation drifts:
+   * 5 * 13.75 is exact here, and 3 * 13.75 = 41.25 rather than 41.249999…
+   */
+  it("uses exact decimal arithmetic, never floating point", () => {
+    for (const [minutes, expected] of [
+      [165, "41.25"],
+      [195, "68.75"],
+      [255, "123.75"],
+      [285, "151.25"],
+    ] as const) {
+      expect(amountFor(minutes)).toBe(expected);
+    }
+  });
+
+  it("stores the amount as a Decimal, not a number", () => {
+    const [line] = calculator.calculate(buildContext(150, RULE));
+
+    expect(Prisma.Decimal.isDecimal(line.amount)).toBe(true);
+    expect(line.amount.toFixed(2)).toBe("27.50");
+  });
+
+  /*
+   * A minute past a block boundary costs the whole block. That rounding rule is
+   * the one pricing_rules.md already states — "every block that is STARTED is
+   * charged in full" — and it is not changed here.
+   */
+  it("charges a started block in full, as the existing rule requires", () => {
+    // 151 minutes: 31 billable, which is three started quarter-hours.
+    expect(amountFor(151)).toBe("41.25");
+    expect(amountFor(155)).toBe("41.25");
+    expect(amountFor(164)).toBe("41.25");
+    expect(amountFor(166)).toBe("55.00");
+  });
+
+  it("classifies the line as WAITING_TIME at the fourth step", () => {
+    const [line] = calculator.calculate(buildContext(150, RULE));
+
+    expect(line.component).toBe(PricingComponentCode.WAITING_TIME);
+    expect(line.calculationOrder).toBe(WAITING_TIME_CALCULATION_ORDER);
+    expect(line.customPropertyId).toBeNull();
   });
 });

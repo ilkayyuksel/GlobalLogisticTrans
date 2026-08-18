@@ -1,27 +1,64 @@
-# The build context is the repository root (see apps/backend/Dockerfile).
-# Excluding these keeps the context small and prevents host-built artefacts
-# from leaking into the image.
+# What must never enter a build context.
+#
+# Two reasons, and the second matters more than the size:
+#
+#   1. speed — node_modules and build output are re-created inside the image,
+#      so shipping them wastes minutes on every build;
+#   2. safety — .env holds the database password, the Auth0 secret and the IMAP
+#      password, and storage/pdf holds real customer transport orders. Neither
+#      belongs in an image that gets pushed to a registry.
+#
+# Anything a build genuinely needs is listed as an exception at the end.
 
+# Dependencies and build output: rebuilt inside the image.
+node_modules
 **/node_modules
+dist
 **/dist
-**/build
+.next
 **/.next
+out
+**/out
+coverage
 **/coverage
+*.tsbuildinfo
 
-.git
-.github
-.vscode
-.idea
-
-# Secrets must never enter an image layer.
+# Secrets. Every variant, so a stray .env.production cannot slip through.
 .env
 .env.*
 !.env.example
 
-docs
-storage
-scripts
-database
+# Real customer documents. The application writes these into a volume at
+# runtime; they must never be baked into an image.
+storage/pdf
 
-**/*.log
-**/*.tsbuildinfo
+# Version control and editor state.
+.git
+.gitignore
+.vscode
+.idea
+*.swp
+
+# Local tooling noise.
+.DS_Store
+Thumbs.db
+npm-debug.log*
+pnpm-debug.log*
+.pnpm-store
+
+# Docker's own files: changing a compose file must not invalidate an image layer.
+docker-compose*.yml
+Dockerfile*
+**/Dockerfile*
+.dockerignore
+
+# Documentation and scratch material. The PDF fixtures under docs/06-pdf are the
+# one exception: the backend image runs a parser smoke test against them at
+# build time, and they are committed test documents rather than customer data.
+docs/00-project
+docs/01-architecture
+docs/02-business
+docs/03-ui
+docs/04-development
+docs/05-pricing
+README

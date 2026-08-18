@@ -15,13 +15,23 @@ are examples, not official prices.
 
 ## Configuration used in these examples
 
+These examples illustrate the FORMULA, so they use a deliberately simple
+configuration rather than the one the business currently runs:
+
 | Setting | Value |
 |---|---|
+| `PRICING.WAITING_TIME_THRESHOLD_MINUTES` | `0` |
 | `PRICING.WAITING_TIME_FREE_MINUTES` | `60` |
 | `PRICING.WAITING_TIME_BLOCK_MINUTES` | `30` |
 | `PRICING.WAITING_TIME_BLOCK_PRICE` | `25.00` |
 
-Examples 9 and 10 override one of these values, as noted.
+A threshold of zero means charging begins as soon as the allowance is exceeded,
+which is what examples 1 to 10 below show. Examples 9 and 10 override one of the
+other values, as noted, and examples 11 to 14 show the threshold in use.
+
+The configuration the business actually runs — a 150-minute threshold, a
+120-minute allowance, 15-minute blocks at 13.75 — is set out in
+`pricing_rules.md`.
 
 ## Examples
 
@@ -38,7 +48,25 @@ Examples 9 and 10 override one of these values, as noted.
 | 9 | Zero block price (`blockPrice = 0.00`) | 90 | 30 | 1 | 0.00 | yes |
 | 10 | No free allowance (`free = 0`) | 10 | 10 | 1 | 25.00 | yes |
 
+With `threshold = 150`, `free = 120`, `blockMinutes = 15` and
+`blockPrice = 13.75` — the business configuration:
+
+| # | Case | `waited` | `billableMinutes` | `blocks` | Amount | Line produced |
+|---|---|---|---|---|---|---|
+| 11 | Past the allowance, short of the threshold | 135 | 0 | 0 | — | no |
+| 12 | One minute short of the threshold | 149 | 0 | 0 | — | no |
+| 13 | Exactly the threshold | 150 | 30 | 2 | 27.50 | yes |
+| 14 | A full extra hour | 180 | 60 | 4 | 55.00 | yes |
+
 ## Notes
+
+**Examples 11 and 12** are the reason the threshold exists. Both waits exceed
+the 120-minute allowance and neither is charged: the allowance alone would have
+billed a block for each.
+
+**Example 13** shows that the threshold is not the deduction. At 150 minutes the
+charge covers the 30 minutes past the ALLOWANCE, not the 0 minutes past the
+threshold.
 
 **Examples 1 and 2** are identical in outcome. Waiting time that was never
 recorded and waiting time explicitly recorded as zero are both zero minutes.

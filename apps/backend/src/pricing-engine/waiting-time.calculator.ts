@@ -22,17 +22,25 @@ const NO_BILLABLE_BLOCKS = 0;
 /**
  * Calculates the Waiting Time charge — step 4 of the pricing sequence.
  *
- * The formula is defined in pricing_formula.md and worked through in
- * pricing_examples.md:
- *
+ *   if waited < threshold: nothing is charged
  *   billableMinutes = max(0, waited - free)
  *   blocks          = ceil(billableMinutes / blockMinutes)
  *   amount          = blocks * blockPrice
  *
- * Two rules drive the shape of the result. The free allowance is a deduction
- * applied once, before any blocking — not a threshold and not per block. And
- * every block that is STARTED is charged in full, which is what makes one
- * minute beyond the allowance cost the same as a whole block.
+ * ── THE THRESHOLD AND THE ALLOWANCE ARE TWO DIFFERENT RULES ─────────────────
+ * The threshold decides WHETHER waiting is charged; the allowance decides HOW
+ * MUCH of it is chargeable once it is. Both apply, in that order.
+ *
+ * With a 2-hour allowance and a 2h30 threshold, a wait of 2h15 costs nothing
+ * even though it already exceeds the allowance, while 2h30 is charged for the
+ * 30 minutes beyond the allowance — not for the 0 minutes beyond the
+ * threshold. That is the business rule as the operator stated it, and it
+ * cannot be expressed by either value alone: the allowance is what is
+ * subtracted, the threshold is what must be reached first.
+ * ────────────────────────────────────────────────────────────────────────────
+ *
+ * Every block that is STARTED is charged in full, which is what makes one
+ * minute past a block boundary cost a whole block.
  *
  * A Trip with nothing billable produces no line at all, rather than a line of
  * zero: the component did not apply. A Trip with billable blocks always
@@ -74,12 +82,16 @@ export class WaitingTimeCalculator implements PricingCalculationStep {
   }
 
   /**
-   * The free allowance is deducted once from the total wait.
+   * The minutes this Trip is charged for.
    *
-   * A Trip that waited within the allowance has nothing billable, and the
-   * result is never negative.
+   * Nothing at all until the threshold is reached; from there, the total wait
+   * less the free allowance. The result is never negative.
    */
   private billableMinutes(context: PricingCalculationContext): number {
+    if (context.waitingTimeMinutes < context.rules.waitingTimeThresholdMinutes) {
+      return 0;
+    }
+
     return Math.max(
       0,
       context.waitingTimeMinutes - context.rules.waitingTimeFreeMinutes,

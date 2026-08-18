@@ -2,16 +2,21 @@ import { Transform, plainToInstance } from "class-transformer";
 import {
   IsArray,
   IsBoolean,
-  IsEmail,
   IsEnum,
   IsInt,
   IsNotEmpty,
   IsString,
   Max,
   Min,
+  Validate,
   ValidateIf,
+  ValidationArguments,
+  ValidatorConstraint,
+  ValidatorConstraintInterface,
   validateSync,
 } from "class-validator";
+
+import { isTrustedSenderPattern } from "../imap/trusted-sender";
 
 /**
  * Validated shape of the environment.
@@ -140,6 +145,22 @@ function parsePositiveInteger(defaultValue: number) {
  * domain-suffix matching would silently trust every address at a domain, which
  * no requirement asks for.
  */
+/**
+ * Refuses any allowlist entry that is not an exact address or a `*@domain`
+ * wildcard. The format itself lives in `trusted-sender.ts`, so the validator
+ * and the matcher can never disagree about what is accepted.
+ */
+@ValidatorConstraint({ name: "trustedSenderPattern", async: false })
+export class TrustedSenderPatternRule implements ValidatorConstraintInterface {
+  validate(value: unknown): boolean {
+    return isTrustedSenderPattern(value);
+  }
+
+  defaultMessage(args: ValidationArguments): string {
+    return `IMAP_TRUSTED_SENDERS entry ${JSON.stringify(args.value)} is neither an exact address (planning@eucon.nl) nor a domain wildcard (*@eucon.nl).`;
+  }
+}
+
 function parseTrustedSenders({ value }: { value: unknown }): unknown {
   if (isBlank(value) || typeof value !== "string") {
     return [];
@@ -331,15 +352,24 @@ export class EnvironmentVariables {
   /**
    * The senders whose transport orders may create Trips.
    *
+   * Two forms are accepted, and nothing else:
+   *
+   *   planning@eucon.nl   one exact address
+   *   *@eucon.nl          any local part at exactly that domain
+   *
    * Required when IMAP is on and deliberately has no default: an empty
    * allowlist would either trust nobody, making the feature look broken, or —
    * far worse — be read as "trust anyone", which would let any sender create
    * Trips by emailing a PDF.
+   *
+   * Validated at startup rather than at the first email, so a pattern that
+   * would widen the whitelist — `*`, `*@*`, anything regex-shaped — stops the
+   * application instead of silently trusting the internet.
    */
   @Transform(parseTrustedSenders)
   @ValidateIf((environment: EnvironmentVariables) => environment.ENABLE_IMAP)
   @IsArray()
-  @IsEmail({}, { each: true })
+  @Validate(TrustedSenderPatternRule, { each: true })
   IMAP_TRUSTED_SENDERS: string[] = [];
 
   @Transform(defaultWhenBlank(DEFAULT_MAIL_SUBJECT_NEW))

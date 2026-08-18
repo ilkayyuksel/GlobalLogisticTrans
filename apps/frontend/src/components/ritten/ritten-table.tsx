@@ -6,7 +6,8 @@ import type { ReactNode } from "react";
 import { TripStatusBadge } from "@/components/trips/trip-status-badge";
 import { ApiError } from "@/lib/api/client";
 import type { UpdateTripPayload } from "@/lib/api/trips";
-import type { Trip, Vehicle } from "@/lib/api/types";
+import type { PricingSnapshot, Trip, Vehicle } from "@/lib/api/types";
+import { toPricingCells } from "@/lib/ritten/pricing-cells";
 import { toClockLabel } from "@/lib/calendar/clock";
 import { formatCalendarDate } from "@/lib/calendar/calendar-dates";
 import { toFleetOptions, type FleetOption } from "@/lib/fleet-options";
@@ -64,6 +65,28 @@ const COLUMN_KEYS = [
   "ritten.column.actions",
 ] as const;
 
+/**
+ * The pricing columns, to the RIGHT of every operational column.
+ *
+ * They are appended rather than woven in, so the columns an operator works in
+ * every day never move when prices are shown. The table already scrolls
+ * horizontally; these live at the end of that scroll.
+ *
+ * The names are the ones the Excel export already uses — Tarief, Brandstof,
+ * Backload, Tol, Tunnel, Others, EK — so one vocabulary covers the screen and
+ * the spreadsheet.
+ */
+const PRICING_COLUMN_KEYS = [
+  "ritten.column.tarief",
+  "ritten.column.brandstof",
+  "ritten.column.backload",
+  "ritten.column.tol",
+  "ritten.column.tunnel",
+  "ritten.column.others",
+  "ritten.column.ek",
+  "ritten.column.totaal",
+] as const;
+
 export interface RittenTableProps {
   trips: readonly Trip[];
   actions: RittenActions;
@@ -76,6 +99,16 @@ export interface RittenTableProps {
   /** The Trips ticked on the current page. */
   selectedTripIds: ReadonlySet<string>;
   onToggleSelection: (tripId: string) => void;
+  /**
+   * Whether the pricing columns are shown at all.
+   *
+   * When false they are not rendered — not blanked, not masked. A column of
+   * asterisks still tells the room that a price exists and roughly how it is
+   * shaped; an absent column tells them nothing, which is the point.
+   */
+  showPricing: boolean;
+  /** The stored snapshots of the Trips on this page, keyed by Trip id. */
+  pricingByTripId: ReadonlyMap<string, PricingSnapshot>;
 }
 
 export function RittenTable(props: RittenTableProps) {
@@ -99,6 +132,17 @@ export function RittenTable(props: RittenTableProps) {
                 </span>
               </th>
             ))}
+            {props.showPricing
+              ? PRICING_COLUMN_KEYS.map((key) => (
+                  <th
+                    key={key}
+                    scope="col"
+                    className="whitespace-nowrap px-3 py-2 text-right font-medium"
+                  >
+                    {t(key)}
+                  </th>
+                ))
+              : null}
           </tr>
         </thead>
         {/*
@@ -113,7 +157,10 @@ export function RittenTable(props: RittenTableProps) {
             <tr>
               <th
                 scope="colgroup"
-                colSpan={COLUMN_KEYS.length}
+                colSpan={
+                  COLUMN_KEYS.length +
+                  (props.showPricing ? PRICING_COLUMN_KEYS.length : 0)
+                }
                 className="border-b border-border bg-hover/40 px-3 py-1.5 text-left text-xs font-semibold text-secondary"
               >
                 <span className="flex items-center gap-2">
@@ -150,6 +197,8 @@ function RittenRow({
   pricingAttentionTripIds,
   selectedTripIds,
   onToggleSelection,
+  showPricing,
+  pricingByTripId,
 }: RittenTableProps & { trip: Trip }) {
   const t = useTranslation();
   const empty = t("ritten.value.empty");
@@ -301,7 +350,53 @@ function RittenRow({
         */}
         <RowActionMenu trip={trip} actions={actions} isBusy={isBusy} />
       </td>
+
+      {showPricing ? (
+        <PricingCells snapshot={pricingByTripId.get(trip.id) ?? null} />
+      ) : null}
     </tr>
+  );
+}
+
+/**
+ * What the Pricing Engine stored for this Trip, read and shown.
+ *
+ * Nothing is calculated here — not a component, and least of all the total,
+ * which is the backend's own `totalPrice` passed through. See
+ * `pricing-cells.ts`.
+ *
+ * A Trip with no snapshot shows the same empty marker the rest of the table
+ * uses, never `0.00`: not yet priced and priced at nothing are different facts.
+ */
+function PricingCells({ snapshot }: { snapshot: PricingSnapshot | null }) {
+  const t = useTranslation();
+  const empty = t("ritten.value.empty");
+  const cells = toPricingCells(snapshot);
+
+  const amounts = [
+    cells.tarief,
+    cells.brandstof,
+    cells.backload,
+    cells.tol,
+    cells.tunnel,
+    cells.others,
+    cells.ek,
+  ];
+
+  return (
+    <>
+      {amounts.map((amount, index) => (
+        <td
+          key={PRICING_COLUMN_KEYS[index]}
+          className="whitespace-nowrap px-3 py-2 text-right tabular-nums text-secondary"
+        >
+          {amount ?? empty}
+        </td>
+      ))}
+      <td className="whitespace-nowrap px-3 py-2 text-right font-medium tabular-nums text-foreground">
+        {cells.totaal ?? empty}
+      </td>
+    </>
   );
 }
 

@@ -1,20 +1,78 @@
-# Transport Management System — local development infrastructure.
+# TRAXO — the production stack.
 #
-# This file provisions infrastructure only. Application services (backend,
-# frontend, parser, pricing-engine, imap) are deliberately absent: they are run
-# from source during development and get their own compose files when
-# containerized.
+#   cp .env.example .env    # then fill it in
+#   docker compose up -d
 #
-# Usage:
-#   cp .env.example .env   # then fill in the values
-#   docker compose up -d --wait
+# That is the whole deployment. Everything else — installing dependencies,
+# generating the Prisma client, building both applications, applying database
+# migrations — happens inside the images, so a server needs Docker and nothing
+# else.
+#
+# ── WHAT IS PUBLIC AND WHAT IS NOT ──────────────────────────────────────────
+# Only the proxy publishes ports: 80 and 443. The backend, the frontend and the
+# database are reachable over internal networks only, so nothing but the proxy
+# can be addressed from the internet — not even by IP.
+# ────────────────────────────────────────────────────────────────────────────
+#
+# ── DEVELOPMENT USES A DIFFERENT FILE ───────────────────────────────────────
+# `docker-compose.dev.yml` provisions a database and pgadmin for working from
+# source. It is a separate file with separate volumes, so deploying can never
+# touch a developer's database and a server never runs pgadmin.
+# ────────────────────────────────────────────────────────────────────────────
 
 services:
+  # ── The only service the internet can reach ───────────────────────────────
+  proxy:
+    image: traefik:v3.3
+    restart: unless-stopped
+
+    command:
+      # Routing comes from container labels; nothing else is discoverable, and
+      # a container must opt in with `traefik.enable=true`.
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--providers.docker.network=traxo-proxy"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+      # Every plain HTTP request is answered with a redirect to HTTPS.
+      - "--entrypoints.web.http.redirections.entrypoint.to=websecure"
+      - "--entrypoints.web.http.redirections.entrypoint.scheme=https"
+      - "--entrypoints.web.http.redirections.entrypoint.permanent=true"
+      # Let's Encrypt, over the HTTP-01 challenge: it needs port 80 reachable
+      # and the DNS records pointing here, and nothing else.
+      - "--certificatesresolvers.letsencrypt.acme.httpchallenge=true"
+      - "--certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web"
+      - "--certificatesresolvers.letsencrypt.acme.email=${ACME_EMAIL}"
+      - "--certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json"
+      - "--accesslog=true"
+      - "--log.level=INFO"
+      - "--ping=true"
+
+    ports:
+      - "80:80"
+      - "443:443"
+
+    volumes:
+      # Read-only: the proxy reads container labels and must never be able to
+      # act on the daemon it is reading from.
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      # The issued certificates. Losing this volume means re-issuing them, and
+      # Let's Encrypt rate-limits that.
+      - letsencrypt:/letsencrypt
+
+    networks:
+      - proxy
+
+    healthcheck:
+      test: ["CMD", "traefik", "healthcheck", "--ping"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  # ── The database ──────────────────────────────────────────────────────────
   postgres:
-    # PostgreSQL 17. Version 13 or newer is required because the schema relies
-    # on gen_random_uuid() being available as a core function.
     image: postgres:17-alpine
-    container_name: tms-postgres
     restart: unless-stopped
 
     environment:
@@ -22,66 +80,204 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB}
 
-    ports:
-      # Host port is configurable so the container does not collide with a
-      # PostgreSQL instance already installed on the developer machine.
-      - "${POSTGRES_PORT:-5432}:5432"
+    # No `ports:` on purpose. The database is reachable only from the two
+    # services on the `database` network; publishing 5432 would put it on the
+    # internet behind nothing but a password.
 
     volumes:
       - postgres_data:/var/lib/postgresql/data
 
+    networks:
+      - database
+
     healthcheck:
-      # Lets `docker compose up --wait` block until the database genuinely
-      # accepts connections, so running migrations immediately after start
-      # does not fail against a still-initializing server.
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      # What "ready" means here: accepting connections for this user and
+      # database, not merely running. Everything downstream waits for it.
+      test:
+        ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 10s
       timeout: 5s
-      retries: 5
-      start_period: 10s
+      retries: 10
+      start_period: 15s
 
-  pgadmin:
-    # Database administration UI. Development convenience only — nothing in the
-    # application depends on it, and it is never deployed.
-    image: dpage/pgadmin4:9
-    container_name: tms-pgadmin
+  # ── Migrations, as a one-shot container ───────────────────────────────────
+  # Runs to completion and exits. The backend waits for that exit to succeed,
+  # so no request is ever served against a schema that has not been migrated,
+  # and two backend replicas could never race each other applying migrations.
+  migrate:
+    # The backend's image, reused — not built again. It already carries the
+    # schema, the migrations and the Prisma CLI, and giving both services a
+    # build section would have them race to write the same tag.
+    image: traxo-backend:${TRAXO_VERSION:-latest}
+
+    restart: "no"
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+
+    # `migrate deploy` and nothing else: it applies pending migrations and never
+    # resets, never drops, never seeds. `migrate dev`, `db push` and the seeds
+    # are development tools and are deliberately absent from this stack.
+    command: ["node_modules/prisma/build/index.js", "migrate", "deploy"]
+
+    networks:
+      - database
+
+  # ── The API ───────────────────────────────────────────────────────────────
+  backend:
+    image: traxo-backend:${TRAXO_VERSION:-latest}
+    build:
+      context: .
+      dockerfile: apps/backend/Dockerfile
+      target: runtime
+
     restart: unless-stopped
 
     depends_on:
       postgres:
-        # Starting pgadmin before the database is accepting connections just
-        # produces a confusing connection error on the first page load.
         condition: service_healthy
+      migrate:
+        # Starts only once migrations have finished successfully.
+        condition: service_completed_successfully
 
     environment:
-      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_DEFAULT_EMAIL}
-      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_DEFAULT_PASSWORD}
-      # Desktop mode: this is a single-developer local tool, so the login screen
-      # and master-password prompt are pure friction.
-      PGADMIN_CONFIG_SERVER_MODE: "False"
-      PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED: "False"
+      NODE_ENV: production
+      API_PORT: 3000
+      # The compose service name, never localhost: inside a container localhost
+      # is the container itself.
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      # Inside the image, always. Host paths would not exist here.
+      PDF_STORAGE_DIR: /app/storage/pdf
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      CORS_ORIGINS: ${APP_BASE_URL}
 
-    ports:
-      # Container listens on 80; mapped high so no privileged port is needed.
-      - "${PGADMIN_PORT:-5050}:80"
+      ENABLE_AUTH: ${ENABLE_AUTH:-true}
+      AUTH0_DOMAIN: ${AUTH0_DOMAIN}
+      AUTH0_AUDIENCE: ${AUTH0_AUDIENCE}
+      AUTH0_ALLOWED_SUBJECTS: ${AUTH0_ALLOWED_SUBJECTS}
+      PDF_UPLOAD_MAX_SIZE_MB: ${PDF_UPLOAD_MAX_SIZE_MB:-20}
+
+      ENABLE_IMAP: ${ENABLE_IMAP:-false}
+      IMAP_HOST: ${IMAP_HOST:-}
+      IMAP_PORT: ${IMAP_PORT:-993}
+      IMAP_USERNAME: ${IMAP_USERNAME:-}
+      IMAP_PASSWORD: ${IMAP_PASSWORD:-}
+      IMAP_TLS: ${IMAP_TLS:-true}
+      IMAP_FOLDER: ${IMAP_FOLDER:-INBOX}
+      IMAP_TRUSTED_SENDERS: ${IMAP_TRUSTED_SENDERS:-}
+      MAIL_SUBJECT_NEW: ${MAIL_SUBJECT_NEW:-NEW:}
+      IMAP_POLL_CRON: ${IMAP_POLL_CRON:-0 */5 * * * *}
 
     volumes:
-      - pgadmin_data:/var/lib/pgadmin
+      # Transport orders, uploaded and emailed. On a named volume because
+      # replacing this container must not delete them.
+      - pdf_storage:/app/storage/pdf
+
+    networks:
+      - proxy
+      - database
 
     healthcheck:
-      # /misc/ping returns "PING" once the web app has finished booting, which
-      # takes noticeably longer than the container being "running".
-      test: ["CMD", "wget", "-qO-", "http://localhost:80/misc/ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
+      # The endpoint the application already exposes; it reports the database
+      # connection too, so an unhealthy database shows up as an unhealthy API.
+      test:
+        - "CMD"
+        - "node"
+        - "-e"
+        - "fetch('http://127.0.0.1:3000/health').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))"
+      interval: 30s
+      timeout: 10s
+      retries: 5
       start_period: 30s
 
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=traxo-proxy"
+      - "traefik.http.routers.backend.rule=Host(`${API_HOST}`)"
+      - "traefik.http.routers.backend.entrypoints=websecure"
+      - "traefik.http.routers.backend.tls.certresolver=letsencrypt"
+      - "traefik.http.services.backend.loadbalancer.server.port=3000"
+
+  # ── The web application ───────────────────────────────────────────────────
+  frontend:
+    image: traxo-frontend:${TRAXO_VERSION:-latest}
+    build:
+      context: .
+      dockerfile: apps/frontend/Dockerfile
+      target: runtime
+      args:
+        # Build-time, because Next inlines it into the browser bundle. Changing
+        # it requires rebuilding the image, not just restarting the container.
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL}
+
+    restart: unless-stopped
+
+    # Deliberately NOT dependent on the database: the frontend holds no
+    # connection to it and must be able to start and serve its login page even
+    # while the API is still coming up.
+    depends_on:
+      backend:
+        condition: service_started
+
+    environment:
+      NODE_ENV: production
+      # The Auth0 SDK builds its callback and logout URLs from this, so it is
+      # what decides where a login returns to. Never localhost in production.
+      APP_BASE_URL: ${APP_BASE_URL}
+      AUTH0_DOMAIN: ${AUTH0_DOMAIN}
+      AUTH0_CLIENT_ID: ${AUTH0_CLIENT_ID}
+      AUTH0_CLIENT_SECRET: ${AUTH0_CLIENT_SECRET}
+      AUTH0_SECRET: ${AUTH0_SECRET}
+      AUTH0_AUDIENCE: ${AUTH0_AUDIENCE}
+      AUTH0_SCOPE: ${AUTH0_SCOPE:-openid profile email}
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL}
+
+    networks:
+      - proxy
+
+    healthcheck:
+      test:
+        - "CMD"
+        - "node"
+        - "-e"
+        - "fetch('http://127.0.0.1:3100/auth').then((response) => process.exit(response.status < 500 ? 0 : 1)).catch(() => process.exit(1))"
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=traxo-proxy"
+      - "traefik.http.routers.frontend.rule=Host(`${APP_HOST}`) || Host(`${APP_HOST_WWW}`)"
+      - "traefik.http.routers.frontend.entrypoints=websecure"
+      - "traefik.http.routers.frontend.tls.certresolver=letsencrypt"
+      - "traefik.http.services.frontend.loadbalancer.server.port=3100"
+
+# ── Networks ────────────────────────────────────────────────────────────────
+# Two of them, so reachability is a property of the topology rather than of a
+# firewall someone has to remember. The frontend is not on `database` and
+# therefore cannot reach PostgreSQL at all; `database` is internal, so nothing
+# on it can reach — or be reached from — the internet.
+networks:
+  proxy:
+    name: traxo-proxy
+  database:
+    name: traxo-database
+    internal: true
+
+# ── Volumes ─────────────────────────────────────────────────────────────────
+# `docker compose down` leaves all three intact. `docker compose down -v`
+# DELETES them — the database, every stored transport order and the
+# certificates. See the deployment section of the README.
 volumes:
-  # Named volumes rather than bind mounts: avoids the file-permission and
-  # performance problems bind-mounting these directories causes on Windows and
-  # macOS. pgadmin in particular runs as uid 5050 and cannot write a host mount.
   postgres_data:
-    name: tms-postgres-data
-  pgadmin_data:
-    name: tms-pgadmin-data
+    name: traxo-postgres-data
+  pdf_storage:
+    name: traxo-pdf-storage
+  letsencrypt:
+    name: traxo-letsencrypt

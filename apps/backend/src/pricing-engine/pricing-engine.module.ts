@@ -1,5 +1,6 @@
 import { Module } from "@nestjs/common";
 
+import { CustomPropertyModule } from "../custom-properties/custom-property.module";
 import { RouteCostModule } from "../route-costs/route-cost.module";
 import { RoutePricingModule } from "../route-pricing/route-pricing.module";
 import { SettingsModule } from "../settings/settings.module";
@@ -29,9 +30,11 @@ import { WaitingTimeCalculator } from "./waiting-time.calculator";
  * Engine is a domain service. It owns no table, so it imports the seven modules
  * that own the data it needs and talks to their Services only.
  *
- * CustomPropertyModule is deliberately absent. The Engine reads a Trip's
- * ASSIGNED properties through TripCustomPropertyService, never the catalog, so
- * it has no reason to reach the catalog directly.
+ * The Engine reads a Trip's ASSIGNED properties through
+ * TripCustomPropertyService. It reaches the CATALOG for exactly one thing: the
+ * property it applies automatically — TAR — which by definition nobody assigned,
+ * so there is no assignment to read it from. It is looked up by the id the
+ * AUTOMATIC_CUSTOM_PROPERTY_ID Setting holds, never by name.
  *
  * All seven dependencies flow one way. Nothing in Settings, RoutePricing,
  * RouteCost, Trip, TripCustomProperty, TripPricing or TripPricingItem knows the
@@ -48,6 +51,7 @@ import { WaitingTimeCalculator } from "./waiting-time.calculator";
  */
 @Module({
   imports: [
+    CustomPropertyModule,
     SettingsModule,
     RoutePricingModule,
     RouteCostModule,

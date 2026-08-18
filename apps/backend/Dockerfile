@@ -1,65 +1,158 @@
-# Backend container image.
+# The backend, built and run for production.
 #
-# Built from the REPOSITORY ROOT, not from apps/backend, because this is a pnpm
-# workspace: the lockfile, the workspace manifest and prisma/schema.prisma all
-# live at the root and are required to resolve and generate.
+# ── BUILT FROM THE REPOSITORY ROOT ──────────────────────────────────────────
+#   docker build -f apps/backend/Dockerfile .
 #
-#   docker build -f apps/backend/Dockerfile -t tms-backend .
+# The context is the whole workspace, not apps/backend, because the backend is
+# not self-contained: it imports @tms/parser from apps/parser and the Prisma
+# schema and migrations live at the root. Building from the app directory would
+# mean copying files upward out of the context, which cannot be done.
+# ────────────────────────────────────────────────────────────────────────────
+#
+# ── THE MONOREPO LAYOUT SURVIVES INTO THE RUNTIME IMAGE ─────────────────────
+# The final image keeps /app/apps/backend, /app/apps/parser and /app/node_modules
+# exactly as the repository has them. That is deliberate: @tms/parser is a
+# workspace link, and pdfjs-dist is resolved from inside the parser at runtime
+# through require.resolve. Flattening the layout is what broke that resolution
+# once before; preserving it means the container resolves modules the same way
+# the developer machine does.
+# ────────────────────────────────────────────────────────────────────────────
 
-# ---------------------------------------------------------------------------
-# Stage 1 — install dependencies (cached independently of source changes)
-# ---------------------------------------------------------------------------
-FROM node:22-alpine AS dependencies
+# ── Stage 1: dependencies ───────────────────────────────────────────────────
+# Every dependency, dev ones included: nest build and prisma generate need them.
+FROM node:22-bookworm-slim AS dependencies
 
+WORKDIR /app
+
+# corepack ships with Node and pins pnpm to the version package.json names, so
+# the image cannot drift from the lockfile the repository was resolved with.
 RUN corepack enable
 
-WORKDIR /repository
-
-# Only the manifests, so this layer is reused whenever source changes but
-# dependencies do not.
+# Manifests first, so a change to source code does not invalidate the install
+# layer — by far the most expensive one.
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY apps/backend/package.json ./apps/backend/
+COPY apps/frontend/package.json ./apps/frontend/
+COPY apps/parser/package.json ./apps/parser/
 
 RUN pnpm install --frozen-lockfile
 
-# ---------------------------------------------------------------------------
-# Stage 2 — generate the Prisma client and compile TypeScript
-# ---------------------------------------------------------------------------
+# ── Stage 2: build ──────────────────────────────────────────────────────────
 FROM dependencies AS build
 
-COPY prisma.config.ts ./
+# The Prisma schema and the generator live at the root.
 COPY prisma ./prisma
+COPY prisma.config.ts ./
+
+COPY apps/parser ./apps/parser
 COPY apps/backend ./apps/backend
 
-# The generated client must exist before tsc runs: the backend imports its types.
-RUN pnpm prisma generate
+# The parser is built first: the backend compiles against its emitted types.
+RUN pnpm --filter @tms/parser build
+
+# Generated from the schema, not committed, so it must happen inside the image.
+#
+# `prisma generate` connects to nothing — it reads the schema and writes a
+# client — but prisma.config.ts resolves DATABASE_URL when the CLI loads it, so
+# the variable has to exist. A placeholder is passed for this command only: it
+# is never stored in the image, and the real URL is supplied at runtime by
+# compose.
+RUN DATABASE_URL="postgresql://placeholder:placeholder@127.0.0.1:5432/placeholder"   pnpm exec prisma generate
 
 RUN pnpm --filter @tms/backend build
 
-# Drop development dependencies now that compilation is finished.
-RUN pnpm install --frozen-lockfile --prod
+# ── Dev dependencies are removed from this same tree ────────────────────────
+# NOT re-installed in a separate stage, and that is deliberate. Prisma 7
+# generates its client INTO the @prisma/client package inside pnpm's store, so a
+# fresh production install would produce a tree with no generated client in it
+# and no stable path to copy one from — the store directory carries a content
+# hash. Pruning keeps the tree that was generated into and removes what
+# production does not run.
+#
+# CI=true answers pnpm's "replace node_modules?" prompt, which a build has no
+# terminal for.
+ENV CI=true
+RUN pnpm prune --prod
 
-# ---------------------------------------------------------------------------
-# Stage 3 — runtime
-# ---------------------------------------------------------------------------
-FROM node:22-alpine AS runtime
+# ── Stage 3: the parser smoke test ──────────────────────────────────────────
+# A real transport order, parsed by the real parser, inside the image that will
+# run it. This is the check that pdfjs-dist resolves here — a build that passes
+# every test on a developer machine and cannot load pdfjs in the container is
+# exactly the failure this catches, and it catches it at build time rather than
+# on the first email.
+#
+# It runs against the committed fixtures in docs/06-pdf, which are test
+# documents rather than customer data, and neither the fixtures nor this stage
+# reach the runtime image.
+FROM build AS smoke-test
+
+COPY docs/06-pdf ./docs/06-pdf
+
+RUN node -e " \
+  const { readFileSync } = require('node:fs'); \
+  const { parse } = require('./apps/parser/dist/index.js'); \
+  parse(new Uint8Array(readFileSync('docs/06-pdf/NEW/1page.pdf'))).then((result) => { \
+    if (!result.ok) { throw new Error('parser smoke test failed: ' + result.reason + ' ' + result.message); } \
+    if (result.trips[0].bookingNumber !== 'ANRDUB2602247') { throw new Error('parser smoke test read the wrong booking: ' + result.trips[0].bookingNumber); } \
+    console.log(result.layout + ' ' + result.documentStatus + ' ' + result.trips[0].bookingNumber); \
+  }).catch((error) => { console.error(error.message); process.exit(1); }); \
+" | tee /parser-smoke.txt
+
+# ── Stage 4: runtime ────────────────────────────────────────────────────────
+FROM node:22-bookworm-slim AS runtime
+
+# Trust store for outbound TLS — the mailbox connection and Auth0's JWKS
+# endpoint both need it, and the slim image does not carry one.
+# tini reaps zombies and forwards signals, so `docker compose down` stops the
+# process rather than waiting out the timeout.
+RUN apt-get update \
+  && apt-get install --no-install-recommends --yes ca-certificates tini \
+  && rm -rf /var/lib/apt/lists/*
 
 ENV NODE_ENV=production
 
-WORKDIR /repository
+WORKDIR /app
 
-# node:alpine already ships an unprivileged "node" user; running as root inside
-# a container is an unnecessary risk.
+RUN corepack enable
+
+# The workspace skeleton, so pnpm and Node resolve exactly as they do in
+# development.
+COPY --chown=node:node package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY --chown=node:node apps/backend/package.json ./apps/backend/
+COPY --chown=node:node apps/parser/package.json ./apps/parser/
+
+# The pruned tree, with the generated Prisma client and the workspace links
+# intact. pnpm's node_modules is a tree of symlinks into node_modules/.pnpm, so
+# it is copied whole — copying only the top level would leave dangling links.
+COPY --chown=node:node --from=build /app/node_modules ./node_modules
+COPY --chown=node:node --from=build /app/apps/backend/node_modules ./apps/backend/node_modules
+COPY --chown=node:node --from=build /app/apps/parser/node_modules ./apps/parser/node_modules
+
+COPY --chown=node:node --from=build /app/apps/parser/dist ./apps/parser/dist
+COPY --chown=node:node --from=build /app/apps/backend/dist ./apps/backend/dist
+
+# The schema and migrations: `prisma migrate deploy` runs from this image, as a
+# separate one-shot container before the backend starts. The CLI is a runtime
+# dependency for exactly that reason, so it survives the prune above.
+COPY --chown=node:node --from=build /app/prisma ./prisma
+COPY --chown=node:node --from=build /app/prisma.config.ts ./prisma.config.ts
+
+# What the smoke test read, carried into the image.
+#
+# It is here for a second reason as well: Docker builds only the stages a target
+# depends on, so without this line the smoke-test stage would be skipped
+# entirely by `--target runtime` and the check would silently never run.
+COPY --chown=node:node --from=smoke-test /parser-smoke.txt ./parser-smoke.txt
+
+# Where uploaded and emailed transport orders are written. A named volume is
+# mounted here by compose; the directory is created so the path exists even when
+# it is not, and is owned by the unprivileged user that writes to it.
+RUN mkdir -p /app/storage/pdf && chown -R node:node /app/storage
+
+# Never root. The application writes only to the storage volume.
 USER node
 
-COPY --from=build --chown=node:node /repository/node_modules ./node_modules
-COPY --from=build --chown=node:node /repository/apps/backend/node_modules ./apps/backend/node_modules
-COPY --from=build --chown=node:node /repository/apps/backend/dist ./apps/backend/dist
-COPY --from=build --chown=node:node /repository/apps/backend/package.json ./apps/backend/
-
-WORKDIR /repository/apps/backend
-
-# Documentation only — the published port is decided by the orchestrator.
 EXPOSE 3000
 
-CMD ["node", "dist/main.js"]
+ENTRYPOINT ["/usr/bin/tini", "--"]
+CMD ["node", "apps/backend/dist/main.js"]

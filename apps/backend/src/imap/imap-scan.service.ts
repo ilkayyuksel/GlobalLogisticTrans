@@ -22,6 +22,7 @@ import {
 } from "./imap-mailbox.client";
 import { ImportedEmailService } from "./imported-email.service";
 import { MessageAction, selectMessage } from "./message-selection";
+import { domainOf } from "./trusted-sender";
 
 /** A supported email carries exactly one, per `businessrules.md` §1. */
 const EXPECTED_PDF_ATTACHMENTS = 1;
@@ -166,6 +167,18 @@ export class ImapScanService {
         selection.outcome,
       );
       counters.ignored += 1;
+
+      /*
+       * The DOMAIN, never the address. A refused sender is the one thing an
+       * operator needs to see to fix an allowlist — "we keep refusing
+       * @eucon.nl" is actionable — while the local part identifies a person and
+       * has no diagnostic value here.
+       */
+      this.logger.log("Email ignored", {
+        messageId: message.messageId,
+        reason: selection.outcome,
+        senderDomain: domainOf(message.senderEmail),
+      });
 
       return;
     }

@@ -48,6 +48,9 @@ const STATUS_BY_CODE: Record<PricingEngineErrorCode, number> = {
   [PricingEngineErrorCode.MISSING_ROUTE_COST]: HttpStatus.CONFLICT,
   [PricingEngineErrorCode.MISSING_CUSTOM_PROPERTY_PRICE]: HttpStatus.CONFLICT,
   [PricingEngineErrorCode.NEGATIVE_TOTAL]: HttpStatus.CONFLICT,
+  // A group that is not one delivery and one collection: the data is wrong,
+  // and pricing it would mean choosing a leg on a guess.
+  [PricingEngineErrorCode.INVALID_COMBINATION]: HttpStatus.CONFLICT,
   [PricingEngineErrorCode.UNKNOWN_PRICING_COMPONENT]: HttpStatus.CONFLICT,
 };
 

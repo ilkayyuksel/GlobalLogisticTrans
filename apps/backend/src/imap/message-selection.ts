@@ -1,3 +1,5 @@
+import { isTrustedSender } from "./trusted-sender";
+
 /**
  * Which emails may create Trips, and which are set aside.
  *
@@ -47,7 +49,10 @@ export interface SelectionInput {
 }
 
 export interface SelectionRules {
-  /** Exact addresses, already lowercased by configuration. */
+  /**
+   * Exact addresses and `*@domain` wildcards, already lowercased by
+   * configuration. Matching is `trusted-sender.ts`, which owns the format.
+   */
   readonly trustedSenders: readonly string[];
   readonly newSubjectPrefix: string;
 }
@@ -89,22 +94,6 @@ export function selectMessage(
   }
 
   return refuse(SelectionOutcome.NO_RECOGNISED_PREFIX);
-}
-
-/**
- * Exact address matching, case-insensitively.
- *
- * Deliberately not domain-suffix matching: trusting `@example.com` would trust
- * every address the domain can ever issue, and no requirement asks for that.
- * Extending the allowlist is a configuration change, which is visible.
- */
-function isTrustedSender(
-  senderEmail: string,
-  trustedSenders: readonly string[],
-): boolean {
-  const sender = senderEmail.trim().toLowerCase();
-
-  return trustedSenders.some((trusted) => trusted === sender);
 }
 
 function startsWithPrefix(subject: string, prefix: string): boolean {

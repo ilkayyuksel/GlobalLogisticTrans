@@ -6,6 +6,11 @@ import { RittenDialog } from "@/components/ritten/ritten-dialog";
 import { ApiError, userFacingMessage } from "@/lib/api/client";
 import type { CreateVehiclePayload } from "@/lib/api/vehicles";
 import type { Vehicle } from "@/lib/api/types";
+import {
+  DEFAULT_FLEET_COLOR,
+  FLEET_COLORS,
+  toStoredColor,
+} from "@/lib/fleet-colors";
 import { useTranslation } from "@/lib/i18n/language-provider";
 
 /**
@@ -36,29 +41,6 @@ const LICENSE_PLATE_MAX_LENGTH = 20;
 const BRAND_MAX_LENGTH = 100;
 const MODEL_MAX_LENGTH = 100;
 
-const DEFAULT_COLOR = "#2563eb";
-
-/**
- * The colours offered as one-click choices.
- *
- * A planning colour only has to do one thing: make one truck distinguishable
- * from the next down a list of rows. These are spaced around the hue circle and
- * chosen to stay legible as a small stripe in both the light and dark themes.
- * The full picker is still there for anyone who wants a specific colour.
- */
-const COLOR_PALETTE = [
-  "#2563eb",
-  "#0891b2",
-  "#059669",
-  "#65a30d",
-  "#ca8a04",
-  "#ea580c",
-  "#dc2626",
-  "#db2777",
-  "#7c3aed",
-  "#4b5563",
-] as const;
-
 interface FormValues {
   licensePlate: string;
   displayColor: string;
@@ -69,7 +51,7 @@ interface FormValues {
 function toFormValues(vehicle: Vehicle | null): FormValues {
   return {
     licensePlate: vehicle?.licensePlate ?? "",
-    displayColor: vehicle?.displayColor ?? DEFAULT_COLOR,
+    displayColor: vehicle?.displayColor ?? DEFAULT_FLEET_COLOR,
     brand: vehicle?.brand ?? "",
     model: vehicle?.model ?? "",
   };
@@ -79,7 +61,7 @@ function toFormValues(vehicle: Vehicle | null): FormValues {
 function toPayload(values: FormValues): CreateVehiclePayload {
   return {
     licensePlate: values.licensePlate.trim(),
-    displayColor: values.displayColor.trim().toLowerCase(),
+    displayColor: toStoredColor(values.displayColor),
     brand: emptyToNull(values.brand),
     model: emptyToNull(values.model),
   };
@@ -226,22 +208,28 @@ function ColorField({
         />
 
         <div className="flex flex-wrap gap-1">
-          {COLOR_PALETTE.map((color) => (
-            <button
-              key={color}
-              type="button"
-              onClick={() => onChange(color)}
-              aria-label={color}
-              aria-pressed={value.toLowerCase() === color}
-              style={{ backgroundColor: color }}
-              className={[
-                "h-6 w-6 rounded-md border",
-                value.toLowerCase() === color
-                  ? "border-foreground ring-2 ring-primary"
-                  : "border-border",
-              ].join(" ")}
-            />
-          ))}
+          {FLEET_COLORS.map((color) => {
+            const isSelected = toStoredColor(value) === color;
+
+            return (
+              <button
+                key={color}
+                type="button"
+                onClick={() => onChange(color)}
+                aria-label={color}
+                // The chosen swatch is marked for a screen reader as well as
+                // visually: a ring alone says nothing to anyone not looking.
+                aria-pressed={isSelected}
+                style={{ backgroundColor: color }}
+                className={[
+                  "h-6 w-6 rounded-md border",
+                  isSelected
+                    ? "border-foreground ring-2 ring-primary"
+                    : "border-border",
+                ].join(" ")}
+              />
+            );
+          })}
         </div>
       </div>
     </Field>

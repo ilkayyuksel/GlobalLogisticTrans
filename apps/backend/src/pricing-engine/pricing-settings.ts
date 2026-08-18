@@ -14,7 +14,29 @@ export const PricingSettingKey = {
   STRATEGY: "PRICING_STRATEGY",
   FUEL_PERCENTAGE: "FUEL_PERCENTAGE",
   COMBINATION_SURCHARGE: "COMBINATION_SURCHARGE",
+  /**
+   * The Custom Property the Engine applies on its own, without anyone assigning
+   * it: TAR, in this business.
+   *
+   * The VALUE is the property's id, so the amount stays the one configured on
+   * the property itself and an administrator can change the price without a
+   * code change. It is a Setting rather than a name in code because a name in
+   * code is configuration hidden inside a deployment — and rather than a link
+   * to a PricingComponent because the schema forbids a fixed-price property
+   * from carrying one.
+   */
+  AUTOMATIC_CUSTOM_PROPERTY_ID: "AUTOMATIC_CUSTOM_PROPERTY_ID",
   WAITING_TIME_FREE_MINUTES: "WAITING_TIME_FREE_MINUTES",
+  /**
+   * How long a Trip must have waited before ANY of it is charged.
+   *
+   * Distinct from the free allowance, and both apply. The threshold decides
+   * WHETHER waiting is charged at all; the allowance decides HOW MUCH of it is
+   * chargeable once it is. A wait short of the threshold costs nothing even
+   * though it already exceeds the allowance — that is the business rule, and it
+   * cannot be expressed by the allowance alone.
+   */
+  WAITING_TIME_THRESHOLD_MINUTES: "WAITING_TIME_THRESHOLD_MINUTES",
   WAITING_TIME_BLOCK_MINUTES: "WAITING_TIME_BLOCK_MINUTES",
   WAITING_TIME_BLOCK_PRICE: "WAITING_TIME_BLOCK_PRICE",
   /**

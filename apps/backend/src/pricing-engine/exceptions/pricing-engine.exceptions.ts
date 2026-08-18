@@ -28,6 +28,7 @@ export const PricingEngineErrorCode = {
   MISSING_CUSTOM_PROPERTY_PRICE: "PRICING_MISSING_CUSTOM_PROPERTY_PRICE",
   NEGATIVE_TOTAL: "PRICING_NEGATIVE_TOTAL",
   UNKNOWN_PRICING_COMPONENT: "PRICING_UNKNOWN_COMPONENT",
+  INVALID_COMBINATION: "PRICING_INVALID_COMBINATION",
 } as const;
 
 export type PricingEngineErrorCode =
@@ -220,6 +221,29 @@ export class MissingTripPricingInputException extends PricingEngineException {
     super(
       PricingEngineErrorCode.MISSING_TRIP_INPUT,
       `Trip "${tripId}" has no ${missingInput}, which ${strategy} pricing requires.`,
+    );
+  }
+}
+
+/**
+ * The Trips of one transport order are grouped, but they are not one delivery
+ * and one collection.
+ *
+ * No real order produces this, so it is a configuration or data fault rather
+ * than a priceable state. Pricing stops instead of guessing which leg should
+ * carry the charges a Combination places on exactly one of them.
+ */
+export class InvalidCombinationForPricingException extends PricingEngineException {
+  constructor(
+    readonly tripId: string,
+    readonly tripGroupId: string,
+    readonly directions: readonly (string | null)[],
+  ) {
+    super(
+      PricingEngineErrorCode.INVALID_COMBINATION,
+      `Trip ${tripId} belongs to group ${tripGroupId}, whose Trips came from one transport order but do not form one DELIVERY and one COLLECTION (found: ${directions
+        .map((direction) => direction ?? "none")
+        .join(", ")}). Correct the group before pricing it.`,
     );
   }
 }

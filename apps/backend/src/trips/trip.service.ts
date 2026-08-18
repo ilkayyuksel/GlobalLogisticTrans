@@ -67,6 +67,12 @@ const HIDDEN_BY_DEFAULT_STATUSES: readonly TripStatus[] = [TripStatus.DELETED];
  * and field names are, so a log line stays useful without carrying commercial
  * or personal data.
  */
+/**
+ * More than any real group holds, so the read is bounded without ever
+ * truncating one. A Combination has two; a manual group, a few.
+ */
+const GROUP_MEMBER_LIMIT = 100;
+
 @Injectable()
 export class TripService {
   constructor(
@@ -156,6 +162,29 @@ export class TripService {
 
   async findById(id: string): Promise<TripResponseDto> {
     return this.toResponse(await this.requireTrip(id));
+  }
+
+  /**
+   * Every Trip in one group.
+   *
+   * Internal and deliberately narrow: there is no route and no DTO, because
+   * this answers one question the Pricing Engine has to ask — which Trips share
+   * this Trip's group, so it can tell a real Combination from a manual group.
+   *
+   * Unpaginated on purpose. A group holds two Trips in the case that matters
+   * and a handful at most in any other; paging it would be machinery for a size
+   * that does not occur.
+   */
+  async findByGroupId(
+    tripGroupId: string,
+  ): Promise<{ items: TripResponseDto[] }> {
+    const { items } = await this.repository.findPage({
+      tripGroupId,
+      skip: 0,
+      take: GROUP_MEMBER_LIMIT,
+    });
+
+    return { items: await this.toResponses(items) };
   }
 
   /**

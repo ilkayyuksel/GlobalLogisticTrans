@@ -227,21 +227,68 @@ Waiting Time is entered manually by the Administrator.
 
 The Pricing Engine never calculates waiting time automatically.
 
-The first configurable waiting period is free.
+Waiting time is charged only once it reaches a configured **threshold**. Below
+that threshold nothing is charged at all.
 
-Only the remaining waiting time is billable.
+From the threshold upwards, a configured **free allowance** is deducted and only
+what remains is billable.
 
 Billable waiting time is charged in configurable time blocks.
 
 ## Settings
 
-Three Settings govern the calculation. All three live in the PRICING category.
+Four Settings govern the calculation. All four live in the PRICING category.
 
 | Key | Value type | Unit | Meaning |
 |---|---|---|---|
-| `WAITING_TIME_FREE_MINUTES` | INTEGER | minutes | The free allowance granted before any waiting time becomes billable. |
+| `WAITING_TIME_THRESHOLD_MINUTES` | INTEGER | minutes | The wait at which charging begins. A shorter wait is never charged. |
+| `WAITING_TIME_FREE_MINUTES` | INTEGER | minutes | The allowance deducted from the total wait once the threshold is reached. |
 | `WAITING_TIME_BLOCK_MINUTES` | INTEGER | minutes | The size of one billable block. |
 | `WAITING_TIME_BLOCK_PRICE` | DECIMAL | EUR per block | The price charged for one billable block. |
+
+`WAITING_TIME_THRESHOLD_MINUTES` is zero or greater. A value of zero means there
+is no threshold, and charging begins as soon as the free allowance is exceeded.
+
+## The configured rule
+
+The business currently configures:
+
+| Setting | Value |
+|---|---|
+| `WAITING_TIME_THRESHOLD_MINUTES` | `150` (2h30) |
+| `WAITING_TIME_FREE_MINUTES` | `120` (2h00) |
+| `WAITING_TIME_BLOCK_MINUTES` | `15` |
+| `WAITING_TIME_BLOCK_PRICE` | `13.75` |
+
+which is EUR 55.00 per chargeable hour, stated as a quarter-hour block price.
+
+In words:
+
+**Below 150 minutes there is no Waiting Time line at all.** A wait of 2h15 is
+entirely free even though it already exceeds the two-hour allowance.
+
+**From 150 minutes upwards**, the chargeable minutes are the total wait less the
+120-minute allowance, and those minutes are then charged by the block rule
+below.
+
+| Waiting | Chargeable minutes | Amount |
+|---:|---:|---:|
+| 0:00 – 2:29 | — | no line |
+| 2:30 | 30 | 27.50 |
+| 2:45 | 45 | 41.25 |
+| 3:00 | 60 | 55.00 |
+| 3:15 | 75 | 68.75 |
+| 3:30 | 90 | 82.50 |
+
+## The threshold and the allowance are two different rules
+
+The threshold decides **whether** waiting is charged. The allowance decides
+**how much** of it is chargeable once it is. Both apply, in that order, and
+neither can express the other:
+
+- without the threshold, 2h15 would cost one block;
+- without the allowance, 2h30 would be charged for its full two and a half
+  hours rather than for the thirty minutes past the allowance.
 
 `WAITING_TIME_FREE_MINUTES` is zero or greater. A value of zero means no free
 allowance: waiting is billable from the first minute.
@@ -261,9 +308,12 @@ and the Pricing Engine refuses to calculate if such a value somehow reaches it.
 The free allowance is applied **first**, and only what remains is divided into
 blocks. The two Settings are applied in that order and never the reverse.
 
-The free allowance is a deduction, not a threshold. Waiting time that exceeds
-the allowance is charged only for the excess; the allowance itself is never
-billed, however long the total wait becomes.
+The free allowance is a deduction. Waiting time that exceeds it is charged only
+for the excess; the allowance itself is never billed, however long the total
+wait becomes.
+
+The threshold is separate and is applied first: a wait short of it produces
+nothing billable even when it exceeds the allowance.
 
 Waiting time equal to or below the free allowance produces nothing billable.
 
@@ -279,8 +329,9 @@ minute beyond the free allowance therefore costs the same as a full block.
 A Waiting Time pricing line is produced only when at least one billable block
 exists.
 
-A Trip with no recorded waiting time, or with waiting time within the free
-allowance, carries no Waiting Time line at all — the component did not apply.
+A Trip with no recorded waiting time, with waiting time below the threshold, or
+with waiting time within the free allowance, carries no Waiting Time line at
+all — the component did not apply.
 
 A Trip with at least one billable block always carries a line, including when
 `WAITING_TIME_BLOCK_PRICE` is zero. That line records an amount of zero: the
@@ -408,6 +459,70 @@ CustomProperty
 Configured Pricing
 
 The engine simply processes every assigned Custom Property.
+
+---
+
+## The automatic Custom Property (TAR)
+
+One Custom Property is applied by the Pricing Engine **without anyone assigning
+it**. In this business that property is TAR.
+
+Which property it is, is configuration, not code: the PRICING Setting
+`AUTOMATIC_CUSTOM_PROPERTY_ID` holds the property's id. The engine never
+recognises it by name, and the amount charged is the property's own
+`default_price` — changing that price changes what new calculations charge, with
+no code change.
+
+### Which Trips pay it
+
+| Trip | TAR |
+|---|---|
+| An ordinary Trip | charged |
+| A Trip in a manually created group | charged — a manual group is not a Combination |
+| The COLLECTION leg of a genuine Combination | charged |
+| The DELIVERY leg of a genuine Combination | **not** charged |
+
+A genuine Combination therefore carries **exactly one** TAR charge in total: the
+two legs are one truck movement, and the movement is charged once.
+
+### What counts as a genuine Combination
+
+Both of the following, from persisted data only:
+
+- the Trips share a `trip_group_id`, **and**
+- they were created from the **same** `pdf_document_id` — one transport order
+  printed both legs.
+
+Trips an operator grouped by hand come from different documents, or from none,
+and are therefore not a Combination. Nothing is inferred from planning dates,
+booking numbers or the order rows appear in.
+
+If the Trips of one document are grouped but do **not** form exactly one
+DELIVERY and one COLLECTION, the Pricing Engine **refuses to price them**
+(`PRICING_INVALID_COMBINATION`) rather than guessing which leg should carry the
+charge. That state is a data fault, not a priceable one.
+
+### The assignments are overruled, not trusted
+
+The automatic property is removed from the Trip's assignments and then applied
+again where the rule says it belongs. Every starting state therefore produces
+the same answer:
+
+| Stored assignments | Result |
+|---|---|
+| none | charged where the rule says |
+| assigned by hand as well | charged once, not twice |
+| assigned to the wrong leg | charged on the correct leg only |
+| assigned to both legs | one charge, on the collection |
+
+An operator never has to tick TAR, and a tick left over from before this rule
+existed cannot produce a second charge.
+
+### Historical pricing is never rewritten
+
+A stored snapshot records what was charged and is left alone. The rule applies to
+**new** calculations only — a Trip closing, or an administrator asking for a
+reprocess.
 
 ---
 

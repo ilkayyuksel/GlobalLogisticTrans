@@ -413,6 +413,37 @@ describe("Vehicles page", () => {
         );
       });
 
+      /**
+       * A fleet of twenty trucks needs twenty colours that are tellable apart.
+       * The palette is one shared list — `lib/fleet-colors.ts` — so this counts
+       * what the form actually renders rather than trusting the constant.
+       */
+      it("offers enough colours for a fleet of twenty", async () => {
+        const dialog = await openForm();
+
+        const swatches = within(dialog)
+          .getAllByRole("button")
+          .filter((button) => /^#[0-9a-f]{6}$/.test(button.getAttribute("aria-label") ?? ""));
+
+        expect(swatches.length).toBeGreaterThanOrEqual(20);
+        // Every swatch distinct: two trucks a shade apart help nobody.
+        expect(
+          new Set(swatches.map((button) => button.getAttribute("aria-label"))).size,
+        ).toBe(swatches.length);
+      });
+
+      it("keeps the native picker beside the swatches", async () => {
+        const dialog = await openForm();
+
+        expect(within(dialog).getByLabelText("Planningskleur")).toHaveAttribute(
+          "type",
+          "color",
+        );
+        expect(
+          within(dialog).getByRole("button", { name: "#7c3aed" }),
+        ).toBeInTheDocument();
+      });
+
       it("marks the palette colour currently in use", async () => {
         const dialog = await openForm();
 

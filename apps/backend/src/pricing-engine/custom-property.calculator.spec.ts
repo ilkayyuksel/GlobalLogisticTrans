@@ -83,7 +83,9 @@ function buildContext(
       strategy: PricingStrategy.ROUTE_BASED,
       fuelPercentage: "15",
       combinationSurcharge: "75",
+      automaticCustomPropertyId: "property-tar",
       waitingTimeFreeMinutes: 60,
+      waitingTimeThresholdMinutes: 0,
       waitingTimeBlockMinutes: 30,
       waitingTimeBlockPrice: "25.00",
       ruleVersion: "2026.1",
@@ -468,5 +470,91 @@ describe("CustomPropertyCalculator", () => {
         "Secret Name",
       );
     });
+  });
+});
+
+/**
+ * ── TAR ─────────────────────────────────────────────────────────────────────
+ * TAR is an ordinary fixed-price Custom Property. Its amount is the price
+ * CONFIGURED on the property — 20.00 in this system — and the calculator reads
+ * it rather than knowing it: nothing here recognises the name "TAR", which is
+ * what lets an administrator change the price without a code change.
+ *
+ * A Trip is charged TAR when TAR is assigned to it, once, and never otherwise.
+ * That is what makes "only one leg of a Combination pays TAR" achievable today:
+ * the operator assigns it to one leg. WHICH leg should own it automatically is
+ * an open business question — see the phase report — and nothing here guesses.
+ * ────────────────────────────────────────────────────────────────────────────
+ */
+describe("TAR", () => {
+  const TAR_AT_TWENTY = fixedPrice("property-tar", "TAR", "20.00");
+
+  let calculator: CustomPropertyCalculator;
+
+  beforeEach(() => {
+    calculator = new CustomPropertyCalculator({
+      setContext: jest.fn(),
+      log: jest.fn(),
+      warn: jest.fn(),
+    } as unknown as AppLoggerService);
+  });
+
+  it("charges the configured 20.00 to a Trip it is assigned to", () => {
+    const lines = calculator.calculate(buildContext([TAR_AT_TWENTY]));
+
+    expect(lines).toHaveLength(1);
+    expect(lines[0].amount.toFixed(2)).toBe("20.00");
+    expect(lines[0].customPropertyId).toBe("property-tar");
+  });
+
+  it("takes the amount from the configuration, not from its name", () => {
+    // The same property at a different configured price. A calculator that
+    // knew "TAR is 20" would ignore this and be wrong.
+    const lines = calculator.calculate(
+      buildContext([fixedPrice("property-tar", "TAR", "24.50")]),
+    );
+
+    expect(lines[0].amount.toFixed(2)).toBe("24.50");
+  });
+
+  it("charges nothing to a Trip it is not assigned to", () => {
+    const lines = calculator.calculate(buildContext([]));
+
+    expect(lines).toEqual([]);
+  });
+
+  /*
+   * The two legs of a Combination are priced independently — each is its own
+   * calculation — so TAR is charged exactly where it is assigned. Assigning it
+   * to one leg charges it once for the pair, whichever leg that is.
+   */
+  it("is charged once for a Combination when one leg carries it", () => {
+    const carrying = calculator.calculate(buildContext([TAR_AT_TWENTY]));
+    const other = calculator.calculate(buildContext([]));
+
+    expect(carrying).toHaveLength(1);
+    expect(carrying[0].amount.toFixed(2)).toBe("20.00");
+    expect(other).toEqual([]);
+  });
+
+  it("is charged twice when both legs carry it — which is why one must not", () => {
+    const first = calculator.calculate(buildContext([TAR_AT_TWENTY]));
+    const second = calculator.calculate(buildContext([TAR_AT_TWENTY]));
+
+    // Recorded, not endorsed: nothing in the system stops this today, and
+    // nothing decides which leg should have been left out.
+    expect(first).toHaveLength(1);
+    expect(second).toHaveLength(1);
+  });
+
+  it("does not depend on which leg is the delivery or the collection", () => {
+    const asDelivery = calculator.calculate(buildContext([TAR_AT_TWENTY]));
+    const asCollection = calculator.calculate(buildContext([TAR_AT_TWENTY]));
+
+    // Direction plays no part in the amount. It could only decide WHERE the
+    // property is assigned, and that decision has not been made.
+    expect(asDelivery[0].amount.toFixed(2)).toBe(
+      asCollection[0].amount.toFixed(2),
+    );
   });
 });

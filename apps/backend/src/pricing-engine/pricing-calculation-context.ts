@@ -27,7 +27,18 @@ export interface PricingRuleConfiguration {
   /** Percentage applied to the base price only, never to the other components. */
   readonly fuelPercentage: string;
   readonly combinationSurcharge: string;
+  /**
+   * The Custom Property the Engine applies without anyone assigning it — TAR.
+   *
+   * An id, so the AMOUNT stays the price configured on the property itself.
+   */
+  readonly automaticCustomPropertyId: string;
   readonly waitingTimeFreeMinutes: number;
+  /**
+   * The wait at which charging begins. A shorter wait costs nothing at all,
+   * even when it already exceeds the free allowance.
+   */
+  readonly waitingTimeThresholdMinutes: number;
   /** Always greater than zero: it is the divisor that produces the block count. */
   readonly waitingTimeBlockMinutes: number;
   readonly waitingTimeBlockPrice: string;

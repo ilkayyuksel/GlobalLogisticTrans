@@ -1,0 +1,91 @@
+# Transport Management System — LOCAL DEVELOPMENT infrastructure.
+#
+# This file provisions infrastructure only. The applications themselves are run
+# from source during development (`pnpm dev:backend`, `pnpm dev:frontend`), which
+# is what makes hot reload and a debugger possible.
+#
+# The PRODUCTION stack is `docker-compose.yml`: it builds and runs the whole
+# application and is what a server deploys. The two are deliberately separate
+# files with separate volumes, so a deployment can never touch a developer's
+# database and `docker compose up -d` on a server never starts pgadmin.
+#
+# Usage:
+#   cp .env.example .env   # then fill in the values
+#   pnpm db:up             # or: docker compose -f docker-compose.dev.yml up -d --wait
+
+services:
+  postgres:
+    # PostgreSQL 17. Version 13 or newer is required because the schema relies
+    # on gen_random_uuid() being available as a core function.
+    image: postgres:17-alpine
+    container_name: tms-postgres
+    restart: unless-stopped
+
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+
+    ports:
+      # Host port is configurable so the container does not collide with a
+      # PostgreSQL instance already installed on the developer machine.
+      - "${POSTGRES_PORT:-5432}:5432"
+
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+    healthcheck:
+      # Lets `docker compose up --wait` block until the database genuinely
+      # accepts connections, so running migrations immediately after start
+      # does not fail against a still-initializing server.
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  pgadmin:
+    # Database administration UI. Development convenience only — nothing in the
+    # application depends on it, and it is never deployed.
+    image: dpage/pgadmin4:9
+    container_name: tms-pgadmin
+    restart: unless-stopped
+
+    depends_on:
+      postgres:
+        # Starting pgadmin before the database is accepting connections just
+        # produces a confusing connection error on the first page load.
+        condition: service_healthy
+
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_DEFAULT_EMAIL}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_DEFAULT_PASSWORD}
+      # Desktop mode: this is a single-developer local tool, so the login screen
+      # and master-password prompt are pure friction.
+      PGADMIN_CONFIG_SERVER_MODE: "False"
+      PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED: "False"
+
+    ports:
+      # Container listens on 80; mapped high so no privileged port is needed.
+      - "${PGADMIN_PORT:-5050}:80"
+
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+
+    healthcheck:
+      # /misc/ping returns "PING" once the web app has finished booting, which
+      # takes noticeably longer than the container being "running".
+      test: ["CMD", "wget", "-qO-", "http://localhost:80/misc/ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+volumes:
+  # Named volumes rather than bind mounts: avoids the file-permission and
+  # performance problems bind-mounting these directories causes on Windows and
+  # macOS. pgadmin in particular runs as uid 5050 and cannot write a host mount.
+  postgres_data:
+    name: tms-postgres-data
+  pgadmin_data:
+    name: tms-pgadmin-data

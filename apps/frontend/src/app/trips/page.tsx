@@ -35,7 +35,11 @@ import { userFacingMessage } from "@/lib/api/client";
 import { listCustomProperties } from "@/lib/api/custom-properties";
 import { listActiveVehicles } from "@/lib/api/fleet";
 import { fetchPdfDocument } from "@/lib/api/pdf-documents";
-import { getTripPricing, reprocessTripPricing } from "@/lib/api/pricing";
+import {
+  fetchPricingSnapshots,
+  getTripPricing,
+  reprocessTripPricing,
+} from "@/lib/api/pricing";
 import { getRittenCounts } from "@/lib/api/ritten";
 import {
   changeTripStatus,
@@ -51,7 +55,11 @@ import {
   type CreateTripPayload,
   type UpdateTripPayload,
 } from "@/lib/api/trips";
-import type { ChangeableTripStatus, Trip } from "@/lib/api/types";
+import type {
+  ChangeableTripStatus,
+  PricingSnapshot,
+  Trip,
+} from "@/lib/api/types";
 import { downloadBlob } from "@/lib/download";
 import { useTranslation } from "@/lib/i18n/language-provider";
 import type { TranslationKey } from "@/lib/i18n/translations";
@@ -97,6 +105,9 @@ interface Feedback {
   readonly isError: boolean;
 }
 
+/** One shared empty map, so a render with no pricing changes no identity. */
+const EMPTY_PRICING: ReadonlyMap<string, PricingSnapshot> = new Map();
+
 export default function RittenPage() {
   const t = useTranslation();
 
@@ -119,6 +130,12 @@ export default function RittenPage() {
   const [pricingAttention, setPricingAttention] = useState<Set<string>>(new Set());
 
   const [sort, setSort] = useState<RittenSort>(DEFAULT_RITTEN_SORT);
+  /*
+   * Prices are off until asked for. The Ritten list is read over a driver's
+   * shoulder and on a shared screen, so money is not on it by default — and
+   * when it is off the columns are absent, not blanked.
+   */
+  const [showPricing, setShowPricing] = useState(false);
 
   const debouncedSearch = useDebounced(filters.search, SEARCH_DEBOUNCE_MS);
 
@@ -218,6 +235,38 @@ export default function RittenPage() {
     [],
   );
 
+  /**
+   * The stored pricing of the Trips on this page — ONE request, never one per
+   * row.
+   *
+   * Fetched only while the operator is showing prices, and keyed on the ids
+   * actually on screen, so turning the columns off costs nothing and paging
+   * costs exactly one more call. `fetchPricingSnapshots` batches ids under the
+   * endpoint's own limit, so the request count follows the page size rather
+   * than the row count.
+   *
+   * This is a READ. Nothing here prices a Trip: showing prices must never
+   * cause one.
+   */
+  const pricedTripIds = useMemo(
+    () => (trips.data?.items ?? []).map((trip) => trip.id),
+    [trips.data],
+  );
+
+  const pricing = useAsync(
+    useCallback(
+      (signal: AbortSignal) =>
+        showPricing && pricedTripIds.length > 0
+          ? fetchPricingSnapshots(pricedTripIds, signal)
+          : Promise.resolve(new Map()),
+      [showPricing, pricedTripIds],
+    ),
+    [showPricing, pricedTripIds],
+  );
+
+  // Already keyed by Trip id by the client, which batches the ids for us.
+  const pricingByTripId = pricing.data ?? EMPTY_PRICING;
+
   const sections = useMemo(
     () => buildSections(view, anchor, trips.data?.items ?? []),
     [view, anchor, trips.data],
@@ -254,6 +303,16 @@ export default function RittenPage() {
 
       trips.reload();
       counts.reload();
+      /*
+       * A mutation can change what a Trip costs — waiting time above all — and
+       * the reprocess action replaces the snapshot outright. The displayed
+       * amounts are therefore refetched from the backend rather than adjusted
+       * here: this side never calculates a price, so the only way for it to
+       * show a new one is to ask.
+       */
+      if (showPricing) {
+        pricing.reload();
+      }
       setFeedback({ messageKey: successKey, isError: false });
     } catch (error: unknown) {
       setFeedback({
@@ -444,6 +503,16 @@ export default function RittenPage() {
 
       <div className="flex flex-wrap items-center justify-between gap-3">
         <RittenSortControl value={sort} onChange={setSort} />
+
+        <label className="flex items-center gap-2 text-sm text-secondary">
+          <input
+            type="checkbox"
+            checked={showPricing}
+            onChange={(event) => setShowPricing(event.target.checked)}
+            className="h-4 w-4 rounded border-border accent-primary"
+          />
+          {t("ritten.pricing.show")}
+        </label>
       </div>
 
       <div className="rounded-lg border border-border bg-card">
@@ -550,6 +619,8 @@ export default function RittenPage() {
                   pricingAttentionTripIds={pricingAttention}
                   selectedTripIds={selectedTripIds}
                   onToggleSelection={toggleSelection}
+                  showPricing={showPricing}
+                  pricingByTripId={pricingByTripId}
                 />
               ))}
             </div>

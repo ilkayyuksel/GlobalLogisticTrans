@@ -76,7 +76,9 @@ const RULES: PricingRuleConfiguration = {
   strategy: PricingStrategy.ROUTE_BASED,
   fuelPercentage: "15",
   combinationSurcharge: "75",
+  automaticCustomPropertyId: "property-tar",
   waitingTimeFreeMinutes: 60,
+  waitingTimeThresholdMinutes: 0,
   waitingTimeBlockMinutes: 30,
     waitingTimeBlockPrice: "25.00",
     ruleVersion: "2026.1",
@@ -180,9 +182,14 @@ describe("PricingEngineService", () => {
         buildTrip(),
         RULES,
       );
+      // The Trip itself, not just its id: the resolver needs the group and the
+      // direction to decide whether this leg carries the automatic property.
       expect(
         componentResolver.resolveAssignedCustomProperties,
-      ).toHaveBeenCalledWith(TRIP_ID);
+      ).toHaveBeenCalledWith(
+        expect.objectContaining({ id: TRIP_ID }),
+        expect.objectContaining({ automaticCustomPropertyId: "property-tar" }),
+      );
       expect(routeCostResolver.resolve).toHaveBeenCalledWith(TRIP_ID, ROUTE);
       expect(snapshotWriter.findExistingSnapshot).toHaveBeenCalledWith(TRIP_ID);
     });
