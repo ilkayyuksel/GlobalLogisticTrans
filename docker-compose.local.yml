@@ -1,0 +1,47 @@
+# Running the PRODUCTION stack on a developer machine.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.local.yml up -d
+#
+# Then open http://localhost:3100.
+#
+# ── WHY THIS FILE EXISTS ────────────────────────────────────────────────────
+# `docker-compose.yml` publishes ONE thing: the proxy, on 80 and 443. That is
+# correct for a server — the application must not be addressable except through
+# the proxy — and useless on a laptop, where there is no DNS for trano.be and no
+# way for Let's Encrypt to reach anything.
+#
+# So this override does exactly two things:
+#
+#   * takes the proxy out of the picture (`scale: 0`), which also stops it
+#     asking a real certificate authority for certificates it cannot get;
+#   * publishes the frontend and the API on localhost, at the same ports the
+#     development servers use.
+#
+# Nothing else changes: the same images, the same migrations, the same database
+# and the same volumes as a deployment. It is the production stack, reachable
+# from a browser on this machine.
+# ────────────────────────────────────────────────────────────────────────────
+#
+# ── WHAT IT DOES NOT TEST ───────────────────────────────────────────────────
+# TLS, the HTTP-to-HTTPS redirect and the hostname routing all live in the proxy
+# and are therefore NOT exercised here. Those are verified against a real
+# deployment, or by running the full stack with real hostnames.
+# ────────────────────────────────────────────────────────────────────────────
+
+services:
+  proxy:
+    # Not started. The service stays defined so one command can switch back.
+    scale: 0
+
+  backend:
+    ports:
+      - "${LOCAL_API_PORT:-3000}:3000"
+
+  frontend:
+    ports:
+      - "${LOCAL_APP_PORT:-3100}:3100"
+
+  postgres:
+    ports:
+      # Handy for psql or a GUI while testing. Still bound to localhost only.
+      - "127.0.0.1:${LOCAL_POSTGRES_PORT:-55432}:5432"

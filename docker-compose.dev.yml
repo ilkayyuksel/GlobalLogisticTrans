@@ -13,6 +13,9 @@
 #   cp .env.example .env   # then fill in the values
 #   pnpm db:up             # or: docker compose -f docker-compose.dev.yml up -d --wait
 
+# A project name of its own — see the note in docker-compose.yml.
+name: traxo-dev
+
 services:
   postgres:
     # PostgreSQL 17. Version 13 or newer is required because the schema relies

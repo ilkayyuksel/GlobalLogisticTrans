@@ -453,6 +453,33 @@ The same, for one volume.
 Neither is ever run by the stack itself. Nothing in this repository resets a
 database automatically.
 
+## Trying the production stack locally
+
+The deployment stack publishes only the proxy, on 80 and 443, and the proxy
+routes by hostname and asks Let's Encrypt for certificates. None of that works
+on a laptop, so there is an override that leaves the proxy out and publishes the
+applications directly:
+
+    docker compose -f docker-compose.yml -f docker-compose.local.yml up -d
+
+Then open <http://localhost:3100>. The API is on <http://localhost:3000>.
+
+Same images, same migrations, same volumes as a server — only the proxy is
+absent, so TLS and the hostname routing are not exercised.
+
+Two things to know:
+
+- **The ports clash with the development servers.** `pnpm dev:frontend` and this
+  stack both want 3100. Stop one before starting the other, or set
+  `LOCAL_APP_PORT` / `LOCAL_API_PORT` in `.env`.
+- **It has its own, empty database** (`traxo-postgres-data`). The development
+  data lives in `tms-postgres-data` and is not shared. That separation is
+  deliberate.
+
+Stop it again with:
+
+    docker compose -f docker-compose.yml -f docker-compose.local.yml down
+
 ## Local development
 
 Development still runs from source, against its own database:
@@ -461,8 +488,8 @@ Development still runs from source, against its own database:
     pnpm dev:backend
     pnpm dev:frontend
 
-The two stacks share no volumes, so deploying can never touch a developer's
-database.
+The two stacks share no volumes and no project name, so neither can stop or
+delete anything belonging to the other.
 
 ---
 

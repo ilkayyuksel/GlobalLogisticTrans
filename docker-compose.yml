@@ -8,6 +8,14 @@
 # migrations — happens inside the images, so a server needs Docker and nothing
 # else.
 #
+# ── A MISSING VALUE STOPS THE COMMAND ───────────────────────────────────────
+# The variables this stack cannot work without are written `${VAR:?why}`. Compose
+# refuses to start and says which one is missing, rather than substituting an
+# empty string — an empty hostname produced a proxy with the rule Host(``), which
+# starts happily, routes nothing and asks Let's Encrypt for a certificate for no
+# domain at all.
+# ────────────────────────────────────────────────────────────────────────────
+#
 # ── WHAT IS PUBLIC AND WHAT IS NOT ──────────────────────────────────────────
 # Only the proxy publishes ports: 80 and 443. The backend, the frontend and the
 # database are reachable over internal networks only, so nothing but the proxy
@@ -19,6 +27,11 @@
 # source. It is a separate file with separate volumes, so deploying can never
 # touch a developer's database and a server never runs pgadmin.
 # ────────────────────────────────────────────────────────────────────────────
+
+# Its own project name, so this stack and the development one can never touch
+# each other's containers. Without it both files default to the directory name,
+# and `docker compose down` here would stop the development database as well.
+name: traxo
 
 services:
   # ── The only service the internet can reach ───────────────────────────────
@@ -42,7 +55,7 @@ services:
       # and the DNS records pointing here, and nothing else.
       - "--certificatesresolvers.letsencrypt.acme.httpchallenge=true"
       - "--certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web"
-      - "--certificatesresolvers.letsencrypt.acme.email=${ACME_EMAIL}"
+      - "--certificatesresolvers.letsencrypt.acme.email=${ACME_EMAIL:?ACME_EMAIL is required: the address Let's Encrypt sends expiry warnings to}"
       - "--certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json"
       - "--accesslog=true"
       - "--log.level=INFO"
@@ -77,8 +90,8 @@ services:
 
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB is required}
 
     # No `ports:` on purpose. The database is reachable only from the two
     # services on the `database` network; publishing 5432 would put it on the
@@ -197,7 +210,7 @@ services:
     labels:
       - "traefik.enable=true"
       - "traefik.docker.network=traxo-proxy"
-      - "traefik.http.routers.backend.rule=Host(`${API_HOST}`)"
+      - "traefik.http.routers.backend.rule=Host(`${API_HOST:?API_HOST is required, e.g. api.trano.be}`)"
       - "traefik.http.routers.backend.entrypoints=websecure"
       - "traefik.http.routers.backend.tls.certresolver=letsencrypt"
       - "traefik.http.services.backend.loadbalancer.server.port=3000"
@@ -212,7 +225,7 @@ services:
       args:
         # Build-time, because Next inlines it into the browser bundle. Changing
         # it requires rebuilding the image, not just restarting the container.
-        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL}
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:?NEXT_PUBLIC_API_URL is required, e.g. https://api.trano.be — it is baked into the browser bundle}
 
     restart: unless-stopped
 
@@ -227,7 +240,7 @@ services:
       NODE_ENV: production
       # The Auth0 SDK builds its callback and logout URLs from this, so it is
       # what decides where a login returns to. Never localhost in production.
-      APP_BASE_URL: ${APP_BASE_URL}
+      APP_BASE_URL: ${APP_BASE_URL:?APP_BASE_URL is required, e.g. https://trano.be — Auth0 builds its callback URL from it}
       AUTH0_DOMAIN: ${AUTH0_DOMAIN}
       AUTH0_CLIENT_ID: ${AUTH0_CLIENT_ID}
       AUTH0_CLIENT_SECRET: ${AUTH0_CLIENT_SECRET}
@@ -253,7 +266,7 @@ services:
     labels:
       - "traefik.enable=true"
       - "traefik.docker.network=traxo-proxy"
-      - "traefik.http.routers.frontend.rule=Host(`${APP_HOST}`) || Host(`${APP_HOST_WWW}`)"
+      - "traefik.http.routers.frontend.rule=Host(`${APP_HOST:?APP_HOST is required, e.g. trano.be}`) || Host(`${APP_HOST_WWW:-www.${APP_HOST}}`)"
       - "traefik.http.routers.frontend.entrypoints=websecure"
       - "traefik.http.routers.frontend.tls.certresolver=letsencrypt"
       - "traefik.http.services.frontend.loadbalancer.server.port=3100"
