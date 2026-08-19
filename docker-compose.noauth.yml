@@ -1,0 +1,42 @@
+# Running LOCALLY WITHOUT Auth0.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.local.yml -f docker-compose.noauth.yml up -d
+#
+# For working on the application when the Auth0 tenant is unreachable, not yet
+# configured, or simply in the way. Never for a server.
+#
+# ── WHAT IT SWITCHES OFF, AND HOW ───────────────────────────────────────────
+# Both halves of the protection, because either one alone still blocks:
+#
+#   * the frontend blanks its Auth0 variables. `isAuthConfigured()` then reports
+#     that no tenant is configured, and the middleware lets every request
+#     through instead of redirecting to the login page. Nothing is faked and no
+#     session is invented — the application simply runs with nobody signed in.
+#   * the backend sets ENABLE_AUTH=false, so the API accepts calls that carry no
+#     token. Without this the pages would load and every request behind them
+#     would answer 401.
+#
+# The API client already handles this: with no token it omits the Authorization
+# header rather than failing.
+# ────────────────────────────────────────────────────────────────────────────
+#
+# ── WHY A SEPARATE FILE ─────────────────────────────────────────────────────
+# It has to be asked for by name. A flag inside the normal configuration is one
+# typo away from a deployment that serves the whole administration to anyone who
+# finds the address; a file that must appear on the command line cannot be
+# switched on by accident, and it leaves the real credentials in .env untouched.
+# ────────────────────────────────────────────────────────────────────────────
+
+services:
+  backend:
+    environment:
+      ENABLE_AUTH: "false"
+
+  frontend:
+    environment:
+      # Emptied deliberately. The frontend treats an incomplete tenant as
+      # "authentication not configured", which is the behaviour wanted here.
+      AUTH0_DOMAIN: ""
+      AUTH0_CLIENT_ID: ""
+      AUTH0_CLIENT_SECRET: ""
+      AUTH0_SECRET: ""

@@ -508,6 +508,20 @@ Two things to know:
   data lives in `tms-postgres-data` and is not shared. That separation is
   deliberate.
 
+### Without Auth0
+
+When the Auth0 tenant is unreachable or simply in the way, add a third file:
+
+    docker compose -f docker-compose.yml -f docker-compose.local.yml -f docker-compose.noauth.yml up -d
+
+It blanks the frontend's Auth0 variables — the application then reports that no
+tenant is configured and stops redirecting to the login page — and sets
+`ENABLE_AUTH=false` so the API accepts calls without a token. Both are needed:
+either alone still blocks.
+
+It must be named on the command line, so it cannot be switched on by accident,
+and it leaves the credentials in `.env` untouched. **Never on a server.**
+
 Stop it again with:
 
     docker compose -f docker-compose.yml -f docker-compose.local.yml down
