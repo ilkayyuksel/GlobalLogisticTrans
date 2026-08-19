@@ -14,10 +14,19 @@ coverage/
 .eslintcache
 
 # Environment
-# .env.example is the committed template; real .env files never are.
+# .env.example and .env.production.example are the committed templates; real
+# .env files never are — they hold the database password, the Auth0 secret and
+# the mailbox password.
 .env
 .env.*
 !.env.example
+!.env.production.example
+
+# Traefik's issued certificates and its ACME account key. They live in a named
+# Docker volume, so nothing should appear here — this entry exists so a
+# certificate cannot be committed by an operator who bind-mounts them instead.
+traefik/acme.json
+traefik/*.json
 
 # Logs
 *.log

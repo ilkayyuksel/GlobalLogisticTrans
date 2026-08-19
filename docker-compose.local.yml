@@ -29,7 +29,7 @@
 # ────────────────────────────────────────────────────────────────────────────
 
 services:
-  proxy:
+  traefik:
     # Not started. The service stays defined so one command can switch back.
     scale: 0
 

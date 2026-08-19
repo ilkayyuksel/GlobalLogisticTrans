@@ -35,8 +35,18 @@ name: traxo
 
 services:
   # ── The only service the internet can reach ───────────────────────────────
-  proxy:
-    image: traefik:v3.3
+  traefik:
+    # Pinned to an exact patch release, never `latest`: the proxy is the one
+    # service the internet reaches, and its version must be a decision rather
+    # than whatever happened to be published.
+    #
+    # NOT v3.3. That release bundles docker/docker v27.1.1, whose client pins
+    # API version 1.24 and never negotiates — every call goes to /v1.24/…. Docker
+    # Engine 29 refuses API versions below 1.40, so the provider fails outright
+    # with "client version 1.24 is too old". Measured, not assumed: v3.3 issues
+    # GET /v1.24/version, while this release sends HEAD /_ping first and then
+    # uses whatever version the daemon reports.
+    image: traefik:v3.7.11
     restart: unless-stopped
 
     command:
@@ -44,7 +54,7 @@ services:
       # a container must opt in with `traefik.enable=true`.
       - "--providers.docker=true"
       - "--providers.docker.exposedbydefault=false"
-      - "--providers.docker.network=traxo-proxy"
+      - "--providers.docker.network=traxo-web"
       - "--entrypoints.web.address=:80"
       - "--entrypoints.websecure.address=:443"
       # Every plain HTTP request is answered with a redirect to HTTPS.
@@ -74,7 +84,7 @@ services:
       - letsencrypt:/letsencrypt
 
     networks:
-      - proxy
+      - web
 
     healthcheck:
       test: ["CMD", "traefik", "healthcheck", "--ping"]
@@ -101,7 +111,7 @@ services:
       - postgres_data:/var/lib/postgresql/data
 
     networks:
-      - database
+      - internal
 
     healthcheck:
       # What "ready" means here: accepting connections for this user and
@@ -138,7 +148,7 @@ services:
     command: ["node_modules/prisma/build/index.js", "migrate", "deploy"]
 
     networks:
-      - database
+      - internal
 
   # ── The API ───────────────────────────────────────────────────────────────
   backend:
@@ -191,8 +201,8 @@ services:
       - pdf_storage:/app/storage/pdf
 
     networks:
-      - proxy
-      - database
+      - web
+      - internal
 
     healthcheck:
       # The endpoint the application already exposes; it reports the database
@@ -209,7 +219,7 @@ services:
 
     labels:
       - "traefik.enable=true"
-      - "traefik.docker.network=traxo-proxy"
+      - "traefik.docker.network=traxo-web"
       - "traefik.http.routers.backend.rule=Host(`${API_HOST:?API_HOST is required, e.g. api.trano.be}`)"
       - "traefik.http.routers.backend.entrypoints=websecure"
       - "traefik.http.routers.backend.tls.certresolver=letsencrypt"
@@ -250,7 +260,7 @@ services:
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL}
 
     networks:
-      - proxy
+      - web
 
     healthcheck:
       test:
@@ -265,7 +275,7 @@ services:
 
     labels:
       - "traefik.enable=true"
-      - "traefik.docker.network=traxo-proxy"
+      - "traefik.docker.network=traxo-web"
       - "traefik.http.routers.frontend.rule=Host(`${APP_HOST:?APP_HOST is required, e.g. trano.be}`) || Host(`${APP_HOST_WWW:-www.${APP_HOST}}`)"
       - "traefik.http.routers.frontend.entrypoints=websecure"
       - "traefik.http.routers.frontend.tls.certresolver=letsencrypt"
@@ -273,14 +283,17 @@ services:
 
 # ── Networks ────────────────────────────────────────────────────────────────
 # Two of them, so reachability is a property of the topology rather than of a
-# firewall someone has to remember. The frontend is not on `database` and
-# therefore cannot reach PostgreSQL at all; `database` is internal, so nothing
-# on it can reach — or be reached from — the internet.
+# firewall someone has to remember.
 networks:
-  proxy:
-    name: traxo-proxy
-  database:
-    name: traxo-database
+  # Traefik, the frontend and the backend. Reachable from the internet only
+  # through Traefik, which is the only service publishing a port.
+  web:
+    name: traxo-web
+  # PostgreSQL, the backend and the migration job. `internal: true` means no
+  # route to or from the internet at all: the frontend is not on it and cannot
+  # reach the database even by accident.
+  internal:
+    name: traxo-internal
     internal: true
 
 # ── Volumes ─────────────────────────────────────────────────────────────────

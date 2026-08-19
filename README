@@ -363,18 +363,44 @@ and nothing else — no Node, no pnpm, no Prisma CLI, no build step by hand.
 
 ## Prerequisites
 
-- Docker Engine with the Compose plugin
-- DNS A records for `trano.be`, `www.trano.be` and `api.trano.be` pointing at the
-  server, before the first start: certificates are issued over HTTP, so the
-  names must already resolve here
-- Ports 80 and 443 reachable from the internet
+On the server: **Docker Engine with the Compose plugin, and Git.** Nothing else —
+no Node, no pnpm, no Prisma CLI.
+
+### DNS
+
+All three names must resolve to the server **before the first start**:
+certificates are issued over HTTP, so Let's Encrypt has to reach this machine by
+name.
+
+| Record | Name | Value |
+|---|---|---|
+| A | `@` | `2.57.91.91` |
+| CNAME | `www` | `trano.be` |
+| **A** | **`api`** | **`2.57.91.91`** — must still be added |
+
+Docker configures no DNS; these records are created at the registrar.
+
+### Firewall
+
+Open **22, 80 and 443** only. Nothing else needs to be reachable: `3000`
+(backend), `3100` (frontend) and `5432` (PostgreSQL) are published to no host
+interface at all and must never be opened.
 
 ## Environment
 
-    cp .env.example .env
+    git clone <repository>
+    cd <repository>
+    cp .env.production.example .env
 
-Then fill it in. Every variable is marked `[PRODUCTION]`, `[OPTIONAL]` or
-`[DEVELOPMENT]` in that file. The ones a deployment cannot start without:
+Then fill it in — `.env.production.example` documents every variable and marks
+each `[REQUIRED]` or `[OPTIONAL]`. (`.env.example` is the development template;
+the production one is shorter and has the real hostnames in it.)
+
+Compose refuses to start when a required value is missing, and names it:
+
+    required variable APP_HOST is missing a value: APP_HOST is required, e.g. trano.be
+
+The variables a deployment cannot start without:
 
 | Variable | What it is |
 |---|---|
@@ -403,12 +429,17 @@ then the API once they succeeded, then the web application, then the proxy.
 
 ## Everyday commands
 
-    docker compose ps             # what is running, and whether it is healthy
-    docker compose logs -f        # follow everything
+    docker compose up -d              # start everything
+    docker compose build              # rebuild the images
+    docker compose build --no-cache   # rebuild from scratch
+    docker compose ps                 # what runs, and whether it is healthy
+    docker compose logs -f            # follow everything
     docker compose logs -f backend
+    docker compose logs -f frontend
+    docker compose logs -f traefik
+    docker compose restart            # restart every service
     docker compose restart backend
-    docker compose down           # stop everything; DATA IS KEPT
-    docker compose up -d          # start it again
+    docker compose down               # stop everything; DATA IS KEPT
 
 ## Migrations
 
@@ -432,8 +463,9 @@ They survive `docker compose down`, image rebuilds and container replacement.
 
 ## Backups
 
-Both volumes matter, and a database dump alone is not a backup — the PDFs live
-outside it:
+A backup must cover **both** the database and the PDF storage. A database dump
+alone is not a backup: the original transport orders live outside it, and a Trip
+without its document cannot be checked against what the customer sent.
 
     docker compose exec postgres pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB" > backup.sql
     docker run --rm -v traxo-pdf-storage:/data -v "$PWD:/backup" alpine \
