@@ -49,7 +49,15 @@ export interface ImportedTripData {
    */
   readonly terminal: string | null;
   readonly destinationCity: string;
-  readonly destinationCountry: string;
+  /**
+   * Null when the document states no country.
+   *
+   * Real orders exist that print a city and never name its country, and the
+   * number beside it settles nothing — 59554 is Raillencourt-Sainte-Olle in
+   * France and Lippstadt in Germany. The column is nullable, so an absent
+   * country is stored as absent rather than guessed at.
+   */
+  readonly destinationCountry: string | null;
   readonly planningDate: string;
   readonly startTime: string | null;
   readonly endTime: string | null;

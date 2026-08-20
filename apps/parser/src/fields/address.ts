@@ -36,16 +36,37 @@ export const POSTCODE_LINE = /^([A-Z]{1,2})-(\d{4,5})\s+(.+)$/;
 /**
  * `NNNN City` — the same line without its country prefix.
  *
- * A real order prints `2040 Antwerpen`. It is accepted ONLY when the country
- * can be established from evidence elsewhere in the document; see
- * `countryForBarePostcode`. On its own it says nothing about which country a
- * four-digit postcode belongs to, and guessing would be an invention.
+ * Real orders print `2040 Antwerpen`, `3980 Tessenderlo` and `9940 Evergem,`.
+ * The trailing comma is part of a comma-separated address and belongs to the
+ * punctuation, not to the name.
+ *
+ * The number says nothing about WHICH country: 59554 is Raillencourt-Sainte-Olle
+ * in France and Lippstadt in Germany. So this line yields a city, and the
+ * country has to come from somewhere the document actually states it.
  */
-const BARE_POSTCODE_LINE = /^(\d{4,5})\s+([A-Za-z].*)$/;
+const BARE_POSTCODE_LINE = /^(\d{4,5})[\s,]+([A-Za-z].*)$/;
+
+/**
+ * `[NNNNN]` — the customer reference the order prints above every address.
+ *
+ * It is the postcode again, in brackets. On most documents it is redundant; on
+ * one real order it is the ONLY postcode present, which is what makes the last
+ * address line identifiable as the city.
+ */
+const BRACKETED_POSTCODE = /^\[(\d{4,5})\]$/;
+
+/** The bracket, a company, a street and the city: anything less is truncated. */
+const MINIMUM_ADDRESS_LINES = 4;
+
+/** `Evergem,` is the same city as `Evergem`. */
+function toCityName(value: string): string {
+  return value.trim().replace(/[,;]+$/, "").trim();
+}
 
 export interface ExtractedAddress {
   readonly destinationCity: string;
-  readonly destinationCountry: string;
+  /** Null when the document states no country. */
+  readonly destinationCountry: string | null;
   readonly rawAddress: string;
   readonly section: string;
 }
@@ -72,7 +93,8 @@ export function extractAddress(
   const place =
     readPrefixedPostcode(block) ??
     readCountryLine(block) ??
-    readBarePostcode(block, fragments);
+    readBarePostcode(block, fragments) ??
+    readBracketedPostcode(block);
 
   if (!place) {
     throw new ExtractionError(
@@ -100,7 +122,15 @@ export function extractAddress(
  */
 interface ReadPlace {
   readonly city: string;
-  readonly country: string;
+  /**
+   * Null when the document names no country.
+   *
+   * Not every transport order does, and none of the alternatives is honest: a
+   * postcode belongs to no country on its own, and borrowing the terminal's
+   * country would put a French address in Belgium. An absent country is
+   * recorded as absent.
+   */
+  readonly country: string | null;
   readonly lastLineIndex: number;
 }
 
@@ -162,19 +192,35 @@ function readCountryLine(block: readonly Fragment[]): ReadPlace | null {
 
     const cityLine = block[index - 1].text.trim();
 
-    // The line above must be a plain city, not another country and not a line
-    // that already carries a postcode — those are the normal form, handled
-    // above, and reaching them here would mean something is wrong.
+    // The line above must not be another country, and must not be the prefixed
+    // form — that is the normal layout, handled above, and reaching it here
+    // would mean something is wrong.
     if (
       cityLine.length === 0 ||
       countryFromName(cityLine) !== null ||
-      POSTCODE_LINE.test(cityLine) ||
-      BARE_POSTCODE_LINE.test(cityLine)
+      POSTCODE_LINE.test(cityLine)
     ) {
       return null;
     }
 
-    return { city: cityLine, country, lastLineIndex: index };
+    /*
+     * It MAY carry its own postcode, and real orders do:
+     *
+     *   9940 Evergem,        4880 Aubel
+     *   Belgium              Belgium
+     *
+     * The postcode is dropped rather than kept — a city is a name, and
+     * "9940 Evergem" as a destination would match no configured route and read
+     * as nonsense in an export. The country still comes from the word below,
+     * never from the number.
+     */
+    const bare = BARE_POSTCODE_LINE.exec(cityLine);
+
+    return {
+      city: toCityName(bare ? bare[2] : cityLine),
+      country,
+      lastLineIndex: index,
+    };
   }
 
   return null;
@@ -189,7 +235,10 @@ function readCountryLine(block: readonly Fragment[]): ReadPlace | null {
  * document is the depot line `BE-2040 Antwerp`. That is evidence the document
  * itself provides, not an assumption about numbering.
  *
- * Without such a line the address stays unreadable, and the order is refused.
+ * When the document states no country anywhere, the city is still read and the
+ * country is reported as ABSENT. That is the honest answer: `3980 Tessenderlo`
+ * names a place beyond doubt, and inventing "Belgium" from the digits would be
+ * a guess the document does not support.
  */
 function readBarePostcode(
   block: readonly Fragment[],
@@ -203,16 +252,66 @@ function readBarePostcode(
     }
 
     const [, postcode, city] = match;
-    const country = countryForBarePostcode(postcode, fragments);
 
-    if (!country) {
-      return null;
-    }
-
-    return { city, country, lastLineIndex: index };
+    return {
+      city: toCityName(city),
+      country: countryForBarePostcode(postcode, fragments),
+      lastLineIndex: index,
+    };
   }
 
   return null;
+}
+
+/**
+ * VARIATION 3 — the postcode appears ONLY in the bracketed reference.
+ *
+ * One real order prints:
+ *
+ *   [59554]
+ *   LENGLET
+ *   ZI ACTIPOLE DE L'A2
+ *   AVENUE DES DEUX VALLÉES
+ *   RAILLENCOURT STE OLLE
+ *
+ * There is no postcode beside the city and no country anywhere, so every rule
+ * above has nothing to anchor on. The bracket is what remains: the order prints
+ * the customer's postcode there, above every address, which is what makes this
+ * a structural reading rather than "take the last line and hope".
+ *
+ * Deliberately narrow, because the last line of an address block is not always
+ * a city:
+ *
+ *   * the block must OPEN with the bracketed postcode, as these orders do;
+ *   * the last line must carry no digit. A street keeps its number
+ *     ("Transportstraat 6", "Rue de Kan 7"), a city does not, and refusing
+ *     rather than guessing is what keeps a street out of the city field;
+ *   * the block must hold a full address — the bracket, a company, a street and
+ *     the city. Fewer lines than that is a truncated block, where the last line
+ *     is as likely to be the street as the city, and a street read as a city
+ *     would match no route and mislead an operator. Such a block is refused;
+ *   * it runs last, so no document that any other rule can read ever reaches it.
+ *
+ * The country is absent, and is reported as absent: 59554 is
+ * Raillencourt-Sainte-Olle in France and Lippstadt in Germany, so the number
+ * decides nothing.
+ */
+function readBracketedPostcode(block: readonly Fragment[]): ReadPlace | null {
+  if (
+    block.length < MINIMUM_ADDRESS_LINES ||
+    !BRACKETED_POSTCODE.test(block[0].text.trim())
+  ) {
+    return null;
+  }
+
+  const lastIndex = block.length - 1;
+  const candidate = toCityName(block[lastIndex].text);
+
+  if (candidate.length === 0 || /\d/.test(candidate)) {
+    return null;
+  }
+
+  return { city: candidate, country: null, lastLineIndex: lastIndex };
 }
 
 /**
@@ -283,7 +382,8 @@ export function extractStartpointAddress(
   const place =
     readPrefixedPostcode(block) ??
     readCountryLine(block) ??
-    readBarePostcode(block, fragments);
+    readBarePostcode(block, fragments) ??
+    readBracketedPostcode(block);
 
   if (!place) {
     return null;

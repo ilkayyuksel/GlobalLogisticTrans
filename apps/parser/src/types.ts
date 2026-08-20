@@ -66,7 +66,7 @@ export interface ParsedTrip {
    */
   readonly terminal: string | null;
   readonly destinationCity: string;
-  readonly destinationCountry: string;
+  readonly destinationCountry: string | null;
   /** ISO calendar date, `YYYY-MM-DD`. */
   readonly date: string;
   /** `HH:mm`, or null when the document states no time. */

@@ -41,7 +41,7 @@ interface ExpectedTrip {
   readonly containerNumber: string | null;
   readonly terminal: string | null;
   readonly destinationCity: string;
-  readonly destinationCountry: string;
+  readonly destinationCountry: string | null;
   readonly date: string;
   readonly startTime: string | null;
   readonly endTime: string | null;
@@ -293,6 +293,109 @@ const PARSED_DOCUMENTS: readonly ExpectedDocument[] = [
         endTime: "08:00",
         groupKey: null,
         // The trip belongs to page 1; its address was read from page 2.
+        page: 1,
+        addressSection: "LOADING 1",
+      },
+    ],
+  },
+  {
+    /*
+     * BUG-CITY — the postcode sits on the city line with no country prefix, and
+     * the document names no country at all.
+     */
+    file: "BUG-CITY/transportorder1370334.pdf",
+    pageCount: 2,
+    layout: "SINGLE_TWO_PAGE",
+    documentStatus: "PLANNED",
+    trips: [
+      {
+        bookingNumber: "ANRBEL2792205",
+        direction: "COLLECTION",
+        containerType: "45PH",
+        containerNumber: null,
+        terminal: "PSA Quay 869",
+        destinationCity: "Tessenderlo",
+        destinationCountry: null,
+        date: "2026-08-21",
+        // The order prints a date with no time window.
+        startTime: null,
+        endTime: null,
+        groupKey: null,
+        page: 1,
+        addressSection: "LOADING 1",
+      },
+    ],
+  },
+  {
+    /* BUG-CITY — a comma-separated address: "9940 Evergem," then "Belgium". */
+    file: "BUG-CITY/transportorder1370335.pdf",
+    pageCount: 2,
+    layout: "SINGLE_TWO_PAGE",
+    documentStatus: "PLANNED",
+    trips: [
+      {
+        bookingNumber: "ANRDUB2792951",
+        direction: "COLLECTION",
+        containerType: "45PH",
+        containerNumber: null,
+        terminal: "PSA Quay 869",
+        destinationCity: "Evergem",
+        destinationCountry: "Belgium",
+        date: "2026-08-21",
+        startTime: "08:00",
+        endTime: "10:00",
+        groupKey: null,
+        page: 1,
+        addressSection: "LOADING 1",
+      },
+    ],
+  },
+  {
+    /* BUG-CITY — "4880 Aubel" with the country on the following line. */
+    file: "BUG-CITY/transportorder1370337.pdf",
+    pageCount: 2,
+    layout: "SINGLE_TWO_PAGE",
+    documentStatus: "PLANNED",
+    trips: [
+      {
+        bookingNumber: "ANRDUB2786809",
+        direction: "COLLECTION",
+        containerType: "45PH",
+        containerNumber: null,
+        terminal: "PSA Quay 869",
+        destinationCity: "Aubel",
+        destinationCountry: "Belgium",
+        date: "2026-08-21",
+        startTime: "09:00",
+        endTime: "09:00",
+        groupKey: null,
+        page: 1,
+        addressSection: "LOADING 1",
+      },
+    ],
+  },
+  {
+    /*
+     * BUG-CITY — the postcode appears ONLY in the bracketed reference, and the
+     * city is the last line of the block.
+     */
+    file: "BUG-CITY/transportorder1370345.pdf",
+    pageCount: 2,
+    layout: "SINGLE_TWO_PAGE",
+    documentStatus: "PLANNED",
+    trips: [
+      {
+        bookingNumber: "ANRDUB2792288",
+        direction: "COLLECTION",
+        containerType: "45PH",
+        containerNumber: null,
+        terminal: "PSA Quay 869",
+        destinationCity: "Raillencourt Ste Olle",
+        destinationCountry: null,
+        date: "2026-08-21",
+        startTime: null,
+        endTime: null,
+        groupKey: null,
         page: 1,
         addressSection: "LOADING 1",
       },
@@ -809,5 +912,99 @@ describe("the variations these documents actually contain", () => {
     if (!result.ok) throw new Error("expected a parse");
     // The document prints no container number. Absence stays absence.
     expect(result.trips[0].containerNumber).toBeNull();
+  });
+});
+
+/**
+ * ── THE FOUR BUG-CITY ORDERS ────────────────────────────────────────────────
+ * Four real orders that the parser refused outright: each prints its address in
+ * a shape the city rule did not cover. They are pinned here by what they say,
+ * and the assertions state WHY each one was hard.
+ * ────────────────────────────────────────────────────────────────────────────
+ */
+describe("the addresses that had no readable city line", () => {
+  it("reads a bare postcode and city with no country stated anywhere", async () => {
+    const result = await parseFixture("BUG-CITY/transportorder1370334.pdf");
+
+    if (!result.ok) throw new Error("expected a parse");
+    // "3980 Tessenderlo" — the postcode belongs to the address, not the name.
+    expect(result.trips[0].destinationCity).toBe("Tessenderlo");
+    expect(result.trips[0].destinationCountry).toBeNull();
+  });
+
+  it("reads a comma-separated address whose country is on its own line", async () => {
+    const result = await parseFixture("BUG-CITY/transportorder1370335.pdf");
+
+    if (!result.ok) throw new Error("expected a parse");
+    // "9940 Evergem," then "Belgium": the comma is punctuation, not a name.
+    expect(result.trips[0].destinationCity).toBe("Evergem");
+    expect(result.trips[0].destinationCountry).toBe("Belgium");
+  });
+
+  it("reads a postcode-and-city line followed by a country", async () => {
+    const result = await parseFixture("BUG-CITY/transportorder1370337.pdf");
+
+    if (!result.ok) throw new Error("expected a parse");
+    expect(result.trips[0].destinationCity).toBe("Aubel");
+    expect(result.trips[0].destinationCountry).toBe("Belgium");
+  });
+
+  it("reads a city whose postcode exists only in the bracketed reference", async () => {
+    const result = await parseFixture("BUG-CITY/transportorder1370345.pdf");
+
+    if (!result.ok) throw new Error("expected a parse");
+    expect(result.trips[0].destinationCity).toBe("Raillencourt Ste Olle");
+    expect(result.trips[0].destinationCountry).toBeNull();
+  });
+
+  /**
+   * The city must be a NAME. A postcode inside it would match no configured
+   * route and would read as nonsense in an export, so this is asserted for all
+   * four rather than left to the individual expectations above.
+   */
+  it.each([
+    "BUG-CITY/transportorder1370334.pdf",
+    "BUG-CITY/transportorder1370335.pdf",
+    "BUG-CITY/transportorder1370337.pdf",
+    "BUG-CITY/transportorder1370345.pdf",
+  ])("keeps %s's city free of postcodes and punctuation", async (file) => {
+    const result = await parseFixture(file);
+
+    if (!result.ok) throw new Error("expected a parse");
+
+    const { destinationCity } = result.trips[0];
+
+    expect(destinationCity).not.toMatch(/\d/);
+    expect(destinationCity).not.toMatch(/[,;]/);
+    expect(destinationCity.trim()).toBe(destinationCity);
+  });
+
+  /**
+   * The raw address keeps the whole block, so a city that ever comes out wrong
+   * can be checked against what the document actually printed.
+   */
+  it("keeps the full address block as evidence", async () => {
+    const result = await parseFixture("BUG-CITY/transportorder1370345.pdf");
+
+    if (!result.ok) throw new Error("expected a parse");
+    expect(result.trips[0].raw.rawAddress).toContain("[59554]");
+    expect(result.trips[0].raw.rawAddress).toContain("RAILLENCOURT STE OLLE");
+  });
+
+  /**
+   * The country is absent because the document never states it — not because
+   * the parser gave up. Nothing may fill it in from the digits: 59554 is
+   * Raillencourt-Sainte-Olle in France and Lippstadt in Germany.
+   */
+  it("invents no country for a document that states none", async () => {
+    for (const file of [
+      "BUG-CITY/transportorder1370334.pdf",
+      "BUG-CITY/transportorder1370345.pdf",
+    ]) {
+      const result = await parseFixture(file);
+
+      if (!result.ok) throw new Error("expected a parse");
+      expect(result.trips[0].destinationCountry).toBeNull();
+    }
   });
 });

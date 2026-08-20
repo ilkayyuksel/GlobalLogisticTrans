@@ -385,32 +385,45 @@ describe("address", () => {
       expect(result.destinationCountry).toBe("Belgium");
     });
 
-    it("refuses when no line states that postcode's country", () => {
-      expect(() =>
-        extractAddress(
-          addressBlock(["[2040]", "Ineos Styrolution", "2040 Antwerpen"]),
-          header,
-        ),
-      ).toThrow(ExtractionError);
+    /*
+     * ── AN UNSTATED COUNTRY IS ABSENT, NOT A REFUSAL ────────────────────────
+     * A real order prints "3980 Tessenderlo" and names no country anywhere. The
+     * city is beyond doubt; the country is genuinely unknown, and the number
+     * settles nothing — 59554 is Raillencourt-Sainte-Olle in France and
+     * Lippstadt in Germany. Refusing the whole document over a field it never
+     * claimed threw away a perfectly readable destination.
+     * ────────────────────────────────────────────────────────────────────────
+     */
+    it("reads the city and reports no country when none is stated", () => {
+      const result = extractAddress(
+        addressBlock(["[2040]", "Ineos Styrolution", "2040 Antwerpen"]),
+        header,
+      );
+
+      expect(result.destinationCity).toBe("Antwerpen");
+      expect(result.destinationCountry).toBeNull();
     });
 
-    it("refuses when a different postcode is the only prefixed one", () => {
-      expect(() =>
-        extractAddress(
-          withDepotLine(
-            ["[2040]", "Ineos Styrolution", "2040 Antwerpen"],
-            "BE-9130 Kallo",
-          ),
-          header,
+    it("does not borrow the country of a different postcode", () => {
+      const result = extractAddress(
+        withDepotLine(
+          ["[2040]", "Ineos Styrolution", "2040 Antwerpen"],
+          "BE-9130 Kallo",
         ),
-      ).toThrow(ExtractionError);
+        header,
+      );
+
+      expect(result.destinationCity).toBe("Antwerpen");
+      // 9130 is not 2040, so it says nothing about this address.
+      expect(result.destinationCountry).toBeNull();
     });
 
     /*
-     * A document contradicting itself is a document nobody can trust. It is
-     * refused rather than resolved by preferring one of the two.
+     * A document contradicting itself is a document nobody can trust on that
+     * point. The city still reads; the country is left unstated rather than
+     * resolved by preferring one of the two.
      */
-    it("refuses when the document states two countries for that postcode", () => {
+    it("states no country when the document names two for that postcode", () => {
       const fragments = [
         ...withDepotLine(
           ["[2040]", "Ineos Styrolution", "2040 Antwerpen"],
@@ -419,7 +432,10 @@ describe("address", () => {
         { page: 1, x: 98, y: 100, text: "NL-2040 Zandvoort" },
       ];
 
-      expect(() => extractAddress(fragments, header)).toThrow(ExtractionError);
+      const result = extractAddress(fragments, header);
+
+      expect(result.destinationCity).toBe("Antwerpen");
+      expect(result.destinationCountry).toBeNull();
     });
   });
 
