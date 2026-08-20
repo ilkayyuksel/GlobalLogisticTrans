@@ -74,7 +74,16 @@ The IMAP service continuously monitors one mailbox.
 
 Configuration is provided through environment variables.
 
-Only unread emails are processed.
+A normal poll considers only emails received TODAY. The date is part of the
+IMAP search itself, so the historical mailbox is never scanned and old
+attachments are never downloaded.
+
+Read and unread emails are both considered. The unread flag is not a record of
+what this system did — a transport order may be opened in a mail client before
+the next poll — so an email that has already been processed is recognised by its
+Message-ID in `imported_email`, which is the only protection against
+reprocessing. A successfully imported email is still marked read, so that the
+folder stays readable to a human.
 
 ---
 

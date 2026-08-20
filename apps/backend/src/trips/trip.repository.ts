@@ -191,6 +191,31 @@ export class TripRepository {
     return this.prisma.trip.findUnique({ where: { id } });
   }
 
+  /**
+   * Every Trip planned inside a date range, unpaged.
+   *
+   * Unpaged because the RANGE is the bound: a caller that asks for one month
+   * gets one month of a family fleet's work, not an open-ended table scan. It
+   * exists for aggregation — counting Trips per driver — where paging would
+   * turn one honest total into a series of partial ones.
+   *
+   * Both ends are inclusive, matching the range filter the list already uses.
+   */
+  findByPlanningDateRange(
+    from: Date,
+    to: Date,
+    excludeStatuses: readonly TripStatus[],
+  ): Promise<Trip[]> {
+    return this.prisma.trip.findMany({
+      where: {
+        planningDate: { gte: from, lte: to },
+        ...(excludeStatuses.length > 0
+          ? { status: { notIn: [...excludeStatuses] } }
+          : {}),
+      },
+    });
+  }
+
   /** The Trip currently holding a booking number, if any. */
   findByBookingNumber(query: BookingNumberQuery): Promise<Trip | null> {
     return this.prisma.trip.findFirst({

@@ -518,6 +518,30 @@ describe("date and time", () => {
     expect(result.endTime).toBeNull();
   });
 
+  /**
+   * One timestamp is an appointment, and it becomes a window of zero length —
+   * the same thing the many `08:00 till 08:00` orders state in the other
+   * spelling. Leaving the end absent would leave the Trip unplannable.
+   */
+  it("reads a single timestamp as a window of zero length", () => {
+    const result = extractDateTime(dateLine("21/08/2026 15:00"), header);
+
+    expect(result.date).toBe("2026-08-21");
+    expect(result.startTime).toBe("15:00");
+    expect(result.endTime).toBe("15:00");
+  });
+
+  /**
+   * Two times and no `till`: which one is the start is the document's to say.
+   * Reading the first and dropping the second would discard half of what the
+   * order stated, so it is refused rather than guessed at.
+   */
+  it("refuses two times that are not joined by 'till'", () => {
+    expect(() =>
+      extractDateTime(dateLine("21/08/2026 15:00 17:00"), header),
+    ).toThrow(/more than one time/);
+  });
+
   it("refuses a day that does not exist", () => {
     expect(() =>
       extractDateTime(dateLine("31/02/2025 08:00 till 09:00"), header),

@@ -9,4 +9,4 @@
  * Bump it when a change alters what the parser EXTRACTS. A refactor that
  * produces identical output for every fixture does not bump it.
  */
-export const PARSER_VERSION = "1.2.0";
+export const PARSER_VERSION = "1.3.0";

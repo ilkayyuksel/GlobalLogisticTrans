@@ -5,7 +5,7 @@ import { useState } from "react";
 import { RittenDialog } from "@/components/ritten/ritten-dialog";
 import { ApiError, userFacingMessage } from "@/lib/api/client";
 import type { CreateVehiclePayload } from "@/lib/api/vehicles";
-import type { Vehicle } from "@/lib/api/types";
+import type { Driver, Vehicle } from "@/lib/api/types";
 import {
   DEFAULT_FLEET_COLOR,
   FLEET_COLORS,
@@ -31,6 +31,20 @@ import { useTranslation } from "@/lib/i18n/language-provider";
  * with its own rules, and the update endpoint refuses the field.
  * ────────────────────────────────────────────────────────────────────────────
  *
+ * ── THE DRIVER IS NOT A VEHICLE FIELD ───────────────────────────────────────
+ * A new Vehicle may be given a driver here, and that is NOT stored on the
+ * Vehicle: it creates a VehicleAssignment starting today, through the existing
+ * assignment API. The distinction matters operationally — an assignment has a
+ * date range and is what gives a Trip its EFFECTIVE driver, while a Trip's own
+ * driver column is a per-trip override this form never touches — so the label
+ * says "from today" rather than pretending the truck has an owner.
+ *
+ * An EXISTING vehicle's driver is deliberately not editable here. Changing it
+ * means ending one assignment and starting another, which is a dated decision
+ * with history behind it; the vehicle page owns that, and duplicating it in a
+ * create form would be a second way to do the same thing.
+ * ────────────────────────────────────────────────────────────────────────────
+ *
  * Validation is the backend's. The only checks here are the ones the browser
  * does for free, so an obvious mistake costs no round trip; everything else is
  * reported as the backend worded it, including its field-level details.
@@ -46,6 +60,8 @@ interface FormValues {
   displayColor: string;
   brand: string;
   model: string;
+  /** Empty means no assignment is created. Only offered when creating. */
+  driverId: string;
 }
 
 function toFormValues(vehicle: Vehicle | null): FormValues {
@@ -54,6 +70,7 @@ function toFormValues(vehicle: Vehicle | null): FormValues {
     displayColor: vehicle?.displayColor ?? DEFAULT_FLEET_COLOR,
     brand: vehicle?.brand ?? "",
     model: vehicle?.model ?? "",
+    driverId: "",
   };
 }
 
@@ -73,12 +90,19 @@ function emptyToNull(value: string): string | null {
 
 export function VehicleFormDialog({
   vehicle,
+  drivers,
   onSave,
   onClose,
 }: {
   /** Null when creating. */
   vehicle: Vehicle | null;
-  onSave: (payload: CreateVehiclePayload) => Promise<void>;
+  /** Active drivers, fetched once by the page. Empty while they load. */
+  drivers: readonly Driver[];
+  /**
+   * Saves the vehicle. `driverId` is present only when creating and a driver
+   * was chosen; the page turns it into a VehicleAssignment.
+   */
+  onSave: (payload: CreateVehiclePayload, driverId: string | null) => Promise<void>;
   onClose: () => void;
 }) {
   const t = useTranslation();
@@ -95,7 +119,10 @@ export function VehicleFormDialog({
     setError(null);
 
     try {
-      await onSave(toPayload(values));
+      await onSave(
+        toPayload(values),
+        values.driverId === "" ? null : values.driverId,
+      );
       onClose();
     } catch (caught: unknown) {
       setError(caught);
@@ -150,6 +177,13 @@ export function VehicleFormDialog({
             value={values.displayColor}
             onChange={(displayColor) => update({ displayColor })}
           />
+
+          <DriverField
+            isCreating={vehicle === null}
+            drivers={drivers}
+            value={values.driverId}
+            onChange={(driverId) => update({ driverId })}
+          />
         </div>
 
         <div className="mt-4 flex items-center gap-2">
@@ -171,6 +205,59 @@ export function VehicleFormDialog({
         </div>
       </form>
     </RittenDialog>
+  );
+}
+
+/**
+ * The driver this truck will be assigned to, from today.
+ *
+ * A plain select over the active drivers the page already loaded. When editing
+ * it becomes a sentence rather than a control: the change belongs to the
+ * vehicle page, where the assignment's dates are visible.
+ */
+function DriverField({
+  isCreating,
+  drivers,
+  value,
+  onChange,
+}: {
+  isCreating: boolean;
+  drivers: readonly Driver[];
+  value: string;
+  onChange: (driverId: string) => void;
+}) {
+  const t = useTranslation();
+
+  if (!isCreating) {
+    return (
+      <Field label={t("vehicles.form.driver")} htmlFor="vehicle-driver-note">
+        <p id="vehicle-driver-note" className="text-xs text-muted">
+          {t("vehicles.form.driverEditHint")}
+        </p>
+      </Field>
+    );
+  }
+
+  return (
+    <Field label={t("vehicles.form.driver")} htmlFor="vehicle-driver">
+      <select
+        id="vehicle-driver"
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className="w-full rounded-md border border-border bg-card px-3 py-1.5 text-sm text-foreground"
+      >
+        <option value="">{t("vehicles.form.driverNone")}</option>
+        {drivers.map((driver) => (
+          <option key={driver.id} value={driver.id}>
+            {driver.name}
+          </option>
+        ))}
+      </select>
+      {/* Says what choosing one actually does, because it is not a column. */}
+      <p className="mt-1 text-[11px] text-muted">
+        {t("vehicles.form.driverHint")}
+      </p>
+    </Field>
   );
 }
 

@@ -274,6 +274,9 @@ export interface Driver {
   licenceNumber: string | null;
   phoneNumber: string | null;
   email: string | null;
+  /** Who to call about this driver. Free text; never parsed. */
+  emergencyContact: string | null;
+  notes: string | null;
   isActive: boolean;
 }
 

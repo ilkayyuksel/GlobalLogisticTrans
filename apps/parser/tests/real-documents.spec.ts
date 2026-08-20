@@ -317,9 +317,9 @@ const PARSED_DOCUMENTS: readonly ExpectedDocument[] = [
         destinationCity: "Tessenderlo",
         destinationCountry: null,
         date: "2026-08-21",
-        // The order prints a date with no time window.
-        startTime: null,
-        endTime: null,
+        // "21/08/2026 08:00" — one moment, so the window has zero length.
+        startTime: "08:00",
+        endTime: "08:00",
         groupKey: null,
         page: 1,
         addressSection: "LOADING 1",
@@ -393,8 +393,9 @@ const PARSED_DOCUMENTS: readonly ExpectedDocument[] = [
         destinationCity: "Raillencourt Ste Olle",
         destinationCountry: null,
         date: "2026-08-21",
-        startTime: null,
-        endTime: null,
+        // "21/08/2026 15:00" — one moment, so the window has zero length.
+        startTime: "15:00",
+        endTime: "15:00",
         groupKey: null,
         page: 1,
         addressSection: "LOADING 1",
@@ -1006,5 +1007,54 @@ describe("the addresses that had no readable city line", () => {
       if (!result.ok) throw new Error("expected a parse");
       expect(result.trips[0].destinationCountry).toBeNull();
     }
+  });
+});
+
+/**
+ * ── ONE TIMESTAMP INSTEAD OF A WINDOW ───────────────────────────────────────
+ * Real orders print the appointment two ways:
+ *
+ *   Date/time: 21/08/2026 08:00 till 10:00     a window
+ *   Date/time: 21/08/2026 15:00                one moment
+ *
+ * The second used to leave BOTH times empty, so an order that stated exactly
+ * when to be there arrived in the planning with no time at all. It is now read
+ * as a window of zero length, which is the same thing the many
+ * `08:00 till 08:00` orders already say in the other spelling.
+ * ────────────────────────────────────────────────────────────────────────────
+ */
+describe("a Date/time line with a single timestamp", () => {
+  it.each([
+    ["BUG-CITY/transportorder1370334.pdf", "2026-08-21", "08:00"],
+    ["BUG-CITY/transportorder1370345.pdf", "2026-08-21", "15:00"],
+  ])("reads %s as one moment, not as no time", async (file, date, time) => {
+    const result = await parseFixture(file);
+
+    if (!result.ok) throw new Error("expected a parse");
+
+    const [trip] = result.trips;
+
+    expect(trip.date).toBe(date);
+    expect(trip.startTime).toBe(time);
+    // Equal to the start, never invented and never left absent.
+    expect(trip.endTime).toBe(time);
+  });
+
+  /** The window form must be untouched by the rule that reads the other one. */
+  it("still reads a real window as the two times the document states", async () => {
+    const result = await parseFixture("BUG-CITY/transportorder1370335.pdf");
+
+    if (!result.ok) throw new Error("expected a parse");
+    expect(result.trips[0].startTime).toBe("08:00");
+    expect(result.trips[0].endTime).toBe("10:00");
+  });
+
+  it("keeps the date of a single-timestamp order exactly as printed", async () => {
+    const result = await parseFixture("BUG-CITY/transportorder1370345.pdf");
+
+    if (!result.ok) throw new Error("expected a parse");
+    // 21/08/2026 — day and month never swap on the way to ISO.
+    expect(result.trips[0].raw.rawDate).toBe("21/08/2026 15:00");
+    expect(result.trips[0].date).toBe("2026-08-21");
   });
 });

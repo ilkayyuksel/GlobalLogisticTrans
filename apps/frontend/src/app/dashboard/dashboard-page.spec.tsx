@@ -4,6 +4,10 @@ import userEvent from "@testing-library/user-event";
 import DashboardPage from "./page";
 import { ApiError } from "@/lib/api/client";
 import { uploadTransportOrderPdfs } from "@/lib/api/imports";
+import {
+  getDriverStatistics,
+  type DriverStatistics,
+} from "@/lib/api/driver-statistics";
 import { listMaintenance, type Maintenance } from "@/lib/api/maintenance";
 import { type ListTripsParams, listTrips } from "@/lib/api/trips";
 import type { Paginated, Trip } from "@/lib/api/types";
@@ -25,6 +29,11 @@ jest.mock("@/lib/api/maintenance", () => ({
   listMaintenance: jest.fn(),
 }));
 
+jest.mock("@/lib/api/driver-statistics", () => ({
+  ...jest.requireActual("@/lib/api/driver-statistics"),
+  getDriverStatistics: jest.fn(),
+}));
+
 const listTripsMock = listTrips as jest.MockedFunction<typeof listTrips>;
 const uploadMock = uploadTransportOrderPdfs as jest.MockedFunction<
   typeof uploadTransportOrderPdfs
@@ -32,6 +41,24 @@ const uploadMock = uploadTransportOrderPdfs as jest.MockedFunction<
 const listMaintenanceMock = listMaintenance as jest.MockedFunction<
   typeof listMaintenance
 >;
+const driverStatisticsMock = getDriverStatistics as jest.MockedFunction<
+  typeof getDriverStatistics
+>;
+
+/** The windows come from the backend; the widget never works them out. */
+const PERIOD: DriverStatistics["period"] = {
+  today: "2026-08-20",
+  weekStart: "2026-08-17",
+  weekEnd: "2026-08-23",
+  monthStart: "2026-08-01",
+  monthEnd: "2026-08-31",
+};
+
+function driverStatistics(
+  drivers: DriverStatistics["drivers"] = [],
+): DriverStatistics {
+  return { period: PERIOD, drivers };
+}
 
 function buildWarning(overrides: Partial<Maintenance> = {}): Maintenance {
   return {
@@ -185,6 +212,8 @@ describe("DashboardPage", () => {
     listTripsMock.mockReset();
     listMaintenanceMock.mockReset();
     listMaintenanceMock.mockResolvedValue(maintenancePage([]));
+    driverStatisticsMock.mockReset();
+    driverStatisticsMock.mockResolvedValue(driverStatistics());
     window.localStorage.clear();
     respondWithCounts({ total: 42, today: 3, week: 11, open: 7, closed: 30 });
   });
@@ -194,7 +223,7 @@ describe("DashboardPage", () => {
       renderDashboard();
 
       expect(
-        await screen.findByRole("heading", { name: "TRAXO Dashboard" }),
+        await screen.findByRole("heading", { name: "TRANO Dashboard" }),
       ).toBeInTheDocument();
     });
 
@@ -504,7 +533,7 @@ describe("DashboardPage", () => {
       renderDashboard();
 
       expect(
-        await screen.findByRole("heading", { name: "TRAXO Panel" }),
+        await screen.findByRole("heading", { name: "TRANO Panel" }),
       ).toBeInTheDocument();
       expect(screen.getByText("Toplam sefer")).toBeInTheDocument();
       expect(screen.getByText("Sefer durumu")).toBeInTheDocument();
@@ -526,6 +555,7 @@ describe("Dashboard PDF upload", () => {
     uploadMock.mockReset();
     listMaintenanceMock.mockReset();
     listMaintenanceMock.mockResolvedValue(maintenancePage([]));
+    driverStatisticsMock.mockResolvedValue(driverStatistics());
     window.localStorage.clear();
     respondWithCounts({ total: 0, today: 0, week: 0, open: 0, closed: 0, recent: [] });
   });

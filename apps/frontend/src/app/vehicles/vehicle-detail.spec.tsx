@@ -43,6 +43,8 @@ const DRIVER = {
   id: "driver-1",
   name: "Piet Janssens",
   licenceNumber: null,
+  emergencyContact: null,
+  notes: null,
   phoneNumber: null,
   email: null,
   isActive: true,

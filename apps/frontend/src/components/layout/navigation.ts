@@ -22,6 +22,7 @@ export const MAIN_NAVIGATION: readonly NavigationItem[] = [
   { href: "/dashboard", labelKey: "navigation.dashboard" },
   { href: "/trips", labelKey: "navigation.trips" },
   { href: "/vehicles", labelKey: "navigation.vehicles" },
+  { href: "/drivers", labelKey: "navigation.drivers" },
   { href: "/maintenance", labelKey: "navigation.maintenance" },
   { href: "/calendar", labelKey: "navigation.calendar" },
   { href: "/notes", labelKey: "navigation.notes" },

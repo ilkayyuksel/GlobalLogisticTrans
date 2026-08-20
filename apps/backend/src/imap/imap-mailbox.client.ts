@@ -143,18 +143,30 @@ export class ImapMailboxSession {
   constructor(private readonly client: ImapFlow) {}
 
   /**
-   * The unread messages, described but not downloaded.
+   * Today's messages, described but not downloaded.
    *
-   * Unread is the candidate filter `importRules.md` specifies. It is only a
-   * filter: whether an email was really handled is answered by `imported_email`,
-   * because a flag can be changed by anyone opening the mailbox in a mail
-   * client.
+   * The date is the candidate filter, and the server applies it: `SINCE` is
+   * part of the IMAP search, so a mailbox holding years of mail still returns
+   * only the handful of envelopes a poll can act on. Nothing older is described,
+   * listed or fetched during a normal scan.
+   *
+   * Deliberately NOT the unread flag. A flag is not a record of what this
+   * system did — anyone opening the mailbox in a mail client can read a
+   * transport order before the next poll, and filtering on `seen: false` would
+   * then hide that order forever. What an email has already caused is answered
+   * by `imported_email`, which this system alone writes, and every message
+   * returned here is checked against it before anything is downloaded.
+   *
+   * Read and unread are therefore both returned. Re-describing a handful of
+   * already-imported envelopes each poll is the price of never losing an order
+   * to a flag, and it costs one envelope fetch — no attachment is downloaded
+   * for a message `imported_email` already knows.
    */
   async findCandidates(): Promise<MailboxMessage[]> {
     const messages: MailboxMessage[] = [];
 
     for await (const message of this.client.fetch(
-      { seen: false },
+      { since: startOfToday() },
       { uid: true, envelope: true, bodyStructure: true },
     )) {
       const envelope = message.envelope;
@@ -198,16 +210,33 @@ export class ImapMailboxSession {
   }
 
   /**
-   * Marks a message read, so the next scan does not offer it again.
+   * Marks a message read, once its import succeeded.
    *
-   * Only ever called after the import succeeded. A failed message stays unread
-   * and is retried by the next scan, which is the whole retry mechanism.
+   * No longer what stops a second import — `imported_email` is — but it is what
+   * makes the mailbox readable to a human: an operator opening the folder sees
+   * at a glance which orders this system has taken in. A failed message stays
+   * unread for the same reason, and is retried by the next scan, which is the
+   * whole retry mechanism.
    */
   async markSeen(message: MailboxMessage): Promise<void> {
     await this.client.messageFlagsAdd(String(message.uid), ["\\Seen"], {
       uid: true,
     });
   }
+}
+
+/**
+ * Midnight this morning, in the server's own timezone.
+ *
+ * IMAP `SINCE` compares whole dates rather than instants, so the time of day is
+ * dropped by the protocol anyway; what matters is that the day is the local one,
+ * because that is the day an operator means when they say a transport order
+ * arrived today.
+ */
+function startOfToday(): Date {
+  const now = new Date();
+
+  return new Date(now.getFullYear(), now.getMonth(), now.getDate());
 }
 
 /**

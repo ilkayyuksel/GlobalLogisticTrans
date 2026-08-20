@@ -49,3 +49,40 @@ export function addDays(date: Date, days: number): Date {
 export function todayUtc(): Date {
   return toUtcDate(toIsoDate(new Date()));
 }
+
+const DAYS_PER_WEEK = 7;
+
+/**
+ * The Monday of the week containing this date.
+ *
+ * Monday to Sunday is the week TRAXO already uses everywhere the operator sees
+ * one — the Ritten week view and the Dashboard's "this week" count — so a
+ * statistic that used a different week would disagree with the list it is
+ * supposed to summarise.
+ */
+export function startOfWeekUtc(date: Date): Date {
+  const dayOfWeek = date.getUTCDay();
+  // getUTCDay puts Sunday at 0; the Monday-first week wants it six days in.
+  const daysSinceMonday = dayOfWeek === 0 ? DAYS_PER_WEEK - 1 : dayOfWeek - 1;
+
+  return addDays(date, -daysSinceMonday);
+}
+
+/** The Sunday of that same week. */
+export function endOfWeekUtc(date: Date): Date {
+  return addDays(startOfWeekUtc(date), DAYS_PER_WEEK - 1);
+}
+
+export function startOfMonthUtc(date: Date): Date {
+  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 1));
+}
+
+/**
+ * The last day of the month.
+ *
+ * Day 0 of the NEXT month is the last day of this one, which is what keeps
+ * February correct in a leap year without a table of month lengths.
+ */
+export function endOfMonthUtc(date: Date): Date {
+  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, 0));
+}

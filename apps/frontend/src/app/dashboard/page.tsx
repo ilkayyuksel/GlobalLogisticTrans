@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useCallback } from "react";
 
+import { DriverStatisticsWidget } from "@/components/dashboard/driver-statistics";
 import { MaintenanceWarnings } from "@/components/dashboard/maintenance-warnings";
 import { PdfUpload } from "@/components/dashboard/pdf-upload";
 import { StatCard } from "@/components/dashboard/stat-card";
@@ -163,6 +164,10 @@ export default function DashboardPage() {
           </div>
         </Card>
 
+        <DriverStatisticsWidget />
+      </div>
+
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
         {/* No calendar API exists yet. */}
         <UnavailableWidget
           titleKey="dashboard.calendar.title"

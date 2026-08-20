@@ -315,3 +315,98 @@ describe("keeping the displayed prices current", () => {
     expect(snapshotCalls()).toHaveLength(0);
   });
 });
+
+/**
+ * ── THE FAILED READ ─────────────────────────────────────────────────────────
+ * A pricing read that FAILS and a page of Trips that have no pricing look
+ * identical: eight columns of dashes. They mean opposite things — "nothing is
+ * stored for these Trips" versus "we could not find out" — and on a screen
+ * used for invoicing, reading the second as the first is the expensive
+ * mistake.
+ *
+ * The regression this guards: the failure was swallowed entirely. `useAsync`
+ * puts the error in `error` and leaves `data` null, the table falls back to an
+ * empty map, and every row renders its ordinary empty marker. Nothing on the
+ * page said a request had failed.
+ * ────────────────────────────────────────────────────────────────────────────
+ */
+describe("when the pricing read fails", () => {
+  const CLOSED_TRIP = buildTrip({
+    id: "trip-closed",
+    bookingNumber: "ANRDUB2602247",
+    status: "CLOSED",
+  });
+
+  function respondExceptPricing(): void {
+    respondWith(requestMock, { trips: buildPage([CLOSED_TRIP]) });
+
+    const answerNormally = requestMock.getMockImplementation() as (
+      ...args: unknown[]
+    ) => Promise<unknown>;
+
+    requestMock.mockImplementation((...args: unknown[]) => {
+      if (args[0] === "/api/v1/trip-pricing/snapshots") {
+        return Promise.reject(new Error("Service unavailable"));
+      }
+
+      return answerNormally(...args);
+    });
+  }
+
+  it("says so instead of showing empty price columns", async () => {
+    respondExceptPricing();
+    const user = userEvent.setup();
+    renderRitten();
+    await screen.findByText("ANRDUB2602247");
+
+    await user.click(toggle());
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(/konden niet worden geladen/);
+  });
+
+  it("keeps the failure out of the way while the columns are hidden", async () => {
+    respondExceptPricing();
+    renderRitten();
+    await screen.findByText("ANRDUB2602247");
+
+    // Nothing was asked for, so there is nothing to report.
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("offers the read again rather than leaving the operator stuck", async () => {
+    respondExceptPricing();
+    const user = userEvent.setup();
+    renderRitten();
+    await screen.findByText("ANRDUB2602247");
+
+    await user.click(toggle());
+    await screen.findByRole("alert");
+
+    const before = snapshotCalls().length;
+    await user.click(screen.getByRole("button", { name: "Opnieuw proberen" }));
+
+    await waitFor(() => expect(snapshotCalls().length).toBeGreaterThan(before));
+  });
+
+  it("clears the notice once the read succeeds", async () => {
+    respondExceptPricing();
+    const user = userEvent.setup();
+    renderRitten();
+    await screen.findByText("ANRDUB2602247");
+
+    await user.click(toggle());
+    await screen.findByRole("alert");
+
+    // The backend recovers; the same retry must leave no trace of the failure.
+    respondWith(requestMock, {
+      trips: buildPage([CLOSED_TRIP]),
+      pricingSnapshots: [snapshotFor(CLOSED_TRIP.id)],
+    });
+
+    await user.click(screen.getByRole("button", { name: "Opnieuw proberen" }));
+
+    await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+    expect(await screen.findByText("651.25")).toBeInTheDocument();
+  });
+});

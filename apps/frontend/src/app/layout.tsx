@@ -7,9 +7,9 @@ import { THEME_SCRIPT, ThemeProvider } from "@/lib/theme/theme-provider";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "TRAXO — Transport Operations",
+  title: "TRANO — Transport Operations",
   description:
-    "TRAXO — transport operations: planning, trips and pricing for road transport.",
+    "TRANO — transport operations: planning, trips and pricing for road transport.",
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {

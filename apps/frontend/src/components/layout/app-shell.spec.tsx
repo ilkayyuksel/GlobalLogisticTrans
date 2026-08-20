@@ -55,6 +55,7 @@ describe("AppShell navigation", () => {
         "Dashboard",
         "Ritten",
         "Voertuigen",
+        "Chauffeurs",
         "Onderhoud",
         "Agenda",
         "Notities",
@@ -66,6 +67,7 @@ describe("AppShell navigation", () => {
       ["Dashboard", "/dashboard"],
       ["Ritten", "/trips"],
       ["Voertuigen", "/vehicles"],
+      ["Chauffeurs", "/drivers"],
       ["Onderhoud", "/maintenance"],
       ["Agenda", "/calendar"],
       ["Notities", "/notes"],
@@ -95,7 +97,7 @@ describe("AppShell navigation", () => {
       renderShell();
 
       expect(
-        screen.getByRole("link", { name: /TRAXO/ }),
+        screen.getByRole("link", { name: /TRANO/ }),
       ).toHaveAttribute("href", "/dashboard");
     });
 
@@ -108,7 +110,7 @@ describe("AppShell navigation", () => {
     it("shows the TRAXO wordmark, linked to the dashboard", () => {
       renderShell();
 
-      const home = screen.getByRole("link", { name: /TRAXO/ });
+      const home = screen.getByRole("link", { name: /TRANO/ });
 
       expect(home).toHaveAttribute("href", "/dashboard");
       expect(

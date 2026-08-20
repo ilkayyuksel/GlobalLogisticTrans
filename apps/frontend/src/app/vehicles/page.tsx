@@ -13,12 +13,15 @@ import { userFacingMessage } from "@/lib/api/client";
 import type { Vehicle } from "@/lib/api/types";
 import {
   activateVehicle,
+  createAssignment,
   createVehicle,
   deactivateVehicle,
   listVehicles,
   updateVehicle,
   type CreateVehiclePayload,
 } from "@/lib/api/vehicles";
+import { listDrivers } from "@/lib/api/drivers";
+import { today } from "@/lib/calendar/calendar-dates";
 import { useTranslation } from "@/lib/i18n/language-provider";
 import type { TranslationKey } from "@/lib/i18n/translations";
 import { cn } from "@/lib/cn";
@@ -40,6 +43,8 @@ import { cn } from "@/lib/cn";
  */
 
 const PAGE_SIZE = 25;
+/** Every active driver fits in one page for a fleet of this size. */
+const DRIVER_PICKER_PAGE_SIZE = 200;
 const SEARCH_DEBOUNCE_MS = 300;
 
 type StatusFilter = "" | "active" | "inactive";
@@ -52,6 +57,14 @@ const STATUS_CHOICES: readonly {
   { value: "active", labelKey: "vehicles.filter.statusActive" },
   { value: "inactive", labelKey: "vehicles.filter.statusInactive" },
 ];
+
+/**
+ * The vehicle was created; only the driver link failed.
+ *
+ * A distinct type so the page can say exactly that, instead of reporting a
+ * failure for an operation that half succeeded.
+ */
+class VehicleCreatedWithoutDriverError extends Error {}
 
 interface Feedback {
   readonly messageKey: TranslationKey;
@@ -93,6 +106,22 @@ export default function VehiclesPage() {
     [query, page],
   );
 
+  /**
+   * The drivers a new vehicle can be assigned to.
+   *
+   * Fetched once for the page rather than when the dialog opens: the fleet of a
+   * family business is one small list, and asking again on every open would be
+   * a request per click for data that does not change between them.
+   */
+  const drivers = useAsync(
+    useCallback(
+      (signal: AbortSignal) =>
+        listDrivers({ isActive: true, pageSize: DRIVER_PICKER_PAGE_SIZE }, signal),
+      [],
+    ),
+    [],
+  );
+
   const isFiltered = query.search !== undefined || query.isActive !== undefined;
   const isFirstLoad = vehicles.isLoading && !vehicles.data;
 
@@ -111,8 +140,16 @@ export default function VehiclesPage() {
       vehicles.reload();
       setFeedback({ messageKey: successKey, isError: false });
     } catch (error: unknown) {
+      // The vehicle exists in this case, so the list must still be refreshed.
+      if (error instanceof VehicleCreatedWithoutDriverError) {
+        vehicles.reload();
+      }
+
       setFeedback({
-        messageKey: "vehicles.feedback.failed",
+        messageKey:
+          error instanceof VehicleCreatedWithoutDriverError
+            ? "vehicles.feedback.driverLinkFailed"
+            : "vehicles.feedback.failed",
         detail: userFacingMessage(error),
         isError: true,
       });
@@ -124,18 +161,57 @@ export default function VehiclesPage() {
     }
   }
 
-  function save(payload: CreateVehiclePayload): Promise<void> {
-    return editing
-      ? runMutation(
-          editing.id,
-          () => updateVehicle(editing.id, payload),
-          "vehicles.feedback.updated",
-        )
-      : runMutation(
-          null,
-          () => createVehicle(payload),
-          "vehicles.feedback.created",
-        );
+  function save(
+    payload: CreateVehiclePayload,
+    driverId: string | null,
+  ): Promise<void> {
+    if (editing) {
+      return runMutation(
+        editing.id,
+        () => updateVehicle(editing.id, payload),
+        "vehicles.feedback.updated",
+      );
+    }
+
+    return runMutation(
+      null,
+      () => createWithOptionalDriver(payload, driverId),
+      "vehicles.feedback.created",
+    );
+  }
+
+  /**
+   * Creates the Vehicle, then — only if a driver was chosen — the assignment.
+   *
+   * Two calls in sequence because the assignment needs the vehicle's id, and
+   * there is no endpoint that creates both. The driver is deliberately NOT
+   * written onto the Vehicle: it becomes a VehicleAssignment starting today,
+   * through the same API the vehicle page uses, so there is one way to link a
+   * driver to a truck rather than two.
+   *
+   * A failed assignment does not undo the vehicle. The truck exists and is
+   * correct; what is missing is a link the operator can add on its own page,
+   * and reporting that is more honest than pretending the whole thing failed.
+   */
+  async function createWithOptionalDriver(
+    payload: CreateVehiclePayload,
+    driverId: string | null,
+  ): Promise<void> {
+    const created = await createVehicle(payload);
+
+    if (!driverId) {
+      return;
+    }
+
+    try {
+      await createAssignment({
+        vehicleId: created.id,
+        driverId,
+        validFrom: today(),
+      });
+    } catch (error: unknown) {
+      throw new VehicleCreatedWithoutDriverError(userFacingMessage(error));
+    }
   }
 
   function toggleActivation(vehicle: Vehicle): void {
@@ -302,6 +378,7 @@ export default function VehiclesPage() {
       {isCreating || editing ? (
         <VehicleFormDialog
           vehicle={editing}
+          drivers={drivers.data ? drivers.data.items : []}
           onSave={save}
           onClose={() => {
             setIsCreating(false);

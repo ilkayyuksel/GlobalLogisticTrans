@@ -3,6 +3,8 @@ import { Module } from "@nestjs/common";
 import { DriverModule } from "../drivers/driver.module";
 import { VehicleAssignmentModule } from "../vehicle-assignments/vehicle-assignment.module";
 import { VehicleModule } from "../vehicles/vehicle.module";
+import { DriverStatisticsController } from "./driver-statistics.controller";
+import { DriverStatisticsService } from "./driver-statistics.service";
 import { TripController } from "./trip.controller";
 import { TripGroupController } from "./trip-group.controller";
 import { TripPlanningDataService } from "./trip-planning-data.service";
@@ -23,14 +25,20 @@ import { TripService } from "./trip.service";
  * standing arrangement lives in an assignment. Dependencies still flow one
  * way — none of those three knows about Trip — so no cycle can form.
  *
+ * The Driver statistics live here rather than in the Driver module for the same
+ * reason: they COUNT TRIPS, and resolving which Driver a Trip belongs to is the
+ * planning-data rule this module already owns. Putting them the other way round
+ * would make DriverModule depend on TripModule and close the loop.
+ *
  * TripService is exported because later phases — pricing, export and the
  * parser — read Trips through the service, never through the repository, so
  * database access stays behind a single door.
  */
 @Module({
   imports: [VehicleModule, DriverModule, VehicleAssignmentModule],
-  controllers: [TripController, TripGroupController],
+  controllers: [TripController, TripGroupController, DriverStatisticsController],
   providers: [
+    DriverStatisticsService,
     TripService,
     TripRevisionService,
     TripRepository,

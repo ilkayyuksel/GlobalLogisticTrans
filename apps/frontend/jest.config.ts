@@ -8,8 +8,20 @@ import nextJest from "next/jest.js";
  */
 const createJestConfig = nextJest({ dir: "./" });
 
+/**
+ * Well above what a render needs, and deliberately so.
+ *
+ * These suites mount whole pages and drive them through userEvent, and when the
+ * full suite runs every worker competes for the same cores. Jest's five-second
+ * default is then exceeded by a page that is working perfectly — the failure
+ * moved between suites from run to run, which is the signature of contention
+ * rather than of a defect. A generous ceiling makes a red suite mean something.
+ */
+const TEST_TIMEOUT_MS = 30_000;
+
 const config: Config = {
   testEnvironment: "jsdom",
+  testTimeout: TEST_TIMEOUT_MS,
   setupFilesAfterEnv: ["<rootDir>/jest.setup.ts"],
   moduleNameMapper: {
     "^@/(.*)$": "<rootDir>/src/$1",

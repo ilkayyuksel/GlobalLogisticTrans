@@ -267,6 +267,20 @@ export default function RittenPage() {
   // Already keyed by Trip id by the client, which batches the ids for us.
   const pricingByTripId = pricing.data ?? EMPTY_PRICING;
 
+  /*
+   * A FAILED pricing read must never read as "these Trips have no price".
+   *
+   * Both states put the same dash in all eight columns, and they mean opposite
+   * things: one says the Pricing Engine has nothing stored for this Trip, the
+   * other says we could not find out. Without this notice the operator sees an
+   * empty column and concludes the first, which on an invoicing screen is the
+   * more expensive mistake.
+   *
+   * Only while the columns are on screen: a failure nobody can see the
+   * consequences of is not worth interrupting anyone for.
+   */
+  const pricingFailed = showPricing && !pricing.isLoading && pricing.error !== null;
+
   const sections = useMemo(
     () => buildSections(view, anchor, trips.data?.items ?? []),
     [view, anchor, trips.data],
@@ -514,6 +528,27 @@ export default function RittenPage() {
           {t("ritten.pricing.show")}
         </label>
       </div>
+
+      {pricingFailed ? (
+        <p
+          role="alert"
+          className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-danger/30 bg-danger/5 px-4 py-2 text-sm text-foreground"
+        >
+          <span>
+            {t("ritten.pricing.loadFailed")}{" "}
+            <span className="text-secondary">
+              {userFacingMessage(pricing.error)}
+            </span>
+          </span>
+          <button
+            type="button"
+            onClick={pricing.reload}
+            className="shrink-0 rounded-md border border-border px-3 py-1 text-xs font-medium text-foreground hover:bg-hover"
+          >
+            {t("ritten.pricing.retry")}
+          </button>
+        </p>
+      ) : null}
 
       <div className="rounded-lg border border-border bg-card">
         <RittenFilters

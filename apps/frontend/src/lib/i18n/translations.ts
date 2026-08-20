@@ -28,13 +28,14 @@ export const LANGUAGE_LABELS: Record<Language, string> = {
 };
 
 const nl = {
-  "app.name": "TRAXO",
+  "app.name": "TRANO",
   "app.skipToContent": "Naar de inhoud",
-  "app.home": "TRAXO — naar het dashboard",
+  "app.home": "TRANO — naar het dashboard",
 
   "navigation.dashboard": "Dashboard",
   "navigation.trips": "Ritten",
   "navigation.vehicles": "Voertuigen",
+  "navigation.drivers": "Chauffeurs",
   "navigation.maintenance": "Onderhoud",
   "navigation.calendar": "Agenda",
   "navigation.notes": "Notities",
@@ -64,13 +65,13 @@ const nl = {
   "common.edit": "Bewerken",
   "common.close": "Sluiten",
 
-  "branding.name": "TRAXO",
+  "branding.name": "TRANO",
   "branding.tagline": "Transport Operations",
 
   "login.submit": "Aanmelden",
   "login.intro": "Meld je aan om verder te gaan.",
   "login.singleAdmin":
-    "Aanmelden verloopt via Auth0. TRAXO heeft één beheerder; registreren kan hier niet.",
+    "Aanmelden verloopt via Auth0. TRANO heeft één beheerder; registreren kan hier niet.",
   "login.notConfiguredTitle": "Aanmelden is nog niet ingesteld",
   "login.notConfiguredDescription":
     "Er is nog geen Auth0-tenant geconfigureerd, dus aanmelden kan nog niet. Vul de AUTH0-variabelen in de omgeving in.",
@@ -78,7 +79,7 @@ const nl = {
   "auth.error.retry": "Opnieuw proberen",
   "auth.loading": "Bezig met aanmelden",
 
-  "dashboard.title": "TRAXO Dashboard",
+  "dashboard.title": "TRANO Dashboard",
   "dashboard.stats.totalTrips": "Totaal ritten",
   "dashboard.stats.today": "Vandaag",
   "dashboard.stats.thisWeek": "Deze week",
@@ -193,6 +194,9 @@ const nl = {
   "ritten.pricing.show": "Prijzen tonen",
   "ritten.pricing.hint":
     "Toont de opgeslagen prijzen rechts van de tabel. Scroll naar rechts.",
+  "ritten.pricing.loadFailed":
+    "De prijzen konden niet worden geladen. De lege prijskolommen betekenen hier niet dat deze ritten geen prijs hebben.",
+  "ritten.pricing.retry": "Opnieuw proberen",
   "ritten.value.empty": "—",
   "ritten.value.noVehicle": "Geen voertuig",
   "ritten.value.noDriver": "Geen chauffeur",
@@ -320,6 +324,63 @@ const nl = {
     "Deze selectie is te groot om te exporteren. Kies een kortere periode of scherpere filters.",
   "ritten.export.scope": "Exporteert alle ritten van de huidige filters",
 
+
+  "drivers.title": "Chauffeurs",
+  "drivers.loading": "Chauffeurs laden…",
+  "drivers.value.empty": "—",
+  "drivers.action.new": "Nieuwe chauffeur",
+  "drivers.action.edit": "Bewerken",
+  "drivers.action.activate": "Activeren",
+  "drivers.action.deactivate": "Deactiveren",
+  "drivers.search.label": "Zoeken",
+  "drivers.search.placeholder": "Zoek op naam",
+  "drivers.filter.status": "Status",
+  "drivers.filter.statusAll": "Alle",
+  "drivers.filter.statusActive": "Actief",
+  "drivers.filter.statusInactive": "Inactief",
+  "drivers.column.name": "Naam",
+  "drivers.column.licenceNumber": "Rijbewijsnummer",
+  "drivers.column.phoneNumber": "Telefoon",
+  "drivers.column.email": "E-mail",
+  "drivers.column.status": "Status",
+  "drivers.column.actions": "Acties",
+  "drivers.status.active": "Actief",
+  "drivers.status.inactive": "Inactief",
+  "drivers.empty.title": "Nog geen chauffeurs",
+  "drivers.empty.filtered": "Geen chauffeurs gevonden",
+  "drivers.empty.description":
+    "Maak een chauffeur aan om hem aan een voertuig te kunnen koppelen.",
+  "drivers.confirm.deactivate":
+    "Deze chauffeur deactiveren? Bestaande ritten blijven behouden; hij is alleen niet meer kiesbaar voor nieuwe planning.",
+  "drivers.feedback.created": "Chauffeur aangemaakt",
+  "drivers.feedback.updated": "Chauffeur bijgewerkt",
+  "drivers.feedback.activated": "Chauffeur geactiveerd",
+  "drivers.feedback.deactivated": "Chauffeur gedeactiveerd",
+  "drivers.feedback.failed": "Actie mislukt",
+  "drivers.form.createTitle": "Nieuwe chauffeur",
+  "drivers.form.editTitle": "Chauffeur bewerken",
+  "drivers.form.name": "Naam",
+  "drivers.form.licenceNumber": "Rijbewijsnummer",
+  "drivers.form.licenceNumberHint":
+    "Mag maar bij één actieve chauffeur horen",
+  "drivers.form.phoneNumber": "Telefoon",
+  "drivers.form.email": "E-mail",
+  "drivers.form.emergencyContact": "Noodcontact",
+  "drivers.form.notes": "Notities",
+  "drivers.form.save": "Opslaan",
+  "drivers.form.saving": "Opslaan…",
+  "drivers.form.cancel": "Annuleren",
+
+  "dashboard.drivers.title": "Chauffeurs",
+  "dashboard.drivers.driver": "Chauffeur",
+  "dashboard.drivers.today": "Vandaag",
+  "dashboard.drivers.week": "Deze week",
+  "dashboard.drivers.month": "Deze maand",
+  "dashboard.drivers.empty": "Nog geen chauffeurs",
+  "dashboard.drivers.link": "Beheer chauffeurs",
+  "dashboard.drivers.note":
+    "Ritten geteld op de effectieve chauffeur: de rit-override, anders de chauffeur die op die dag aan het voertuig was toegewezen.",
+
   "vehicles.title": "Voertuigen",
   "vehicles.search.label": "Zoeken",
   "vehicles.search.placeholder": "Zoek nummerplaat, merk, model...",
@@ -355,6 +416,14 @@ const nl = {
   "vehicles.form.model": "Model",
   "vehicles.form.year": "Bouwjaar",
   "vehicles.form.notes": "Notities",
+  "vehicles.form.driver": "Chauffeur",
+  "vehicles.form.driverNone": "Geen chauffeur",
+  "vehicles.form.driverHint":
+    "Maakt een voertuigtoewijzing vanaf vandaag — de standaardchauffeur van dit voertuig. Dit is géén vaste chauffeur per rit.",
+  "vehicles.form.driverEditHint":
+    "De chauffeur van een bestaand voertuig wijzig je op de voertuigpagina, zodat de geldigheidsperiode bewaard blijft.",
+  "vehicles.feedback.driverLinkFailed":
+    "Voertuig aangemaakt, maar de chauffeur kon niet worden gekoppeld",
   "vehicles.confirm.deactivate":
     "Dit voertuig deactiveren? Het verdwijnt uit de keuzelijsten maar blijft zichtbaar op bestaande ritten.",
   "vehicles.feedback.created": "Voertuig aangemaakt",
@@ -626,13 +695,14 @@ export type TranslationKey = keyof typeof nl;
 export type Translations = Record<TranslationKey, string>;
 
 const tr: Translations = {
-  "app.name": "TRAXO",
+  "app.name": "TRANO",
   "app.skipToContent": "İçeriğe geç",
-  "app.home": "TRAXO — panoya git",
+  "app.home": "TRANO — panoya git",
 
   "navigation.dashboard": "Panel",
   "navigation.trips": "Seferler",
   "navigation.vehicles": "Araçlar",
+  "navigation.drivers": "Şoförler",
   "navigation.maintenance": "Bakım",
   "navigation.calendar": "Takvim",
   "navigation.notes": "Notlar",
@@ -662,13 +732,13 @@ const tr: Translations = {
   "common.edit": "Düzenle",
   "common.close": "Kapat",
 
-  "branding.name": "TRAXO",
+  "branding.name": "TRANO",
   "branding.tagline": "Transport Operations",
 
   "login.submit": "Giriş yap",
   "login.intro": "Devam etmek için giriş yapın.",
   "login.singleAdmin":
-    "Giriş Auth0 üzerinden yapılır. TRAXO'nun tek bir yöneticisi vardır; buradan kayıt olunamaz.",
+    "Giriş Auth0 üzerinden yapılır. TRANO'nun tek bir yöneticisi vardır; buradan kayıt olunamaz.",
   "login.notConfiguredTitle": "Giriş henüz yapılandırılmadı",
   "login.notConfiguredDescription":
     "Henüz bir Auth0 tenant'ı yapılandırılmadı, bu yüzden giriş yapılamıyor. Ortamdaki AUTH0 değişkenlerini doldurun.",
@@ -676,7 +746,7 @@ const tr: Translations = {
   "auth.error.retry": "Tekrar dene",
   "auth.loading": "Giriş yapılıyor",
 
-  "dashboard.title": "TRAXO Panel",
+  "dashboard.title": "TRANO Panel",
   "dashboard.stats.totalTrips": "Toplam sefer",
   "dashboard.stats.today": "Bugün",
   "dashboard.stats.thisWeek": "Bu hafta",
@@ -790,6 +860,9 @@ const tr: Translations = {
   "ritten.pricing.show": "Fiyatları göster",
   "ritten.pricing.hint":
     "Kaydedilmiş fiyatları tablonun sağında gösterir. Sağa kaydırın.",
+  "ritten.pricing.loadFailed":
+    "Fiyatlar yüklenemedi. Buradaki boş fiyat sütunları, bu seferlerin fiyatı olmadığı anlamına gelmez.",
+  "ritten.pricing.retry": "Tekrar dene",
   "ritten.value.empty": "—",
   "ritten.value.noVehicle": "Araç yok",
   "ritten.value.noDriver": "Şoför yok",
@@ -917,6 +990,63 @@ const tr: Translations = {
     "Bu seçim dışa aktarmak için çok büyük. Daha kısa bir dönem veya daha dar filtreler seçin.",
   "ritten.export.scope": "Mevcut filtrelerdeki tüm seferleri dışa aktarır",
 
+
+  "drivers.title": "Şoförler",
+  "drivers.loading": "Şoförler yükleniyor…",
+  "drivers.value.empty": "—",
+  "drivers.action.new": "Yeni şoför",
+  "drivers.action.edit": "Düzenle",
+  "drivers.action.activate": "Etkinleştir",
+  "drivers.action.deactivate": "Devre dışı bırak",
+  "drivers.search.label": "Ara",
+  "drivers.search.placeholder": "İsme göre ara",
+  "drivers.filter.status": "Durum",
+  "drivers.filter.statusAll": "Tümü",
+  "drivers.filter.statusActive": "Etkin",
+  "drivers.filter.statusInactive": "Devre dışı",
+  "drivers.column.name": "Ad",
+  "drivers.column.licenceNumber": "Ehliyet numarası",
+  "drivers.column.phoneNumber": "Telefon",
+  "drivers.column.email": "E-posta",
+  "drivers.column.status": "Durum",
+  "drivers.column.actions": "İşlemler",
+  "drivers.status.active": "Etkin",
+  "drivers.status.inactive": "Devre dışı",
+  "drivers.empty.title": "Henüz şoför yok",
+  "drivers.empty.filtered": "Şoför bulunamadı",
+  "drivers.empty.description":
+    "Bir araca atayabilmek için önce bir şoför oluşturun.",
+  "drivers.confirm.deactivate":
+    "Bu şoför devre dışı bırakılsın mı? Mevcut seferler korunur; yalnızca yeni planlamada seçilemez.",
+  "drivers.feedback.created": "Şoför oluşturuldu",
+  "drivers.feedback.updated": "Şoför güncellendi",
+  "drivers.feedback.activated": "Şoför etkinleştirildi",
+  "drivers.feedback.deactivated": "Şoför devre dışı bırakıldı",
+  "drivers.feedback.failed": "İşlem başarısız",
+  "drivers.form.createTitle": "Yeni şoför",
+  "drivers.form.editTitle": "Şoförü düzenle",
+  "drivers.form.name": "Ad",
+  "drivers.form.licenceNumber": "Ehliyet numarası",
+  "drivers.form.licenceNumberHint":
+    "Yalnızca tek bir etkin şoföre ait olabilir",
+  "drivers.form.phoneNumber": "Telefon",
+  "drivers.form.email": "E-posta",
+  "drivers.form.emergencyContact": "Acil durum kişisi",
+  "drivers.form.notes": "Notlar",
+  "drivers.form.save": "Kaydet",
+  "drivers.form.saving": "Kaydediliyor…",
+  "drivers.form.cancel": "İptal",
+
+  "dashboard.drivers.title": "Şoförler",
+  "dashboard.drivers.driver": "Şoför",
+  "dashboard.drivers.today": "Bugün",
+  "dashboard.drivers.week": "Bu hafta",
+  "dashboard.drivers.month": "Bu ay",
+  "dashboard.drivers.empty": "Henüz şoför yok",
+  "dashboard.drivers.link": "Şoförleri yönet",
+  "dashboard.drivers.note":
+    "Seferler etkin şoföre göre sayılır: sefere özel atama varsa o, yoksa o gün araca atanmış şoför.",
+
   "vehicles.title": "Araçlar",
   "vehicles.search.label": "Ara",
   "vehicles.search.placeholder": "Plaka, marka, model ara...",
@@ -952,6 +1082,14 @@ const tr: Translations = {
   "vehicles.form.model": "Model",
   "vehicles.form.year": "Model yılı",
   "vehicles.form.notes": "Notlar",
+  "vehicles.form.driver": "Şoför",
+  "vehicles.form.driverNone": "Şoför yok",
+  "vehicles.form.driverHint":
+    "Bugünden başlayan bir araç ataması oluşturur — bu aracın varsayılan şoförü. Sefer bazlı sabit bir şoför değildir.",
+  "vehicles.form.driverEditHint":
+    "Mevcut bir aracın şoförünü, geçerlilik dönemi korunsun diye araç sayfasından değiştirin.",
+  "vehicles.feedback.driverLinkFailed":
+    "Araç oluşturuldu, ancak şoför atanamadı",
   "vehicles.confirm.deactivate":
     "Bu araç pasifleştirilsin mi? Seçim listelerinden kalkar ama mevcut seferlerde görünmeye devam eder.",
   "vehicles.feedback.created": "Araç oluşturuldu",
