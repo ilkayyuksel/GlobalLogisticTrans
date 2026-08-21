@@ -1,4 +1,6 @@
 import { Module } from "@nestjs/common";
+
+import { CostConfirmationModule } from "../cost-confirmations/cost-confirmation.module";
 import { ConfigService } from "@nestjs/config";
 import { MulterModule } from "@nestjs/platform-express";
 import { memoryStorage } from "multer";
@@ -36,6 +38,7 @@ const MAX_FILES_PER_UPLOAD = 20;
  */
 @Module({
   imports: [
+    CostConfirmationModule,
     TripModule,
     PdfDocumentModule,
     MulterModule.registerAsync({

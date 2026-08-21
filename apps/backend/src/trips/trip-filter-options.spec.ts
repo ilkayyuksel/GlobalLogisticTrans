@@ -41,6 +41,8 @@ describe("Trip filter options", () => {
           Promise.resolve({
             vehicle: null,
             effectiveDriver: null,
+            latestUpdate: null,
+            costConfirmation: null,
             customProperties: [],
           }),
         resolveMany: (trips: readonly Trip[]) =>
@@ -51,6 +53,8 @@ describe("Trip filter options", () => {
                 {
                   vehicle: null,
                   effectiveDriver: null,
+                  latestUpdate: null,
+                  costConfirmation: null,
                   customProperties: [],
                 },
               ]),

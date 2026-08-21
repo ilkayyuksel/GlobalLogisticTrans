@@ -6,6 +6,11 @@ import { useCallback, useState } from "react";
 
 import { PricingPanel } from "@/components/pricing/pricing-panel";
 import { TripActionsBar } from "@/components/trips/trip-actions-bar";
+import { PdfViewerDialog } from "@/components/ritten/pdf-viewer-dialog";
+import { CostConfirmations } from "@/components/trips/cost-confirmations";
+import { TripDocumentHistory } from "@/components/trips/trip-document-history";
+import { fetchPdfDocument } from "@/lib/api/pdf-documents";
+import { downloadBlob } from "@/lib/download";
 import { TripCustomProperties } from "@/components/trips/trip-custom-properties";
 import { TripEditForm } from "@/components/trips/trip-edit-form";
 import { TripSummary } from "@/components/trips/trip-summary";
@@ -88,6 +93,8 @@ function TripDetailView({
 }) {
   const t = useTranslation();
   const [isEditing, setIsEditing] = useState(false);
+  /** The stored document an operator asked to see, from the history list. */
+  const [viewingDocument, setViewingDocument] = useState<string | null>(null);
   const [isBusy, setIsBusy] = useState(false);
   const [feedback, setFeedback] = useState<Feedback | null>(null);
   const { trip } = detail;
@@ -190,6 +197,34 @@ function TripDetailView({
 
       <TripCustomProperties properties={detail.customProperties} />
 
+      {/*
+        What Eucon confirmed it will pay. Read-only, and beside the waiting time
+        rather than instead of it: the minutes and the money are different facts.
+      */}
+      <CostConfirmations
+        confirmation={trip.costConfirmation}
+        onView={setViewingDocument}
+        onDownload={(confirmation) => {
+          void downloadTripDocument({
+            pdfDocumentId: confirmation.pdfDocumentId,
+            originalFilename: `CC${confirmation.ccNumber}.pdf`,
+          });
+        }}
+      />
+
+      {/*
+        Every document that concerned this Trip, newest first. Viewing one
+        reuses the same dialog the Ritten list opens, so there is one viewer and
+        one content route in the whole product.
+      */}
+      <TripDocumentHistory
+        tripId={trip.id}
+        onView={setViewingDocument}
+        onDownload={(document) => {
+          void downloadTripDocument(document);
+        }}
+      />
+
       <PricingPanel
         snapshot={detail.pricing}
         tripStatus={trip.status}
@@ -197,8 +232,32 @@ function TripDetailView({
         onReprocess={handleReprocess}
         reprocessError={null}
       />
+
+      {viewingDocument ? (
+        <PdfViewerDialog
+          trip={trip}
+          pdfDocumentId={viewingDocument}
+          onClose={() => setViewingDocument(null)}
+        />
+      ) : null}
     </div>
   );
+}
+
+/**
+ * Saves one stored document under the name it arrived with.
+ *
+ * The same content endpoint the viewer uses; the filename comes from the
+ * history entry, so an operator gets the document back called what the sender
+ * called it rather than by a content hash.
+ */
+async function downloadTripDocument(document: {
+  pdfDocumentId: string;
+  originalFilename: string;
+}): Promise<void> {
+  const blob = await fetchPdfDocument(document.pdfDocumentId);
+
+  downloadBlob(blob, document.originalFilename);
 }
 
 function FeedbackBanner({ feedback }: { feedback: Feedback }) {

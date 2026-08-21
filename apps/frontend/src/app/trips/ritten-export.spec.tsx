@@ -140,7 +140,7 @@ describe("Ritten export", () => {
     await startExport();
 
     await waitFor(() => {
-      expect(clicked).toEqual(["TRAXO_Prijzen_2026-08-13.xlsx"]);
+      expect(clicked).toEqual(["TRANO_Prijzen_2026-08-13.xlsx"]);
     });
     expect(createObjectURL).toHaveBeenCalled();
     expect(revokeObjectURL).toHaveBeenCalled();
@@ -205,7 +205,7 @@ describe("Ritten export", () => {
       await startExport("Excel — Prijsoverzicht");
 
       await waitFor(() => expect(clicked).toHaveLength(1));
-      expect(clicked[0]).toMatch(/^TRAXO_Prijzen_/);
+      expect(clicked[0]).toMatch(/^TRANO_Prijzen_/);
     });
 
     it("names the basic file after the trips it holds", async () => {
@@ -214,7 +214,7 @@ describe("Ritten export", () => {
       await startExport("Excel — Basis");
 
       await waitFor(() => expect(clicked).toHaveLength(1));
-      expect(clicked[0]).toMatch(/^TRAXO_Ritten_/);
+      expect(clicked[0]).toMatch(/^TRANO_Ritten_/);
     });
 
     /** Both files describe the same selection; only their columns differ. */

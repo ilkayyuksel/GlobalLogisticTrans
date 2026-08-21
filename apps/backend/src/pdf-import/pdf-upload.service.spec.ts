@@ -55,6 +55,7 @@ describe("PdfUploadService", () => {
         combination: false,
         cancellations: [],
         revisions: [],
+        costConfirmations: [],
       }),
     };
 
@@ -131,6 +132,7 @@ describe("PdfUploadService", () => {
         combination: true,
         cancellations: [],
         revisions: [],
+        costConfirmations: [],
       });
 
       const { results } = await service.importUploadedFiles([uploadedFile()]);
@@ -290,6 +292,7 @@ describe("PdfUploadService", () => {
           combination: false,
           cancellations: [],
           revisions: [],
+          costConfirmations: [],
         });
 
       const { results } = await service.importUploadedFiles([

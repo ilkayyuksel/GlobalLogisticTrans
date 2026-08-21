@@ -48,6 +48,8 @@ function buildTrip(overrides: Partial<TripResponseDto> = {}): TripResponseDto {
     internalNotes: null,
   vehicle: null,
   effectiveDriver: null,
+  latestUpdate: null,
+  costConfirmation: null,
     createdAt: new Date("2026-08-01T00:00:00Z"),
     updatedAt: new Date("2026-08-01T00:00:00Z"),
     ...overrides,

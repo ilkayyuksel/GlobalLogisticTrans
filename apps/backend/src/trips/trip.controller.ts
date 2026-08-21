@@ -23,9 +23,11 @@ import { ChangeTripStatusDto } from "./dto/change-trip-status.dto";
 import { CreateTripDto } from "./dto/create-trip.dto";
 import { ListTripsQueryDto } from "./dto/list-trips-query.dto";
 import { RemoveTripFromGroupDto } from "./dto/remove-trip-from-group.dto";
+import { TripDocumentsDto } from "./dto/trip-document-response.dto";
 import { TripIdParamDto } from "./dto/trip-id-param.dto";
 import { PaginatedTripsDto, TripResponseDto } from "./dto/trip-response.dto";
 import { UpdateTripDto } from "./dto/update-trip.dto";
+import { TripDocumentsService } from "./trip-documents.service";
 import { TripService } from "./trip.service";
 
 /**
@@ -42,7 +44,10 @@ import { TripService } from "./trip.service";
 @ApiTags("Trips")
 @Controller("trips")
 export class TripController {
-  constructor(private readonly tripService: TripService) {}
+  constructor(
+    private readonly tripService: TripService,
+    private readonly tripDocumentsService: TripDocumentsService,
+  ) {}
 
   @Get()
   @ApiOperation({
@@ -80,6 +85,22 @@ export class TripController {
   @ApiNotFoundResponse({ description: "No Trip with that id." })
   findById(@Param() params: TripIdParamDto): Promise<TripResponseDto> {
     return this.tripService.findById(params.id);
+  }
+
+  /**
+   * Declared before the ":id" routes for readability; a two-segment path could
+   * not be shadowed by them in any case.
+   */
+  @Get(":id/documents")
+  @ApiOperation({
+    summary: "The transport documents of one Trip",
+    description:
+      "Newest first: every UPDATE and CANCEL document that concerned this Trip, then the original order it was created from. An UPDATE entry carries the fields it moved. Use GET /pdf-documents/{id}/content to view or download one — no storage path, email body or parser internals leave the backend.",
+  })
+  @ApiOkResponse({ type: TripDocumentsDto })
+  @ApiNotFoundResponse({ description: "No Trip with that id." })
+  findDocuments(@Param() params: TripIdParamDto): Promise<TripDocumentsDto> {
+    return this.tripDocumentsService.findForTrip(params.id);
   }
 
   @Post()

@@ -209,14 +209,21 @@ export class ImapScanService {
     action: MessageAction,
     counters: ImapScanResultDto,
   ): Promise<void> {
-    const importedEmail =
-      await this.importedEmailService.startProcessing(message);
+    const importedEmail = await this.importedEmailService.startProcessing(
+      message,
+      importTypeFor(action),
+    );
 
     try {
       const attachment = this.requireSinglePdf(message);
       const downloaded = await session.downloadAttachment(message, attachment);
 
-      const outcome = await this.carryOut(action, downloaded, importedEmail.id);
+      const outcome = await this.carryOut(
+        action,
+        downloaded,
+        importedEmail.id,
+        message.subject,
+      );
 
       await this.importedEmailService.markProcessed(importedEmail.id);
       // Only now: a message marked read before the Trips exist would never be
@@ -234,6 +241,9 @@ export class ImapScanService {
         combination: outcome.combination,
         cancellations: outcome.cancellations.map((entry) => entry.outcome),
         revisedTripIds: outcome.revisions.map((entry) => entry.tripId),
+        costConfirmations: outcome.costConfirmations.map(
+          (entry) => entry.ccNumber,
+        ),
       });
     } catch (error: unknown) {
       await this.recordFailure(message, importedEmail.id, error, counters);
@@ -252,11 +262,26 @@ export class ImapScanService {
     action: MessageAction,
     downloaded: { filename: string; content: Uint8Array },
     importedEmailId: string,
+    subject: string,
   ): Promise<PdfImportResult> {
+    /*
+     * All three store their document, and all three say where it came from.
+     * An UPDATE and a CANCEL are evidence as much as a NEW order is: the change
+     * they caused is recorded against the Trip, and the record is worth little
+     * without the document it was read from.
+     */
+    const options = {
+      provenance: {
+        importSource: ImportSource.EMAIL,
+        importedEmailId,
+      },
+    };
+
     if (action === MessageAction.CANCEL) {
       return this.pdfTripImporter.cancel(
         downloaded.content,
         downloaded.filename,
+        options,
       );
     }
 
@@ -264,20 +289,28 @@ export class ImapScanService {
       return this.pdfTripImporter.revise(
         downloaded.content,
         downloaded.filename,
+        options,
       );
     }
 
-    // Only a NEW order stores its document: a PdfDocument records what a Trip
-    // was created from, and neither of the other two creates one.
+    /*
+     * A cost confirmation names a Trip; it never plans one. It also carries a
+     * complete copy of the order it refers to, so it goes to its own reader —
+     * through the ordinary importer it would look like a second transport order
+     * for a booking we already have.
+     */
+    if (action === MessageAction.COST_CONFIRMATION) {
+      return this.pdfTripImporter.confirmCost(
+        downloaded.content,
+        downloaded.filename,
+        { ...options, subject },
+      );
+    }
+
     return this.pdfTripImporter.import(
       downloaded.content,
       downloaded.filename,
-      {
-        provenance: {
-          importSource: ImportSource.EMAIL,
-          importedEmailId,
-        },
-      },
+      options,
     );
   }
 
@@ -350,6 +383,10 @@ function importTypeFor(action: MessageAction | null): ImportType {
 
   if (action === MessageAction.CANCEL) {
     return ImportType.CANCEL;
+  }
+
+  if (action === MessageAction.COST_CONFIRMATION) {
+    return ImportType.COST_CONFIRMATION;
   }
 
   return ImportType.NEW;

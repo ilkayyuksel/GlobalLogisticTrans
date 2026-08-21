@@ -26,23 +26,33 @@ import { RittenDialog } from "./ritten-dialog";
  */
 export function PdfViewerDialog({
   trip,
+  pdfDocumentId,
+  title,
   onClose,
 }: {
   trip: Trip;
+  /**
+   * The document to show. Defaults to the Trip's original order, which is what
+   * every caller wanted before a Trip could have more than one — the history
+   * list passes the id of the UPDATE or CANCEL an operator picked.
+   */
+  pdfDocumentId?: string;
+  /** What to call it. Defaults to the booking number. */
+  title?: string;
   onClose: () => void;
 }) {
   const t = useTranslation();
   const [objectUrl, setObjectUrl] = useState<string | null>(null);
+  // Only reachable for a Trip that has a document: the action that opens this
+  // dialog is disabled otherwise.
+  const documentId = pdfDocumentId ?? (trip.pdfDocumentId as string);
 
   const document = useAsync(
     useCallback(
-      // Only reachable for a Trip that has a document: the action that opens
-      // this dialog is disabled otherwise.
-      (signal: AbortSignal) =>
-        fetchPdfDocument(trip.pdfDocumentId as string, signal),
-      [trip.pdfDocumentId],
+      (signal: AbortSignal) => fetchPdfDocument(documentId, signal),
+      [documentId],
     ),
-    [trip.pdfDocumentId],
+    [documentId],
   );
 
   useEffect(() => {
@@ -63,7 +73,7 @@ export function PdfViewerDialog({
 
   return (
     <RittenDialog
-      title={`${t("ritten.pdf.title")} — ${trip.bookingNumber}`}
+      title={`${t("ritten.pdf.title")} — ${title ?? trip.bookingNumber}`}
       onClose={onClose}
     >
       <div className="px-4 py-3">
@@ -93,7 +103,10 @@ export function PdfViewerDialog({
               type="button"
               onClick={() =>
                 document.data &&
-                downloadBlob(document.data, `${trip.bookingNumber}.pdf`)
+                downloadBlob(
+                  document.data,
+                  title ?? `${trip.bookingNumber}.pdf`,
+                )
               }
               className="mt-3 rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-white hover:bg-primary-hover"
             >

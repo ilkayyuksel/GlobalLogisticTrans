@@ -73,10 +73,23 @@ describe("Ritten actions", () => {
       expect(
         within(menu).getByRole("menuitem", { name: "Annuleren" }),
       ).toBeInTheDocument();
-      expect(
-        within(menu).getByRole("menuitem", { name: "Verwijderen" }),
-      ).toBeInTheDocument();
     });
+
+    /**
+     * A transport leaves the planning because a CANCEL: document says so — a
+     * soft cancellation that keeps the record. A manual delete beside it would
+     * be a second way to do the same thing, and the destructive one.
+     */
+    it.each(["OPEN", "CLOSED", "CANCELLED"] as const)(
+      "offers no manual deletion of a %s Trip",
+      async (status) => {
+        const menu = await openMenu({ status });
+
+        expect(
+          within(menu).queryByRole("menuitem", { name: "Verwijderen" }),
+        ).not.toBeInTheDocument();
+      },
+    );
 
     /** CLOSED is terminal in the backend, so reopening is never offered. */
     it("offers no transition out of CLOSED, but does offer reprocessing", async () => {
@@ -185,7 +198,6 @@ describe("Ritten actions", () => {
         "PDF bekijken",
         "PDF downloaden",
         "Loskoppelen van groep",
-        "Verwijderen",
       ]);
     });
 
@@ -375,37 +387,11 @@ describe("Ritten actions", () => {
   });
 
   describe("deletion and restoration", () => {
-    /** DELETE /trips/:id deliberately does not exist. */
-    it("soft-deletes through the deletion sub-resource", async () => {
-      const menu = await openMenu();
-
-      await userEvent.click(
-        within(menu).getByRole("menuitem", { name: "Verwijderen" }),
-      );
-
-      await waitFor(() => {
-        expect(requestMock).toHaveBeenCalledWith(
-          "/api/v1/trips/trip-1/deletion",
-          expect.objectContaining({ method: "PATCH" }),
-        );
-      });
-      expect(
-        mutations().some(([path, options]) => options?.method === "DELETE" && path.startsWith("/api/v1/trips/")),
-      ).toBe(false);
-      expect(await screen.findByText("Rit verwijderd")).toBeInTheDocument();
-    });
-
-    it("asks before deleting", async () => {
-      confirmSpy.mockReturnValue(false);
-      const menu = await openMenu();
-
-      await userEvent.click(
-        within(menu).getByRole("menuitem", { name: "Verwijderen" }),
-      );
-
-      expect(mutations()).toHaveLength(0);
-    });
-
+    /**
+     * Restoration stays reachable: a Trip soft-deleted before manual deletion
+     * was withdrawn must still be recoverable, and stranding those records
+     * would be the more destructive choice.
+     */
     it("restores through the restoration sub-resource", async () => {
       const menu = await openMenu({ status: "DELETED" });
 
@@ -524,7 +510,6 @@ describe("Ritten actions", () => {
       expect(
         screen.getByRole("menuitem", { name: "Tamamla" }),
       ).toBeInTheDocument();
-      expect(screen.getByRole("menuitem", { name: "Sil" })).toBeInTheDocument();
     });
   });
 });

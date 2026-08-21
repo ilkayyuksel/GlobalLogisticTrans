@@ -17,6 +17,7 @@ import { VehicleService } from "../vehicles/vehicle.service";
 import { TripController } from "./trip.controller";
 import { TripRepository } from "./trip.repository";
 import { TripPlanningDataService } from "./trip-planning-data.service";
+import { TripDocumentsService } from "./trip-documents.service";
 import { TripService } from "./trip.service";
 
 const TRIP_ID = "3f2504e0-4f89-41d3-9a0c-0305e82c3301";
@@ -113,6 +114,12 @@ describe("TripController (integration)", () => {
       controllers: [TripController],
       providers: [
         TripService,
+        // The documents endpoint has its own tests; this controller only needs
+        // it to exist so the rest of the routes can be exercised.
+        {
+          provide: TripDocumentsService,
+          useValue: { findForTrip: jest.fn().mockResolvedValue({ items: [] }) },
+        },
         { provide: TripRepository, useValue: repository },
         { provide: VehicleService, useValue: vehicleService },
         { provide: DriverService, useValue: driverService },

@@ -125,6 +125,8 @@ function buildTrip(overrides: Partial<Trip> = {}): Trip {
       isActive: true,
       source: "VEHICLE_ASSIGNMENT",
     },
+    latestUpdate: null,
+    costConfirmation: null,
     status: "OPEN",
     bookingNumber: "BK-2026-1001",
     containerNumber: null,

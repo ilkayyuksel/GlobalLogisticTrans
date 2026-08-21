@@ -14,6 +14,13 @@ import { toFleetOptions, type FleetOption } from "@/lib/fleet-options";
 import { useTranslation } from "@/lib/i18n/language-provider";
 import { combinationClasses, combinationLabel } from "@/lib/ritten/combination";
 import { toVehicleGroups } from "@/lib/ritten/vehicle-groups";
+import { toCostConfirmationLabel } from "@/lib/trips/cost-confirmation";
+import {
+  UPDATED_FIELD_CLASS,
+  changedByLatestUpdate,
+  isRevised,
+  type UpdatedField,
+} from "@/lib/trips/latest-update";
 import {
   canEdit,
   canViewPdf,
@@ -85,6 +92,12 @@ const PRICING_COLUMN_KEYS = [
   "ritten.column.others",
   "ritten.column.ek",
   "ritten.column.totaal",
+  /*
+   * What Eucon CONFIRMED for the waiting time, beside what we calculated for
+   * it. It belongs to the pricing columns because it is money, and it appears
+   * and disappears with them for the same reason the others do.
+   */
+  "ritten.column.costConfirmation",
 ] as const;
 
 export interface RittenTableProps {
@@ -211,9 +224,23 @@ function RittenRow({
     <tr
       className={[
         "border-b border-border align-top last:border-0",
-        // A selected row stays legible: a tint, not a fill, and one that reads
-        // in both themes.
-        selectedTripIds.has(trip.id) ? "bg-primary/10" : "hover:bg-hover",
+        /*
+         * A finished transport is marked, and marked in the row.
+         *
+         * The tint says one thing only: this Trip has been carried out. It is
+         * deliberately a whole-row wash of the WARNING token at low opacity,
+         * because it describes the row rather than any single value — which is
+         * what keeps it distinguishable from a field-level highlight, and why
+         * it never darkens the text it sits behind.
+         *
+         * Selection wins while it applies: the operator is acting on those
+         * rows now, and that is the more urgent fact.
+         */
+        selectedTripIds.has(trip.id)
+          ? "bg-primary/10"
+          : trip.status === "CLOSED"
+            ? "bg-warning/10 hover:bg-warning/20"
+            : "hover:bg-hover",
       ].join(" ")}
       /*
        * The vehicle's own colour, as a stripe rather than a fill: one truck
@@ -254,6 +281,16 @@ function RittenRow({
 
       <td className="px-3 py-2">
         <TripStatusBadge status={trip.status} label={t(`status.${trip.status}`)} />
+        {/*
+          "Bijgewerkt" is DERIVED, and beside the status rather than instead of
+          it: the lifecycle is still OPEN. It says a document changed this Trip
+          after it was planned, which is what the yellow fields below detail.
+        */}
+        {isRevised(trip) ? (
+          <span className="mt-1 block text-[11px] font-medium text-warning">
+            {t("ritten.status.revised")}
+          </span>
+        ) : null}
         {pricingAttentionTripIds.has(trip.id) ? (
           <span
             role="status"
@@ -286,27 +323,39 @@ function RittenRow({
 
       {/* Parser-controlled: the backend refuses both, so they are read-only. */}
       <td className="px-3 py-2 tabular-nums text-secondary">
-        {trip.startTime ? toClockLabel(trip.startTime) : empty}
+        <UpdatedValue trip={trip} field="startTime">
+          {trip.startTime ? toClockLabel(trip.startTime) : empty}
+        </UpdatedValue>
       </td>
       <td className="px-3 py-2 tabular-nums text-secondary">
-        {trip.endTime ? toClockLabel(trip.endTime) : empty}
+        <UpdatedValue trip={trip} field="endTime">
+          {trip.endTime ? toClockLabel(trip.endTime) : empty}
+        </UpdatedValue>
       </td>
 
       <td className="px-3 py-2 text-secondary">
-        <InlineCell
-          label={t("ritten.edit.containerNumber")}
-          displayValue={trip.containerNumber ?? empty}
-          editValue={trip.containerNumber ?? ""}
-          maxLength={CONTAINER_NUMBER_MAX_LENGTH}
-          isDisabled={!isEditable || isBusy}
-          // Empty means "clear it", which the backend spells null.
-          onSave={(value) =>
-            save({ containerNumber: value.trim() === "" ? null : value.trim() })
-          }
-        />
+        <UpdatedValue trip={trip} field="containerNumber">
+          <InlineCell
+            label={t("ritten.edit.containerNumber")}
+            displayValue={trip.containerNumber ?? empty}
+            editValue={trip.containerNumber ?? ""}
+            maxLength={CONTAINER_NUMBER_MAX_LENGTH}
+            isDisabled={!isEditable || isBusy}
+            // Empty means "clear it", which the backend spells null.
+            onSave={(value) =>
+              save({
+                containerNumber: value.trim() === "" ? null : value.trim(),
+              })
+            }
+          />
+        </UpdatedValue>
       </td>
 
-      <td className="px-3 py-2 text-secondary">{trip.containerType}</td>
+      <td className="px-3 py-2 text-secondary">
+        <UpdatedValue trip={trip} field="containerType">
+          {trip.containerType}
+        </UpdatedValue>
+      </td>
 
       <td className="px-3 py-2">
         <Link
@@ -317,9 +366,15 @@ function RittenRow({
         </Link>
       </td>
 
-      <td className="px-3 py-2 text-secondary">{trip.terminal ?? empty}</td>
       <td className="px-3 py-2 text-secondary">
-        {trip.destinationCity}, {trip.destinationCountry}
+        <UpdatedValue trip={trip} field="terminal">
+          {trip.terminal ?? empty}
+        </UpdatedValue>
+      </td>
+      <td className="px-3 py-2 text-secondary">
+        <UpdatedValue trip={trip} field="destinationCity">
+          {trip.destinationCity}, {trip.destinationCountry}
+        </UpdatedValue>
       </td>
 
       <td className="px-3 py-2">
@@ -352,9 +407,79 @@ function RittenRow({
       </td>
 
       {showPricing ? (
-        <PricingCells snapshot={pricingByTripId.get(trip.id) ?? null} />
+        <>
+          <PricingCells snapshot={pricingByTripId.get(trip.id) ?? null} />
+          <CostConfirmationCell trip={trip} />
+        </>
       ) : null}
     </tr>
+  );
+}
+
+/**
+ * What Eucon has confirmed for this Trip, if anything.
+ *
+ * The number and the amount together, because either alone is ambiguous: an
+ * amount with no CC number cannot be traced, and a number with no amount says
+ * nothing. There is at most ONE — a Trip's waiting time is confirmed once.
+ *
+ * Read-only, like every pricing cell beside it. An empty marker means nothing
+ * has been confirmed, which is not the same as an amount of zero.
+ */
+function CostConfirmationCell({ trip }: { trip: Trip }) {
+  const t = useTranslation();
+  const confirmation = trip.costConfirmation;
+
+  if (!confirmation) {
+    return (
+      <td className="whitespace-nowrap px-3 py-2 text-right text-secondary">
+        {t("ritten.value.empty")}
+      </td>
+    );
+  }
+
+  return (
+    <td className="whitespace-nowrap px-3 py-2 text-right">
+      <span className="text-[11px] text-muted">
+        {toCostConfirmationLabel(confirmation)}
+      </span>{" "}
+      <span className="font-medium tabular-nums text-foreground">
+        {confirmation.amount}
+      </span>
+    </td>
+  );
+}
+
+/**
+ * A value the latest UPDATE document moved.
+ *
+ * The mark is on the VALUE rather than the row: a row wash already means
+ * "completed", and the two must stay tellable apart. An unchanged value renders
+ * exactly as it did before — no wrapper, no spacing shift — so the marker is
+ * the only difference an operator sees.
+ *
+ * Whether a field changed is the backend's answer, carried on the Trip. This
+ * compares nothing.
+ */
+function UpdatedValue({
+  trip,
+  field,
+  children,
+}: {
+  trip: Trip;
+  field: UpdatedField;
+  children: ReactNode;
+}) {
+  const t = useTranslation();
+
+  if (!changedByLatestUpdate(trip, field)) {
+    return <>{children}</>;
+  }
+
+  return (
+    <span className={UPDATED_FIELD_CLASS} title={t("ritten.status.revisedField")}>
+      {children}
+    </span>
   );
 }
 

@@ -68,16 +68,19 @@ function buildDocument(
 
 describe("TripRevisionService", () => {
   let stored: Trip[];
+  let history: unknown[];
   let repository: {
     findByBookingNumber: jest.Mock;
     setStatus: jest.Mock;
     update: jest.Mock;
+    recordHistory: jest.Mock;
     runInTransaction: jest.Mock;
   };
   let service: TripRevisionService;
 
   beforeEach(() => {
     stored = [];
+    history = [];
 
     repository = {
       findByBookingNumber: jest.fn(
@@ -105,6 +108,11 @@ describe("TripRevisionService", () => {
         const trip = stored.find((candidate) => candidate.id === id) as Trip;
         Object.assign(trip, data);
         return Promise.resolve(trip);
+      }),
+      /** Append-only, like the real one: rows are collected, never replaced. */
+      recordHistory: jest.fn((entries: unknown[]) => {
+        history.push(...entries);
+        return Promise.resolve();
       }),
       runInTransaction: jest.fn((work: (repository: unknown) => unknown) =>
         work(repository),

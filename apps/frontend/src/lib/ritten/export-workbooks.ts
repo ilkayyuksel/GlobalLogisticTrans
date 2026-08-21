@@ -262,11 +262,11 @@ export async function buildBasicWorkbook(
  * downloads folder.
  */
 export function pricingFileName(periodStart: string, periodEnd: string): string {
-  return buildFileName("TRAXO_Prijzen", periodStart, periodEnd);
+  return buildFileName("TRANO_Prijzen", periodStart, periodEnd);
 }
 
 export function basicFileName(periodStart: string, periodEnd: string): string {
-  return buildFileName("TRAXO_Ritten", periodStart, periodEnd);
+  return buildFileName("TRANO_Ritten", periodStart, periodEnd);
 }
 
 function buildFileName(

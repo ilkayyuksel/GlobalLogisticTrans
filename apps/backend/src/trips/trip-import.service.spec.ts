@@ -77,13 +77,16 @@ function buildCommand(
   overrides: Partial<ImportTripsCommand> = {},
 ): ImportTripsCommand {
   return {
-    pdfDocument: {
-      importSource: ImportSource.MANUAL_UPLOAD,
-      originalFilename: "order.pdf",
-      storagePath: "abc123.pdf",
-      fileSizeBytes: BigInt(2048),
-      fileHash: "abc123",
-      mimeType: "application/pdf",
+    document: {
+      kind: "new",
+      data: {
+        importSource: ImportSource.MANUAL_UPLOAD,
+        originalFilename: "order.pdf",
+        storagePath: "abc123.pdf",
+        fileSizeBytes: BigInt(2048),
+        fileHash: "abc123",
+        mimeType: "application/pdf",
+      },
     },
     asCombination: false,
     trips: [buildImportedTrip()],

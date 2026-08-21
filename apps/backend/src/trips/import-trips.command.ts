@@ -15,9 +15,21 @@ import { CreatePdfDocumentData } from "../pdf-documents/pdf-document.repository"
  * because only an import may set them, and keeping them off the public contract
  * is what stops a client from claiming a Trip was parsed when it was typed.
  */
+/**
+ * The document these Trips came from.
+ *
+ * Two shapes, because the document is committed at different moments. An
+ * ordinary import writes it inside the same transaction as the Trips, so a
+ * failure rolls both back together. A revision that turns out to create a Trip
+ * has already stored its document — it had to, so that a refusal could point at
+ * it — and passes the id it was given.
+ */
+export type ImportDocumentSource =
+  | { readonly kind: "new"; readonly data: CreatePdfDocumentData }
+  | { readonly kind: "stored"; readonly id: string };
+
 export interface ImportTripsCommand {
-  /** The document these Trips came from, written in the same transaction. */
-  readonly pdfDocument: CreatePdfDocumentData;
+  readonly document: ImportDocumentSource;
 
   /**
    * Whether the Trips belong to one Combination.

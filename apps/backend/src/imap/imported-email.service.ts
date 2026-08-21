@@ -72,14 +72,22 @@ export class ImportedEmailService {
    * Created as PROCESSING rather than RECEIVED: the row is written at the
    * moment work starts, so a row left in PROCESSING is itself the evidence that
    * a scan died mid-import. Nothing else would record that.
+   *
+   * The action comes from the caller, which read it from the subject. It used
+   * to be NEW for every processed email, which made an update, a cancellation
+   * and a cost confirmation indistinguishable in `/imports` once they had been
+   * handled — a record of what arrived that could not say what it was.
    */
-  startProcessing(message: MailboxMessage): Promise<ImportedEmail> {
+  startProcessing(
+    message: MailboxMessage,
+    importType: ImportType,
+  ): Promise<ImportedEmail> {
     return this.repository.create({
       messageId: message.messageId,
       senderEmail: message.senderEmail,
       subject: message.subject,
       receivedAt: message.receivedAt,
-      importType: ImportType.NEW,
+      importType,
       processingStatus: EmailProcessingStatus.PROCESSING,
     });
   }

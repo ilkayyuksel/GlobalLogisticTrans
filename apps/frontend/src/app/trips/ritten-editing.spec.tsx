@@ -440,6 +440,8 @@ describe("Ritten editing", () => {
           isActive: true,
           source: "VEHICLE_ASSIGNMENT",
         },
+        latestUpdate: null,
+        costConfirmation: null,
       });
 
       expect(screen.getByText("Ayşe Yılmaz")).toBeInTheDocument();

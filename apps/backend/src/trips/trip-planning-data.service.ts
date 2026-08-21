@@ -1,10 +1,12 @@
 import { Injectable } from "@nestjs/common";
 import { Driver, Trip, Vehicle } from "@prisma/client";
 
+import { CostConfirmationService } from "../cost-confirmations/cost-confirmation.service";
 import { DriverService } from "../drivers/driver.service";
 import {
   EffectiveDriverDto,
   EffectiveDriverSource,
+  LatestTripUpdateDto,
   TripCustomPropertySummaryDto,
   TripPlanningData,
   TripVehicleSummaryDto,
@@ -51,6 +53,7 @@ export class TripPlanningDataService {
     private readonly driverService: DriverService,
     private readonly vehicleAssignmentService: VehicleAssignmentService,
     private readonly tripRepository: TripRepository,
+    private readonly costConfirmations: CostConfirmationService,
   ) {}
 
   /**
@@ -86,6 +89,56 @@ export class TripPlanningDataService {
     return byTrip;
   }
 
+  /**
+   * The most recent APPLIED update of each Trip, keyed by Trip id.
+   *
+   * One query for the whole page. An update writes one row PER CHANGED FIELD,
+   * so "the latest update" is a group of rows sharing a document rather than a
+   * single row — the rows are read newest-first and the first document seen for
+   * a Trip is its latest update. Every row of that same document then
+   * contributes its field.
+   *
+   * An update that changed nothing wrote one row with no field, and comes back
+   * as an empty `changedFields`: it happened, and it moved nothing.
+   */
+  private async resolveLatestUpdates(
+    tripIds: readonly string[],
+  ): Promise<Map<string, LatestTripUpdateDto>> {
+    const latest = new Map<string, LatestTripUpdateDto>();
+
+    if (tripIds.length === 0) {
+      return latest;
+    }
+
+    const events = await this.tripRepository.findAppliedUpdateHistory(tripIds);
+
+    for (const event of events) {
+      const known = latest.get(event.tripId);
+
+      if (!known) {
+        latest.set(event.tripId, {
+          occurredAt: event.occurredAt,
+          changedFields: fieldsOf(event.newValue),
+          pdfDocumentId: event.pdfDocumentId,
+        });
+
+        continue;
+      }
+
+      /*
+       * Same document as the one already taken: another field of the SAME
+       * update. A row from an older update is ignored — its fields are not
+       * what the latest update changed, and highlighting them would say that
+       * every field ever touched had just moved.
+       */
+      if (known.pdfDocumentId !== null && known.pdfDocumentId === event.pdfDocumentId) {
+        known.changedFields.push(...fieldsOf(event.newValue));
+      }
+    }
+
+    return latest;
+  }
+
   /** One Trip. Same rule, same code path — just a batch of one. */
   async resolveOne(trip: Trip): Promise<TripPlanningData> {
     const resolved = await this.resolveMany([trip]);
@@ -105,13 +158,21 @@ export class TripPlanningDataService {
       return new Map();
     }
 
-    const [vehicles, overrideDrivers, assignedDrivers, customProperties] =
-      await Promise.all([
-        this.loadVehicles(trips),
-        this.loadOverrideDrivers(trips),
-        this.loadAssignedDrivers(trips),
-        this.resolveCustomProperties(trips.map((trip) => trip.id)),
-      ]);
+    const [
+      vehicles,
+      overrideDrivers,
+      assignedDrivers,
+      customProperties,
+      latestUpdates,
+      confirmations,
+    ] = await Promise.all([
+      this.loadVehicles(trips),
+      this.loadOverrideDrivers(trips),
+      this.loadAssignedDrivers(trips),
+      this.resolveCustomProperties(trips.map((trip) => trip.id)),
+      this.resolveLatestUpdates(trips.map((trip) => trip.id)),
+      this.costConfirmations.findForTrips(trips.map((trip) => trip.id)),
+    ]);
 
     const resolved = new Map<string, TripPlanningData>();
 
@@ -122,6 +183,8 @@ export class TripPlanningDataService {
           : null,
         effectiveDriver: this.resolveDriver(trip, overrideDrivers, assignedDrivers),
         customProperties: customProperties.get(trip.id) ?? [],
+        latestUpdate: latestUpdates.get(trip.id) ?? null,
+        costConfirmation: confirmations.get(trip.id) ?? null,
       });
     }
 
@@ -207,7 +270,24 @@ const EMPTY_PLANNING_DATA: TripPlanningData = {
   vehicle: null,
   effectiveDriver: null,
   customProperties: [],
+  latestUpdate: null,
+  costConfirmation: null,
 };
+
+/**
+ * The field a history row is about.
+ *
+ * A row stores `{ containerNumber: "XYZ456" }` — the field name is the key, so
+ * the change set needs no second column to name it. A row with no value at all
+ * is the marker for an update that changed nothing, and contributes no field.
+ */
+function fieldsOf(newValue: unknown): string[] {
+  if (newValue === null || typeof newValue !== "object" || Array.isArray(newValue)) {
+    return [];
+  }
+
+  return Object.keys(newValue as Record<string, unknown>);
+}
 
 function toVehicleSummary(
   vehicle: Vehicle | undefined,

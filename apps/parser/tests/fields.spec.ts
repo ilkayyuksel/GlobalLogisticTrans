@@ -443,6 +443,62 @@ describe("address", () => {
    * The whole point of the two variations is that they are NARROW. A block
    * with nothing city-shaped in it must still be refused.
    */
+  describe("an address with remarks under it", () => {
+    /**
+     * The address column carries the sender's notes below the address. They are
+     * introduced by a label, which is the form's own way of saying "this is no
+     * longer the address" — so reading stops there rather than at the bottom of
+     * the column.
+     */
+    it("stops at the first labelled line", () => {
+      const result = extractAddress(
+        addressBlock([
+          "[62126]",
+          "Continentale Wimille",
+          "C&D Foods",
+          "Zone Industrielle de la Tresorerie",
+          "F - 62126 Wimille",
+          "Loading Ref: NUT35/149911",
+          "pls fix papers on the last pallet",
+        ]),
+        header,
+      );
+
+      expect(result.destinationCity).toBe("Wimille");
+      expect(result.destinationCountry).toBe("France");
+      expect(result.rawAddress).not.toContain("pallet");
+    });
+
+    /** The spaced hyphen is the same prefixed line as `BE-2040 Antwerpen`. */
+    it("reads a country prefix written with spaces around the hyphen", () => {
+      const result = extractAddress(
+        addressBlock(["Acme", "Main Street 1", "F - 62126 Wimille"]),
+        header,
+      );
+
+      expect(result.destinationCity).toBe("Wimille");
+      expect(result.destinationCountry).toBe("France");
+    });
+
+    /**
+     * Without the address line there is nothing left to read once the remarks
+     * are set aside — which is a refusal, not a licence to use the remark.
+     */
+    it("refuses rather than falling back on a remark", () => {
+      expect(() =>
+        extractAddress(
+          addressBlock([
+            "[62126]",
+            "Continentale Wimille",
+            "Loading Ref: NUT35/149911",
+            "pls fix papers on the last pallet",
+          ]),
+          header,
+        ),
+      ).toThrow(/No readable city line/);
+    });
+  });
+
   describe("what is still refused", () => {
     it.each([
       ["only a company and a street", ["[62119]", "ONTEX", "Quai du Rivage"]],

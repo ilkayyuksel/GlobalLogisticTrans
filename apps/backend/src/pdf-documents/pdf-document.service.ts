@@ -1,6 +1,6 @@
 import { Injectable } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
-import { ImportSource, Prisma } from "@prisma/client";
+import { ImportSource, PdfDocument, Prisma } from "@prisma/client";
 
 import { AppLoggerService } from "../logger/app-logger.service";
 import { PdfDocumentRepository } from "./pdf-document.repository";
@@ -122,6 +122,34 @@ export class PdfDocumentService {
       absolutePath: stored.absolutePath,
       bytesAlreadyOwned: existing !== null,
     };
+  }
+
+  /**
+   * Commits the row describing a stored file.
+   *
+   * The NEW path creates this row inside the Trip transaction, because a
+   * document and the Trips it creates are one fact. An UPDATE or a CANCEL is
+   * different: ONE document may concern several Trips, each handled in its own
+   * transaction, so the row is committed first and every one of them points at
+   * it. `forget` is the compensating half.
+   */
+  async persist(prepared: PreparedPdfDocument): Promise<PdfDocument> {
+    return this.repository.create(prepared.document);
+  }
+
+  /**
+   * Undoes `persist` for an operation that then failed.
+   *
+   * The only place a PdfDocument is ever removed, and deliberately not an API:
+   * it exists so a failed import leaves neither a row nor a file, which is what
+   * keeps storage consistent with the database.
+   */
+  async forget(
+    pdfDocumentId: string,
+    prepared: PreparedPdfDocument,
+  ): Promise<void> {
+    await this.repository.deleteById(pdfDocumentId);
+    await this.discard(prepared);
   }
 
   /**

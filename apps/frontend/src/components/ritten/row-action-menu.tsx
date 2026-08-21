@@ -4,7 +4,7 @@ import { OverlayMenu } from "@/components/ui/overlay-menu";
 import type { Trip } from "@/lib/api/types";
 import { useTranslation } from "@/lib/i18n/language-provider";
 import type { TranslationKey } from "@/lib/i18n/translations";
-import { canDelete, canRestore, statusActionsFor } from "@/lib/trip-actions";
+import { canRestore, statusActionsFor } from "@/lib/trip-actions";
 import {
   STATUS_CONFIRM_KEYS,
   STATUS_LABEL_KEYS,
@@ -137,16 +137,20 @@ export function RowActionMenu({
             />
           ) : null}
 
-          {canDelete(trip) ? (
-            <MenuItem
-              labelKey="ritten.menu.delete"
-              isDestructive
-              onSelect={() =>
-                run(close, () => actions.deleteTrip(trip), t("ritten.confirm.delete"))
-              }
-            />
-          ) : null}
+          {/*
+            No "Verwijderen".
 
+            Removing a transport by hand is not part of the workflow: a Trip
+            leaves the planning because a CANCEL: document says so, which is a
+            SOFT cancellation that keeps the record, its pricing and its
+            history. A manual delete offered beside it would be a second,
+            destructive way to do the same thing — and the one that loses the
+            evidence.
+
+            Restore stays: a Trip that was soft-deleted before this decision
+            must still be recoverable, and stranding those records would be the
+            more destructive choice.
+          */}
           {canRestore(trip) ? (
             <MenuItem
               labelKey="ritten.menu.restore"

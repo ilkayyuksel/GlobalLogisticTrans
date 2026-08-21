@@ -875,6 +875,39 @@ Waiting time is stored separately from pricing calculations.
 
 ---
 
+# Cost Confirmation
+
+A cost Eucon has confirmed for a Trip.
+
+Its own entity rather than a trip_history event: it is not a record of something
+we did, it is money a third party agreed to pay, with its own identifier, its
+own document and its own lifetime.
+
+It holds:
+
+- the Trip it belongs to
+- the confirmation document
+- Eucon's number (digits only; `CC` is a display prefix)
+- the cost code (`WAIT` for waiting time)
+- the amount and its currency, as NUMERIC(12,2)
+- when the confirmation was received
+
+A Trip holds at most ONE. `trip_id` is unique, so a second confirmation cannot
+exist for a Trip whatever path the code takes — the service refuses it first,
+and the constraint is what makes that refusal a guarantee rather than a check.
+
+The same confirmation arriving again is recognised by its number and written
+once. A different one is refused, and the first stays authoritative.
+
+Cost Confirmation is NOT waiting time. Waiting Time is minutes an operator
+enters and the Pricing Engine prices. A confirmation is the amount Eucon pays
+for them. Recording one changes no field of the Trip.
+
+There is no update and no delete. An external confirmation an administrator
+could rewrite would no longer be a confirmation.
+
+---
+
 # Custom Properties
 
 Trips may contain multiple custom properties.
@@ -1317,6 +1350,39 @@ TripHistory stores historical events only.
 It never stores the current state of a Trip.
 
 The current state always belongs to the Trip entity.
+
+---
+
+## Link to the causing document
+
+A history event may name the PDF that caused it, through the nullable
+
+pdf_document_id
+
+foreign key. It is how an UPDATE or a CANCEL document is reached from the Trip
+it concerned: the Trip's own pdf_document_id holds the ORIGINAL order only.
+
+The link lives here rather than on PdfDocument because one document may concern
+several Trips — a Combination names two bookings — and a single foreign key on
+the document could not express that. The file itself is stored once; each
+affected Trip receives its own event pointing at it.
+
+Null means no document caused the event, which is the case for anything an
+operator did by hand.
+
+---
+
+## The change set of one update
+
+An applied UPDATE writes ONE ROW PER FIELD it moved, all sharing the same
+pdf_document_id. Each row carries the field name as the key of previous_value
+and new_value, so the field, its old value and its new value are all readable
+from the row itself.
+
+An update that moved nothing writes a single row with neither value. That is a
+different fact from no update at all, and both must stay distinguishable.
+
+The most recent applied update is what the interface highlights.
 
 ---
 

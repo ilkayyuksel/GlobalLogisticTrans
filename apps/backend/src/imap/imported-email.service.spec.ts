@@ -45,8 +45,22 @@ describe("ImportedEmailService", () => {
   });
 
   describe("startProcessing", () => {
+    /** The action comes from the subject, and is recorded as it was read. */
+    it.each([
+      ImportType.NEW,
+      ImportType.UPDATE,
+      ImportType.CANCEL,
+      ImportType.COST_CONFIRMATION,
+    ])("records %s as the action that was asked for", async (importType) => {
+      await service.startProcessing(mailboxMessage(), importType);
+
+      expect(repository.create).toHaveBeenCalledWith(
+        expect.objectContaining({ importType }),
+      );
+    });
+
     it("opens the record as PROCESSING", async () => {
-      await service.startProcessing(mailboxMessage());
+      await service.startProcessing(mailboxMessage(), ImportType.NEW);
 
       expect(repository.create).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -57,7 +71,7 @@ describe("ImportedEmailService", () => {
     });
 
     it("records the message identity and receipt time", async () => {
-      await service.startProcessing(mailboxMessage());
+      await service.startProcessing(mailboxMessage(), ImportType.NEW);
 
       expect(repository.create).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -74,7 +88,7 @@ describe("ImportedEmailService", () => {
      * adds nothing the PDF does not already carry.
      */
     it("never stores the email body", async () => {
-      await service.startProcessing(mailboxMessage());
+      await service.startProcessing(mailboxMessage(), ImportType.NEW);
 
       const [written] = repository.create.mock.calls[0];
 
@@ -82,7 +96,7 @@ describe("ImportedEmailService", () => {
     });
 
     it("leaves processedAt unset while work is in progress", async () => {
-      await service.startProcessing(mailboxMessage());
+      await service.startProcessing(mailboxMessage(), ImportType.NEW);
 
       const [written] = repository.create.mock.calls[0];
 

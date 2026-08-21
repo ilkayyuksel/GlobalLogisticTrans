@@ -168,6 +168,38 @@ const nl = {
   "ritten.pagination.page": "Pagina",
   "ritten.truncation.notice":
     "Deze periode past niet op één pagina. De secties hieronder tonen alleen de ritten van deze pagina.",
+  "ritten.status.revised": "Bijgewerkt",
+  "ritten.status.revisedField": "Gewijzigd door de laatste UPDATE",
+  "ritten.column.direction": "Richting",
+
+  "tripDocuments.action.costConfirmation": "Kostenbevestiging",
+  "tripDocuments.createdTrip": "Rit aangemaakt",
+
+  "costConfirmation.title": "Kostenbevestiging",
+  "costConfirmation.none": "Nog geen kostenbevestiging",
+  "costConfirmation.number": "Nummer",
+  "costConfirmation.amount": "Bedrag",
+  "costConfirmation.received": "Ontvangen",
+  "costConfirmation.readOnly":
+    "Bevestigd door Eucon. Dit bedrag kan niet worden aangepast.",
+  "costConfirmation.note":
+    "Dit is het bedrag dat Eucon bevestigt voor de wachttijd. Het vervangt de ingevoerde wachttijd niet.",
+  "costConfirmation.view": "Bekijken",
+  "costConfirmation.download": "Downloaden",
+  "ritten.column.costConfirmation": "CC",
+  "tripDocuments.title": "PDF geschiedenis",
+  "tripDocuments.empty": "Nog geen documenten",
+  "tripDocuments.action.new": "Nieuw",
+  "tripDocuments.action.update": "Update",
+  "tripDocuments.action.cancel": "Annulering",
+  "tripDocuments.view": "Bekijken",
+  "tripDocuments.download": "Downloaden",
+  "tripDocuments.changed": "Gewijzigd:",
+  "tripDocuments.changedNothing": "Deze update wijzigde niets.",
+  "tripDocuments.notApplied": "Niet toegepast",
+  "tripDocuments.note":
+    "Elk ontvangen transportdocument blijft bewaard, ook wanneer het niets kon wijzigen.",
+
   "ritten.column.group": "Groep",
   "ritten.column.status": "Status",
   "ritten.column.licensePlate": "Nummerplaat",
@@ -834,6 +866,38 @@ const tr: Translations = {
   "ritten.pagination.page": "Sayfa",
   "ritten.truncation.notice":
     "Bu dönem tek sayfaya sığmıyor. Aşağıdaki bölümler yalnızca bu sayfadaki seferleri gösterir.",
+  "ritten.status.revised": "Güncellendi",
+  "ritten.status.revisedField": "Son GÜNCELLEME ile değişti",
+  "ritten.column.direction": "Yön",
+
+  "tripDocuments.action.costConfirmation": "Maliyet onayı",
+  "tripDocuments.createdTrip": "Sefer oluşturuldu",
+
+  "costConfirmation.title": "Maliyet onayı",
+  "costConfirmation.none": "Henüz maliyet onayı yok",
+  "costConfirmation.number": "Numara",
+  "costConfirmation.amount": "Tutar",
+  "costConfirmation.received": "Alındı",
+  "costConfirmation.readOnly":
+    "Eucon tarafından onaylandı. Bu tutar değiştirilemez.",
+  "costConfirmation.note":
+    "Bu, Eucon'un bekleme süresi için onayladığı tutardır. Girilen bekleme süresinin yerini almaz.",
+  "costConfirmation.view": "Görüntüle",
+  "costConfirmation.download": "İndir",
+  "ritten.column.costConfirmation": "CC",
+  "tripDocuments.title": "PDF geçmişi",
+  "tripDocuments.empty": "Henüz belge yok",
+  "tripDocuments.action.new": "Yeni",
+  "tripDocuments.action.update": "Güncelleme",
+  "tripDocuments.action.cancel": "İptal",
+  "tripDocuments.view": "Görüntüle",
+  "tripDocuments.download": "İndir",
+  "tripDocuments.changed": "Değişen:",
+  "tripDocuments.changedNothing": "Bu güncelleme hiçbir şeyi değiştirmedi.",
+  "tripDocuments.notApplied": "Uygulanmadı",
+  "tripDocuments.note":
+    "Alınan her taşıma belgesi, hiçbir şeyi değiştiremese bile saklanır.",
+
   "ritten.column.group": "Grup",
   "ritten.column.status": "Durum",
   "ritten.column.licensePlate": "Plaka",

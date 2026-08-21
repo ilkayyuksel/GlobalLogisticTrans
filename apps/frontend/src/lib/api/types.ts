@@ -125,6 +125,48 @@ export interface TripCustomPropertySummary {
  */
 export type TripDirection = "COLLECTION" | "DELIVERY";
 
+/**
+ * What the most recent applied UPDATE document did to a Trip.
+ *
+ * Derived by the backend from the audit trail, never stored as a status: the
+ * lifecycle is OPEN, CLOSED and CANCELLED, and "was updated" is a fact about
+ * documents rather than a state a Trip can transition to.
+ *
+ * `changedFields` is EMPTY when an update arrived and moved nothing — a
+ * different thing from no update at all, which is `latestUpdate: null`.
+ */
+export interface LatestTripUpdate {
+  occurredAt: string;
+  changedFields: string[];
+  /** The UPDATE document itself, for viewing or downloading. */
+  pdfDocumentId: string | null;
+}
+
+/**
+ * The cost Eucon has confirmed for a Trip. At most one per Trip.
+ *
+ * READ-ONLY, everywhere and always. It is a statement by somebody else: there
+ * is no endpoint to create, edit or delete one, and the interface must offer no
+ * control that suggests otherwise.
+ *
+ * It is NOT the waiting time. `waitingTimeMinutes` is what an operator entered
+ * and what the Pricing Engine prices; this is the money Eucon will pay for it.
+ * Both belong to the same Trip and neither replaces the other.
+ */
+export interface CostConfirmation {
+  id: string;
+  /** Digits only. Shown as CC4139505 — the prefix is presentation. */
+  ccNumber: string;
+  /** `WAIT` for waiting time. */
+  costCode: string;
+  /** Two decimals, as a string. Never a number: money is never a float. */
+  amount: string;
+  currency: string;
+  receivedAt: string;
+  /** The confirmation document, for viewing or download. */
+  pdfDocumentId: string;
+}
+
 export interface Trip {
   id: string;
   /** Null on a Trip created by hand: there is no source document. */
@@ -138,6 +180,15 @@ export interface Trip {
   vehicle: TripVehicleSummary | null;
   /** Who is driving. Null means nobody is — not "unknown". */
   effectiveDriver: EffectiveDriver | null;
+  latestUpdate: LatestTripUpdate | null;
+  /**
+   * The cost Eucon confirmed, or null.
+   *
+   * A Trip has at most ONE: Eucon confirms its waiting time once, and the
+   * database enforces it. Null means nothing has been confirmed — which is not
+   * the same as an amount of zero.
+   */
+  costConfirmation: CostConfirmation | null;
   /**
    * The Custom Properties assigned to this Trip, in the operator's own display
    * order. Empty means none are assigned.
@@ -217,6 +268,34 @@ export interface TripPricingItem {
 export interface PricingSnapshot {
   pricing: TripPricing;
   items: TripPricingItem[];
+}
+
+/** What a document did to a Trip, as its history lists it. */
+export type TripDocumentAction =
+  | "NEW"
+  | "UPDATE"
+  | "CANCEL"
+  | "COST_CONFIRMATION";
+
+export interface TripDocument {
+  pdfDocumentId: string;
+  action: TripDocumentAction;
+  originalFilename: string;
+  occurredAt: string;
+  /** The fields this document moved. Empty for NEW and CANCEL. */
+  changedFields: string[];
+  /** Why it did what it did, in one sentence. Null for the original order. */
+  outcome: string | null;
+  /** False when the document arrived but changed nothing on this Trip. */
+  applied: boolean;
+  /**
+   * True when this document CREATED the Trip.
+   *
+   * An UPDATE for a booking nobody held creates one, and that is a different
+   * fact from an update applied to a Trip that already existed — which is why
+   * such a Trip is never marked "Bijgewerkt".
+   */
+  createdTrip: boolean;
 }
 
 export interface CustomProperty {

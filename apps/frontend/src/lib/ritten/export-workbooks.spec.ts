@@ -434,19 +434,19 @@ describe("the basic workbook", () => {
 describe("the file names", () => {
   it("names a single day by its date", () => {
     expect(pricingFileName("2026-08-17", "2026-08-17")).toBe(
-      "TRAXO_Prijzen_2026-08-17.xlsx",
+      "TRANO_Prijzen_2026-08-17.xlsx",
     );
     expect(basicFileName("2026-08-17", "2026-08-17")).toBe(
-      "TRAXO_Ritten_2026-08-17.xlsx",
+      "TRANO_Ritten_2026-08-17.xlsx",
     );
   });
 
   it("names a week or month by its range", () => {
     expect(pricingFileName("2026-08-10", "2026-08-16")).toBe(
-      "TRAXO_Prijzen_2026-08-10_2026-08-16.xlsx",
+      "TRANO_Prijzen_2026-08-10_2026-08-16.xlsx",
     );
     expect(basicFileName("2026-08-01", "2026-08-31")).toBe(
-      "TRAXO_Ritten_2026-08-01_2026-08-31.xlsx",
+      "TRANO_Ritten_2026-08-01_2026-08-31.xlsx",
     );
   });
 

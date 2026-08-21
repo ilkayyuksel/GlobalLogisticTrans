@@ -1,4 +1,8 @@
 import { ExtractionError } from "./errors";
+import {
+  extractCostConfirmation,
+  findCostConfirmationHeader,
+} from "./fields/cost-confirmation";
 import { extractDocumentStatus } from "./fields/document-status";
 import { detectLayout } from "./layout/detect";
 import { detectedSections } from "./layout/page-trip";
@@ -9,7 +13,13 @@ import {
   UnreadablePdfError,
   extractDocument,
 } from "./text/extract";
-import { ParseFailure, ParseMetadata, ParseResult, ParsedTrip } from "./types";
+import {
+  CostConfirmationResult,
+  ParseFailure,
+  ParseMetadata,
+  ParseResult,
+  ParsedTrip,
+} from "./types";
 
 export * from "./types";
 export { PARSER_VERSION } from "./version";
@@ -155,4 +165,76 @@ function failure(
 
 function emptyMetadata(): ParseMetadata {
   return { pageCount: 0, fragmentCount: 0, detectedSections: [] };
+}
+
+/**
+ * Turns a Cost Confirmation PDF into the amount Eucon confirmed.
+ *
+ * A SEPARATE entry point from `parse()`, and separate on purpose. These
+ * documents carry a complete transport order inside them — the same voyage,
+ * container and address blocks — so `parse()` reads one happily and returns a
+ * Trip that already exists. Routing by the caller's own knowledge of what it
+ * asked for is what keeps a confirmation from becoming a duplicate order.
+ *
+ * IT NEVER THROWS, for the same reason `parse()` does not: the input arrives
+ * by email from outside the business.
+ */
+export async function parseCostConfirmation(
+  source: Uint8Array,
+): Promise<CostConfirmationResult> {
+  let document: ExtractedDocument;
+
+  try {
+    document = await extractDocument(source);
+  } catch (error: unknown) {
+    return {
+      ok: false,
+      reason:
+        error instanceof UnreadablePdfError ? "INVALID_PDF" : "UNREADABLE_PDF",
+      message:
+        error instanceof Error
+          ? `The file could not be read as a PDF: ${error.message}`
+          : "The file could not be read as a PDF.",
+      missingFields: [],
+      metadata: emptyMetadata(),
+    };
+  }
+
+  const metadata: ParseMetadata = {
+    pageCount: document.pageCount,
+    fragmentCount: document.fragments.length,
+    detectedSections: detectedSections(document.fragments),
+  };
+
+  const header = findCostConfirmationHeader(document.fragments);
+
+  if (!header) {
+    return {
+      ok: false,
+      reason: "NOT_A_COST_CONFIRMATION",
+      message:
+        "The document carries no 'COST CONFIRMATION NR' line, so it is not a cost confirmation.",
+      missingFields: ["ccNumber"],
+      metadata,
+    };
+  }
+
+  const read = extractCostConfirmation(document.fragments, header);
+
+  if (!read.ok) {
+    return {
+      ok: false,
+      reason: "MISSING_REQUIRED_FIELD",
+      message: `The cost confirmation is missing: ${read.missingFields.join(", ")}.`,
+      missingFields: read.missingFields,
+      metadata,
+    };
+  }
+
+  return {
+    ok: true,
+    parserVersion: PARSER_VERSION,
+    confirmation: read.value,
+    metadata,
+  };
 }

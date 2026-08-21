@@ -515,6 +515,168 @@ const PARSED_DOCUMENTS: readonly ExpectedDocument[] = [
       },
     ],
   },
+  {
+    /*
+     * BUG — the address column continues past the address into the sender's
+     * own notes:
+     *
+     *   F - 62126 Wimille
+     *   Loading Ref: NUT35/149911
+     *   pls fix papers on the last pallet
+     *
+     * The last line used to become the city. The country prefix is spaced
+     * (`F - 62126`), which no other fixture does.
+     */
+    file: "BUG-CITY/ANRBEL2792427.pdf",
+    pageCount: 2,
+    layout: "SINGLE_TWO_PAGE",
+    documentStatus: "PLANNED",
+    trips: [
+      {
+        bookingNumber: "ANRBEL2792427",
+        direction: "COLLECTION",
+        containerType: "45PH",
+        containerNumber: null,
+        terminal: "PSA Quay 869",
+        destinationCity: "Wimille",
+        destinationCountry: "France",
+        date: "2026-08-24",
+        startTime: "08:00",
+        endTime: "08:00",
+        groupKey: null,
+        page: 1,
+        addressSection: "LOADING 1",
+      },
+    ],
+  },
+  {
+    /*
+     * The same bytes as 1368224, filed under a second name. Kept as its own
+     * fixture because the duplicate rules are about CONTENT, not filenames:
+     * a document re-sent under another name must parse identically.
+     */
+    file: "UPDATE/transportorder1368224 (1).pdf",
+    pageCount: 1,
+    layout: "SINGLE_ONE_PAGE",
+    documentStatus: "PLANNED",
+    trips: [
+      {
+        bookingNumber: "ANRDUB2790528",
+        direction: "COLLECTION",
+        containerType: "45OS",
+        containerNumber: null,
+        terminal: "PSA Quay 869",
+        destinationCity: "Gondecourt",
+        destinationCountry: "France",
+        date: "2026-08-19",
+        startTime: "08:00",
+        endTime: "08:00",
+        groupKey: null,
+        page: 1,
+        addressSection: "LOADING 1",
+      },
+    ],
+  },
+  {
+    /*
+     * The PLANNED half of the only booking that appears in both folders: this
+     * order and `CANCEL/cancelled_transportorder1369485.pdf` name the same
+     * ANRDUB2790203. Same booking, opposite document status.
+     */
+    file: "UPDATE/transportorder1369485.pdf",
+    pageCount: 2,
+    layout: "SINGLE_TWO_PAGE",
+    documentStatus: "PLANNED",
+    trips: [
+      {
+        bookingNumber: "ANRDUB2790203",
+        direction: "COLLECTION",
+        containerType: "45PH",
+        containerNumber: null,
+        terminal: "PSA Quay 869",
+        destinationCity: "Antwerpen",
+        destinationCountry: "Belgium",
+        date: "2026-08-19",
+        startTime: "07:30",
+        endTime: "14:00",
+        groupKey: null,
+        page: 1,
+        addressSection: "LOADING 1",
+      },
+    ],
+  },
+  {
+    /* The CANCELLED half of that same booking. */
+    file: "CANCEL/cancelled_transportorder1369485.pdf",
+    pageCount: 2,
+    layout: "SINGLE_TWO_PAGE",
+    documentStatus: "CANCELLED",
+    trips: [
+      {
+        bookingNumber: "ANRDUB2790203",
+        direction: "COLLECTION",
+        containerType: "45PH",
+        containerNumber: null,
+        terminal: "PSA Quay 869",
+        destinationCity: "Antwerpen",
+        destinationCountry: "Belgium",
+        date: "2026-08-19",
+        startTime: "07:30",
+        endTime: "14:00",
+        groupKey: null,
+        page: 1,
+        addressSection: "LOADING 1",
+      },
+    ],
+  },
+  {
+    file: "CANCEL/cancelled_transportorder1369488.pdf",
+    pageCount: 2,
+    layout: "SINGLE_TWO_PAGE",
+    documentStatus: "CANCELLED",
+    trips: [
+      {
+        // Same day, same city and same window as 1369485 — a different order.
+        bookingNumber: "ANRDUB2790211",
+        direction: "COLLECTION",
+        containerType: "45PH",
+        containerNumber: null,
+        terminal: "PSA Quay 869",
+        destinationCity: "Antwerpen",
+        destinationCountry: "Belgium",
+        date: "2026-08-19",
+        startTime: "07:30",
+        endTime: "14:00",
+        groupKey: null,
+        page: 1,
+        addressSection: "LOADING 1",
+      },
+    ],
+  },
+  {
+    /* An afternoon window: 16:00 till 18:00, the latest of any fixture. */
+    file: "CANCEL/cancelled_transportorder1367320.pdf",
+    pageCount: 2,
+    layout: "SINGLE_TWO_PAGE",
+    documentStatus: "CANCELLED",
+    trips: [
+      {
+        bookingNumber: "ANRCRK2786825",
+        direction: "COLLECTION",
+        containerType: "45PH",
+        containerNumber: null,
+        terminal: "PSA Quay 869",
+        destinationCity: "Dendermonde",
+        destinationCountry: "Belgium",
+        date: "2026-08-13",
+        startTime: "16:00",
+        endTime: "18:00",
+        groupKey: null,
+        page: 1,
+        addressSection: "LOADING 1",
+      },
+    ],
+  },
 ];
 
 describe.each(PARSED_DOCUMENTS)("$file", (expected) => {
@@ -613,8 +775,19 @@ describe("the CANCELLED stamp", () => {
     (document) => document.documentStatus === "PLANNED",
   );
 
-  it("is carried by five of the real orders", () => {
-    expect(CANCELLED).toHaveLength(5);
+  /**
+   * Every document in the CANCEL folder, and nothing outside it.
+   *
+   * Counted rather than listed so a fixture added to that folder without its
+   * stamp being read would fail here rather than pass unnoticed.
+   */
+  it("is carried by exactly the documents filed as cancellations", () => {
+    expect(CANCELLED.map((document) => document.file).sort()).toEqual(
+      PARSED_DOCUMENTS.map((document) => document.file)
+        .filter((file) => file.startsWith("CANCEL/"))
+        .sort(),
+    );
+    expect(CANCELLED.length).toBe(8);
     expect(PLANNED.length).toBeGreaterThan(0);
   });
 
@@ -1056,5 +1229,84 @@ describe("a Date/time line with a single timestamp", () => {
     // 21/08/2026 — day and month never swap on the way to ISO.
     expect(result.trips[0].raw.rawDate).toBe("21/08/2026 15:00");
     expect(result.trips[0].date).toBe("2026-08-21");
+  });
+});
+
+/**
+ * ── A NOTE TO THE DRIVER IS NOT A CITY ──────────────────────────────────────
+ * One real order prints the shipper's remarks in the address column, below the
+ * address:
+ *
+ *   F - 62126 Wimille
+ *   Loading Ref: NUT35/149911
+ *   pls fix papers on the last pallet
+ *
+ * Read to the bottom of that column, the last line is a sentence somebody typed
+ * for the driver — and it was being stored as the destination. A city that is
+ * really a remark matches no route, prices nothing, and tells the planner to
+ * drive somewhere that does not exist.
+ * ────────────────────────────────────────────────────────────────────────────
+ */
+describe("an address followed by remarks", () => {
+  const FILE = "BUG-CITY/ANRBEL2792427.pdf";
+
+  it("reads the city from the postcode line, not from the last line", async () => {
+    const result = await parseFixture(FILE);
+
+    if (!result.ok) throw new Error("expected a parse");
+
+    const [trip] = result.trips;
+
+    expect(trip.bookingNumber).toBe("ANRBEL2792427");
+    expect(trip.destinationCity).toBe("Wimille");
+    expect(trip.destinationCountry).toBe("France");
+    expect(trip.containerType).toBe("45PH");
+    expect(trip.date).toBe("2026-08-24");
+    expect(trip.startTime).toBe("08:00");
+    expect(trip.endTime).toBe("08:00");
+  });
+
+  it("never stores the remark as the city", async () => {
+    const result = await parseFixture(FILE);
+
+    if (!result.ok) throw new Error("expected a parse");
+
+    const { destinationCity } = result.trips[0];
+
+    expect(destinationCity).not.toBe("pls fix papers on the last pallet");
+    expect(destinationCity.toLowerCase()).not.toContain("papers");
+    expect(destinationCity.toLowerCase()).not.toContain("pallet");
+  });
+
+  /**
+   * The raw address is the evidence for the city, so it stops where the
+   * address does. Everything below is the sender's note, not the address.
+   */
+  it("keeps the remarks out of the recorded address", async () => {
+    const result = await parseFixture(FILE);
+
+    if (!result.ok) throw new Error("expected a parse");
+
+    const { rawAddress } = result.trips[0].raw;
+
+    expect(rawAddress).toContain("F - 62126 Wimille");
+    expect(rawAddress).not.toContain("Loading Ref");
+    expect(rawAddress).not.toContain("pallet");
+  });
+
+  /**
+   * No fixture may keep a remark in its city, whatever rule read it. This is
+   * the invariant the bug broke, asserted across every document at once.
+   */
+  it.each(PARSED_DOCUMENTS)("$file states a city, not a sentence", async (expected) => {
+    const result = await parseFixture(expected.file);
+
+    if (!result.ok) throw new Error("expected a parse");
+
+    for (const trip of result.trips) {
+      // A city is a name: a handful of words, no colon, no sentence.
+      expect(trip.destinationCity.split(/\s+/).length).toBeLessThanOrEqual(4);
+      expect(trip.destinationCity).not.toContain(":");
+    }
   });
 });

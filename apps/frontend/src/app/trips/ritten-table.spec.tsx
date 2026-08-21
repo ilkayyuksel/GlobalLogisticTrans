@@ -242,6 +242,8 @@ describe("Ritten table", () => {
             isActive: false,
             source: "VEHICLE_ASSIGNMENT",
           },
+          latestUpdate: null,
+          costConfirmation: null,
         }),
       );
 
@@ -274,6 +276,41 @@ describe("Ritten table", () => {
       const table = await showRow(buildTrip({ status }));
 
       expect(within(table).getByText(label)).toBeInTheDocument();
+    });
+
+    /**
+     * ── THE COMPLETED-TRIP MARK ───────────────────────────────────────────
+     * A finished transport is washed in the warning token so a planner can see
+     * at a glance which rows are done. It marks the ROW, which is what keeps it
+     * distinguishable from a field-level highlight on a single value, and it is
+     * a token rather than a colour so both themes get it for free.
+     * ──────────────────────────────────────────────────────────────────────
+     */
+    it("marks a completed Trip's row", async () => {
+      const table = await showRow(buildTrip({ status: "CLOSED" }));
+
+      expect(rowOf(table, "ANRDUB2602247").className).toContain("bg-warning/10");
+    });
+
+    it.each(["OPEN", "CANCELLED"] as const)(
+      "leaves a %s Trip's row unmarked",
+      async (status) => {
+        const table = await showRow(buildTrip({ status }));
+
+        expect(rowOf(table, "ANRDUB2602247").className).not.toContain(
+          "bg-warning",
+        );
+      },
+    );
+
+    it("uses no literal colour for the mark", async () => {
+      const table = await showRow(buildTrip({ status: "CLOSED" }));
+      // The vehicle's own colour is data; the completed mark must be a token.
+      const markup = rowOf(table, "ANRDUB2602247")
+        .outerHTML.split(VEHICLE_COLOR)
+        .join("");
+
+      expect(markup).not.toMatch(/#[0-9a-f]{3,8}\b/i);
     });
   });
 

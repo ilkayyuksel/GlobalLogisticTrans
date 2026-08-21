@@ -31,7 +31,7 @@ const STARTPOINT_LABEL = "Startpoint:";
  */
 
 /** `CC-NNNNN City` — the one line that identifies where a trip actually goes. */
-export const POSTCODE_LINE = /^([A-Z]{1,2})-(\d{4,5})\s+(.+)$/;
+export const POSTCODE_LINE = /^([A-Z]{1,2})\s*-\s*(\d{4,5})\s+(.+)$/;
 
 /**
  * `NNNN City` — the same line without its country prefix.
@@ -441,9 +441,49 @@ function addressBlockOf(
 
   const floor = dateLabel ? dateLabel.y : Number.NEGATIVE_INFINITY;
 
-  return [valueColumn, ...valuesBelow(fragments, valueColumn)].filter(
+  const lines = [valueColumn, ...valuesBelow(fragments, valueColumn)].filter(
     (fragment) => fragment.y > floor,
   );
+
+  return untilRemarks(lines);
+}
+
+/**
+ * A LABELLED line: `Loading Ref: NUT35/149911`, `Opening times: 08:00`.
+ *
+ * The label is short and the colon is followed by a space, which is what the
+ * form uses everywhere it names something — and what an address never does. A
+ * street may hold a number, a comma or a slash; none of them holds a label.
+ */
+const LABELLED_LINE = /^[A-Za-z][^:]{0,30}:\s/;
+
+/**
+ * The address, without the free text printed underneath it.
+ *
+ * ── WHY THIS EXISTS ─────────────────────────────────────────────────────────
+ * The address column does not end at the address. Below it the form prints the
+ * sender's own notes — a loading reference, then whatever the shipper wrote:
+ *
+ *     F - 62126 Wimille          <- the address ends here
+ *     Loading Ref: NUT35/149911  <- a labelled reference
+ *     pls fix papers on the last pallet   <- free text
+ *
+ * Read to the bottom of the column, the last line of one real order is
+ * "pls fix papers on the last pallet", and a rule that takes the last line
+ * stored that as the destination city. It is not a city, it is a note to the
+ * driver, and no reading of an address should ever reach it.
+ *
+ * The FIRST labelled line closes the block. That is the form's own structure
+ * rather than a judgement about the words: everything the sender adds below an
+ * address is introduced by a label, and everything above one is the address.
+ * ────────────────────────────────────────────────────────────────────────────
+ */
+function untilRemarks(lines: readonly Fragment[]): Fragment[] {
+  const firstRemark = lines.findIndex((fragment) =>
+    LABELLED_LINE.test(fragment.text.trim()),
+  );
+
+  return firstRemark === -1 ? [...lines] : lines.slice(0, firstRemark);
 }
 
 /**

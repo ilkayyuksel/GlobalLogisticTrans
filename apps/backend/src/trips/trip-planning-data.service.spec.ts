@@ -5,6 +5,7 @@ import { EffectiveDriverSource } from "./dto/trip-response.dto";
 import { TripPlanningDataService } from "./trip-planning-data.service";
 import { VehicleAssignmentService, assignmentKey } from "../vehicle-assignments/vehicle-assignment.service";
 import { VehicleService } from "../vehicles/vehicle.service";
+import { CostConfirmationService } from "../cost-confirmations/cost-confirmation.service";
 import { TripRepository } from "./trip.repository";
 
 /**
@@ -58,7 +59,10 @@ describe("TripPlanningDataService", () => {
   let vehicleService: { findManyByIds: jest.Mock };
   let driverService: { findManyByIds: jest.Mock };
   let assignmentService: { findDriversForVehiclesOnDates: jest.Mock };
-  let tripRepository: { findCustomPropertiesForTrips: jest.Mock };
+  let tripRepository: {
+    findCustomPropertiesForTrips: jest.Mock;
+    findAppliedUpdateHistory: jest.Mock;
+  };
   let service: TripPlanningDataService;
 
   beforeEach(() => {
@@ -70,6 +74,7 @@ describe("TripPlanningDataService", () => {
     // Custom Properties are resolved here too, in one query for the page.
     tripRepository = {
       findCustomPropertiesForTrips: jest.fn().mockResolvedValue([]),
+      findAppliedUpdateHistory: jest.fn().mockResolvedValue([]),
     };
 
     service = new TripPlanningDataService(
@@ -77,6 +82,9 @@ describe("TripPlanningDataService", () => {
       driverService as unknown as DriverService,
       assignmentService as unknown as VehicleAssignmentService,
       tripRepository as unknown as TripRepository,
+      {
+        findForTrips: () => Promise.resolve(new Map()),
+      } as unknown as CostConfirmationService,
     );
   });
 

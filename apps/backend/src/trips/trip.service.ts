@@ -114,6 +114,8 @@ export class TripService {
           vehicle: null,
           effectiveDriver: null,
           customProperties: [],
+          latestUpdate: null,
+          costConfirmation: null,
         },
       ),
     );
@@ -319,6 +321,21 @@ export class TripService {
    * taken the booking number or the Vehicle slot while this one was cancelled,
    * so both are re-checked rather than assumed still free.
    */
+  /**
+   * The Trip holding a booking number, or null.
+   *
+   * Exact match among the statuses that hold a booking number — the same rule
+   * a revision and a cancellation use. Null is an ordinary answer: a document
+   * may name a booking this system has never seen, and inventing the Trip it
+   * refers to is exactly what must not happen.
+   */
+  async findByBookingNumberOrNull(bookingNumber: string): Promise<Trip | null> {
+    return this.repository.findByBookingNumber({
+      bookingNumber,
+      statuses: BOOKING_NUMBER_HOLDING_STATUSES,
+    });
+  }
+
   async changeStatus(
     id: string,
     dto: ChangeTripStatusDto,
@@ -406,7 +423,15 @@ export class TripService {
   async importTrips(command: ImportTripsCommand): Promise<TripResponseDto[]> {
     const created = await this.repository.runImportTransaction(
       async ({ trips, pdfDocuments }) => {
-        const pdfDocument = await pdfDocuments.create(command.pdfDocument);
+        /*
+         * A document already stored is used as it is. Only a brand-new one is
+         * written here, inside the transaction, so that a failed import leaves
+         * neither Trips nor a row describing a document nobody has.
+         */
+        const pdfDocumentId =
+          command.document.kind === "stored"
+            ? command.document.id
+            : (await pdfDocuments.create(command.document.data)).id;
 
         const tripGroup = command.asCombination
           ? await trips.createTripGroup()
@@ -419,7 +444,7 @@ export class TripService {
 
           written.push(
             await trips.create({
-              pdfDocumentId: pdfDocument.id,
+              pdfDocumentId,
               tripGroupId: tripGroup ? tripGroup.id : null,
               bookingNumber: trip.bookingNumber,
               containerNumber: trip.containerNumber,

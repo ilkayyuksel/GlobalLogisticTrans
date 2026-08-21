@@ -1,21 +1,10 @@
-import { ConfigService } from "@nestjs/config";
 import { TripStatus } from "@prisma/client";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
-import { DomainEventBus } from "../common/events/domain-event-bus";
-import { DriverService } from "../drivers/driver.service";
-import { AppLoggerService } from "../logger/app-logger.service";
-import { PdfDocumentRepository } from "../pdf-documents/pdf-document.repository";
-import { PdfDocumentService } from "../pdf-documents/pdf-document.service";
-import { TripPlanningDataService } from "../trips/trip-planning-data.service";
-import { TripRepository } from "../trips/trip.repository";
-import { TripRevisionService } from "../trips/trip-revision.service";
-import { TripService } from "../trips/trip.service";
-import { VehicleService } from "../vehicles/vehicle.service";
-import { PdfTripImporter } from "./pdf-trip-importer.service";
+import { TRIP_GROUP_ID, buildHarness } from "./real-documents.harness";
 
 /**
  * EVERY real transport order, through the real parser and the real importer.
@@ -37,7 +26,6 @@ import { PdfTripImporter } from "./pdf-trip-importer.service";
 jest.setTimeout(120_000);
 
 const FIXTURES = resolve(__dirname, "../../../../docs/06-pdf");
-const TRIP_GROUP_ID = "97777777-7777-4777-8777-777777777777";
 
 interface ExpectedImport {
   readonly file: string;
@@ -113,163 +101,6 @@ function readFixture(name: string): Uint8Array {
  * The import graph with the database replaced by in-memory doubles that record
  * every write, so a test can assert not only what was created but what was NOT.
  */
-function buildHarness(storageDirectory: string) {
-  const trips: Record<string, unknown>[] = [];
-  const pdfDocuments: Record<string, unknown>[] = [];
-  const tripGroups: string[] = [];
-  const events: unknown[] = [];
-
-  const logger = {
-    setContext: jest.fn(),
-    log: jest.fn(),
-    warn: jest.fn(),
-    error: jest.fn(),
-  } as unknown as AppLoggerService;
-
-  const pdfDocumentRepository = {
-    findByFileHash: jest.fn((fileHash: string) =>
-      Promise.resolve(
-        pdfDocuments.find((document) => document.fileHash === fileHash) ?? null,
-      ),
-    ),
-    create: jest.fn((data: Record<string, unknown>) => {
-      const document = { id: `pdf-${pdfDocuments.length + 1}`, ...data };
-      pdfDocuments.push(document);
-      return Promise.resolve(document);
-    }),
-  } as unknown as PdfDocumentRepository;
-
-  const tripRepository = {
-    /*
-     * The real rule, in memory: a booking number is held by any Trip that is
-     * not deleted. This is the ONLY thing standing between a document and a
-     * duplicate import, so a double that ignored it would make every duplicate
-     * test pass for the wrong reason.
-     */
-    findByBookingNumber: jest.fn(
-      ({
-        bookingNumber,
-        statuses,
-      }: {
-        bookingNumber: string;
-        statuses: readonly TripStatus[];
-      }) => {
-        const found = trips.find(
-          (trip) =>
-            trip.bookingNumber === bookingNumber &&
-            statuses.includes(trip.status as TripStatus),
-        );
-
-        return Promise.resolve(found ?? null);
-      },
-    ),
-    setStatus: jest.fn((id: string, status: TripStatus) => {
-      const trip = trips.find((candidate) => candidate.id === id);
-      Object.assign(trip as Record<string, unknown>, { status });
-      return Promise.resolve(trip);
-    }),
-    update: jest.fn((id: string, data: Record<string, unknown>) => {
-      const trip = trips.find((candidate) => candidate.id === id);
-      Object.assign(trip as Record<string, unknown>, data);
-      return Promise.resolve(trip);
-    }),
-    runInTransaction: jest.fn((work: (repository: unknown) => unknown) =>
-      work(tripRepository),
-    ),
-    createTripGroup: jest.fn(() => {
-      tripGroups.push(TRIP_GROUP_ID);
-      return Promise.resolve({ id: TRIP_GROUP_ID });
-    }),
-    create: jest.fn((data: Record<string, unknown>) => {
-      const trip = {
-        vehicleId: null,
-        driverId: null,
-        containerNumber: null,
-        terminal: null,
-        startTime: null,
-        endTime: null,
-        executionDatetime: null,
-        waitingTimeMinutes: null,
-        distanceKm: null,
-        internalNotes: null,
-        parserMetadata: null,
-        tripGroupId: null,
-        ...data,
-        id: `trip-${trips.length + 1}`,
-        status: TripStatus.OPEN,
-        createdAt: new Date("2026-08-17T06:00:00.000Z"),
-        updatedAt: new Date("2026-08-17T06:00:00.000Z"),
-      };
-      trips.push(trip);
-      return Promise.resolve(trip);
-    }),
-    /*
-     * A real transaction, in the one respect that matters here: a failure
-     * inside it discards everything written during it. Without this the
-     * atomicity assertions below would be vacuous.
-     */
-    runImportTransaction: jest.fn(
-      async (work: (repositories: unknown) => Promise<unknown>) => {
-        const tripCount = trips.length;
-        const documentCount = pdfDocuments.length;
-        const groupCount = tripGroups.length;
-
-        try {
-          return await work({
-            trips: tripRepository,
-            pdfDocuments: pdfDocumentRepository,
-          });
-        } catch (error: unknown) {
-          trips.length = tripCount;
-          pdfDocuments.length = documentCount;
-          tripGroups.length = groupCount;
-          throw error;
-        }
-      },
-    ),
-  } as unknown as TripRepository;
-
-  const configService = {
-    get: jest.fn(),
-    getOrThrow: jest.fn((key: string) => {
-      if (key === "PDF_STORAGE_DIR") return storageDirectory;
-      throw new Error(`unexpected configuration key ${key}`);
-    }),
-  } as unknown as ConfigService;
-
-  const tripService = new TripService(
-    tripRepository,
-    {} as unknown as VehicleService,
-    {} as unknown as DriverService,
-    {
-      resolveOne: () =>
-        Promise.resolve({ vehicle: null, effectiveDriver: null }),
-      resolveMany: (given: readonly { id: string }[]) =>
-        Promise.resolve(
-          new Map(
-            given.map((trip) => [
-              trip.id,
-              { vehicle: null, effectiveDriver: null },
-            ]),
-          ),
-        ),
-    } as unknown as TripPlanningDataService,
-    {
-      publish: jest.fn((event: unknown) => events.push(event)),
-    } as unknown as DomainEventBus,
-    logger,
-  );
-
-  const importer = new PdfTripImporter(
-    tripService,
-    new TripRevisionService(tripRepository, logger),
-    new PdfDocumentService(pdfDocumentRepository, configService, logger),
-    logger,
-  );
-
-  return { importer, trips, pdfDocuments, tripGroups, events, storageDirectory };
-}
-
 describe("every real transport order, through the real import pipeline", () => {
   let storageDirectory: string;
   let harness: ReturnType<typeof buildHarness>;
@@ -366,8 +197,17 @@ describe("every real transport order, through the real import pipeline", () => {
 
       expect(harness.trips).toHaveLength(afterFirst);
       expect(harness.tripGroups).toHaveLength(expected.combination ? 1 : 0);
-      // The rolled-back second attempt leaves no PdfDocument behind either.
-      expect(harness.pdfDocuments).toHaveLength(1);
+
+      /*
+       * The refused document is KEPT, and recorded against the Trip that still
+       * holds the booking number. No Trip was created and none was changed —
+       * what is preserved is the fact that the order arrived again, which for a
+       * cancelled booking is exactly what an operator needs to see.
+       */
+      expect(harness.pdfDocuments).toHaveLength(2);
+      expect(harness.history).toContainEqual(
+        expect.objectContaining({ eventType: "NEW_REFUSED_DUPLICATE" }),
+      );
     });
 
     /*
@@ -425,14 +265,23 @@ describe("every real transport order, through the real import pipeline", () => {
    * ────────────────────────────────────────────────────────────────────────────
    */
   describe.each(CANCELLED_DOCUMENTS)("$file", ({ file, booking }) => {
-    it("creates no Trip, no TripGroup, no PdfDocument and no file", async () => {
+    it("creates no Trip and no TripGroup, but keeps the document", async () => {
       const result = await harness.importer.import(readFixture(file), file);
 
       expect(result.trips).toEqual([]);
       expect(harness.trips).toEqual([]);
       expect(harness.tripGroups).toEqual([]);
-      expect(harness.pdfDocuments).toEqual([]);
-      expect(readdirSync(storageDirectory)).toEqual([]);
+
+      /*
+       * The cancellation itself IS kept. It creates nothing and it matched
+       * nothing here, but it is a document the sender sent us, and the record
+       * of a cancelled transport that cannot produce its cancellation is a
+       * record with a hole in it.
+       */
+      expect(harness.pdfDocuments).toHaveLength(1);
+      expect(readdirSync(storageDirectory)).toHaveLength(1);
+      // No Trip to record an event against, so the trail stays empty.
+      expect(harness.history).toEqual([]);
     });
 
     it("reports the booking it names and that nothing matched it", async () => {
@@ -513,18 +362,37 @@ describe("every real transport order, through the real import pipeline", () => {
       const result = await harness.importer.revise(readFixture(FILE), FILE);
 
       expect(result.revisions).toEqual([
-        { bookingNumber: "ANRDUB2765105", tripId: created.id },
+        {
+          bookingNumber: "ANRDUB2765105",
+          tripId: created.id,
+          action: "UPDATED",
+          // The same document, so it agrees with the Trip in every field.
+          changedFields: [],
+        },
       ]);
       expect(harness.trips).toHaveLength(1);
     });
 
-    it("stores no second PdfDocument and no second file", async () => {
+    /**
+     * The revision document is a document of its own.
+     *
+     * Two rows, because two documents arrived — and ONE file, because storage
+     * is content-addressed and these are the same bytes. That is the shape the
+     * history needs: every arrival is listed, nothing is stored twice.
+     */
+    it("keeps the revision as a second document over the same file", async () => {
       await harness.importer.import(readFixture(FILE), FILE);
 
       await harness.importer.revise(readFixture(FILE), FILE);
 
-      expect(harness.pdfDocuments).toHaveLength(1);
+      expect(harness.pdfDocuments).toHaveLength(2);
       expect(readdirSync(storageDirectory)).toHaveLength(1);
+      expect(harness.history).toContainEqual(
+        expect.objectContaining({
+          eventType: "UPDATE_APPLIED",
+          pdfDocumentId: "pdf-2",
+        }),
+      );
     });
 
     it("preserves what the operator planned", async () => {
@@ -544,12 +412,26 @@ describe("every real transport order, through the real import pipeline", () => {
       });
     });
 
-    it("refuses to revise a Trip nobody has, and creates none", async () => {
-      await expect(
-        harness.importer.revise(readFixture(FILE), FILE),
-      ).rejects.toThrow(/never creates one/);
+    /**
+     * A revision for a booking nobody holds CREATES the Trip.
+     *
+     * The original order never reached us — a real thing that happens — and
+     * refusing the revision would leave transport that is genuinely planned
+     * missing from the planning. The Trip is an ordinary imported one: OPEN,
+     * with this document as its source.
+     */
+    it("creates the Trip when nobody holds its booking number", async () => {
+      const result = await harness.importer.revise(readFixture(FILE), FILE);
 
-      expect(harness.trips).toEqual([]);
+      expect(result.revisions[0].action).toBe("CREATED_FROM_UPDATE");
+      expect(harness.trips).toHaveLength(1);
+      expect(harness.trips[0]).toMatchObject({
+        bookingNumber: "ANRDUB2765105",
+        status: TripStatus.OPEN,
+      });
+      // Operator-controlled fields stay absent, as they do for any import.
+      expect(harness.trips[0].vehicleId).toBeNull();
+      expect(harness.trips[0].waitingTimeMinutes).toBeNull();
     });
 
     it("refuses to revise a CLOSED Trip", async () => {
@@ -651,7 +533,9 @@ describe("every real transport order, through the real import pipeline", () => {
 
       expect(result.cancellations[0].outcome).toBe("NO_MATCHING_TRIP");
       expect(harness.trips).toEqual([]);
-      expect(harness.pdfDocuments).toEqual([]);
+      // Kept: a document that arrived is kept even when it matched nothing.
+      expect(harness.pdfDocuments).toHaveLength(1);
+      expect(harness.history).toEqual([]);
     });
   });
 

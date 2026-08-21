@@ -17,6 +17,7 @@ export const PdfImportErrorCode = {
   NO_TRIPS_FOUND: "IMPORT_NO_TRIPS_FOUND",
   UNKNOWN_TERMINAL: "IMPORT_UNKNOWN_TERMINAL",
   INVALID_COMBINATION: "IMPORT_INVALID_COMBINATION",
+  COST_CONFIRMATION_REFUSED: "IMPORT_COST_CONFIRMATION_REFUSED",
   REVISION_REFUSED: "IMPORT_REVISION_REFUSED",
 } as const;
 
@@ -117,6 +118,26 @@ export class InvalidCombinationException extends PdfImportException {
  * Refusing is also what leaves an emailed revision unread, so it is offered
  * again rather than quietly lost.
  */
+/**
+ * A cost confirmation that could not be recorded.
+ *
+ * A business exception rather than a parser failure: the document was read
+ * perfectly well, and what it names — a booking we do not have, or a subject
+ * that contradicts it — is something a person has to look at. The message stays
+ * unread so the next scan offers it again.
+ */
+export class CostConfirmationRefusedException extends PdfImportException {
+  constructor(
+    readonly ccNumber: string,
+    readonly reason: string,
+  ) {
+    super(
+      PdfImportErrorCode.COST_CONFIRMATION_REFUSED,
+      `Cost confirmation "${ccNumber}" was not recorded: ${reason}`,
+    );
+  }
+}
+
 export class RevisionRefusedException extends PdfImportException {
   constructor(
     readonly bookingNumber: string,

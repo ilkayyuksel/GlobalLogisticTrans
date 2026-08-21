@@ -410,3 +410,94 @@ describe("when the pricing read fails", () => {
     expect(await screen.findByText("651.25")).toBeInTheDocument();
   });
 });
+
+/**
+ * ── THE CONFIRMED COST, IN THE LIST ─────────────────────────────────────────
+ * Eucon's confirmed amount is money, so it lives with the other money: it
+ * appears when prices are shown and disappears with them. What it must never
+ * do is look like something the operator can change, or like the waiting time
+ * they entered themselves.
+ * ────────────────────────────────────────────────────────────────────────────
+ */
+describe("the confirmed cost in Ritten", () => {
+  const CONFIRMED = buildTrip({
+    id: "trip-confirmed",
+    bookingNumber: "ANRDUB2789089",
+    costConfirmation: {
+      id: "cc-1",
+      ccNumber: "4132482",
+      costCode: "WAIT",
+      amount: "25.00",
+      currency: "EUR",
+      receivedAt: "2026-08-18T09:00:00.000Z",
+      pdfDocumentId: "pdf-cc-1",
+    },
+  });
+
+  async function showWithPrices(trip = CONFIRMED) {
+    respondWith(requestMock, { trips: buildPage([trip]) });
+    const user = userEvent.setup();
+    renderRitten();
+    await screen.findByText(trip.bookingNumber as string);
+    await user.click(toggle());
+
+    return (await screen.findByText(trip.bookingNumber as string)).closest(
+      "tr",
+    ) as HTMLElement;
+  }
+
+  it("shows the number and the amount once prices are shown", async () => {
+    const row = await showWithPrices();
+
+    expect(within(row).getByText("CC4132482")).toBeInTheDocument();
+    expect(within(row).getByText("25.00")).toBeInTheDocument();
+  });
+
+  it("has its own column heading", async () => {
+    await showWithPrices();
+
+    expect(
+      screen.getByRole("columnheader", { name: "CC" }),
+    ).toBeInTheDocument();
+  });
+
+  /** It is money: it follows the pricing toggle like every other amount. */
+  it("is hidden while prices are hidden", async () => {
+    respondWith(requestMock, { trips: buildPage([CONFIRMED]) });
+    renderRitten();
+    await screen.findByText("ANRDUB2789089");
+
+    expect(screen.queryByText("CC4132482")).toBeNull();
+    expect(screen.queryByRole("columnheader", { name: "CC" })).toBeNull();
+  });
+
+  it("shows the empty marker for a Trip with nothing confirmed", async () => {
+    const row = await showWithPrices(
+      buildTrip({ id: "trip-none", bookingNumber: "ANRBEL2768902" }),
+    );
+
+    // An empty marker, never a zero: nothing confirmed is not zero confirmed.
+    expect(within(row).queryByText("0.00")).toBeNull();
+    expect(within(row).queryByText(/^CC/)).toBeNull();
+  });
+
+  /**
+   * One Trip, one confirmed cost. A second different one is refused by the
+   * backend, so the cell never has to decide which of two to show.
+   */
+  it("shows the one confirmation the Trip has", async () => {
+    const row = await showWithPrices();
+    const cell = within(row).getByText("CC4132482").closest("td") as HTMLElement;
+
+    expect(cell.textContent).toContain("CC4132482");
+    expect(cell.textContent).toContain("25.00");
+  });
+
+  it("offers no control to change the amount", async () => {
+    const row = await showWithPrices();
+    const cell = within(row).getByText("CC4132482").closest("td") as HTMLElement;
+
+    expect(within(cell).queryByRole("button")).toBeNull();
+    expect(within(cell).queryByRole("textbox")).toBeNull();
+  });
+});

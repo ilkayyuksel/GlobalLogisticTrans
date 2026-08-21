@@ -9,8 +9,8 @@ import { isTrustedSender } from "./trusted-sender";
  * what keeps an irrelevant email from costing a download.
  *
  * Two conditions must both hold: the sender is trusted, and the subject
- * announces one of the three instructions this system carries out — NEW,
- * UPDATE or CANCEL.
+ * announces one of the instructions this system carries out — NEW, UPDATE,
+ * CANCEL or COST CONFIRMATION.
  */
 
 /** What became of an email. Recorded and logged; never guessed at. */
@@ -35,6 +35,7 @@ export const MessageAction = {
   NEW: "NEW",
   UPDATE: "UPDATE",
   CANCEL: "CANCEL",
+  COST_CONFIRMATION: "COST_CONFIRMATION",
 } as const;
 
 export type MessageAction =
@@ -42,6 +43,15 @@ export type MessageAction =
 
 const UPDATE_PREFIX = "UPDATE:";
 const CANCEL_PREFIX = "CANCEL:";
+/**
+ * No colon: Eucon writes the whole thing as a title.
+ *
+ *     COST CONFIRMATION NR 4139505 ANRDUB2793105
+ *
+ * The number and the booking that follow are only a hint — the PDF is what is
+ * read — so the prefix alone decides the action.
+ */
+const COST_CONFIRMATION_PREFIX = "COST CONFIRMATION";
 
 export interface SelectionInput {
   readonly senderEmail: string;
@@ -91,6 +101,10 @@ export function selectMessage(
 
   if (startsWithPrefix(subject, CANCEL_PREFIX)) {
     return accept(MessageAction.CANCEL);
+  }
+
+  if (startsWithPrefix(subject, COST_CONFIRMATION_PREFIX)) {
+    return accept(MessageAction.COST_CONFIRMATION);
   }
 
   return refuse(SelectionOutcome.NO_RECOGNISED_PREFIX);

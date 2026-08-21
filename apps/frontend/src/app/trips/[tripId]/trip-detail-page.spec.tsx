@@ -11,7 +11,7 @@ import {
   listTripCustomProperties,
 } from "@/lib/api/fleet";
 import { getPricingSnapshot, reprocessTripPricing } from "@/lib/api/pricing";
-import { getTrip } from "@/lib/api/trips";
+import { getTrip, listTripDocuments } from "@/lib/api/trips";
 import type {
   PricingSnapshot,
   Trip,
@@ -123,6 +123,8 @@ function buildTrip(overrides: Partial<Trip> = {}): Trip {
     direction: null,
     vehicle: null,
     effectiveDriver: null,
+    latestUpdate: null,
+    costConfirmation: null,
     status: "CLOSED",
     bookingNumber: "ANRDUB2602247",
     containerNumber: "PVDU 301326/0",
@@ -221,6 +223,11 @@ function fieldValue(label: string): string {
 describe("TripDetailPage", () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    // The document history is its own component with its own tests; here it
+    // only has to answer so the rest of the page can render.
+    (
+      listTripDocuments as jest.MockedFunction<typeof listTripDocuments>
+    ).mockResolvedValue([]);
     getTripMock.mockResolvedValue(buildTrip());
     getPricingSnapshotMock.mockResolvedValue(null);
     listCustomPropertiesMock.mockResolvedValue([]);
@@ -331,6 +338,8 @@ describe("TripDetailPage", () => {
             isActive: true,
             source: "VEHICLE_ASSIGNMENT",
           },
+          latestUpdate: null,
+          costConfirmation: null,
         }),
       );
 
@@ -352,6 +361,8 @@ describe("TripDetailPage", () => {
             isActive: true,
             source: "OVERRIDE",
           },
+          latestUpdate: null,
+          costConfirmation: null,
         }),
       );
 
@@ -384,6 +395,8 @@ describe("TripDetailPage", () => {
             isActive: false,
             source: "VEHICLE_ASSIGNMENT",
           },
+          latestUpdate: null,
+          costConfirmation: null,
         }),
       );
 

@@ -1,7 +1,12 @@
 import type { ReactNode } from "react";
 
-import { TripStatusBadge } from "./trip-status-badge";
 import { Badge } from "@/components/ui/badge";
+import {
+  UPDATED_FIELD_CLASS,
+  changedByLatestUpdate,
+  isRevised,
+} from "@/lib/trips/latest-update";
+import { TripStatusBadge } from "./trip-status-badge";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import type { Trip, Vehicle } from "@/lib/api/types";
 import { useTranslation } from "@/lib/i18n/language-provider";
@@ -38,23 +43,55 @@ export function TripSummary({
         description={`${t("ritten.column.container")} ${
           trip.containerType ?? t("tripDetail.value.notSet")
         }${trip.containerNumber ? ` · ${trip.containerNumber}` : ""}`}
-        action={<TripStatusBadge status={trip.status} />}
+        action={
+          <span className="flex items-center gap-2">
+            <TripStatusBadge status={trip.status} />
+            {/* Derived, and beside the status: the lifecycle is still OPEN. */}
+            {isRevised(trip) ? (
+              <Badge tone="warning">{t("ritten.status.revised")}</Badge>
+            ) : null}
+          </span>
+        }
       />
       <CardBody>
         <dl className="grid grid-cols-1 gap-x-8 gap-y-4 sm:grid-cols-2 lg:grid-cols-3">
-          <Field label={t("ritten.column.containerType")} value={trip.containerType} />
-          <Field label={t("ritten.column.container")} value={trip.containerNumber} />
-          <Field label={t("ritten.column.terminal")} value={trip.terminal} />
-          <Field label={t("tripDetail.field.city")} value={trip.destinationCity} />
+          <Field
+            label={t("ritten.column.containerType")}
+            value={trip.containerType}
+            isUpdated={changedByLatestUpdate(trip, "containerType")}
+          />
+          <Field
+            label={t("ritten.column.container")}
+            value={trip.containerNumber}
+            isUpdated={changedByLatestUpdate(trip, "containerNumber")}
+          />
+          <Field
+            label={t("ritten.column.terminal")}
+            value={trip.terminal}
+            isUpdated={changedByLatestUpdate(trip, "terminal")}
+          />
+          <Field
+            label={t("tripDetail.field.city")}
+            value={trip.destinationCity}
+            isUpdated={changedByLatestUpdate(trip, "destinationCity")}
+          />
           <Field
             label={t("tripDetail.field.country")}
             value={trip.destinationCountry}
+            isUpdated={changedByLatestUpdate(trip, "destinationCountry")}
           />
           <Field
             label={t("ritten.column.date")}
             value={formatCalendarDate(trip.planningDate)}
           />
-          <Field label={t("tripDetail.field.plannedTime")} value={formatTimeRange(trip)} />
+          <Field
+            label={t("tripDetail.field.plannedTime")}
+            value={formatTimeRange(trip)}
+            isUpdated={
+              changedByLatestUpdate(trip, "startTime") ||
+              changedByLatestUpdate(trip, "endTime")
+            }
+          />
           <Field
             label={t("tripDetail.field.carriedOutAt")}
             value={formatDateTime(trip.executionDatetime)}
@@ -87,6 +124,7 @@ export function TripSummary({
           <Field
             label={t("tripDetail.field.originalDate")}
             value={formatCalendarDate(trip.originalPlanningDate)}
+            isUpdated={changedByLatestUpdate(trip, "originalPlanningDate")}
           />
         </dl>
 
@@ -153,10 +191,13 @@ function Field({
   label,
   value,
   children,
+  isUpdated = false,
 }: {
   label: string;
   value: string | null;
   children?: ReactNode;
+  /** Marked when the LATEST update document moved this field. */
+  isUpdated?: boolean;
 }) {
   const t = useTranslation();
 
@@ -166,9 +207,14 @@ function Field({
         {label}
       </dt>
       <dd className="mt-1 text-sm text-foreground">
-        {value ?? (
-          <span className="text-muted">{t("tripDetail.value.notSet")}</span>
-        )}
+        <span
+          className={isUpdated ? UPDATED_FIELD_CLASS : undefined}
+          title={isUpdated ? t("ritten.status.revisedField") : undefined}
+        >
+          {value ?? (
+            <span className="text-muted">{t("tripDetail.value.notSet")}</span>
+          )}
+        </span>
         {children ? <div className="mt-0.5">{children}</div> : null}
       </dd>
     </div>

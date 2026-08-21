@@ -412,13 +412,32 @@ describe("TripRepository", () => {
     expect(methods).not.toContain("remove");
   });
 
-  it("never touches pricing, history or parser tables", () => {
-    // Those domains belong to later phases and to other owners.
+  it("never touches pricing or parser tables", () => {
+    // Those domains belong to other owners.
     const source = TripRepository.prototype.constructor.toString();
 
     expect(source).not.toContain("tripPricing");
-    expect(source).not.toContain("tripHistory");
     expect(source).not.toContain("parserRun");
     expect(source).not.toContain("parserMetadata");
+  });
+
+  /**
+   * `trip_history` IS this repository's, and deliberately so.
+   *
+   * It is the Trip's own audit trail, and every row must be written in the same
+   * transaction as the change it records — an update whose change set could
+   * commit separately from the update itself would be a record that can lie.
+   * A second repository would have to be transaction-scoped alongside this one
+   * to achieve exactly that, which is machinery for no gain.
+   *
+   * Append-only remains the rule, and it is asserted rather than assumed.
+   */
+  it("appends to the audit trail but never rewrites it", () => {
+    const source = TripRepository.prototype.constructor.toString();
+
+    expect(source).toContain("tripHistory.createMany");
+    expect(source).not.toContain("tripHistory.update");
+    expect(source).not.toContain("tripHistory.delete");
+    expect(source).not.toContain("tripHistory.upsert");
   });
 });

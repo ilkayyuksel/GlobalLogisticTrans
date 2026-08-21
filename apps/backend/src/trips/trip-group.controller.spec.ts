@@ -17,6 +17,7 @@ import { VehicleService } from "../vehicles/vehicle.service";
 import { TripController } from "./trip.controller";
 import { TripGroupController } from "./trip-group.controller";
 import { TripPlanningDataService } from "./trip-planning-data.service";
+import { TripDocumentsService } from "./trip-documents.service";
 import { TripRepository } from "./trip.repository";
 import { TripService } from "./trip.service";
 
@@ -101,6 +102,12 @@ describe("TripGroupController (integration)", () => {
       controllers: [TripGroupController, TripController],
       providers: [
         TripService,
+        // TripController is mounted here too; its documents endpoint has its
+        // own tests and only has to be resolvable.
+        {
+          provide: TripDocumentsService,
+          useValue: { findForTrip: jest.fn().mockResolvedValue({ items: [] }) },
+        },
         { provide: TripRepository, useValue: repository },
         { provide: VehicleService, useValue: { findById: jest.fn() } },
         { provide: DriverService, useValue: { findById: jest.fn() } },

@@ -107,6 +107,9 @@ enum ImportType {
   NEW
   UPDATE
   CANCEL
+  /// A cost Eucon confirms for a Trip that already exists. It never creates
+  /// one, which is why it is its own action rather than a kind of UPDATE.
+  COST_CONFIRMATION
 
   @@map("import_type")
 }
@@ -221,6 +224,10 @@ model PdfDocument {
 
   parserRuns ParserRun[]
   trips      Trip[]
+  /// The Trip events this document caused — an UPDATE or a CANCEL. A NEW
+  /// document is reached through `trips` instead, which is the Trip it created.
+  tripHistory       TripHistory[]
+  costConfirmations CostConfirmation[]
 
   @@index([fileHash])
   @@index([importSource])
@@ -361,9 +368,10 @@ model Trip {
   vehicle     Vehicle?    @relation(fields: [vehicleId], references: [id], onDelete: Restrict)
   driver      Driver?     @relation(fields: [driverId], references: [id], onDelete: Restrict)
 
-  pricing          TripPricing?
-  history          TripHistory[]
-  customProperties TripCustomProperty[]
+  pricing           TripPricing?
+  history           TripHistory[]
+  customProperties  TripCustomProperty[]
+  costConfirmations CostConfirmation[]
 
   @@index([bookingNumber])
   @@index([planningDate])
@@ -374,6 +382,58 @@ model Trip {
   @@index([driverId])
   @@index([pdfDocumentId])
   @@map("trip")
+}
+
+/// A cost Eucon has CONFIRMED for a Trip.
+///
+/// Its own entity rather than a trip_history event, because it is not a record
+/// of something we did — it is money a third party agreed to pay, with its own
+/// identifier, its own document and its own lifetime. History explains a Trip;
+/// this is a value the business acts on.
+///
+/// It is also NOT waiting time. Waiting time is minutes an operator enters and
+/// prices through the configured rule; a confirmation is the amount Eucon will
+/// pay for those minutes. Both exist on the same Trip and neither overwrites
+/// the other — see database_model.md "Cost Confirmation".
+///
+/// Read-only once written: an external confirmation that an administrator can
+/// edit is no longer a confirmation. Exactly one may exist per Trip — see the
+/// unique constraint on trip_id.
+model CostConfirmation {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+
+  /// UNIQUE: a Trip has at most ONE confirmed cost.
+  ///
+  /// Eucon confirms a Trip's waiting time once, and the first confirmation is
+  /// the authoritative one. A second, different confirmation for the same Trip
+  /// is refused rather than added, overwritten or summed — and the constraint
+  /// is what guarantees it, so no path through the code can produce a second.
+  tripId String @unique @map("trip_id") @db.Uuid
+  /// The confirmation document itself. Non-null: an amount whose evidence
+  /// cannot be produced is not a confirmation.
+  pdfDocumentId String @map("pdf_document_id") @db.Uuid
+
+  /// Eucon's own number, digits only — `CC` is a display prefix, not data.
+  ccNumber String @map("cc_number") @db.Text
+  /// `WAIT` on every document seen so far. Stored rather than assumed, because
+  /// nothing says Eucon confirms only waiting time.
+  costCode String @map("cost_code") @db.Text
+
+  /// NUMERIC like every other amount in this schema. Never a float.
+  amount   Decimal @db.Decimal(12, 2)
+  currency String  @default("EUR") @db.VarChar(3)
+
+  /// What the document was printed, as the document states it.
+  receivedAt DateTime @map("received_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  trip        Trip        @relation(fields: [tripId], references: [id], onDelete: Restrict)
+  pdfDocument PdfDocument @relation(fields: [pdfDocumentId], references: [id], onDelete: Restrict)
+
+  @@index([pdfDocumentId])
+  @@map("cost_confirmation")
 }
 
 /// Append-only audit trail. Never updated, never deleted — enforced by the
@@ -391,6 +451,18 @@ model TripHistory {
   /// See database_schema.md open point O4 for system-generated events.
   performedBy String   @map("performed_by") @db.VarChar(255)
 
+  /// The document that caused this event: the UPDATE or CANCEL PDF.
+  ///
+  /// Null for an event no document caused — a status change made by hand, for
+  /// instance. It lives HERE rather than as pdf_document.trip_id because one
+  /// document may concern several Trips: a Combination names two bookings, and
+  /// a single UPDATE for it produces one event per Trip, all pointing at the
+  /// same stored PDF. The file itself is never duplicated.
+  ///
+  /// Restrict, for the same reason trip.pdf_document_id is: the evidence for a
+  /// recorded change must not be removable while the record survives.
+  pdfDocumentId String? @map("pdf_document_id") @db.Uuid
+
   /// JSONB so values of any column type survive without being stringified.
   previousValue Json?   @map("previous_value") @db.JsonB
   newValue      Json?   @map("new_value") @db.JsonB
@@ -399,11 +471,13 @@ model TripHistory {
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  trip Trip @relation(fields: [tripId], references: [id], onDelete: Restrict)
+  trip        Trip         @relation(fields: [tripId], references: [id], onDelete: Restrict)
+  pdfDocument PdfDocument? @relation(fields: [pdfDocumentId], references: [id], onDelete: Restrict)
 
   @@index([tripId, occurredAt(sort: Desc)])
   @@index([eventType])
   @@index([performedBy])
+  @@index([pdfDocumentId])
   @@map("trip_history")
 }
 

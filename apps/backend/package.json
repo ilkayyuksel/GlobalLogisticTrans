@@ -31,7 +31,8 @@
         }
       ]
     },
-    "testEnvironment": "node"
+    "testEnvironment": "node",
+    "testTimeout": 30000
   },
   "dependencies": {
     "@nestjs/common": "^11.1.28",

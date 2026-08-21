@@ -124,3 +124,60 @@ export interface ParseFailure {
 }
 
 export type ParseResult = ParseSuccess | ParseFailure;
+
+/**
+ * ── COST CONFIRMATION ───────────────────────────────────────────────────────
+ * A different KIND of document, and deliberately a different result type.
+ *
+ * Eucon sends these after we report a waiting time: they confirm the money it
+ * will pay for it. They arrive on the same form as a transport order and carry
+ * a full copy of one, which is exactly why they get their own reader and their
+ * own result — pushed through `parse()` they would look like an ordinary order
+ * and create a second Trip for a booking that already exists.
+ *
+ * A Cost Confirmation NEVER creates a Trip. It names one.
+ * ────────────────────────────────────────────────────────────────────────────
+ */
+export interface ParsedCostConfirmation {
+  /** Eucon's number, digits only. `CC` is a display prefix, not data. */
+  readonly ccNumber: string;
+  /** The booking this confirmation belongs to. The only way it finds its Trip. */
+  readonly bookingNumber: string;
+  /** Fixed-2 decimal string, exactly as the document printed it. */
+  readonly amount: string;
+  readonly currency: string;
+  /** `WAIT` on every document seen so far. Stored, never assumed. */
+  readonly costCode: string;
+  readonly costDescription: string | null;
+  /** Null when the document prints an unreadable reference such as `????`. */
+  readonly containerReference: string | null;
+  readonly remarks: string | null;
+  /** The confirmation block, kept as evidence for what was read. */
+  readonly raw: string;
+}
+
+export interface CostConfirmationSuccess {
+  readonly ok: true;
+  readonly parserVersion: string;
+  readonly confirmation: ParsedCostConfirmation;
+  readonly metadata: ParseMetadata;
+}
+
+export type CostConfirmationFailureReason =
+  | "INVALID_PDF"
+  | "UNREADABLE_PDF"
+  /** Readable, but no confirmation block: this is not a Cost Confirmation. */
+  | "NOT_A_COST_CONFIRMATION"
+  | "MISSING_REQUIRED_FIELD";
+
+export interface CostConfirmationFailure {
+  readonly ok: false;
+  readonly reason: CostConfirmationFailureReason;
+  readonly message: string;
+  readonly missingFields: string[];
+  readonly metadata: ParseMetadata;
+}
+
+export type CostConfirmationResult =
+  | CostConfirmationSuccess
+  | CostConfirmationFailure;

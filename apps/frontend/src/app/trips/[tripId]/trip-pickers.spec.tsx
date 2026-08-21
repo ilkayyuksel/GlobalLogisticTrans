@@ -11,7 +11,11 @@ import {
   listTripCustomProperties,
 } from "@/lib/api/fleet";
 import { getPricingSnapshot } from "@/lib/api/pricing";
-import { getTrip, updateTrip } from "@/lib/api/trips";
+import {
+  getTrip,
+  listTripDocuments,
+  updateTrip,
+} from "@/lib/api/trips";
 import type { Trip } from "@/lib/api/types";
 
 jest.mock("@/lib/api/trips");
@@ -121,6 +125,8 @@ function buildTrip(overrides: Partial<Trip> = {}): Trip {
     direction: null,
     vehicle: null,
     effectiveDriver: null,
+    latestUpdate: null,
+    costConfirmation: null,
     status: "OPEN",
     bookingNumber: "BK-2026-1001",
     containerNumber: null,
@@ -155,6 +161,11 @@ function vehiclePicker(): HTMLSelectElement {
 describe("The vehicle picker", () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    // The document history is its own component with its own tests; here it
+    // only has to answer so the rest of the page can render.
+    (
+      listTripDocuments as jest.MockedFunction<typeof listTripDocuments>
+    ).mockResolvedValue([]);
     getTripMock.mockResolvedValue(buildTrip());
     getPricingSnapshotMock.mockResolvedValue(null);
     listCustomPropertiesMock.mockResolvedValue([]);
@@ -353,6 +364,8 @@ describe("The vehicle picker", () => {
               isActive: true,
               source: "VEHICLE_ASSIGNMENT",
             },
+            latestUpdate: null,
+            costConfirmation: null,
           }),
         );
 

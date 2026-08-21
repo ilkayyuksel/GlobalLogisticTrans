@@ -3,6 +3,7 @@ import type {
   ChangeableTripStatus,
   Paginated,
   Trip,
+  TripDocument,
   TripGroup,
   TripStatus,
 } from "./types";
@@ -205,6 +206,25 @@ export function changeTripStatus(
  * exist: a Trip is never physically removed, and an HTTP DELETE would imply
  * that it is.
  */
+/**
+ * Every transport document that concerns this Trip, newest first.
+ *
+ * One request. The bytes are fetched through the existing PDF content endpoint
+ * using the id each entry carries — there is no second content route, and no
+ * storage path ever reaches this side.
+ */
+export async function listTripDocuments(
+  tripId: string,
+  signal?: AbortSignal,
+): Promise<TripDocument[]> {
+  const response = await request<{ items: TripDocument[] }>(
+    `${TRIPS_PATH}/${tripId}/documents`,
+    { signal },
+  );
+
+  return response.items;
+}
+
 export function deleteTrip(
   tripId: string,
   signal?: AbortSignal,

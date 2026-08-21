@@ -1,5 +1,6 @@
 import { Module } from "@nestjs/common";
 
+import { CostConfirmationModule } from "../cost-confirmations/cost-confirmation.module";
 import { DriverModule } from "../drivers/driver.module";
 import { VehicleAssignmentModule } from "../vehicle-assignments/vehicle-assignment.module";
 import { VehicleModule } from "../vehicles/vehicle.module";
@@ -7,6 +8,7 @@ import { DriverStatisticsController } from "./driver-statistics.controller";
 import { DriverStatisticsService } from "./driver-statistics.service";
 import { TripController } from "./trip.controller";
 import { TripGroupController } from "./trip-group.controller";
+import { TripDocumentsService } from "./trip-documents.service";
 import { TripPlanningDataService } from "./trip-planning-data.service";
 import { TripRepository } from "./trip.repository";
 import { TripRevisionService } from "./trip-revision.service";
@@ -35,7 +37,12 @@ import { TripService } from "./trip.service";
  * database access stays behind a single door.
  */
 @Module({
-  imports: [VehicleModule, DriverModule, VehicleAssignmentModule],
+  imports: [
+    VehicleModule,
+    DriverModule,
+    VehicleAssignmentModule,
+    CostConfirmationModule,
+  ],
   controllers: [TripController, TripGroupController, DriverStatisticsController],
   providers: [
     DriverStatisticsService,
@@ -43,6 +50,7 @@ import { TripService } from "./trip.service";
     TripRevisionService,
     TripRepository,
     TripPlanningDataService,
+    TripDocumentsService,
   ],
   // TripRevisionService is exported for the import boundary: a cancellation or
   // a revision arrives as a document, and the rules for both live in the Trip

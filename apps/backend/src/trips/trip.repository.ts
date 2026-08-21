@@ -2,6 +2,7 @@ import { Injectable } from "@nestjs/common";
 import { Prisma, Trip, TripGroup, TripStatus } from "@prisma/client";
 
 import { PdfDocumentRepository } from "../pdf-documents/pdf-document.repository";
+import { TripHistoryEvent } from "./trip-history";
 import { PrismaService } from "../prisma/prisma.service";
 
 /** The repositories one import writes through, bound to a single transaction. */
@@ -100,6 +101,9 @@ export function buildOrderBy(
   ];
 }
 
+/** Named here so the repository does not import the whole event vocabulary. */
+const UPDATE_APPLIED_EVENT: string = TripHistoryEvent.UpdateApplied;
+
 export type CreateTripData = Prisma.TripUncheckedCreateInput;
 export type UpdateTripData = Prisma.TripUncheckedUpdateInput;
 
@@ -189,6 +193,62 @@ export class TripRepository {
 
   findById(id: string): Promise<Trip | null> {
     return this.prisma.trip.findUnique({ where: { id } });
+  }
+
+  /**
+   * Appends events to the audit trail.
+   *
+   * Append-only: there is no update and no delete here, and there never will
+   * be — a record of what happened that can be rewritten is not a record. Many
+   * rows at once because ONE document produces one row per field it moved, and
+   * they must land together with the change they describe.
+   */
+  async recordHistory(
+    entries: readonly Prisma.TripHistoryUncheckedCreateInput[],
+  ): Promise<void> {
+    if (entries.length === 0) {
+      return;
+    }
+
+    await this.prisma.tripHistory.createMany({ data: [...entries] });
+  }
+
+  /** The document a Trip was created from. Read-only, for its history list. */
+  findPdfDocument(pdfDocumentId: string) {
+    return this.prisma.pdfDocument.findUnique({ where: { id: pdfDocumentId } });
+  }
+
+  /**
+   * A Trip's history, newest first, with the document each event came from.
+   *
+   * The document travels on the row, so a caller listing the PDFs of a Trip
+   * costs one query rather than one per event.
+   */
+  findHistoryForTrip(tripId: string) {
+    return this.prisma.tripHistory.findMany({
+      where: { tripId },
+      orderBy: { occurredAt: "desc" },
+      include: { pdfDocument: true },
+    });
+  }
+
+  /**
+   * The rows of the most recent APPLIED update of each Trip.
+   *
+   * One query for a whole page. Every applied-update row of the page is read
+   * and the newest occurrence per Trip is picked in memory: an update writes
+   * one row per changed field, so "the latest update" is a GROUP of rows
+   * sharing a document, not a single row that a `take: 1` could find.
+   */
+  findAppliedUpdateHistory(tripIds: readonly string[]) {
+    if (tripIds.length === 0) {
+      return Promise.resolve([]);
+    }
+
+    return this.prisma.tripHistory.findMany({
+      where: { tripId: { in: [...tripIds] }, eventType: UPDATE_APPLIED_EVENT },
+      orderBy: { occurredAt: "desc" },
+    });
   }
 
   /**

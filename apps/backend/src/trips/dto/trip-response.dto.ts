@@ -1,4 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from "@nestjs/swagger";
+
+import { CostConfirmationDto } from "../../cost-confirmations/dto/cost-confirmation-response.dto";
 import { Trip, TripDirection, TripStatus } from "@prisma/client";
 
 import { toIsoDate } from "../../common/dates";
@@ -123,6 +125,40 @@ export interface TripPlanningData {
   effectiveDriver: EffectiveDriverDto | null;
   /** In the properties' configured display order. Empty when none are assigned. */
   customProperties: TripCustomPropertySummaryDto[];
+  latestUpdate: LatestTripUpdateDto | null;
+  costConfirmation: CostConfirmationDto | null;
+}
+
+/**
+ * What the most recent APPLIED update document did to this Trip.
+ *
+ * Derived, never stored: it is the newest `UPDATE_APPLIED` event, read from the
+ * audit trail. A cancellation does not replace it and neither does the original
+ * import, so a cancelled Trip still reports the last update it received before
+ * it was cancelled.
+ *
+ * Null when no update has ever been applied. `changedFields` is EMPTY when an
+ * update arrived and changed nothing, which is a different fact and stays
+ * distinguishable.
+ */
+export class LatestTripUpdateDto {
+  @ApiProperty({ format: "date-time" })
+  occurredAt!: Date;
+
+  @ApiProperty({
+    type: [String],
+    description:
+      "The parser-controlled fields that update moved. Empty when it moved none.",
+    example: ["containerNumber", "originalPlanningDate"],
+  })
+  changedFields!: string[];
+
+  @ApiPropertyOptional({
+    format: "uuid",
+    nullable: true,
+    description: "The UPDATE document that caused it, for viewing or download.",
+  })
+  pdfDocumentId!: string | null;
 }
 
 export class TripResponseDto {
@@ -256,6 +292,22 @@ export class TripResponseDto {
   })
   effectiveDriver!: EffectiveDriverDto | null;
 
+  @ApiPropertyOptional({
+    type: LatestTripUpdateDto,
+    nullable: true,
+    description:
+      "The most recent applied UPDATE document, or null when there has been none. Derived from the audit trail; there is no UPDATED status.",
+  })
+  latestUpdate!: LatestTripUpdateDto | null;
+
+  @ApiPropertyOptional({
+    type: CostConfirmationDto,
+    nullable: true,
+    description:
+      "The cost Eucon confirmed for this Trip, or null. A Trip has at most ONE. Read-only, and never merged with the waiting time an operator entered: the minutes and the confirmed amount are different facts.",
+  })
+  costConfirmation!: CostConfirmationDto | null;
+
   @ApiProperty({ format: "date-time" })
   createdAt!: Date;
 
@@ -309,6 +361,8 @@ export function toTripResponse(
     internalNotes: trip.internalNotes,
     vehicle: planning.vehicle,
     effectiveDriver: planning.effectiveDriver,
+    latestUpdate: planning.latestUpdate,
+    costConfirmation: planning.costConfirmation,
     customProperties: planning.customProperties,
     createdAt: trip.createdAt,
     updatedAt: trip.updatedAt,

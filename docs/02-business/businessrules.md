@@ -56,6 +56,71 @@ Manual values entered by an administrator must never be overwritten automaticall
 
 The complete update history should remain traceable.
 
+### Every document is kept
+
+NEW, UPDATE and CANCEL documents are all stored, and none of them replaces
+another: an order that receives three updates and is then cancelled keeps all
+five documents. The original order is reached through the Trip itself; every
+later document through the audit trail, where the event it caused points at it.
+One document may concern several Trips - a Combination names two bookings - and
+is stored once, with one event per Trip.
+
+The action is recorded when the document arrives (`imported_email.import_type`,
+or MANUAL_UPLOAD when there is no email) and is never inferred from a filename.
+
+### An UPDATE for a booking we do not have
+
+Sometimes the original order never reaches us and the first document for a
+booking is a revision of it. The UPDATE then CREATES the Trip, from its own
+document:
+
+- the Trip is an ordinary imported Trip, status Open
+- it carries the parser-controlled values that document states
+- the operator-controlled fields stay empty, as they do for any import
+- its planning date and original planning date are the document's own date;
+  today's date is never used as a fallback
+- the UPDATE document becomes the Trip's source document, and its provenance
+  stays UPDATE - the action is what arrived
+
+This is NOT recorded as an update. There was no earlier state, so there is no
+change set, and no field change is invented. The event says what happened: an
+UPDATE document created this Trip because no Trip held its booking number. The
+interface shows the document as "Rit aangemaakt" and does NOT mark the Trip
+"Bijgewerkt", which means an existing Trip was revised.
+
+A later UPDATE for that booking is an ordinary revision, compared against the
+Trip as the first one created it. Everything else is unchanged: a NEW order for
+the booking runs into the duplicate rule, a CANCEL cancels it, and an UPDATE
+after cancellation or for a CLOSED Trip is refused exactly as before - never by
+creating a second Trip.
+
+### Every UPDATE has its own change set
+
+An UPDATE is compared against the Trip AS IT STANDS at that moment, never
+against the original order. Each update writes one audit row per field it moved,
+all pointing at that update's document, so three updates keep three separate
+answers. An update that moves nothing is still recorded, with an empty change
+set: the document arrived and was accepted.
+
+A value that returns to an earlier one counts as changed again, because the
+document said something the Trip did not.
+
+Only these fields may be changed by a document: container number, container
+type, terminal, destination city, destination country, the document's own date,
+start and end time, direction and parser metadata. Everything the operator owns
+is untouched.
+
+### The latest update is what the interface highlights
+
+A Trip reports its most recent APPLIED update. The fields that update moved are
+marked in the planning list and on the Trip page; when a newer update arrives,
+the previous update's fields stop being marked. The mark means "the latest
+update changed this", not "this was changed at some point".
+
+"Bijgewerkt" is a DERIVED marker shown beside the status of an OPEN Trip that
+has such an update. It is not a status: the lifecycle remains Open, Afgewerkt
+and Geannuleerd, and no transition leads to or from "Bijgewerkt".
+
 ---
 
 ## CANCEL
@@ -69,6 +134,124 @@ Instead they receive the status:
 Cancelled
 
 Cancelled trips remain available for history and exports.
+
+Cancellation is a SOFT cancellation: the Trip, its pricing, its custom
+properties and its group membership are all preserved.
+
+### Cancelled is terminal for automatic documents
+
+Once a Trip is Cancelled, no automatically processed PDF may move it again:
+
+- an UPDATE: document is stored and refused (`REFUSED_CANCELLED`)
+- a NEW: document does not create a second Trip — a cancelled Trip keeps its
+  booking number, so the import runs into the existing one
+- a second CANCEL: document reports `ALREADY_CANCELLED` and writes nothing
+
+The only way back to Open is the operator's explicit "Openen" action through
+the status endpoint. It changes the lifecycle state and nothing else, and it
+triggers no pricing.
+
+### Documents that could not be applied are still recorded
+
+An update after cancellation, a repeated cancellation, a cancellation of
+finished work and a new order for a booking number that is still held are all
+stored and recorded against the Trip they named. None of them changes it. The
+record says what arrived and why nothing moved.
+
+### Arrival order must not decide the outcome
+
+A mailbox is not a queue: an UPDATE: and a CANCEL: for the same booking may be
+delivered or retried in either order. Both
+
+    NEW -> UPDATE -> CANCEL
+
+and
+
+    NEW -> CANCEL -> UPDATE
+
+must end with the Trip Cancelled. Lifecycle correctness may never depend on the
+order documents are processed in — the rules above are what guarantee it, not
+the sequence of the scan.
+
+### No manual deletion
+
+Removing a transport by hand is not part of the workflow, and the Trips action
+menu offers no "Verwijderen". A transport leaves the planning because a CANCEL:
+document says so.
+
+---
+
+## COST CONFIRMATION
+
+Eucon sends a Cost Confirmation after we report a waiting time. It confirms the
+amount Eucon will pay for that waiting time.
+
+The email subject begins with
+
+COST CONFIRMATION
+
+and usually repeats the number and the booking:
+
+COST CONFIRMATION NR 4139505 ANRDUB2793105
+
+The subject is a hint. The PDF is the document, and its body is what is read.
+When the two disagree the confirmation is REFUSED rather than resolved: two
+different bookings in one message means one of them is wrong, and recording an
+amount against either would be a guess about somebody else's money.
+
+### What is read
+
+From the block Eucon prints at the top of the notification:
+
+    COST CONFIRMATION NR 4132482 ANRDUB2789089 EUCU4530818
+    Costcode: WAIT - Waiting Time
+    Amount: EUR 25.00
+
+the number, the booking number, the cost code and the amount. The container
+reference at the end of the first line is optional — one real document prints
+`????` where the others print a reference — and an unreadable one is recorded as
+absent rather than refusing the confirmation.
+
+### What it does
+
+The Trip is found by EXACT booking number, like every other later document. The
+confirmation is stored with its PDF, and:
+
+- it never creates a Trip
+- it never changes a status, a vehicle, a driver or a planning date
+- it never changes the waiting time
+
+A confirmation for a booking nobody holds is refused and nothing is written.
+The email stays unread, so the next scan offers it again once the Trip exists.
+
+### It is not the waiting time
+
+Waiting time is minutes an operator enters, and the Pricing Engine prices them
+through the configured rule. A Cost Confirmation is the money Eucon confirms for
+those minutes. Both belong to the same Trip and neither replaces the other. The
+confirmed amount is shown separately and is NOT merged into the WAITING_TIME
+pricing line.
+
+### It cannot be edited
+
+The amount is a statement by somebody else. There is no endpoint to create,
+change or delete a confirmation: it is written only by the import that read its
+document, and it is displayed read-only.
+
+### One per Trip
+
+A Trip has at most ONE Cost Confirmation. Eucon confirms a Trip's waiting time
+once, and the first confirmation is the authoritative one. The database enforces
+it: `cost_confirmation.trip_id` is unique.
+
+The same confirmation arriving twice — the same number for the same Trip, under
+any filename — is recorded once and reported as already recorded.
+
+A DIFFERENT confirmation for a Trip that already has one is REFUSED. The
+existing amount stands: nothing is overwritten, nothing is summed, no second
+record is created, and the Trip itself is not touched. The refusal is recorded
+against the Trip with the document that carried it, so the arrival can still be
+found, and the email is left unread like any other refused document.
 
 ---
 

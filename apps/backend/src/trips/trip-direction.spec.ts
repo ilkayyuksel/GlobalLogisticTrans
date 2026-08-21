@@ -48,6 +48,8 @@ function buildTrip(direction: TripDirection | null) {
 const NO_PLANNING = {
   vehicle: null,
   effectiveDriver: null,
+  latestUpdate: null,
+  costConfirmation: null,
   customProperties: [],
 };
 

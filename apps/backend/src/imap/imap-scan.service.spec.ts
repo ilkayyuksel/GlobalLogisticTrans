@@ -120,12 +120,14 @@ describe("ImapScanService", () => {
         combination: false,
         cancellations: [],
         revisions: [],
+        costConfirmations: [],
       }),
       cancel: jest.fn().mockResolvedValue({
         trips: [],
         combination: false,
         cancellations: [{ bookingNumber: "ANRDUB2602247", outcome: "CANCELLED" }],
         revisions: [],
+        costConfirmations: [],
       }),
       revise: jest.fn().mockResolvedValue({
         trips: [],
@@ -472,6 +474,7 @@ describe("ImapScanService", () => {
           combination: false,
           cancellations: [],
           revisions: [],
+          costConfirmations: [],
         });
 
       const result = await service.scan();

@@ -38,6 +38,8 @@ function trip(overrides: Partial<Trip> = {}): Trip {
       isActive: true,
       source: "VEHICLE_ASSIGNMENT",
     },
+    latestUpdate: null,
+    costConfirmation: null,
     ...overrides,
   } as Trip;
 }

@@ -17,6 +17,7 @@ import {
   getTrip,
   restoreTrip,
   updateTrip,
+  listTripDocuments,
 } from "@/lib/api/trips";
 import type { PricingSnapshot, Trip, TripPricingItem } from "@/lib/api/types";
 
@@ -130,6 +131,8 @@ function buildTrip(overrides: Partial<Trip> = {}): Trip {
     direction: null,
     vehicle: null,
     effectiveDriver: null,
+    latestUpdate: null,
+    costConfirmation: null,
     status: "OPEN",
     bookingNumber: "ANRDUB2602247",
     containerNumber: "PVDU 301326/0",
@@ -197,6 +200,11 @@ describe("Trip management", () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    // The document history is its own component with its own tests; here it
+    // only has to answer so the rest of the page can render.
+    (
+      listTripDocuments as jest.MockedFunction<typeof listTripDocuments>
+    ).mockResolvedValue([]);
     getTripMock.mockResolvedValue(buildTrip());
     getPricingSnapshotMock.mockResolvedValue(null);
     listCustomPropertiesMock.mockResolvedValue([]);

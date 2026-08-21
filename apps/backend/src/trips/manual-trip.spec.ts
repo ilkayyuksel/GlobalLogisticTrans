@@ -13,6 +13,7 @@ import { VehicleService } from "../vehicles/vehicle.service";
 import { TripController } from "./trip.controller";
 import { TripPlanningDataService } from "./trip-planning-data.service";
 import { TripRepository } from "./trip.repository";
+import { TripDocumentsService } from "./trip-documents.service";
 import { TripService } from "./trip.service";
 
 /**
@@ -85,6 +86,12 @@ describe("Manual Trip creation", () => {
       controllers: [TripController],
       providers: [
         TripService,
+        // The documents endpoint has its own tests; this controller only needs
+        // it to exist so the rest of the routes can be exercised.
+        {
+          provide: TripDocumentsService,
+          useValue: { findForTrip: jest.fn().mockResolvedValue({ items: [] }) },
+        },
         { provide: TripRepository, useValue: repository },
         {
           provide: VehicleService,
@@ -110,6 +117,8 @@ describe("Manual Trip creation", () => {
               Promise.resolve({
                 vehicle: null,
                 effectiveDriver: null,
+                latestUpdate: null,
+                costConfirmation: null,
                 customProperties: [],
               }),
             resolveMany: () => Promise.resolve(new Map()),

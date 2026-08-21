@@ -37,6 +37,8 @@ export function buildTrip(overrides: Partial<Trip> = {}): Trip {
       isActive: true,
       source: "VEHICLE_ASSIGNMENT",
     },
+    latestUpdate: null,
+    costConfirmation: null,
     status: "OPEN",
     bookingNumber: "ANRDUB2602247",
     containerNumber: "MSKU1234567",

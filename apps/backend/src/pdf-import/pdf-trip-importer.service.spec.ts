@@ -2,6 +2,7 @@ import { ImportSource } from "@prisma/client";
 import type { ParseResult, ParsedTrip } from "@tms/parser";
 
 import { AppLoggerService } from "../logger/app-logger.service";
+import { CostConfirmationService } from "../cost-confirmations/cost-confirmation.service";
 import { PdfDocumentService } from "../pdf-documents/pdf-document.service";
 import { TripRevisionService } from "../trips/trip-revision.service";
 import { TripService } from "../trips/trip.service";
@@ -128,6 +129,13 @@ describe("PdfTripImporter", () => {
       tripService as unknown as TripService,
       tripRevision as unknown as TripRevisionService,
       pdfDocumentService as unknown as PdfDocumentService,
+      {
+        record: jest.fn().mockResolvedValue({
+          outcome: "RECORDED",
+          confirmation: null,
+        }),
+        findForTrips: jest.fn().mockResolvedValue(new Map()),
+      } as unknown as CostConfirmationService,
       logger as unknown as AppLoggerService,
     );
   });

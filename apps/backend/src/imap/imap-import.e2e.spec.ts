@@ -9,6 +9,7 @@ import { DomainEventBus } from "../common/events/domain-event-bus";
 import { DriverService } from "../drivers/driver.service";
 import { AppLoggerService } from "../logger/app-logger.service";
 import { PdfDocumentRepository } from "../pdf-documents/pdf-document.repository";
+import { CostConfirmationService } from "../cost-confirmations/cost-confirmation.service";
 import { PdfDocumentService } from "../pdf-documents/pdf-document.service";
 import { PdfTripImporter } from "../pdf-import/pdf-trip-importer.service";
 import { TripRepository } from "../trips/trip.repository";
@@ -85,12 +86,18 @@ describe("IMAP import, end to end with a real transport order", () => {
   let storageDirectory: string;
   let createdTrips: Record<string, unknown>[];
   let createdPdfDocuments: Record<string, unknown>[];
+  /** Every audit-trail row the scan wrote, in the order it wrote them. */
+  let recordedHistory: Record<string, unknown>[];
+  /** Documents compensated away after a failure. */
+  let deletedPdfDocuments: string[];
   let session: {
     findCandidates: jest.Mock;
     downloadAttachment: jest.Mock;
     markSeen: jest.Mock;
   };
   let importedEmailStatus: { id: string; status: string; processedAt: unknown };
+  /** The action the scan recorded for the message it processed. */
+  let startedImportType: string | null;
   /** The import type of every email the scan refused to carry out. */
   let ignoredImports: string[];
   let scanService: ImapScanService;
@@ -112,6 +119,10 @@ describe("IMAP import, end to end with a real transport order", () => {
       create: jest.fn((data: Record<string, unknown>) => {
         createdPdfDocuments.push(data);
         return Promise.resolve({ id: PDF_DOCUMENT_ID, ...data });
+      }),
+      deleteById: jest.fn((id: string) => {
+        deletedPdfDocuments.push(id);
+        return Promise.resolve();
       }),
     } as unknown as PdfDocumentRepository;
 
@@ -146,6 +157,11 @@ describe("IMAP import, end to end with a real transport order", () => {
         const trip = createdTrips.find((candidate) => candidate.id === id);
         Object.assign(trip as Record<string, unknown>, { status });
         return Promise.resolve(trip);
+      }),
+      /** Append-only, like the real one: rows accumulate and never change. */
+      recordHistory: jest.fn((entries: Record<string, unknown>[]) => {
+        recordedHistory.push(...entries);
+        return Promise.resolve();
       }),
       runInTransaction: jest.fn((work: (repository: unknown) => unknown) =>
         work(tripRepository),
@@ -228,12 +244,22 @@ describe("IMAP import, end to end with a real transport order", () => {
       tripService,
       new TripRevisionService(tripRepository, logger),
       pdfDocumentService,
+      {
+        record: jest.fn().mockResolvedValue({
+          outcome: "RECORDED",
+          confirmation: null,
+        }),
+        findForTrips: jest.fn().mockResolvedValue(new Map()),
+      } as unknown as CostConfirmationService,
       logger,
     );
 
     const importedEmailService = {
       findByMessageId: jest.fn().mockResolvedValue(null),
-      startProcessing: jest.fn().mockResolvedValue({ id: IMPORTED_EMAIL_ID }),
+      startProcessing: jest.fn((_message: unknown, importType: unknown) => {
+        startedImportType = String(importType);
+        return Promise.resolve({ id: IMPORTED_EMAIL_ID });
+      }),
       recordIgnored: jest.fn((_message: unknown, importType: unknown) => {
         ignoredImports.push(String(importType));
         return Promise.resolve({ id: IMPORTED_EMAIL_ID });
@@ -278,7 +304,10 @@ describe("IMAP import, end to end with a real transport order", () => {
     storageDirectory = await mkdtemp(join(tmpdir(), "tms-imap-e2e-"));
     createdTrips = [];
     createdPdfDocuments = [];
+    recordedHistory = [];
+    deletedPdfDocuments = [];
     importedEmailStatus = { id: "", status: "", processedAt: null };
+    startedImportType = null;
     ignoredImports = [];
 
     session = {
@@ -534,6 +563,16 @@ describe("IMAP import, end to end with a real transport order", () => {
       expect(result).toMatchObject({ imported: 1, failed: 0 });
       expect(importedEmailStatus.status).toBe("PROCESSED");
       expect(session.markSeen).toHaveBeenCalled();
+
+      // The cancellation document is KEPT: it is the reason the Trip left the
+      // planning, and the event recording that points straight at it.
+      expect(createdPdfDocuments).toHaveLength(2);
+      expect(recordedHistory).toContainEqual(
+        expect.objectContaining({
+          eventType: "CANCELLED",
+          pdfDocumentId: PDF_DOCUMENT_ID,
+        }),
+      );
     });
 
     /* A cancellation that matches nothing creates nothing, and still succeeds. */
@@ -545,15 +584,23 @@ describe("IMAP import, end to end with a real transport order", () => {
       const result = await scanService.scan();
 
       expect(createdTrips).toEqual([]);
-      expect(createdPdfDocuments).toEqual([]);
       expect(result).toMatchObject({ imported: 1, failed: 0 });
       expect(importedEmailStatus.status).toBe("PROCESSED");
+      /*
+       * The document is still kept. It arrived and was accepted; that it named
+       * a booking we do not have is a fact about our records, not a reason to
+       * throw the sender's document away. There is no Trip to record an event
+       * against, which is why the history stays empty.
+       */
+      expect(createdPdfDocuments).toHaveLength(1);
+      expect(recordedHistory).toEqual([]);
     });
 
     /*
      * An UPDATE email revises the Trip that already exists. The document here
-     * is the same order, so the revision is a no-op in values — what it proves
-     * is that no SECOND Trip appears and no PdfDocument is stored.
+     * is the same order, so the revision changes no value — which is exactly
+     * the case worth pinning: no SECOND Trip appears, the document is still
+     * kept, and the event says plainly that nothing moved.
      */
     it("revises the existing Trip an UPDATE: email names", async () => {
       messageCarrying("NEW/1page.pdf");
@@ -566,26 +613,44 @@ describe("IMAP import, end to end with a real transport order", () => {
       const result = await scanService.scan();
 
       expect(createdTrips).toHaveLength(1);
-      expect(createdPdfDocuments).toHaveLength(1);
       expect(result).toMatchObject({ imported: 1, failed: 0 });
       expect(session.markSeen).toHaveBeenCalledTimes(2);
+
+      // Two documents: the order, and the update that repeated it.
+      expect(createdPdfDocuments).toHaveLength(2);
+      expect(recordedHistory).toEqual([
+        expect.objectContaining({
+          eventType: "UPDATE_APPLIED",
+          pdfDocumentId: PDF_DOCUMENT_ID,
+          previousValue: undefined,
+          newValue: undefined,
+        }),
+      ]);
     });
 
     /*
-     * A revision of a Trip we do not have is a business exception, not new
-     * work. It fails, and the message stays unread so it is offered again.
+     * An UPDATE: email for a booking nobody holds CREATES the Trip. The order
+     * it revises never reached us, and refusing it would leave real transport
+     * out of the planning.
      */
-    it("fails an UPDATE: email that matches no Trip, leaving it unread", async () => {
+    it("creates a Trip from an UPDATE: email that matches none", async () => {
       messageCarrying("NEW/1page.pdf", {
         subject: "UPDATE: Trucking Order 1212816",
       });
 
       const result = await scanService.scan();
 
-      expect(createdTrips).toEqual([]);
-      expect(result).toMatchObject({ failed: 1, imported: 0 });
-      expect(importedEmailStatus.status).toBe("FAILED");
-      expect(session.markSeen).not.toHaveBeenCalled();
+      expect(createdTrips).toHaveLength(1);
+      expect(createdTrips[0].status).toBe(TripStatus.OPEN);
+      expect(result).toMatchObject({ imported: 1, failed: 0 });
+      expect(importedEmailStatus.status).toBe("PROCESSED");
+      expect(session.markSeen).toHaveBeenCalled();
+      // Its document is kept: it is that Trip's source document now.
+      expect(createdPdfDocuments).toHaveLength(1);
+      expect(deletedPdfDocuments).toEqual([]);
+      expect(recordedHistory).toContainEqual(
+        expect.objectContaining({ eventType: "UPDATE_CREATED_TRIP" }),
+      );
     });
 
     /*
@@ -600,8 +665,220 @@ describe("IMAP import, end to end with a real transport order", () => {
       const result = await scanService.scan();
 
       expect(createdTrips).toEqual([]);
-      expect(createdPdfDocuments).toEqual([]);
       expect(result).toMatchObject({ imported: 1, failed: 0 });
+      // Kept like any other cancellation: the stamp is the instruction.
+      expect(createdPdfDocuments).toHaveLength(1);
+    });
+
+
+    /**
+     * ── THE REAL PAIR, THROUGH THE MAILBOX ──────────────────────────────────
+     * One booking, two real documents from the fixture folders, delivered as
+     * three emails. This is the whole workflow at the boundary it actually
+     * arrives at: the action comes from the SUBJECT, the bytes are the sender's
+     * own, and every step is recorded against the same Trip.
+     * ────────────────────────────────────────────────────────────────────────
+     */
+    describe("a real order, revised and then cancelled", () => {
+      const PLANNED = "UPDATE/transportorder1369485.pdf";
+      const CANCELLED = "CANCEL/cancelled_transportorder1369485.pdf";
+      const BOOKING = "ANRDUB2790203";
+
+      it("creates, revises and cancels one Trip", async () => {
+        messageCarrying(PLANNED, {
+          messageId: "<real-new@carrier.test>",
+          subject: "NEW: Trucking Order 1369485",
+        });
+        await scanService.scan();
+
+        expect(createdTrips).toHaveLength(1);
+        expect(createdTrips[0].bookingNumber).toBe(BOOKING);
+        expect(createdTrips[0].status).toBe(TripStatus.OPEN);
+
+        messageCarrying(PLANNED, {
+          messageId: "<real-update@carrier.test>",
+          subject: "UPDATE: Trucking Order 1369485",
+        });
+        await scanService.scan();
+
+        expect(createdTrips).toHaveLength(1);
+        expect(recordedHistory).toContainEqual(
+          expect.objectContaining({ eventType: "UPDATE_APPLIED" }),
+        );
+
+        messageCarrying(CANCELLED, {
+          messageId: "<real-cancel@carrier.test>",
+          subject: "CANCEL: Trucking Order 1369485",
+        });
+        const result = await scanService.scan();
+
+        expect(createdTrips[0].status).toBe(TripStatus.CANCELLED);
+        expect(result).toMatchObject({ imported: 1, failed: 0 });
+        // Three emails, three documents, all kept.
+        expect(createdPdfDocuments).toHaveLength(3);
+        expect(importedEmailStatus.status).toBe("PROCESSED");
+        expect(session.markSeen).toHaveBeenCalledTimes(3);
+      });
+
+      /** The dangerous order: the cancellation first, the revision after it. */
+      it("keeps the Trip cancelled when the revision arrives last", async () => {
+        messageCarrying(PLANNED, {
+          messageId: "<real-new@carrier.test>",
+          subject: "NEW: Trucking Order 1369485",
+        });
+        await scanService.scan();
+
+        messageCarrying(CANCELLED, {
+          messageId: "<real-cancel@carrier.test>",
+          subject: "CANCEL: Trucking Order 1369485",
+        });
+        await scanService.scan();
+
+        messageCarrying(PLANNED, {
+          messageId: "<real-late-update@carrier.test>",
+          subject: "UPDATE: Trucking Order 1369485",
+        });
+        const result = await scanService.scan();
+
+        expect(createdTrips[0].status).toBe(TripStatus.CANCELLED);
+        // The refusal is a failure for the MESSAGE — it stays unread and is
+        // offered again — while the Trip and its documents are untouched.
+        expect(result).toMatchObject({ failed: 1, imported: 0 });
+        expect(importedEmailStatus.status).toBe("FAILED");
+        expect(recordedHistory).toContainEqual(
+          expect.objectContaining({ eventType: "UPDATE_REFUSED" }),
+        );
+      });
+
+      /** A second NEW for the same booking must not create a second Trip. */
+      it("creates no second Trip when the order is re-sent after cancelling", async () => {
+        messageCarrying(PLANNED, {
+          messageId: "<real-new@carrier.test>",
+          subject: "NEW: Trucking Order 1369485",
+        });
+        await scanService.scan();
+
+        messageCarrying(CANCELLED, {
+          messageId: "<real-cancel@carrier.test>",
+          subject: "CANCEL: Trucking Order 1369485",
+        });
+        await scanService.scan();
+
+        messageCarrying(PLANNED, {
+          messageId: "<real-new-again@carrier.test>",
+          subject: "NEW: Trucking Order 1369485",
+        });
+        const result = await scanService.scan();
+
+        expect(createdTrips).toHaveLength(1);
+        expect(createdTrips[0].status).toBe(TripStatus.CANCELLED);
+        // Its Trips already exist, which is not a failure.
+        expect(result).toMatchObject({ alreadyProcessed: 1, failed: 0 });
+        expect(recordedHistory).toContainEqual(
+          expect.objectContaining({ eventType: "NEW_REFUSED_DUPLICATE" }),
+        );
+      });
+    });
+
+
+    /**
+     * ── A COST CONFIRMATION THROUGH THE MAILBOX ─────────────────────────────
+     * Eucon sends these after we report a waiting time. The subject announces
+     * the action, the PDF states the amount, and the Trip it names already
+     * exists — which is the point: a confirmation is read by its own reader
+     * precisely so the transport order printed inside it never becomes a
+     * second Trip.
+     * ────────────────────────────────────────────────────────────────────────
+     */
+    describe("a cost confirmation", () => {
+      const CONFIRMATION =
+        "Cost-Combination/COST_CONFIRMATION_NR_4132482__ANRDUB2789089__EUCU4530818.pdf";
+      const BOOKING = "ANRDUB2789089";
+
+      /** The Trip the confirmation names, as an ordinary order would create it. */
+      function existingTrip() {
+        createdTrips.push({
+          id: "trip-existing",
+          bookingNumber: BOOKING,
+          status: TripStatus.OPEN,
+          waitingTimeMinutes: 150,
+          vehicleId: "vehicle-1",
+        } as unknown as Record<string, unknown>);
+      }
+
+      it("records the confirmed amount against the Trip it names", async () => {
+        existingTrip();
+        messageCarrying(CONFIRMATION, {
+          messageId: "<cc-4132482@carrier.test>",
+          subject: "COST CONFIRMATION NR 4132482 ANRDUB2789089",
+        });
+
+        const result = await scanService.scan();
+
+        expect(result).toMatchObject({ imported: 1, failed: 0 });
+        expect(importedEmailStatus.status).toBe("PROCESSED");
+        expect(session.markSeen).toHaveBeenCalled();
+        // The document is kept, and no Trip was created.
+        expect(createdPdfDocuments).toHaveLength(1);
+        expect(createdTrips).toHaveLength(1);
+      });
+
+      it("is recorded as its own kind of email", async () => {
+        existingTrip();
+        messageCarrying(CONFIRMATION, {
+          messageId: "<cc-4132482@carrier.test>",
+          subject: "COST CONFIRMATION NR 4132482 ANRDUB2789089",
+        });
+
+        await scanService.scan();
+
+        // Not NEW, not UPDATE, not CANCEL: /imports must be able to tell.
+        expect(startedImportType).toBe("COST_CONFIRMATION");
+      });
+
+      it("changes nothing about the Trip", async () => {
+        existingTrip();
+        const before = { ...createdTrips[0] };
+        messageCarrying(CONFIRMATION, {
+          messageId: "<cc-4132482@carrier.test>",
+          subject: "COST CONFIRMATION NR 4132482 ANRDUB2789089",
+        });
+
+        await scanService.scan();
+
+        // Not the status, and above all not the waiting time it confirms.
+        expect(createdTrips[0]).toEqual(before);
+      });
+
+      it("leaves an unknown booking retryable, creating nothing", async () => {
+        messageCarrying(CONFIRMATION, {
+          messageId: "<cc-unknown@carrier.test>",
+          subject: "COST CONFIRMATION NR 4132482 ANRDUB2789089",
+        });
+
+        const result = await scanService.scan();
+
+        expect(result).toMatchObject({ failed: 1, imported: 0 });
+        expect(importedEmailStatus.status).toBe("FAILED");
+        // Unread, so the next scan offers it again once the Trip exists.
+        expect(session.markSeen).not.toHaveBeenCalled();
+        expect(createdTrips).toEqual([]);
+        expect(createdPdfDocuments).toEqual([]);
+      });
+
+      it("refuses a subject that contradicts its document", async () => {
+        existingTrip();
+        messageCarrying(CONFIRMATION, {
+          messageId: "<cc-mismatch@carrier.test>",
+          subject: "COST CONFIRMATION NR 9999999 ANRDUB9999999",
+        });
+
+        const result = await scanService.scan();
+
+        expect(result).toMatchObject({ failed: 1, imported: 0 });
+        expect(session.markSeen).not.toHaveBeenCalled();
+        expect(createdPdfDocuments).toEqual([]);
+      });
     });
 
     it("marks an unreadable attachment FAILED and leaves it unread", async () => {
@@ -631,15 +908,18 @@ describe("IMAP import, end to end with a real transport order", () => {
       expect(readdirSync(storageDirectory)).toEqual([]);
     });
 
-    /* A cancellation stores no document either: it creates no Trip to own one. */
-    it("stores no file for a cancellation", async () => {
+    /*
+     * A cancellation DOES store its document: it is the reason a Trip left the
+     * planning, and the event recording that points at it.
+     */
+    it("keeps the file of a cancellation", async () => {
       messageCarrying("NEW/1page.pdf", {
         subject: "CANCEL: Trucking Order 1212816",
       });
 
       await scanService.scan();
 
-      expect(readdirSync(storageDirectory)).toEqual([]);
+      expect(readdirSync(storageDirectory)).toHaveLength(1);
     });
   });
 });

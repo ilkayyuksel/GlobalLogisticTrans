@@ -38,4 +38,16 @@ export class PdfDocumentRepository {
   create(data: CreatePdfDocumentData): Promise<PdfDocument> {
     return this.prisma.pdfDocument.create({ data });
   }
+
+  /**
+   * Removes a row written for an import that then failed.
+   *
+   * The one deletion in this domain, and it exists only as the compensating
+   * half of `persist`. A document that was genuinely imported is never removed:
+   * every Trip and every history event that references it would lose its
+   * evidence, which the Restrict foreign keys also refuse.
+   */
+  async deleteById(id: string): Promise<void> {
+    await this.prisma.pdfDocument.delete({ where: { id } });
+  }
 }
