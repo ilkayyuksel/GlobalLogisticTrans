@@ -36,6 +36,10 @@ function buildDocument(overrides: Partial<TripDocument> = {}): TripDocument {
     outcome: "containerNumber: ABC123 → XYZ456",
     applied: true,
     createdTrip: false,
+    receivedAt: "2026-08-20T08:00:00.000Z",
+    // Which document governs the Trip is the backend's answer; most entries in
+    // a history are not it.
+    isEffective: false,
     ...overrides,
   };
 }
@@ -263,5 +267,82 @@ describe("a document that created the Trip", () => {
     renderHistory();
 
     expect(await screen.findByText("Sefer oluşturuldu")).toBeInTheDocument();
+  });
+});
+
+/**
+ * ── WHICH DOCUMENT THE TRIP CURRENTLY REFLECTS ──────────────────────────────
+ * Documents do not arrive in the order they were sent, so the newest entry in
+ * this list is not always the one in force: a CANCEL posted first can be
+ * processed last. The backend decides which governs the Trip, from the order the
+ * documents ARRIVED, and marks it. Nothing here compares dates.
+ * ────────────────────────────────────────────────────────────────────────────
+ */
+describe("the document currently in force", () => {
+  it("is marked, and only it", async () => {
+    listMock.mockResolvedValue([
+      buildDocument({ pdfDocumentId: "pdf-2", originalFilename: "cancel.pdf" }),
+      buildDocument({
+        pdfDocumentId: "pdf-1",
+        originalFilename: "update.pdf",
+        isEffective: true,
+      }),
+    ]);
+
+    renderHistory();
+    await screen.findByText("update.pdf");
+
+    expect(screen.getAllByText("Huidig document")).toHaveLength(1);
+  });
+
+  /**
+   * The one that matters: the marked document is NOT the newest in the list.
+   * A UI that worked it out from the order would put the badge on cancel.pdf.
+   */
+  it("marks the document the backend named, not the first in the list", async () => {
+    listMock.mockResolvedValue([
+      buildDocument({ pdfDocumentId: "pdf-2", originalFilename: "cancel.pdf" }),
+      buildDocument({
+        pdfDocumentId: "pdf-1",
+        originalFilename: "update.pdf",
+        isEffective: true,
+      }),
+    ]);
+
+    renderHistory();
+    const entry = (await screen.findByText("update.pdf")).closest(
+      "li",
+    ) as HTMLElement;
+
+    expect(within(entry).getByText("Huidig document")).toBeInTheDocument();
+  });
+
+  it("marks nothing when no document governs the Trip", async () => {
+    listMock.mockResolvedValue([buildDocument()]);
+
+    renderHistory();
+    await screen.findByText("transportorder1370334.pdf");
+
+    expect(screen.queryByText("Huidig document")).toBeNull();
+  });
+
+  it("is translated", async () => {
+    window.localStorage.setItem("tms.language", "tr");
+    listMock.mockResolvedValue([buildDocument({ isEffective: true })]);
+
+    renderHistory();
+
+    expect(await screen.findByText("Geçerli belge")).toBeInTheDocument();
+  });
+
+  it.each(["light", "dark"])("uses design tokens in %s mode", async (theme) => {
+    document.documentElement.classList.toggle("dark", theme === "dark");
+    listMock.mockResolvedValue([buildDocument({ isEffective: true })]);
+
+    renderHistory();
+    const badge = await screen.findByText("Huidig document");
+
+    expect(badge.className).toMatch(/bg-success/);
+    expect(badge.className).not.toMatch(/#[0-9a-f]{3,8}\b/i);
   });
 });

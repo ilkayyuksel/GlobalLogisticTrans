@@ -129,6 +129,15 @@ function DocumentRow({
           {document.applied ? null : (
             <Badge tone="neutral">{t("tripDocuments.notApplied")}</Badge>
           )}
+          {/*
+            Which document the Trip currently reflects. Documents do not arrive
+            in the order they were sent, so the newest entry in this list is not
+            always the one in force — the backend says which is, and this shows
+            its answer rather than guessing from the dates.
+          */}
+          {document.isEffective ? (
+            <Badge tone="success">{t("tripDocuments.effective")}</Badge>
+          ) : null}
         </span>
 
         <span className="flex items-center gap-3">

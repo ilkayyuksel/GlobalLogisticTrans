@@ -296,6 +296,18 @@ export interface TripDocument {
    * such a Trip is never marked "Bijgewerkt".
    */
   createdTrip: boolean;
+  /**
+   * When the email carrying this document was received. Null for one uploaded
+   * by hand, which has no email — `occurredAt` is then the upload time.
+   */
+  receivedAt: string | null;
+  /**
+   * True for the one document that currently governs the Trip.
+   *
+   * The backend decides it, from the order the documents ARRIVED rather than
+   * the order they were processed in. Nothing here compares timestamps.
+   */
+  isEffective: boolean;
 }
 
 export interface CustomProperty {

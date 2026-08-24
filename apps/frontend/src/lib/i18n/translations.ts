@@ -197,6 +197,7 @@ const nl = {
   "tripDocuments.changed": "Gewijzigd:",
   "tripDocuments.changedNothing": "Deze update wijzigde niets.",
   "tripDocuments.notApplied": "Niet toegepast",
+  "tripDocuments.effective": "Huidig document",
   "tripDocuments.note":
     "Elk ontvangen transportdocument blijft bewaard, ook wanneer het niets kon wijzigen.",
 
@@ -907,6 +908,7 @@ const tr: Translations = {
   "tripDocuments.changed": "Değişen:",
   "tripDocuments.changedNothing": "Bu güncelleme hiçbir şeyi değiştirmedi.",
   "tripDocuments.notApplied": "Uygulanmadı",
+  "tripDocuments.effective": "Geçerli belge",
   "tripDocuments.note":
     "Alınan her taşıma belgesi, hiçbir şeyi değiştiremese bile saklanır.",
 
