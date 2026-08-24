@@ -4,6 +4,7 @@ import { DomainEventBus } from "../common/events/domain-event-bus";
 import { DriverService } from "../drivers/driver.service";
 import { AppLoggerService } from "../logger/app-logger.service";
 import { VehicleService } from "../vehicles/vehicle.service";
+import { AutomaticFlatPropertyService } from "./automatic-flat.service";
 import { TripPlanningDataService } from "./trip-planning-data.service";
 import { TripRepository } from "./trip.repository";
 import { TripService } from "./trip.service";
@@ -61,6 +62,10 @@ describe("Trip filter options", () => {
             ),
           ),
       } as unknown as TripPlanningDataService,
+      {
+        applyToNewTrip: jest.fn(),
+        synchronise: jest.fn(),
+      } as unknown as AutomaticFlatPropertyService,
       { publish: jest.fn() } as unknown as DomainEventBus,
       {
         setContext: jest.fn(),

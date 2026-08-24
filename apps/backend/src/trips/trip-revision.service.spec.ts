@@ -2,6 +2,8 @@ import { Prisma, Trip, TripStatus } from "@prisma/client";
 
 import { AppLoggerService } from "../logger/app-logger.service";
 import { ImportedTripData } from "./import-trips.command";
+import { AutomaticFlatPropertyService } from "./automatic-flat.service";
+import { stubTripWriteTransaction } from "./trip-write-transaction.double";
 import { TripRevisionService } from "./trip-revision.service";
 import { TripRepository } from "./trip.repository";
 
@@ -75,6 +77,7 @@ describe("TripRevisionService", () => {
     update: jest.Mock;
     recordHistory: jest.Mock;
     runInTransaction: jest.Mock;
+    runTripWriteTransaction: jest.Mock;
   };
   let service: TripRevisionService;
 
@@ -117,10 +120,18 @@ describe("TripRevisionService", () => {
       runInTransaction: jest.fn((work: (repository: unknown) => unknown) =>
         work(repository),
       ),
+      // Replaced below: it hands out this very double, which does not exist yet.
+      runTripWriteTransaction: jest.fn(),
     };
+
+    repository.runTripWriteTransaction = stubTripWriteTransaction(repository);
 
     service = new TripRevisionService(
       repository as unknown as TripRepository,
+      {
+        applyToNewTrip: jest.fn(),
+        synchronise: jest.fn(),
+      } as unknown as AutomaticFlatPropertyService,
       {
         setContext: jest.fn(),
         log: jest.fn(),

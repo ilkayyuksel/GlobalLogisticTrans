@@ -499,6 +499,117 @@ describe("address", () => {
     });
   });
 
+  /**
+   * ── A PRINTED LINE SPLIT ACROSS TWO FRAGMENTS ─────────────────────────────
+   * A PDF stores positioned runs of text, not lines. A wide gap inside a line
+   * ends one run and starts another, so
+   *
+   *     62223            SAINT LAURENT BLANGY
+   *
+   * reaches the parser as two fragments on one row. Reading only the run that
+   * starts at the address column threw the city away and left the block ending
+   * in a bare postcode, which no rule can read.
+   *
+   * The row is joined instead — geometry, not a guess about which fragment
+   * looks like a city — and the boundary is the next COLUMN, so the sender's
+   * remarks can never be joined onto the address.
+   * ──────────────────────────────────────────────────────────────────────────
+   */
+  describe("a line the PDF split into two fragments", () => {
+    /** The same block, with the last line broken in two at a wide gap. */
+    function splitLastLine(
+      lines: string[],
+      tail: string,
+      options: { remarks?: string } = {},
+    ): Fragment[] {
+      const fragments = addressBlock(lines);
+      const lastY = 380 - (lines.length - 1) * 12;
+
+      fragments.push({ page: 1, x: 126, y: lastY, text: tail });
+
+      if (options.remarks !== undefined) {
+        // The next column, on the label's own row, exactly as the form prints it.
+        fragments.push({ page: 1, x: 295, y: 380, text: "Remarks:" });
+        fragments.push({ page: 1, x: 350, y: lastY, text: options.remarks });
+      }
+
+      return fragments;
+    }
+
+    it("joins the row into one line and reads the city from it", () => {
+      const result = extractAddress(
+        splitLastLine(
+          ["[62223]", "Delisle – Saint Laurent", "120 Allée des Atrébates", "62223"],
+          "SAINT LAURENT BLANGY",
+        ),
+        header,
+      );
+
+      expect(result.destinationCity).toBe("Saint Laurent Blangy");
+    });
+
+    it("keeps the joined line in the raw address", () => {
+      const result = extractAddress(
+        splitLastLine(
+          ["[62223]", "Delisle – Saint Laurent", "120 Allée des Atrébates", "62223"],
+          "SAINT LAURENT BLANGY",
+        ),
+        header,
+      );
+
+      expect(result.rawAddress).toContain("62223 SAINT LAURENT BLANGY");
+    });
+
+    /** The whole point of the boundary: the next column is a different thing. */
+    it("never joins the remarks column onto the address", () => {
+      const result = extractAddress(
+        splitLastLine(
+          ["[62223]", "Delisle – Saint Laurent", "120 Allée des Atrébates", "62223"],
+          "SAINT LAURENT BLANGY",
+          { remarks: "Loading Ref: 93165142" },
+        ),
+        header,
+      );
+
+      expect(result.destinationCity).toBe("Saint Laurent Blangy");
+      expect(result.rawAddress).not.toMatch(/93165142/);
+      expect(result.rawAddress).not.toMatch(/Loading Ref/);
+    });
+
+    it("still reads a prefixed postcode that arrives split", () => {
+      const result = extractAddress(
+        splitLastLine(
+          ["[62119]", "ONTEX Dourges", "Quai du Rivage", "F-62119"],
+          "DOURGES",
+        ),
+        header,
+      );
+
+      expect(result).toMatchObject({
+        destinationCity: "Dourges",
+        destinationCountry: "France",
+      });
+    });
+
+    /** A document whose rows are single fragments must read exactly as before. */
+    it("changes nothing when every row is one fragment", () => {
+      const result = extractAddress(
+        addressBlock([
+          "[62119]",
+          "ONTEX Dourges",
+          "Quai du Rivage",
+          "F-62119 DOURGES",
+        ]),
+        header,
+      );
+
+      expect(result).toMatchObject({
+        destinationCity: "Dourges",
+        destinationCountry: "France",
+      });
+    });
+  });
+
   describe("what is still refused", () => {
     it.each([
       ["only a company and a street", ["[62119]", "ONTEX", "Quai du Rivage"]],

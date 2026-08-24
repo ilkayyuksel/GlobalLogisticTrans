@@ -208,6 +208,14 @@ export default function VehicleDetailPage() {
               ? (assignment.data?.assignment ?? null)
               : null
           }
+          current={
+            isEditingAssignment || !assignment.data
+              ? null
+              : {
+                  driverName: assignment.data.driver.name,
+                  validFrom: assignment.data.assignment.validFrom,
+                }
+          }
           today={today()}
           onSave={saveAssignment}
           onClose={() => setIsAssigning(false)}
@@ -300,7 +308,15 @@ function AssignmentPanel({
             onClick={onLink}
             className="rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-white hover:bg-primary-hover"
           >
-            {t("vehicles.assignment.link")}
+            {/*
+              The same action, named for the situation. With a driver already on
+              the vehicle, "Chauffeur koppelen" reads as something that has been
+              done already, and operators concluded the driver could not be
+              changed at all — while this is exactly the button that changes it.
+            */}
+            {data
+              ? t("vehicles.assignment.change")
+              : t("vehicles.assignment.link")}
           </button>
         }
       />

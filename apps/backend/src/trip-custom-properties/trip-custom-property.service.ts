@@ -3,6 +3,10 @@ import { Prisma } from "@prisma/client";
 
 import { CustomPropertyService } from "../custom-properties/custom-property.service";
 import { AppLoggerService } from "../logger/app-logger.service";
+import {
+  FLAT_CUSTOM_PROPERTY_NAME,
+  requiresFlatProperty,
+} from "../trips/flat-container-rule";
 import { TripService } from "../trips/trip.service";
 import { AssignCustomPropertyDto } from "./dto/assign-custom-property.dto";
 import {
@@ -13,6 +17,7 @@ import {
 import {
   DuplicateTripCustomPropertyException,
   InactiveCustomPropertyException,
+  RequiredCustomPropertyException,
   TripCustomPropertyNotFoundException,
 } from "./exceptions/trip-custom-property.exceptions";
 import {
@@ -59,11 +64,15 @@ export class TripCustomPropertyService {
    * things to a caller about to price it.
    */
   async findByTripId(tripId: string): Promise<TripCustomPropertiesDto> {
-    await this.tripService.findById(tripId);
+    const trip = await this.tripService.findById(tripId);
 
     const assignments = await this.repository.findByTripId(tripId);
 
-    return { items: assignments.map(toTripCustomPropertyResponse) };
+    return {
+      items: assignments.map((assignment) =>
+        toTripCustomPropertyResponse(assignment, trip.containerType),
+      ),
+    };
   }
 
   /**
@@ -76,7 +85,7 @@ export class TripCustomPropertyService {
   async assign(
     dto: AssignCustomPropertyDto,
   ): Promise<TripCustomPropertyResponseDto> {
-    await this.tripService.findById(dto.tripId);
+    const trip = await this.tripService.findById(dto.tripId);
     await this.assertPropertyAssignable(dto.customPropertyId);
     await this.assertNotAlreadyAssigned(dto.tripId, dto.customPropertyId);
 
@@ -84,6 +93,13 @@ export class TripCustomPropertyService {
       this.repository.create({
         tripId: dto.tripId,
         customPropertyId: dto.customPropertyId,
+        /*
+         * Anything assigned through this endpoint is somebody's decision, even
+         * when a rule would have assigned the same property anyway. Recording
+         * it as manual is what protects it later: an automatic rule may only
+         * withdraw what it added itself.
+         */
+        isAutomatic: false,
       }),
     );
 
@@ -94,7 +110,7 @@ export class TripCustomPropertyService {
       customPropertyId: created.customPropertyId,
     });
 
-    return toTripCustomPropertyResponse(created);
+    return toTripCustomPropertyResponse(created, trip.containerType);
   }
 
   /**
@@ -107,6 +123,9 @@ export class TripCustomPropertyService {
    */
   async remove(id: string): Promise<TripCustomPropertyResponseDto> {
     const assignment = await this.requireAssignment(id);
+    const trip = await this.tripService.findById(assignment.tripId);
+
+    this.assertNotRequiredByContainerType(assignment, trip.containerType);
 
     const removed = await this.repository.delete(assignment.id);
 
@@ -116,7 +135,39 @@ export class TripCustomPropertyService {
       customPropertyId: removed.customPropertyId,
     });
 
-    return toTripCustomPropertyResponse(removed);
+    return toTripCustomPropertyResponse(removed, trip.containerType);
+  }
+
+  /**
+   * Refuses to unassign a property the Trip's container type requires.
+   *
+   * The check is the same predicate the automatic rule uses, so the UI, the API
+   * and the rule cannot disagree about which Trips are affected. It is enforced
+   * HERE rather than only in the browser: the endpoint is the contract, and a
+   * disabled button protects nothing.
+   */
+  private assertNotRequiredByContainerType(
+    assignment: TripCustomPropertyWithProperty,
+    containerType: string | null,
+  ): void {
+    const isRequired =
+      assignment.customProperty.name === FLAT_CUSTOM_PROPERTY_NAME &&
+      requiresFlatProperty(containerType);
+
+    if (!isRequired) {
+      return;
+    }
+
+    this.logger.warn("Rejected removal of a required custom property", {
+      tripCustomPropertyId: assignment.id,
+      tripId: assignment.tripId,
+      customPropertyId: assignment.customPropertyId,
+    });
+
+    throw new RequiredCustomPropertyException(
+      assignment.tripId,
+      containerType as string,
+    );
   }
 
   private async requireAssignment(

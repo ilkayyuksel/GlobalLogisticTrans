@@ -1,0 +1,59 @@
+# Running the stack against the DEVELOPMENT database instead of its own.
+#
+#   docker compose -f docker-compose.yml \
+#                  -f docker-compose.local.yml \
+#                  -f docker-compose.noauth.yml \
+#                  -f docker-compose.localdb.yml up -d
+#
+# ── WHY THIS FILE EXISTS ────────────────────────────────────────────────────
+# The stack normally carries its own PostgreSQL, which is right for a
+# deployment and for testing the stack itself — but it means the application
+# you open on localhost shows a different set of Trips from the one the
+# development servers work against.
+#
+# This override points the backend and the migration step at `tms-postgres`
+# instead: the database that `docker-compose.dev.yml` starts and that `pnpm dev`
+# uses. One dataset, whichever way the application is started.
+#
+# It joins that stack's network and addresses the container by name rather than
+# going out to the host and back in through the published port. That is one hop
+# instead of three, and it does not depend on `host.docker.internal`, which is
+# not reachable from these containers here.
+#
+# The stack's own database keeps running and is simply left alone. Stopping it
+# here would mean rewriting the `depends_on` conditions of two services for no
+# gain, and its data stays intact for when the stack is used normally again.
+# ────────────────────────────────────────────────────────────────────────────
+#
+# ── THIS IS REAL DATA ───────────────────────────────────────────────────────
+# The development database holds actual work. So IMAP polling is OFF here:
+# with it on, the backend would poll the live mailbox every five minutes and
+# import today's orders straight into that dataset, which is a decision to make
+# deliberately rather than a side effect of opening the application.
+#
+# To let it import, delete the ENABLE_IMAP lines below and restart.
+# ────────────────────────────────────────────────────────────────────────────
+
+services:
+  migrate:
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@tms-postgres:5432/${POSTGRES_DB}
+    networks:
+      - internal
+      - development
+
+  backend:
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@tms-postgres:5432/${POSTGRES_DB}
+      ENABLE_IMAP: "false"
+    networks:
+      - internal
+      - web
+      - development
+
+networks:
+  # The network `docker-compose.dev.yml` already created. Joined, never
+  # defined here: this file must not be the thing that owns it.
+  development:
+    external: true
+    name: traxo-dev_default

@@ -9,6 +9,7 @@ import { toUtcTime } from "../common/time-of-day";
 import { DriverService } from "../drivers/driver.service";
 import { AppLoggerService } from "../logger/app-logger.service";
 import { VehicleService } from "../vehicles/vehicle.service";
+import { AutomaticFlatPropertyService } from "./automatic-flat.service";
 import { ChangeTripStatusDto } from "./dto/change-trip-status.dto";
 import { CreateTripDto } from "./dto/create-trip.dto";
 import { ListTripsQueryDto } from "./dto/list-trips-query.dto";
@@ -80,6 +81,7 @@ export class TripService {
     private readonly vehicleService: VehicleService,
     private readonly driverService: DriverService,
     private readonly planningData: TripPlanningDataService,
+    private readonly automaticFlat: AutomaticFlatPropertyService,
     private readonly eventBus: DomainEventBus,
     private readonly logger: AppLoggerService,
   ) {
@@ -249,13 +251,13 @@ export class TripService {
         ? planningDate
         : toUtcDate(dto.originalPlanningDate);
 
-    const created = await this.repository.runInTransaction(
-      async (repository) => {
+    const created = await this.repository.runTripWriteTransaction(
+      async ({ trips: repository, customProperties }) => {
         if (bookingNumber !== null) {
           await this.assertBookingNumberFree(repository, bookingNumber);
         }
 
-        return repository.create({
+        const trip = await repository.create({
           pdfDocumentId,
           bookingNumber,
           containerNumber: dto.containerNumber ?? null,
@@ -274,6 +276,20 @@ export class TripService {
           distanceKm: dto.distanceKm ?? null,
           internalNotes: dto.internalNotes ?? null,
         });
+
+        /*
+         * The container type decides this, not the person filling the form —
+         * a Trip entered by hand as 20FL owes the same charge as one that
+         * arrived on a document. Inside the transaction, so the Trip cannot
+         * exist without the property its type requires.
+         */
+        await this.automaticFlat.applyToNewTrip(
+          customProperties,
+          trip.id,
+          trip.containerType,
+        );
+
+        return trip;
       },
     );
 
@@ -421,8 +437,8 @@ export class TripService {
    * operation's concern and is never triggered here.
    */
   async importTrips(command: ImportTripsCommand): Promise<TripResponseDto[]> {
-    const created = await this.repository.runImportTransaction(
-      async ({ trips, pdfDocuments }) => {
+    const created = await this.repository.runTripWriteTransaction(
+      async ({ trips, pdfDocuments, customProperties }) => {
         /*
          * A document already stored is used as it is. Only a brand-new one is
          * written here, inside the transaction, so that a failed import leaves
@@ -442,24 +458,32 @@ export class TripService {
         for (const trip of command.trips) {
           await this.assertBookingNumberFree(trips, trip.bookingNumber);
 
-          written.push(
-            await trips.create({
-              pdfDocumentId,
-              tripGroupId: tripGroup ? tripGroup.id : null,
-              bookingNumber: trip.bookingNumber,
-              containerNumber: trip.containerNumber,
-              containerType: trip.containerType,
-              terminal: trip.terminal,
-              destinationCity: trip.destinationCity,
-              destinationCountry: trip.destinationCountry,
-              originalPlanningDate: toUtcDate(trip.planningDate),
-              planningDate: toUtcDate(trip.planningDate),
-              startTime: trip.startTime ? toUtcTime(trip.startTime) : null,
-              endTime: trip.endTime ? toUtcTime(trip.endTime) : null,
-              direction: trip.direction,
-              parserMetadata: trip.parserMetadata,
-            }),
+          const stored = await trips.create({
+            pdfDocumentId,
+            tripGroupId: tripGroup ? tripGroup.id : null,
+            bookingNumber: trip.bookingNumber,
+            containerNumber: trip.containerNumber,
+            containerType: trip.containerType,
+            terminal: trip.terminal,
+            destinationCity: trip.destinationCity,
+            destinationCountry: trip.destinationCountry,
+            originalPlanningDate: toUtcDate(trip.planningDate),
+            planningDate: toUtcDate(trip.planningDate),
+            startTime: trip.startTime ? toUtcTime(trip.startTime) : null,
+            endTime: trip.endTime ? toUtcTime(trip.endTime) : null,
+            direction: trip.direction,
+            parserMetadata: trip.parserMetadata,
+          });
+
+          // Same rule, same transaction. The document only states the container
+          // type; what that type obliges is this domain's decision.
+          await this.automaticFlat.applyToNewTrip(
+            customProperties,
+            stored.id,
+            stored.containerType,
           );
+
+          written.push(stored);
         }
 
         return written;

@@ -190,6 +190,9 @@ function buildCustomProperty(): TripCustomProperty {
     id: "assignment-1",
     tripId: "trip-1",
     customPropertyId: "property-1",
+    // Chosen by a person, and freely removable: the Trip is not a flat rack.
+    isAutomatic: false,
+    isRequired: false,
     customProperty: {
       id: "property-1",
       name: "ADR surcharge",

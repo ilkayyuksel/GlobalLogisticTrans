@@ -349,6 +349,73 @@ describe("PricingComponentResolver", () => {
       ]);
     });
 
+    /**
+     * An automatically assigned Flat is priced like any other property.
+     *
+     * That is the point of storing it as an ordinary assignment rather than
+     * applying it during the calculation the way TAR is applied: the Engine has
+     * no idea a rule put it there, needs no rule of its own, and reads the
+     * configured amount exactly as it does for a property somebody ticked.
+     *
+     * The amount below is a configured value the test supplies, never a literal
+     * the code carries — change the configuration and the line changes with it.
+     */
+    it("carries an automatically assigned Flat at its configured price", async () => {
+      tripCustomPropertyService.findByTripId.mockResolvedValue({
+        items: [
+          {
+            ...assignment("property-flat", "Flat", null, "80.00"),
+            isAutomatic: true,
+          },
+        ],
+      });
+
+      const resolved = await resolve();
+
+      expect(resolved).toContainEqual({
+        customPropertyId: "property-flat",
+        name: "Flat",
+        pricingComponentId: null,
+        defaultPrice: "80.00",
+      });
+    });
+
+    it("prices a manual and an automatic Flat identically", async () => {
+      const priceOf = async (isAutomatic: boolean) => {
+        tripCustomPropertyService.findByTripId.mockResolvedValue({
+          items: [
+            {
+              ...assignment("property-flat", "Flat", null, "80.00"),
+              isAutomatic,
+            },
+          ],
+        });
+
+        return (await resolve()).find(
+          (property) => property.customPropertyId === "property-flat",
+        );
+      };
+
+      expect(await priceOf(true)).toEqual(await priceOf(false));
+    });
+
+    it("charges an automatically assigned Flat exactly once", async () => {
+      tripCustomPropertyService.findByTripId.mockResolvedValue({
+        items: [
+          {
+            ...assignment("property-flat", "Flat", null, "80.00"),
+            isAutomatic: true,
+          },
+        ],
+      });
+
+      const resolved = await resolve();
+
+      expect(
+        resolved.filter((property) => property.name === "Flat"),
+      ).toHaveLength(1);
+    });
+
     it("keeps a property that has since been deactivated", async () => {
       // The Trip carries it. Withdrawing a property from the catalog must not
       // silently change what an already-planned Trip is charged.

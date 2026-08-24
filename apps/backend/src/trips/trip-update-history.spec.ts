@@ -5,6 +5,8 @@ import { DriverService } from "../drivers/driver.service";
 import { ImportedTripData } from "./import-trips.command";
 import { TripDocumentsService } from "./trip-documents.service";
 import { TripPlanningDataService } from "./trip-planning-data.service";
+import { AutomaticFlatPropertyService } from "./automatic-flat.service";
+import { stubTripWriteTransaction } from "./trip-write-transaction.double";
 import { TripRevisionService } from "./trip-revision.service";
 import { CostConfirmationService } from "../cost-confirmations/cost-confirmation.service";
 import { TripRepository } from "./trip.repository";
@@ -176,10 +178,21 @@ describe("many updates to one Trip", () => {
       runInTransaction: jest.fn((work: (repository: unknown) => unknown) =>
         work(fake),
       ),
+      // Replaced below: it hands out this very double, which does not exist yet.
+      runTripWriteTransaction: jest.fn() as jest.Mock,
     };
 
+    fake.runTripWriteTransaction = stubTripWriteTransaction(fake);
+
     repository = fake as unknown as TripRepository;
-    revision = new TripRevisionService(repository, logger);
+    revision = new TripRevisionService(
+      repository,
+      {
+        applyToNewTrip: jest.fn(),
+        synchronise: jest.fn(),
+      } as unknown as AutomaticFlatPropertyService,
+      logger,
+    );
   });
 
   /** A stored UPDATE document, as the importer would have committed one. */

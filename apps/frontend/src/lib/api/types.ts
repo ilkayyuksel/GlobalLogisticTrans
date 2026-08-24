@@ -315,6 +315,21 @@ export interface TripCustomProperty {
   customPropertyId: string;
   customProperty: CustomProperty;
   assignedAt: string;
+  /**
+   * True when a backend rule assigned this property rather than a person.
+   *
+   * Read-only. An assignment made from the application is always manual.
+   */
+  isAutomatic: boolean;
+  /**
+   * True when the Trip's container type requires this property, in which case
+   * the backend refuses to unassign it.
+   *
+   * The backend decides this — it depends on the container type, and working it
+   * out here would put the same business rule in two places. The UI only
+   * renders the answer.
+   */
+  isRequired: boolean;
 }
 
 export interface Vehicle {

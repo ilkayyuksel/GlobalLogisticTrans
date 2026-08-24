@@ -13,6 +13,9 @@ import { CostConfirmationService } from "../cost-confirmations/cost-confirmation
 import { PdfDocumentService } from "../pdf-documents/pdf-document.service";
 import { PdfTripImporter } from "../pdf-import/pdf-trip-importer.service";
 import { TripRepository } from "../trips/trip.repository";
+import { TripCustomPropertyRepository } from "../trip-custom-properties/trip-custom-property.repository";
+import { CustomPropertyService } from "../custom-properties/custom-property.service";
+import { AutomaticFlatPropertyService } from "../trips/automatic-flat.service";
 import { TripRevisionService } from "../trips/trip-revision.service";
 import { TripService } from "../trips/trip.service";
 import { VehicleService } from "../vehicles/vehicle.service";
@@ -98,6 +101,8 @@ describe("IMAP import, end to end with a real transport order", () => {
   let importedEmailStatus: { id: string; status: string; processedAt: unknown };
   /** The action the scan recorded for the message it processed. */
   let startedImportType: string | null;
+  /** The allowlist this scan runs with, so a test can widen it. */
+  let trustedSenders: string[];
   /** The import type of every email the scan refused to carry out. */
   let ignoredImports: string[];
   let scanService: ImapScanService;
@@ -113,6 +118,14 @@ describe("IMAP import, end to end with a real transport order", () => {
       warn: jest.fn(),
       error: jest.fn(),
     } as unknown as AppLoggerService;
+
+    const customPropertyRepository = {
+      create: jest.fn((data: Record<string, unknown>) =>
+        Promise.resolve({ id: "trip-custom-property-1", ...data }),
+      ),
+      findByTripAndProperty: jest.fn().mockResolvedValue(null),
+      delete: jest.fn(),
+    } as unknown as TripCustomPropertyRepository;
 
     const pdfDocumentRepository = {
       findByFileHash: jest.fn().mockResolvedValue(null),
@@ -196,17 +209,36 @@ describe("IMAP import, end to end with a real transport order", () => {
 
         return Promise.resolve(row);
       }),
-      runImportTransaction: jest.fn(
+      runTripWriteTransaction: jest.fn(
         (work: (repositories: unknown) => Promise<unknown>) =>
-          work({ trips: tripRepository, pdfDocuments: pdfDocumentRepository }),
+          work({
+            trips: tripRepository,
+            pdfDocuments: pdfDocumentRepository,
+            customProperties: customPropertyRepository,
+          }),
       ),
     } as unknown as TripRepository;
+
+    /*
+     * The automatic Flat rule, real, over an in-memory assignment table. These
+     * documents are 45PH, so it assigns nothing — which is exactly what has to
+     * keep being true as the rule moves through the import path.
+     */
+    const automaticFlat = new AutomaticFlatPropertyService(
+      {
+        findActiveByName: jest.fn().mockResolvedValue({
+          id: "custom-property-flat",
+          name: "Flat",
+        }),
+      } as unknown as CustomPropertyService,
+      logger,
+    );
 
     const configService = {
       get: jest.fn((key: string) => (key === "ENABLE_IMAP" ? true : undefined)),
       getOrThrow: jest.fn((key: string) => {
         if (key === "PDF_STORAGE_DIR") return storageDirectory;
-        if (key === "IMAP_TRUSTED_SENDERS") return [TRUSTED_SENDER];
+        if (key === "IMAP_TRUSTED_SENDERS") return trustedSenders;
         return "NEW:";
       }),
     } as unknown as ConfigService;
@@ -228,6 +260,7 @@ describe("IMAP import, end to end with a real transport order", () => {
             ),
           ),
       } as unknown as TripPlanningDataService,
+      automaticFlat,
       { publish: jest.fn() } as unknown as DomainEventBus,
       logger,
     );
@@ -242,7 +275,7 @@ describe("IMAP import, end to end with a real transport order", () => {
     // these tests takes exactly the path a real one takes.
     const importer = new PdfTripImporter(
       tripService,
-      new TripRevisionService(tripRepository, logger),
+      new TripRevisionService(tripRepository, automaticFlat, logger),
       pdfDocumentService,
       {
         record: jest.fn().mockResolvedValue({
@@ -308,6 +341,7 @@ describe("IMAP import, end to end with a real transport order", () => {
     deletedPdfDocuments = [];
     importedEmailStatus = { id: "", status: "", processedAt: null };
     startedImportType = null;
+    trustedSenders = [TRUSTED_SENDER];
     ignoredImports = [];
 
     session = {
@@ -878,6 +912,100 @@ describe("IMAP import, end to end with a real transport order", () => {
         expect(result).toMatchObject({ failed: 1, imported: 0 });
         expect(session.markSeen).not.toHaveBeenCalled();
         expect(createdPdfDocuments).toEqual([]);
+      });
+    });
+
+    /**
+     * ── THE ALLOWLIST AS PRODUCTION CONFIGURES IT ───────────────────────────
+     * `IMAP_TRUSTED_SENDERS=eucon` accepts any address containing that text,
+     * because the sender does not use a single domain. What matters here is
+     * that trusting a sender THAT way changes nothing about what happens next:
+     * the same subject detection, the same parser, the same workflow.
+     * ────────────────────────────────────────────────────────────────────────
+     */
+    describe("a sender trusted by substring", () => {
+      beforeEach(() => {
+        trustedSenders = ["eucon"];
+      });
+
+      it.each([
+        ["the original domain", "planning@eucon.nl"],
+        ["another domain carrying the name", "planning@euconxx.com"],
+        ["the name as the local part", "eucon@example.com"],
+      ])("imports a NEW order from %s", async (_case, senderEmail) => {
+        messageCarrying("NEW/1page.pdf", { senderEmail });
+
+        const result = await scanService.scan();
+
+        expect(result).toMatchObject({ imported: 1, failed: 0 });
+        expect(createdTrips).toHaveLength(1);
+        expect(createdTrips[0].bookingNumber).toBe("ANRDUB2602247");
+      });
+
+      it("still refuses a near-miss sender", async () => {
+        messageCarrying("NEW/1page.pdf", {
+          senderEmail: "planning@eurocon.com",
+        });
+
+        const result = await scanService.scan();
+
+        expect(result).toMatchObject({ ignored: 1, imported: 0 });
+        expect(createdTrips).toEqual([]);
+      });
+
+      it("carries out an UPDATE from such a sender unchanged", async () => {
+        messageCarrying("NEW/1page.pdf", { senderEmail: "planning@eucon.nl" });
+        await scanService.scan();
+
+        messageCarrying("NEW/1page.pdf", {
+          messageId: "<update-substring@eucon.nl>",
+          subject: "UPDATE: Trucking Order 1212816",
+          senderEmail: "planning@euconxx.com",
+        });
+        const result = await scanService.scan();
+
+        expect(result).toMatchObject({ imported: 1, failed: 0 });
+        expect(createdTrips).toHaveLength(1);
+        expect(recordedHistory).toContainEqual(
+          expect.objectContaining({ eventType: "UPDATE_APPLIED" }),
+        );
+      });
+
+      it("carries out a CANCEL from such a sender unchanged", async () => {
+        messageCarrying("NEW/1page.pdf", { senderEmail: "planning@eucon.nl" });
+        await scanService.scan();
+
+        messageCarrying("NEW/1page.pdf", {
+          messageId: "<cancel-substring@eucon.nl>",
+          subject: "CANCEL: Trucking Order 1212816",
+          senderEmail: "info@eucon.be",
+        });
+        await scanService.scan();
+
+        expect(createdTrips[0].status).toBe(TripStatus.CANCELLED);
+      });
+
+      it("carries out a COST CONFIRMATION from such a sender unchanged", async () => {
+        createdTrips.push({
+          id: "trip-existing",
+          bookingNumber: "ANRDUB2789089",
+          status: TripStatus.OPEN,
+          waitingTimeMinutes: 150,
+        } as unknown as Record<string, unknown>);
+
+        messageCarrying(
+          "Cost-Combination/COST_CONFIRMATION_NR_4132482__ANRDUB2789089__EUCU4530818.pdf",
+          {
+            messageId: "<cc-substring@eucon.nl>",
+            subject: "COST CONFIRMATION NR 4132482 ANRDUB2789089",
+            senderEmail: "billing@eucon-group.com",
+          },
+        );
+
+        const result = await scanService.scan();
+
+        expect(result).toMatchObject({ imported: 1, failed: 0 });
+        expect(startedImportType).toBe("COST_CONFIRMATION");
       });
     });
 

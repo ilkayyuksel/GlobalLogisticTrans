@@ -13,6 +13,7 @@ import {
   describeChange,
   detectFieldChanges,
 } from "./trip-history";
+import { AutomaticFlatPropertyService } from "./automatic-flat.service";
 import { TripRepository } from "./trip.repository";
 
 /**
@@ -83,6 +84,7 @@ export interface DocumentReference {
 export class TripRevisionService {
   constructor(
     private readonly repository: TripRepository,
+    private readonly automaticFlat: AutomaticFlatPropertyService,
     private readonly logger: AppLoggerService,
   ) {
     this.logger.setContext(TripRevisionService.name);
@@ -184,8 +186,11 @@ export class TripRevisionService {
     document: ImportedTripData,
     source?: DocumentReference,
   ): Promise<RevisionResult> {
-    const result = await this.repository.runInTransaction(
-      async (repository): Promise<RevisionResult> => {
+    const result = await this.repository.runTripWriteTransaction(
+      async ({
+        trips: repository,
+        customProperties,
+      }): Promise<RevisionResult> => {
         const trip = await repository.findByBookingNumber({
           bookingNumber: document.bookingNumber,
           statuses: BOOKING_NUMBER_HOLDING_STATUSES,
@@ -231,6 +236,19 @@ export class TripRevisionService {
         const updated = await repository.update(
           trip.id,
           this.toRevisedFields(trip, document),
+        );
+
+        /*
+         * The container type may just have changed, and the Flat property has
+         * to follow it: a Trip revised from 20FL to 45PH no longer owes the
+         * charge, one revised the other way does. Run unconditionally because
+         * the rule reads the type it now HAS — it needs no memory of what it
+         * was — and it is the one Custom Property a document may move.
+         */
+        await this.automaticFlat.synchronise(
+          customProperties,
+          updated.id,
+          updated.containerType,
         );
 
         await this.recordUpdate(repository, trip.id, source, changes);
@@ -440,6 +458,11 @@ export class TripRevisionService {
    * listing what MAY change rather than by listing what may not, so a column
    * added later is preserved by default instead of being overwritten by
    * oversight.
+   *
+   * The AUTOMATIC Flat assignment is the single exception, and it is not one of
+   * these fields: the document states a container type, and what that type
+   * obliges is decided afterwards by the Trip domain. A property the operator
+   * assigned by hand is still never touched.
    * ──────────────────────────────────────────────────────────────────────────
    */
   private toRevisedFields(existing: Trip, document: ImportedTripData) {

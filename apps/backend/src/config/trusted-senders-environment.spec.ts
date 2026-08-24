@@ -60,11 +60,29 @@ describe("IMAP_TRUSTED_SENDERS", () => {
     ["every domain", "*@*"],
     ["a regular expression", ".*eucon.*"],
     ["a wildcarded domain", "*@*.eucon.nl"],
-    ["a bare domain", "eucon.nl"],
     ["a partial wildcard", "plan*@eucon.nl"],
     ["one good entry and one dangerous one", "*@eucon.nl,*"],
+    ["a substring too short to be an allowlist", "eu"],
+    ["a good entry beside a too-short one", "eucon,a"],
   ])("refuses %s", (_case, value) => {
     expect(withSenders(value)).toThrow(/IMAP_TRUSTED_SENDERS/);
+  });
+
+  /**
+   * The substring form, as production configures it.
+   *
+   * Written without an `@`, so it is not an address: it asks for any sender
+   * containing that text, which is how orders arriving from several domains
+   * carrying the same name are accepted without listing each one.
+   */
+  it.each([
+    ["the production value", "eucon", ["eucon"]],
+    ["a bare domain", "eucon.nl", ["eucon.nl"]],
+    ["a substring beside an address", "eucon,orders@partner.be", ["eucon", "orders@partner.be"]],
+  ])("accepts %s", (_case, value, expected) => {
+    const environment = withSenders(value)();
+
+    expect(environment.IMAP_TRUSTED_SENDERS).toEqual(expected);
   });
 
   /**

@@ -2,13 +2,23 @@ import { Injectable } from "@nestjs/common";
 import { Prisma, Trip, TripGroup, TripStatus } from "@prisma/client";
 
 import { PdfDocumentRepository } from "../pdf-documents/pdf-document.repository";
+import { TripCustomPropertyRepository } from "../trip-custom-properties/trip-custom-property.repository";
 import { TripHistoryEvent } from "./trip-history";
 import { PrismaService } from "../prisma/prisma.service";
 
-/** The repositories one import writes through, bound to a single transaction. */
-export interface ImportRepositories {
+/**
+ * The repositories a Trip write may span, bound to a single transaction.
+ *
+ * Three tables, because writing a Trip is rarely only a Trip: an import also
+ * writes the document that explains it, and every write has to leave the Trip's
+ * automatic Custom Properties agreeing with its container type. A caller uses
+ * the ones it needs and ignores the rest; each is a plain object, so an unused
+ * one costs nothing.
+ */
+export interface TripWriteRepositories {
   readonly trips: TripRepository;
   readonly pdfDocuments: PdfDocumentRepository;
+  readonly customProperties: TripCustomPropertyRepository;
 }
 
 export interface FindTripsFilter {
@@ -136,8 +146,8 @@ export class TripRepository {
   }
 
   /**
-   * Runs `work` against transaction-scoped clones of this repository and the
-   * PdfDocument repository.
+   * Runs `work` against transaction-scoped clones of the repositories a Trip
+   * write may span.
    *
    * Importing a transport order writes a PdfDocument, sometimes a TripGroup and
    * one or two Trips, and none of those is meaningful without the others: a
@@ -145,11 +155,16 @@ export class TripRepository {
    * misrepresents a Combination. One transaction is what makes the import
    * all-or-nothing.
    *
-   * Both clones are constructed directly rather than injected, the same pattern
+   * The Trip's automatic Custom Properties belong to the same unit for the same
+   * reason. A 20FL Trip that committed without its Flat assignment would be
+   * under-charged from then on, with nothing on the Trip to reveal it, so the
+   * assignment either lands with the Trip or the Trip is not written.
+   *
+   * The clones are constructed directly rather than injected, the same pattern
    * TripPricingRepository already uses for its snapshot write.
    */
-  runImportTransaction<TResult>(
-    work: (repositories: ImportRepositories) => Promise<TResult>,
+  runTripWriteTransaction<TResult>(
+    work: (repositories: TripWriteRepositories) => Promise<TResult>,
   ): Promise<TResult> {
     return this.prisma.$transaction((transaction) => {
       const scoped = transaction as unknown as PrismaService;
@@ -157,6 +172,7 @@ export class TripRepository {
       return work({
         trips: new TripRepository(scoped),
         pdfDocuments: new PdfDocumentRepository(scoped),
+        customProperties: new TripCustomPropertyRepository(scoped),
       });
     });
   }

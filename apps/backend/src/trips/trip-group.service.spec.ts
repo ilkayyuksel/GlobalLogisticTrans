@@ -10,6 +10,7 @@ import {
   TripNotFoundException,
   TripNotInGroupException,
 } from "./exceptions/trip.exceptions";
+import { AutomaticFlatPropertyService } from "./automatic-flat.service";
 import { TripPlanningDataService } from "./trip-planning-data.service";
 import { TripRepository } from "./trip.repository";
 import { TripService } from "./trip.service";
@@ -99,6 +100,10 @@ describe("TripService grouping", () => {
             ),
           ),
       } as unknown as TripPlanningDataService,
+      {
+        applyToNewTrip: jest.fn(),
+        synchronise: jest.fn(),
+      } as unknown as AutomaticFlatPropertyService,
       { publish: jest.fn() } as unknown as DomainEventBus,
       {
         setContext: jest.fn(),

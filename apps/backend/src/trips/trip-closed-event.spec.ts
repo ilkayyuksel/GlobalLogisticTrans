@@ -10,6 +10,7 @@ import { VehicleService } from "../vehicles/vehicle.service";
 import { TRIP_CLOSED_EVENT, TripClosedEvent } from "./events/trip-closed.event";
 import { TripRepository } from "./trip.repository";
 import { TripService } from "./trip.service";
+import { AutomaticFlatPropertyService } from "./automatic-flat.service";
 import { TripPlanningDataService } from "./trip-planning-data.service";
 
 const TRIP_ID = "3f2504e0-4f89-41d3-9a0c-0305e82c3301";
@@ -104,6 +105,10 @@ describe("TripService — TripClosed event", () => {
             ),
           ),
       } as unknown as TripPlanningDataService,
+      {
+        applyToNewTrip: jest.fn(),
+        synchronise: jest.fn(),
+      } as unknown as AutomaticFlatPropertyService,
       eventBus as unknown as DomainEventBus,
       logger as unknown as AppLoggerService,
     );

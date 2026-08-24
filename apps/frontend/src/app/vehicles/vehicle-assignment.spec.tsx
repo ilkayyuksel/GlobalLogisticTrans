@@ -342,14 +342,21 @@ describe("Vehicle assignment", () => {
       return screen.findByRole("dialog");
     }
 
-    /** The backend refuses both; offering them would guarantee a rejection. */
-    it("does not allow the driver or the start date to change", async () => {
+    /**
+     * The backend refuses both, and the form says why rather than showing a
+     * dead control: a greyed-out dropdown reads as "this is broken", which is
+     * precisely how operators concluded the driver could not be changed at all.
+     */
+    it("does not offer the driver as a control, and names the way to change it", async () => {
       respondWith();
 
       renderDetail();
       const dialog = await openEdit();
 
-      expect(await within(dialog).findByLabelText("Chauffeur")).toBeDisabled();
+      expect(
+        await within(dialog).findByText(/Chauffeur wijzigen/),
+      ).toBeInTheDocument();
+      expect(within(dialog).queryByRole("combobox")).not.toBeInTheDocument();
       expect(within(dialog).getByLabelText("Geldig vanaf")).toBeDisabled();
       expect(within(dialog).getByLabelText("Geldig tot")).toBeEnabled();
     });
@@ -424,8 +431,9 @@ describe("Vehicle assignment", () => {
       renderDetail();
 
       expect(await screen.findByText("Şoför ataması")).toBeInTheDocument();
+      // The vehicle already has a driver, so the action is "change", not "link".
       expect(
-        screen.getByRole("button", { name: "Şoför ata" }),
+        screen.getByRole("button", { name: "Şoförü değiştir" }),
       ).toBeInTheDocument();
       expect(screen.getByText("Açık uçlu")).toBeInTheDocument();
     });

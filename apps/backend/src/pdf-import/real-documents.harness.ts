@@ -3,11 +3,15 @@ import { TripStatus } from "@prisma/client";
 
 import { CostConfirmationRepository } from "../cost-confirmations/cost-confirmation.repository";
 import { CostConfirmationService } from "../cost-confirmations/cost-confirmation.service";
+import { CustomPropertyService } from "../custom-properties/custom-property.service";
 import { DomainEventBus } from "../common/events/domain-event-bus";
 import { DriverService } from "../drivers/driver.service";
 import { AppLoggerService } from "../logger/app-logger.service";
 import { PdfDocumentRepository } from "../pdf-documents/pdf-document.repository";
 import { PdfDocumentService } from "../pdf-documents/pdf-document.service";
+import { TripCustomPropertyRepository } from "../trip-custom-properties/trip-custom-property.repository";
+import { AutomaticFlatPropertyService } from "../trips/automatic-flat.service";
+import { FLAT_CUSTOM_PROPERTY_NAME } from "../trips/flat-container-rule";
 import { TripDocumentsService } from "../trips/trip-documents.service";
 import { TripPlanningDataService } from "../trips/trip-planning-data.service";
 import { TripRepository } from "../trips/trip.repository";
@@ -48,6 +52,8 @@ export function buildHarness(storageDirectory: string) {
   const history: Record<string, unknown>[] = [];
   /** Every confirmed cost written, in the order it was recorded. */
   const costConfirmations: Record<string, unknown>[] = [];
+  /** Every Custom Property assignment, exactly as the real table holds them. */
+  const customProperties: Record<string, unknown>[] = [];
 
   const logger = {
     setContext: jest.fn(),
@@ -85,6 +91,61 @@ export function buildHarness(storageDirectory: string) {
       return Promise.resolve();
     }),
   } as unknown as PdfDocumentRepository;
+
+  /**
+   * The one configured Custom Property these tests need.
+   *
+   * Its NAME is what the rule looks it up by, and its price is what the Pricing
+   * Engine would read later — neither is a literal anywhere in the rule.
+   */
+  const FLAT_PROPERTY = {
+    id: "custom-property-flat",
+    name: FLAT_CUSTOM_PROPERTY_NAME,
+    defaultPrice: "80.00",
+    pricingComponentId: null,
+    displayOrder: 2,
+    isActive: true,
+  };
+
+  const customPropertyRepository = {
+    findByTripAndProperty: jest.fn((tripId: string, customPropertyId: string) =>
+      Promise.resolve(
+        customProperties.find(
+          (row) =>
+            row.tripId === tripId && row.customPropertyId === customPropertyId,
+        ) ?? null,
+      ),
+    ),
+    findByTripId: jest.fn((tripId: string) =>
+      Promise.resolve(customProperties.filter((row) => row.tripId === tripId)),
+    ),
+    create: jest.fn((data: Record<string, unknown>) => {
+      const row = {
+        id: `trip-custom-property-${customProperties.length + 1}`,
+        isAutomatic: false,
+        ...data,
+        customProperty: FLAT_PROPERTY,
+        createdAt: new Date("2026-08-17T06:00:00.000Z"),
+      };
+      customProperties.push(row);
+      return Promise.resolve(row);
+    }),
+    delete: jest.fn((id: string) => {
+      const index = customProperties.findIndex((row) => row.id === id);
+      const [removed] = customProperties.splice(index, 1);
+      return Promise.resolve(removed);
+    }),
+  } as unknown as TripCustomPropertyRepository;
+
+  /** The REAL rule, over the configured property above. */
+  const automaticFlat = new AutomaticFlatPropertyService(
+    {
+      findActiveByName: jest.fn((name: string) =>
+        Promise.resolve(name === FLAT_CUSTOM_PROPERTY_NAME ? FLAT_PROPERTY : null),
+      ),
+    } as unknown as CustomPropertyService,
+    logger,
+  );
 
   const tripRepository = {
     /**
@@ -208,21 +269,26 @@ export function buildHarness(storageDirectory: string) {
      * A real transaction, in the one respect that matters: a failure inside it
      * discards everything written during it.
      */
-    runImportTransaction: jest.fn(
+    runTripWriteTransaction: jest.fn(
       async (work: (repositories: unknown) => Promise<unknown>) => {
         const tripCount = trips.length;
         const documentCount = pdfDocuments.length;
         const groupCount = tripGroups.length;
+        const propertyRows = [...customProperties];
 
         try {
           return await work({
             trips: tripRepository,
             pdfDocuments: pdfDocumentRepository,
+            customProperties: customPropertyRepository,
           });
         } catch (error: unknown) {
           trips.length = tripCount;
           pdfDocuments.length = documentCount;
           tripGroups.length = groupCount;
+          // Restored rather than truncated: a revision may have REMOVED a row
+          // inside the transaction, and a rollback puts that one back too.
+          customProperties.splice(0, customProperties.length, ...propertyRows);
           throw error;
         }
       },
@@ -256,6 +322,7 @@ export function buildHarness(storageDirectory: string) {
     {} as unknown as VehicleService,
     {} as unknown as DriverService,
     planningData,
+    automaticFlat,
     {
       publish: jest.fn((event: unknown) => events.push(event)),
     } as unknown as DomainEventBus,
@@ -318,7 +385,7 @@ export function buildHarness(storageDirectory: string) {
   return {
     importer: new PdfTripImporter(
       tripService,
-      new TripRevisionService(tripRepository, logger),
+      new TripRevisionService(tripRepository, automaticFlat, logger),
       pdfDocumentService,
       costConfirmationService,
       logger,
@@ -354,6 +421,8 @@ export function buildHarness(storageDirectory: string) {
     },
     costConfirmationService,
     costConfirmations,
+    /** Every Custom Property assignment the import wrote, automatic or not. */
+    customProperties,
     trips,
     pdfDocuments,
     tripGroups,

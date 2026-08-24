@@ -1,6 +1,6 @@
 import { ExtractionError, missingField } from "../errors";
 import { COUNTRY_BY_POSTCODE_PREFIX, countryFromName } from "./country";
-import { Fragment } from "../text/extract";
+import { COLUMN_TOLERANCE, Fragment, ROW_TOLERANCE } from "../text/extract";
 import {
   findLabel,
   joinText,
@@ -403,6 +403,23 @@ export function extractStartpointAddress(
  * The column is taken from the `Address:` label's own value rather than
  * assumed, so a form whose columns shift still reads correctly. Reading stops
  * at `Date/time:`, which closes the block in every fixture.
+ *
+ * ── A PRINTED LINE IS NOT ALWAYS ONE FRAGMENT ───────────────────────────────
+ * A PDF has no lines, only positioned runs of text, and a wide gap inside a
+ * line is emitted as two runs. One real order prints its last address line as
+ *
+ *     62223            SAINT LAURENT BLANGY
+ *     ^ x=97.5         ^ x=125.4
+ *
+ * — one line to a reader, two fragments to the text layer. Taking only the
+ * fragment that starts at the column left the block ending in a bare postcode
+ * with the city discarded, and every rule below then had nothing to read.
+ *
+ * So a line here is the whole ROW inside the address column, its fragments
+ * joined left to right. That is the form's own geometry rather than a guess
+ * about which fragment is a city, and it changes nothing for a document whose
+ * rows hold a single fragment — which is all of the others.
+ * ────────────────────────────────────────────────────────────────────────────
  */
 function addressBlockOf(
   fragments: readonly Fragment[],
@@ -423,7 +440,7 @@ function addressBlockOf(
     .filter(
       (fragment) =>
         fragment.page === addressLabel.page &&
-        Math.abs(fragment.y - addressLabel.y) <= 3 &&
+        Math.abs(fragment.y - addressLabel.y) <= ROW_TOLERANCE &&
         fragment.x > addressLabel.x,
     )
     .sort((left, right) => left.x - right.x)[0];
@@ -441,11 +458,64 @@ function addressBlockOf(
 
   const floor = dateLabel ? dateLabel.y : Number.NEGATIVE_INFINITY;
 
-  const lines = [valueColumn, ...valuesBelow(fragments, valueColumn)].filter(
-    (fragment) => fragment.y > floor,
-  );
+  const lines = [valueColumn, ...valuesBelow(fragments, valueColumn)]
+    .filter((fragment) => fragment.y > floor)
+    .map((anchor) =>
+      withRowContinuation(fragments, anchor, nextColumnX(fragments, addressLabel, valueColumn)),
+    );
 
   return untilRemarks(lines);
+}
+
+/**
+ * Where the column to the RIGHT of the address begins, or +infinity.
+ *
+ * The form puts `Remarks:` there, on the same row as `Address:`, and that
+ * column carries the sender's own notes. It is the boundary a row may not be
+ * joined across: without it, "62223 SAINT LAURENT BLANGY" would be read as
+ * "62223 SAINT LAURENT BLANGY Loading Ref: 93165142".
+ *
+ * Taken from the label row rather than named, so a form that calls that column
+ * something else still bounds the address correctly.
+ */
+function nextColumnX(
+  fragments: readonly Fragment[],
+  addressLabel: Fragment,
+  valueColumn: Fragment,
+): number {
+  const next = fragments
+    .filter(
+      (fragment) =>
+        fragment.page === addressLabel.page &&
+        Math.abs(fragment.y - addressLabel.y) <= ROW_TOLERANCE &&
+        fragment.x > valueColumn.x + COLUMN_TOLERANCE,
+    )
+    .sort((left, right) => left.x - right.x)[0];
+
+  return next ? next.x : Number.POSITIVE_INFINITY;
+}
+
+/**
+ * One printed line: the anchor plus whatever continues it on the same row.
+ *
+ * The result is a synthetic fragment carrying the anchor's own position, so
+ * everything downstream — the ordering, the `Date/time:` floor, the remarks
+ * cut — keeps working on it exactly as it did on the anchor.
+ */
+function withRowContinuation(
+  fragments: readonly Fragment[],
+  anchor: Fragment,
+  boundaryX: number,
+): Fragment {
+  const continuation = valuesRightOf(fragments, anchor).filter(
+    (fragment) => fragment.x < boundaryX,
+  );
+
+  if (continuation.length === 0) {
+    return anchor;
+  }
+
+  return { ...anchor, text: joinText([anchor, ...continuation]) };
 }
 
 /**

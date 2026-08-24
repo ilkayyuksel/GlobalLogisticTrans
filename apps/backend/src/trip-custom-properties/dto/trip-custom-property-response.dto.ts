@@ -4,6 +4,10 @@ import {
   CustomPropertyResponseDto,
   toCustomPropertyResponse,
 } from "../../custom-properties/dto/custom-property-response.dto";
+import {
+  FLAT_CUSTOM_PROPERTY_NAME,
+  requiresFlatProperty,
+} from "../../trips/flat-container-rule";
 import { TripCustomPropertyWithProperty } from "../trip-custom-property.repository";
 
 /**
@@ -16,6 +20,13 @@ import { TripCustomPropertyWithProperty } from "../trip-custom-property.reposito
  *
  * `assignedAt` is the row's creation timestamp. The model calls it the "Added
  * Timestamp" and deliberately stores it only once.
+ *
+ * `isAutomatic` and `isRequired` are both READ-ONLY and answer different
+ * questions. The first is where the assignment came from and never changes. The
+ * second is whether the Trip may part with it right now, which depends on the
+ * Trip's container type and therefore changes when the type does. A client
+ * showing a remove button reads `isRequired`; nothing works it out for itself,
+ * because the same rule then existed in two places.
  */
 export class TripCustomPropertyResponseDto {
   @ApiProperty({ format: "uuid", description: "Identity of the assignment." })
@@ -39,6 +50,18 @@ export class TripCustomPropertyResponseDto {
     description: "When the property was added to the Trip.",
   })
   assignedAt!: Date;
+
+  @ApiProperty({
+    description:
+      "True when a domain rule assigned this property rather than a person. Read-only: an assignment made through this API is always manual.",
+  })
+  isAutomatic!: boolean;
+
+  @ApiProperty({
+    description:
+      "True when the Trip's container type requires this property, in which case removing it is refused. Read-only, and re-evaluated on every read: it follows the container type.",
+  })
+  isRequired!: boolean;
 }
 
 /**
@@ -58,6 +81,8 @@ export class TripCustomPropertiesDto {
 
 export function toTripCustomPropertyResponse(
   assignment: TripCustomPropertyWithProperty,
+  /** The Trip's container type, which decides whether the property is required. */
+  containerType: string | null,
 ): TripCustomPropertyResponseDto {
   return {
     id: assignment.id,
@@ -65,5 +90,9 @@ export function toTripCustomPropertyResponse(
     customPropertyId: assignment.customPropertyId,
     customProperty: toCustomPropertyResponse(assignment.customProperty),
     assignedAt: assignment.createdAt,
+    isAutomatic: assignment.isAutomatic,
+    isRequired:
+      assignment.customProperty.name === FLAT_CUSTOM_PROPERTY_NAME &&
+      requiresFlatProperty(containerType),
   };
 }

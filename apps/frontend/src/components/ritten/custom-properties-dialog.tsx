@@ -37,6 +37,17 @@ import { RittenDialog } from "./ritten-dialog";
  * No price is shown or computed. A property's configured price is not what it
  * contributed to this Trip — that is a line in the pricing snapshot, which is
  * the only place a priced amount is authoritative.
+ *
+ * ── A PROPERTY THE CONTAINER TYPE REQUIRES ──────────────────────────────────
+ * Some assignments cannot be removed: a 20FL and a 20ST always carry Flat, and
+ * the backend refuses to unassign it. The remove action is disabled for those,
+ * with the reason beside it — a button that is always refused is worse than no
+ * button.
+ *
+ * WHICH assignments those are is the backend's answer, carried on each one as
+ * `isRequired`. Nothing here looks at a container type; the rule lives in one
+ * place and this renders what it decided.
+ * ────────────────────────────────────────────────────────────────────────────
  */
 export function CustomPropertiesDialog({
   trip,
@@ -78,6 +89,9 @@ export function CustomPropertiesDialog({
 
   const assignedIds = new Set(
     (assigned.data ?? []).map((item) => item.customPropertyId),
+  );
+  const hasRequired = (assigned.data ?? []).some(
+    (assignment) => assignment.isRequired,
   );
   const available = (assignable.data ?? []).filter(
     (property) => !assignedIds.has(property.id),
@@ -141,22 +155,35 @@ export function CustomPropertiesDialog({
                     )}
                   </span>
 
-                  <button
-                    type="button"
-                    disabled={busyId === assignment.id}
-                    onClick={() =>
-                      void run(assignment.id, () =>
-                        removeCustomPropertyAssignment(assignment.id),
-                      )
-                    }
-                    className="shrink-0 text-xs font-medium text-secondary hover:text-danger disabled:opacity-50"
-                  >
-                    {t("ritten.custom.remove")}
-                  </button>
+                  {assignment.isRequired ? (
+                    <span className="shrink-0 text-xs text-muted">
+                      {t("ritten.custom.required")}
+                    </span>
+                  ) : (
+                    <button
+                      type="button"
+                      disabled={busyId === assignment.id}
+                      onClick={() =>
+                        void run(assignment.id, () =>
+                          removeCustomPropertyAssignment(assignment.id),
+                        )
+                      }
+                      className="shrink-0 text-xs font-medium text-secondary hover:text-danger disabled:opacity-50"
+                    >
+                      {t("ritten.custom.remove")}
+                    </button>
+                  )}
                 </li>
               ))}
             </ul>
           )}
+
+          {/* Said once, before anything is attempted, rather than as a refusal. */}
+          {hasRequired ? (
+            <p className="mt-2 text-[11px] text-muted">
+              {t("ritten.custom.requiredHint")}
+            </p>
+          ) : null}
 
           <h3 className="mt-4 text-xs font-medium uppercase tracking-wide text-muted">
             {t("ritten.custom.available")}

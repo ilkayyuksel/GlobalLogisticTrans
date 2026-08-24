@@ -525,12 +525,13 @@ Join table implementing the many-to-many relationship between Trip and CustomPro
 | `id` | `UUID` | NO | `gen_random_uuid()` | Primary key |
 | `trip_id` | `UUID` | NO | — | |
 | `custom_property_id` | `UUID` | NO | — | |
+| `is_automatic` | `BOOLEAN` | NO | `false` | A domain rule assigned this, and only such an assignment may be withdrawn automatically. `false` means a person chose it. |
 | `created_at` | `TIMESTAMPTZ` | NO | `now()` | Serves as the "Added Timestamp" |
 | `updated_at` | `TIMESTAMPTZ` | NO | `now()` | |
 
 ### Constraints
 
-- `UNIQUE (trip_id, custom_property_id)` — the same Custom Property cannot be assigned twice to the same Trip.
+- `UNIQUE (trip_id, custom_property_id)` — the same Custom Property cannot be assigned twice to the same Trip. It is also what limits a Trip to one Flat assignment, whether manual or automatic.
 
 ### Foreign Keys
 

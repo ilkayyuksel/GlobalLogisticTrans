@@ -64,6 +64,26 @@ export class CustomPropertyService {
   }
 
   /**
+   * The ACTIVE property configured under this name, or null.
+   *
+   * Exists so a domain rule can name the property it needs — "Flat" — without
+   * carrying a copy of its id. The name is unique among active properties
+   * (`custom_property_name_active_key`), so at most one row can answer.
+   *
+   * Null is an ordinary answer, not an error: a property may have been renamed
+   * or deactivated, and what that means is the caller's decision rather than
+   * this module's. Deactivated properties are deliberately excluded — an
+   * inactive property may not be assigned to anything.
+   */
+  async findActiveByName(
+    name: string,
+  ): Promise<CustomPropertyResponseDto | null> {
+    const property = await this.repository.findActiveByName(name);
+
+    return property ? toCustomPropertyResponse(property) : null;
+  }
+
+  /**
    * Creates a property, appending it to the end of the list when no position is
    * given.
    *

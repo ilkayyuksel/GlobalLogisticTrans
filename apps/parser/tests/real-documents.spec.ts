@@ -551,6 +551,44 @@ const PARSED_DOCUMENTS: readonly ExpectedDocument[] = [
   },
   {
     /*
+     * BUG — the postcode and the city are one printed line, emitted as TWO
+     * fragments because of the gap between them:
+     *
+     *   62223            SAINT LAURENT BLANGY
+     *
+     * Only the fragment starting at the address column was read, so the block
+     * ended in a bare postcode and no rule could find a city at all. The order
+     * was refused outright with "No readable city line was found".
+     *
+     * It states no country anywhere — the only prefixed postcode on the page is
+     * the Antwerp terminal's `BE-2040` — so the country is recorded as absent,
+     * exactly as it is for the other order whose postcode names a place in more
+     * than one country.
+     */
+    file: "BUG-CITY/transportorder1371231.pdf",
+    pageCount: 1,
+    layout: "SINGLE_ONE_PAGE",
+    documentStatus: "PLANNED",
+    trips: [
+      {
+        bookingNumber: "ANRDUB2792867",
+        direction: "COLLECTION",
+        containerType: "45PH",
+        containerNumber: null,
+        terminal: "PSA Quay 869",
+        destinationCity: "Saint Laurent Blangy",
+        destinationCountry: null,
+        date: "2026-08-25",
+        startTime: "08:45",
+        endTime: "08:45",
+        groupKey: null,
+        page: 1,
+        addressSection: "LOADING 1",
+      },
+    ],
+  },
+  {
+    /*
      * The same bytes as 1368224, filed under a second name. Kept as its own
      * fixture because the duplicate rules are about CONTENT, not filenames:
      * a document re-sent under another name must parse identically.
@@ -1090,10 +1128,10 @@ describe("the variations these documents actually contain", () => {
 });
 
 /**
- * ── THE FOUR BUG-CITY ORDERS ────────────────────────────────────────────────
- * Four real orders that the parser refused outright: each prints its address in
- * a shape the city rule did not cover. They are pinned here by what they say,
- * and the assertions state WHY each one was hard.
+ * ── THE BUG-CITY ORDERS ─────────────────────────────────────────────────────
+ * Real orders that the parser refused outright: each prints its address in a
+ * shape the city rule did not cover. They are pinned here by what they say, and
+ * the assertions state WHY each one was hard.
  * ────────────────────────────────────────────────────────────────────────────
  */
 describe("the addresses that had no readable city line", () => {
@@ -1141,6 +1179,7 @@ describe("the addresses that had no readable city line", () => {
     "BUG-CITY/transportorder1370335.pdf",
     "BUG-CITY/transportorder1370337.pdf",
     "BUG-CITY/transportorder1370345.pdf",
+    "BUG-CITY/transportorder1371231.pdf",
   ])("keeps %s's city free of postcodes and punctuation", async (file) => {
     const result = await parseFixture(file);
 
@@ -1151,6 +1190,99 @@ describe("the addresses that had no readable city line", () => {
     expect(destinationCity).not.toMatch(/\d/);
     expect(destinationCity).not.toMatch(/[,;]/);
     expect(destinationCity.trim()).toBe(destinationCity);
+  });
+
+  /**
+   * ── ONE PRINTED LINE, TWO FRAGMENTS ───────────────────────────────────────
+   * The last address line of this order is
+   *
+   *     62223            SAINT LAURENT BLANGY
+   *
+   * one line on paper and two runs of text in the PDF, because of the gap
+   * between the postcode and the name. The block builder kept only the run that
+   * starts at the address column, so the address ended at "62223" and no rule
+   * had a city to find — the whole order was refused.
+   *
+   * Every assertion below names something the parser must NOT have taken
+   * instead. Each is a line that was physically closer to the answer than the
+   * city: the company two lines up, the street one line up, the bracketed
+   * reference at the top, and the sender's own note in the next column.
+   * ──────────────────────────────────────────────────────────────────────────
+   */
+  describe("a postcode and city printed as one line", () => {
+    const FILE = "BUG-CITY/transportorder1371231.pdf";
+
+    async function trip() {
+      const result = await parseFixture(FILE);
+
+      if (!result.ok) {
+        throw new Error(`expected a parse: ${result.reason} — ${result.message}`);
+      }
+
+      return result.trips[0];
+    }
+
+    it("reads the city from the line the postcode shares", async () => {
+      // Title-cased like every other city this parser reads: "DOURGES" is
+      // stored as "Dourges", and this is the same rule, not an exception.
+      expect((await trip()).destinationCity).toBe("Saint Laurent Blangy");
+    });
+
+    it("names the place the document names, whatever the capitals", async () => {
+      expect((await trip()).destinationCity.toUpperCase()).toBe(
+        "SAINT LAURENT BLANGY",
+      );
+    });
+
+    it("does not take the company name", async () => {
+      expect((await trip()).destinationCity).not.toBe("Delisle – Saint Laurent");
+      expect((await trip()).destinationCity).not.toMatch(/delisle/i);
+    });
+
+    it("does not take the street", async () => {
+      expect((await trip()).destinationCity).not.toBe("120 Allée des Atrébates");
+      expect((await trip()).destinationCity).not.toMatch(/atrébates/i);
+    });
+
+    it("does not take the loading reference or the remarks column", async () => {
+      const city = (await trip()).destinationCity;
+
+      expect(city).not.toMatch(/loading ref/i);
+      expect(city).not.toMatch(/93165142/);
+      expect(city).not.toMatch(/remarks/i);
+    });
+
+    it("keeps the postcode out of the city", async () => {
+      const city = (await trip()).destinationCity;
+
+      expect(city).not.toMatch(/62223/);
+      expect(city).not.toMatch(/\d/);
+    });
+
+    /**
+     * The document states no country: the only prefixed postcode on the page is
+     * the Antwerp terminal's `BE-2040`, and a bare `62223` names a place in more
+     * than one country. Absent is recorded as absent rather than guessed at —
+     * the same answer this parser already gives for Raillencourt Ste Olle.
+     */
+    it("records the country as absent, because the document states none", async () => {
+      expect((await trip()).destinationCountry).toBeNull();
+    });
+
+    it("reads everything else the document states", async () => {
+      expect(await trip()).toMatchObject({
+        bookingNumber: "ANRDUB2792867",
+        containerType: "45PH",
+        date: "2026-08-25",
+        startTime: "08:45",
+        endTime: "08:45",
+      });
+    });
+
+    /** The evidence, so a wrong city could always be checked against the page. */
+    it("keeps the joined line in the raw address", async () => {
+      expect((await trip()).raw.rawAddress).toContain("62223 SAINT LAURENT BLANGY");
+    });
   });
 
   /**

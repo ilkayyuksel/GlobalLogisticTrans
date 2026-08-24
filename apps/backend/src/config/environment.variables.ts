@@ -157,7 +157,7 @@ export class TrustedSenderPatternRule implements ValidatorConstraintInterface {
   }
 
   defaultMessage(args: ValidationArguments): string {
-    return `IMAP_TRUSTED_SENDERS entry ${JSON.stringify(args.value)} is neither an exact address (planning@eucon.nl) nor a domain wildcard (*@eucon.nl).`;
+    return `IMAP_TRUSTED_SENDERS entry ${JSON.stringify(args.value)} is none of the accepted forms: an exact address (planning@eucon.nl), a domain wildcard (*@eucon.nl), or a literal substring of at least three characters (eucon).`;
   }
 }
 

@@ -139,9 +139,23 @@ describe("Manual PDF upload, end to end over HTTP", () => {
           updatedAt: new Date("2026-08-13T06:00:00.000Z"),
         });
       }),
-      runImportTransaction: jest.fn(
+      runTripWriteTransaction: jest.fn(
         (work: (repositories: unknown) => Promise<unknown>) =>
-          work({ trips: tripRepository, pdfDocuments: pdfDocumentRepository }),
+          work({
+            trips: tripRepository,
+            pdfDocuments: pdfDocumentRepository,
+            /*
+             * Every fixture here is a 45PH, which requires no automatic
+             * property — so the rule never reaches this. It is handed over
+             * anyway, because the transaction's shape is part of what these
+             * tests exercise.
+             */
+            customProperties: {
+              create: jest.fn(),
+              findByTripAndProperty: jest.fn().mockResolvedValue(null),
+              delete: jest.fn(),
+            },
+          }),
       ),
     } as unknown as TripRepository;
 

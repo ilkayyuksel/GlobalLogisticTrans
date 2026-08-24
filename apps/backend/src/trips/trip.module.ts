@@ -1,9 +1,11 @@
 import { Module } from "@nestjs/common";
 
 import { CostConfirmationModule } from "../cost-confirmations/cost-confirmation.module";
+import { CustomPropertyModule } from "../custom-properties/custom-property.module";
 import { DriverModule } from "../drivers/driver.module";
 import { VehicleAssignmentModule } from "../vehicle-assignments/vehicle-assignment.module";
 import { VehicleModule } from "../vehicles/vehicle.module";
+import { AutomaticFlatPropertyService } from "./automatic-flat.service";
 import { DriverStatisticsController } from "./driver-statistics.controller";
 import { DriverStatisticsService } from "./driver-statistics.service";
 import { TripController } from "./trip.controller";
@@ -32,6 +34,14 @@ import { TripService } from "./trip.service";
  * planning-data rule this module already owns. Putting them the other way round
  * would make DriverModule depend on TripModule and close the loop.
  *
+ * CustomPropertyModule is imported for one rule: a Trip whose container type
+ * is 20FL or 20ST must carry the "Flat" property, and the rule resolves that
+ * property by NAME through the Custom Property service rather than holding a
+ * copy of its id. The dependency points the same way as the others — Custom
+ * Property knows nothing about Trips — so no cycle forms. The assignment ROW is
+ * written through a transaction-scoped repository handed out by
+ * `runTripWriteTransaction`, so the Trip and its properties commit together.
+ *
  * TripService is exported because later phases — pricing, export and the
  * parser — read Trips through the service, never through the repository, so
  * database access stays behind a single door.
@@ -42,9 +52,11 @@ import { TripService } from "./trip.service";
     DriverModule,
     VehicleAssignmentModule,
     CostConfirmationModule,
+    CustomPropertyModule,
   ],
   controllers: [TripController, TripGroupController, DriverStatisticsController],
   providers: [
+    AutomaticFlatPropertyService,
     DriverStatisticsService,
     TripService,
     TripRevisionService,

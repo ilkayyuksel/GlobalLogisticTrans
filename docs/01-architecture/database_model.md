@@ -801,6 +801,28 @@ The override never changes the underlying VehicleAssignment.
 
 One Driver may perform many Trips, whether derived or through override.
 
+## Changing the Driver of a Vehicle
+
+A Vehicle carries different Drivers over time.
+
+Changing the Driver is never an edit of the existing VehicleAssignment.
+
+It creates a NEW VehicleAssignment starting on the date the Administrator gives.
+
+The Backend closes the previous open-ended assignment on the day before that date.
+
+The previous assignment keeps its own Driver and its own period.
+
+Because the Driver of a Trip is resolved against the Trip's planning date, every
+Trip planned before the handover keeps the Driver who actually performed it.
+
+No Trip row is modified by a reassignment.
+
+An existing VehicleAssignment therefore exposes only its end date and its notes
+for editing. Its Vehicle, its Driver and its start date define which period the
+record represents, and changing them would rewrite history rather than record a
+decision.
+
 Drivers cannot be assigned, derived or overridden, while marked as unavailable.
 
 ---
@@ -3045,6 +3067,9 @@ This is a many-to-many relationship, implemented through TripCustomProperty.
 
 Custom Properties are assigned manually by the Administrator.
 
+One property is also assigned automatically. See "Automatic Flat assignment"
+below.
+
 Multiple Custom Properties may be assigned to the same Trip.
 
 Example
@@ -4300,6 +4325,58 @@ The Parser Service never creates TripCustomProperty records directly.
 A TripCustomProperty record is created when the Administrator assigns a Custom Property to a Trip.
 
 A TripCustomProperty record is removed when the Administrator removes a Custom Property from a Trip.
+
+A record is also created and removed by the automatic Flat rule described below.
+
+---
+
+## Automatic Flat assignment
+
+A Trip whose containerType is 20FL or 20ST must carry the Custom Property named
+Flat.
+
+The comparison trims surrounding whitespace and ignores capitalisation. It is an
+exact match on the code: 20FLX, 20STUFF and 45PH require nothing.
+
+The rule is applied by the Backend on every path that writes a Trip:
+
+- manual Trip creation
+- NEW PDF import
+- an UPDATE PDF that creates a Trip
+- an UPDATE PDF that changes the containerType
+
+The property is resolved by NAME through the Custom Property configuration. No
+identifier and no price is held in the source. Its amount continues to come from
+CustomProperty.defaultPrice, read by the Pricing Engine at calculation time, and
+the Pricing Engine is unchanged: an automatically assigned property is priced
+exactly like a manually assigned one.
+
+The assignment is written inside the same transaction as the Trip. A Trip whose
+containerType requires Flat is never stored without it; if no active property is
+configured under that name, the whole operation is refused.
+
+---
+
+## Manual and automatic assignments
+
+TripCustomProperty.isAutomatic records where an assignment came from.
+
+- true: a domain rule assigned it. Only such an assignment may be withdrawn
+  automatically, which happens when the containerType stops requiring it.
+- false: a person assigned it. A manual assignment is never withdrawn
+  automatically and is never converted into an automatic one, even when a rule
+  would have assigned the same property.
+
+An assignment made through the API is always manual.
+
+Because the pair (tripId, customPropertyId) is unique, a Trip carries at most one
+Flat assignment. When a manual Flat already exists on a Trip that becomes a flat
+rack, it satisfies the rule as it stands and is left manual.
+
+While the containerType requires Flat, the assignment cannot be removed — by the
+rule or by the Administrator. Removal is refused by the Backend and the removal
+action is not offered in the interface. Changing the containerType is what
+releases it.
 
 ---
 

@@ -269,6 +269,9 @@ const nl = {
   "ritten.custom.available": "Beschikbaar",
   "ritten.custom.add": "Toevoegen",
   "ritten.custom.remove": "Verwijderen",
+  "ritten.custom.required": "Verplicht",
+  "ritten.custom.requiredHint":
+    "Flat is verplicht voor containertype 20FL en 20ST en kan niet worden verwijderd. Wijzig het containertype als dit niet klopt.",
   "ritten.custom.empty": "Nog niets toegewezen",
   "ritten.custom.noneAvailable": "Geen actieve custom waarden",
   "ritten.custom.loading": "Custom waarden laden",
@@ -454,6 +457,7 @@ const nl = {
     "Maakt een voertuigtoewijzing vanaf vandaag — de standaardchauffeur van dit voertuig. Dit is géén vaste chauffeur per rit.",
   "vehicles.form.driverEditHint":
     "De chauffeur van een bestaand voertuig wijzig je op de voertuigpagina, zodat de geldigheidsperiode bewaard blijft.",
+  "vehicles.form.driverEditLink": "Open de voertuigpagina",
   "vehicles.feedback.driverLinkFailed":
     "Voertuig aangemaakt, maar de chauffeur kon niet worden gekoppeld",
   "vehicles.confirm.deactivate":
@@ -571,6 +575,14 @@ const nl = {
   "ritten.waiting.minutesWhole": "Minuten moeten een heel getal zijn.",
   "ritten.waiting.minutesRange": "Minuten moeten tussen 0 en 59 liggen.",
   "vehicles.assignment.title": "Chauffeurtoewijzing",
+  "vehicles.assignment.change": "Chauffeur wijzigen",
+  "vehicles.assignment.changeTitle": "Chauffeur wijzigen",
+  "vehicles.assignment.startsOn": "Nieuwe chauffeur vanaf",
+  "vehicles.assignment.supersedes":
+    "De huidige toewijzing loopt tot de dag vóór deze datum. De vorige toewijzing blijft bewaard, en ritten van vóór die datum houden hun chauffeur.",
+  "vehicles.assignment.currentDriver": "Huidige chauffeur",
+  "vehicles.assignment.driverReadOnly":
+    "De chauffeur van een bestaande toewijzing kan niet worden gewijzigd. Gebruik \u201cChauffeur wijzigen\u201d: dat maakt een nieuwe toewijzing en laat de historiek intact.",
   "vehicles.assignment.link": "Chauffeur koppelen",
   "vehicles.assignment.edit": "Toewijzing bewerken",
   "vehicles.assignment.driver": "Chauffeur",
@@ -967,6 +979,9 @@ const tr: Translations = {
   "ritten.custom.available": "Kullanılabilir",
   "ritten.custom.add": "Ekle",
   "ritten.custom.remove": "Kaldır",
+  "ritten.custom.required": "Zorunlu",
+  "ritten.custom.requiredHint":
+    "Flat, 20FL ve 20ST konteyner tipleri için zorunludur ve kaldırılamaz. Doğru değilse konteyner tipini değiştirin.",
   "ritten.custom.empty": "Henüz atanmadı",
   "ritten.custom.noneAvailable": "Aktif özel değer yok",
   "ritten.custom.loading": "Özel değerler yükleniyor",
@@ -1152,6 +1167,7 @@ const tr: Translations = {
     "Bugünden başlayan bir araç ataması oluşturur — bu aracın varsayılan şoförü. Sefer bazlı sabit bir şoför değildir.",
   "vehicles.form.driverEditHint":
     "Mevcut bir aracın şoförünü, geçerlilik dönemi korunsun diye araç sayfasından değiştirin.",
+  "vehicles.form.driverEditLink": "Araç sayfasını aç",
   "vehicles.feedback.driverLinkFailed":
     "Araç oluşturuldu, ancak şoför atanamadı",
   "vehicles.confirm.deactivate":
@@ -1267,6 +1283,14 @@ const tr: Translations = {
   "ritten.waiting.minutesWhole": "Dakika tam sayı olmalı.",
   "ritten.waiting.minutesRange": "Dakika 0 ile 59 arasında olmalı.",
   "vehicles.assignment.title": "Şoför ataması",
+  "vehicles.assignment.change": "Şoförü değiştir",
+  "vehicles.assignment.changeTitle": "Şoförü değiştir",
+  "vehicles.assignment.startsOn": "Yeni şoför şu tarihten itibaren",
+  "vehicles.assignment.supersedes":
+    "Mevcut atama bu tarihten bir gün öncesine kadar sürer. Önceki atama korunur ve o tarihten önceki seferler şoförünü korur.",
+  "vehicles.assignment.currentDriver": "Mevcut şoför",
+  "vehicles.assignment.driverReadOnly":
+    "Mevcut bir atamanın şoförü değiştirilemez. \u201cŞoförü değiştir\u201d\u2019i kullanın: bu yeni bir atama oluşturur ve geçmişi olduğu gibi bırakır.",
   "vehicles.assignment.link": "Şoför ata",
   "vehicles.assignment.edit": "Atamayı düzenle",
   "vehicles.assignment.driver": "Şoför",

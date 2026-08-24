@@ -260,5 +260,14 @@ describe("linking a driver while creating a vehicle", () => {
     expect(
       screen.getByText(/wijzig je op de voertuigpagina/),
     ).toBeInTheDocument();
+
+    /*
+     * And it goes there. An explanation with nowhere to go is how this read as
+     * "the chauffeur cannot be changed" — the rule is right, the dead end was
+     * not.
+     */
+    expect(
+      screen.getByRole("link", { name: "Open de voertuigpagina" }),
+    ).toHaveAttribute("href", `/vehicles/${VEHICLE_ID}`);
   });
 });

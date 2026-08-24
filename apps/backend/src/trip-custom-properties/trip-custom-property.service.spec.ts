@@ -7,6 +7,7 @@ import { TripService } from "../trips/trip.service";
 import {
   DuplicateTripCustomPropertyException,
   InactiveCustomPropertyException,
+  RequiredCustomPropertyException,
   TripCustomPropertyNotFoundException,
 } from "./exceptions/trip-custom-property.exceptions";
 import {
@@ -43,6 +44,8 @@ function buildAssignment(
     id: ASSIGNMENT_ID,
     tripId: TRIP_ID,
     customPropertyId: PROPERTY_ID,
+    // Somebody chose it, which is what every assignment made through the API is.
+    isAutomatic: false,
     createdAt: new Date("2026-08-01T00:00:00Z"),
     updatedAt: new Date("2026-08-01T00:00:00Z"),
     customProperty: buildProperty(),
@@ -66,7 +69,13 @@ describe("TripCustomPropertyService", () => {
       delete: jest.fn().mockResolvedValue(buildAssignment()),
     } as unknown as jest.Mocked<TripCustomPropertyRepository>;
 
-    tripService = { findById: jest.fn().mockResolvedValue({ id: TRIP_ID }) };
+    // A 45PH: no container type in these tests requires a property, which is
+    // what keeps them about assignment rather than about the Flat rule.
+    tripService = {
+      findById: jest
+        .fn()
+        .mockResolvedValue({ id: TRIP_ID, containerType: "45PH" }),
+    };
     customPropertyService = {
       findById: jest
         .fn()
@@ -126,6 +135,8 @@ describe("TripCustomPropertyService", () => {
       expect(repository.create).toHaveBeenCalledWith({
         tripId: TRIP_ID,
         customPropertyId: PROPERTY_ID,
+        // Chosen by a person, which is what this endpoint always means.
+        isAutomatic: false,
       });
     });
 
@@ -272,10 +283,15 @@ describe("TripCustomPropertyService", () => {
       expect(repository.delete).not.toHaveBeenCalled();
     });
 
-    it("never consults the Trip or the property, which are not modified", async () => {
+    /**
+     * The Trip IS read — its container type decides whether the property may
+     * be unassigned at all — but neither it nor the property is written to.
+     * Removing an assignment changes only the assignment.
+     */
+    it("reads the Trip for the rule, and modifies neither it nor the property", async () => {
       await service.remove(ASSIGNMENT_ID);
 
-      expect(tripService.findById).not.toHaveBeenCalled();
+      expect(tripService.findById).toHaveBeenCalledWith(TRIP_ID);
       expect(customPropertyService.findById).not.toHaveBeenCalled();
     });
 
@@ -310,5 +326,137 @@ describe("TripCustomPropertyService", () => {
     expect(source).not.toContain("tripPricing");
     expect(source).not.toContain("changeStatus");
     expect(source).not.toContain("defaultPrice");
+  });
+  /**
+   * A property the container type requires cannot be unassigned.
+   *
+   * The rule would put an automatic Flat straight back, so removing it would be
+   * theatre; a manual Flat on a 20FL is in the same position for a better
+   * reason — the invariant is about what the Trip CARRIES, not about who put it
+   * there. Either way the way out is the same: change the container type.
+   *
+   * Enforced in the service, not only in the browser. A disabled button
+   * protects nothing.
+   */
+  describe("a property the container type requires", () => {
+    function flatOn(containerType: string, isAutomatic: boolean) {
+      tripService.findById.mockResolvedValue({ id: TRIP_ID, containerType });
+      repository.findById.mockResolvedValue(
+        buildAssignment({
+          isAutomatic,
+          customProperty: buildProperty({ name: "Flat" }),
+        }),
+      );
+    }
+
+    it.each([
+      ["20FL", true],
+      ["20ST", true],
+      ["20FL", false],
+      ["20ST", false],
+    ])(
+      "refuses to remove Flat from a %s Trip (automatic: %p)",
+      async (containerType, isAutomatic) => {
+        flatOn(containerType, isAutomatic);
+
+        await expect(service.remove(ASSIGNMENT_ID)).rejects.toBeInstanceOf(
+          RequiredCustomPropertyException,
+        );
+        expect(repository.delete).not.toHaveBeenCalled();
+      },
+    );
+
+    it("names the container type, which is the reason and the way out", async () => {
+      flatOn("20FL", true);
+
+      await expect(service.remove(ASSIGNMENT_ID)).rejects.toThrow(/20FL/);
+    });
+
+    it("logs the refusal without naming the property", async () => {
+      flatOn("20FL", true);
+
+      await expect(service.remove(ASSIGNMENT_ID)).rejects.toBeDefined();
+      expect(logger.warn).toHaveBeenCalledWith(
+        "Rejected removal of a required custom property",
+        expect.objectContaining({ tripId: TRIP_ID }),
+      );
+      expect(JSON.stringify(logger.warn.mock.calls)).not.toContain("Flat");
+    });
+
+    it("allows Flat to be removed once the container type no longer requires it", async () => {
+      flatOn("45PH", false);
+
+      await expect(service.remove(ASSIGNMENT_ID)).resolves.toBeDefined();
+      expect(repository.delete).toHaveBeenCalledWith(ASSIGNMENT_ID);
+    });
+
+    /** Only Flat is protected. Every other property stays freely removable. */
+    it("allows another property to be removed from a 20FL Trip", async () => {
+      tripService.findById.mockResolvedValue({
+        id: TRIP_ID,
+        containerType: "20FL",
+      });
+      repository.findById.mockResolvedValue(
+        buildAssignment({ customProperty: buildProperty({ name: "TAR" }) }),
+      );
+
+      await expect(service.remove(ASSIGNMENT_ID)).resolves.toBeDefined();
+      expect(repository.delete).toHaveBeenCalled();
+    });
+  });
+
+  /**
+   * The two read-only flags a client needs, and must never compute itself.
+   */
+  describe("what a listed assignment reports", () => {
+    it("reports where the assignment came from", async () => {
+      repository.findByTripId.mockResolvedValue([
+        buildAssignment({ isAutomatic: true }),
+      ]);
+
+      const { items } = await service.findByTripId(TRIP_ID);
+
+      expect(items[0].isAutomatic).toBe(true);
+    });
+
+    it("reports Flat on a 20FL Trip as required", async () => {
+      tripService.findById.mockResolvedValue({
+        id: TRIP_ID,
+        containerType: "20FL",
+      });
+      repository.findByTripId.mockResolvedValue([
+        buildAssignment({ customProperty: buildProperty({ name: "Flat" }) }),
+      ]);
+
+      const { items } = await service.findByTripId(TRIP_ID);
+
+      expect(items[0].isRequired).toBe(true);
+    });
+
+    it("reports the same Flat on a 45PH Trip as not required", async () => {
+      tripService.findById.mockResolvedValue({
+        id: TRIP_ID,
+        containerType: "45PH",
+      });
+      repository.findByTripId.mockResolvedValue([
+        buildAssignment({ customProperty: buildProperty({ name: "Flat" }) }),
+      ]);
+
+      const { items } = await service.findByTripId(TRIP_ID);
+
+      expect(items[0].isRequired).toBe(false);
+    });
+
+    it("reports another property on a 20FL Trip as not required", async () => {
+      tripService.findById.mockResolvedValue({
+        id: TRIP_ID,
+        containerType: "20FL",
+      });
+      repository.findByTripId.mockResolvedValue([buildAssignment()]);
+
+      const { items } = await service.findByTripId(TRIP_ID);
+
+      expect(items[0].isRequired).toBe(false);
+    });
   });
 });

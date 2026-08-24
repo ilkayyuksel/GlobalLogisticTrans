@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ConflictException,
   NotFoundException,
+  UnprocessableEntityException,
 } from "@nestjs/common";
 import { TripStatus } from "@prisma/client";
 
@@ -117,6 +118,30 @@ export class VehicleAlreadyBookedException extends ConflictException {
   constructor(vehicleId: string, conflictingTripId: string) {
     super(
       `Vehicle "${vehicleId}" is already booked by Trip "${conflictingTripId}" during that interval.`,
+    );
+  }
+}
+
+/**
+ * The Custom Property a container type requires is not configured.
+ *
+ * Raised while writing a Trip whose container type must carry a property that
+ * no active Custom Property provides. The Trip write is rolled back with it:
+ * the rule is an invariant, and a 20FL Trip stored without its Flat property
+ * would be silently under-charged for the rest of its life.
+ *
+ * 422 rather than 500, because nothing is broken — an administrator
+ * deactivated or renamed a property, and the same request succeeds once it is
+ * configured again. The property is named because naming what is missing is the
+ * whole use of the message; its configured price never appears anywhere.
+ */
+export class MissingRequiredCustomPropertyException extends UnprocessableEntityException {
+  constructor(
+    readonly propertyName: string,
+    readonly containerType: string,
+  ) {
+    super(
+      `Container type "${containerType}" requires the Custom Property "${propertyName}", but no active property is configured under that name.`,
     );
   }
 }

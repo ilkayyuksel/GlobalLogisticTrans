@@ -1,19 +1,22 @@
 import { PdfDocumentRepository } from "../pdf-documents/pdf-document.repository";
 import { PrismaService } from "../prisma/prisma.service";
-import { ImportRepositories, TripRepository } from "./trip.repository";
+import { TripCustomPropertyRepository } from "../trip-custom-properties/trip-custom-property.repository";
+import { TripRepository, TripWriteRepositories } from "./trip.repository";
 
 /**
- * The import transaction.
+ * The Trip write transaction.
  *
- * What matters is that both repositories the import writes through are bound to
- * the SAME transaction client — a document written outside it would survive a
- * rollback that removed its Trips.
+ * What matters is that every repository the write goes through is bound to the
+ * SAME transaction client — a document written outside it would survive a
+ * rollback that removed its Trips, and so would an automatic Custom Property
+ * assignment, leaving a row pointing at a Trip that does not exist.
  */
-describe("TripRepository import transaction", () => {
+describe("TripRepository write transaction", () => {
   let prisma: {
     trip: { create: jest.Mock };
     tripGroup: { create: jest.Mock };
     pdfDocument: { create: jest.Mock };
+    tripCustomProperty: { create: jest.Mock };
     $transaction: jest.Mock;
   };
   let repository: TripRepository;
@@ -23,6 +26,7 @@ describe("TripRepository import transaction", () => {
       trip: { create: jest.fn().mockResolvedValue({}) },
       tripGroup: { create: jest.fn().mockResolvedValue({ id: "group" }) },
       pdfDocument: { create: jest.fn().mockResolvedValue({ id: "pdf" }) },
+      tripCustomProperty: { create: jest.fn().mockResolvedValue({ id: "tcp" }) },
       $transaction: jest.fn(),
     };
 
@@ -34,34 +38,46 @@ describe("TripRepository import transaction", () => {
   });
 
   it("hands the callback repositories, never a Prisma client", async () => {
-    let received: ImportRepositories | undefined;
+    let received: TripWriteRepositories | undefined;
 
-    await repository.runImportTransaction(async (repositories) => {
+    await repository.runTripWriteTransaction(async (repositories) => {
       received = repositories;
       return null;
     });
 
     expect(received?.trips).toBeInstanceOf(TripRepository);
     expect(received?.pdfDocuments).toBeInstanceOf(PdfDocumentRepository);
+    expect(received?.customProperties).toBeInstanceOf(
+      TripCustomPropertyRepository,
+    );
   });
 
-  it("runs both repositories inside one transaction", async () => {
-    await repository.runImportTransaction(async ({ trips, pdfDocuments }) => {
-      await pdfDocuments.create({
-        importSource: "MANUAL_UPLOAD",
-        originalFilename: "order.pdf",
-        storagePath: "abc.pdf",
-        fileSizeBytes: BigInt(1),
-        fileHash: "abc",
-        mimeType: "application/pdf",
-      });
-      await trips.createTripGroup();
-      return null;
-    });
+  it("runs every repository inside one transaction", async () => {
+    await repository.runTripWriteTransaction(
+      async ({ trips, pdfDocuments, customProperties }) => {
+        await pdfDocuments.create({
+          importSource: "MANUAL_UPLOAD",
+          originalFilename: "order.pdf",
+          storagePath: "abc.pdf",
+          fileSizeBytes: BigInt(1),
+          fileHash: "abc",
+          mimeType: "application/pdf",
+        });
+        await trips.createTripGroup();
+        // The automatic Flat assignment shares the Trip's transaction.
+        await customProperties.create({
+          tripId: "trip-1",
+          customPropertyId: "property-1",
+          isAutomatic: true,
+        });
+        return null;
+      },
+    );
 
     expect(prisma.$transaction).toHaveBeenCalledTimes(1);
     expect(prisma.pdfDocument.create).toHaveBeenCalledTimes(1);
     expect(prisma.tripGroup.create).toHaveBeenCalledTimes(1);
+    expect(prisma.tripCustomProperty.create).toHaveBeenCalledTimes(1);
   });
 
   it("propagates a failure so the transaction rolls back", async () => {
@@ -70,7 +86,7 @@ describe("TripRepository import transaction", () => {
     );
 
     await expect(
-      repository.runImportTransaction(async () => {
+      repository.runTripWriteTransaction(async () => {
         throw new Error("write failed");
       }),
     ).rejects.toThrow("write failed");

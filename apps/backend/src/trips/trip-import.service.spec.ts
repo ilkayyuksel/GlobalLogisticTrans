@@ -9,6 +9,8 @@ import { DuplicateBookingNumberException } from "./exceptions/trip.exceptions";
 import { ImportTripsCommand, ImportedTripData } from "./import-trips.command";
 import { TripRepository } from "./trip.repository";
 import { TripService } from "./trip.service";
+import { TripCustomPropertyRepository } from "../trip-custom-properties/trip-custom-property.repository";
+import { AutomaticFlatPropertyService } from "./automatic-flat.service";
 import { TripPlanningDataService } from "./trip-planning-data.service";
 
 /**
@@ -97,11 +99,19 @@ function buildCommand(
 describe("TripService.importTrips", () => {
   let repository: jest.Mocked<TripRepository>;
   let pdfDocuments: jest.Mocked<PdfDocumentRepository>;
+  /** Present so the transaction shape matches; this spec asserts nothing on it. */
+  let customProperties: jest.Mocked<TripCustomPropertyRepository>;
   let logger: { setContext: jest.Mock; log: jest.Mock; warn: jest.Mock };
   let eventBus: { publish: jest.Mock };
   let service: TripService;
 
   beforeEach(() => {
+    customProperties = {
+      create: jest.fn(),
+      findByTripAndProperty: jest.fn().mockResolvedValue(null),
+      delete: jest.fn(),
+    } as unknown as jest.Mocked<TripCustomPropertyRepository>;
+
     pdfDocuments = {
       findByFileHash: jest.fn(),
       create: jest.fn().mockResolvedValue({ id: PDF_ID }),
@@ -118,14 +128,14 @@ describe("TripService.importTrips", () => {
           }),
         ),
       ),
-      runImportTransaction: jest.fn(),
+      runTripWriteTransaction: jest.fn(),
     } as unknown as jest.Mocked<TripRepository>;
 
     // The real transaction hands the callback repositories bound to it; the
     // double passes the same ones through so every call stays observable.
-    (repository.runImportTransaction as jest.Mock).mockImplementation(
+    (repository.runTripWriteTransaction as jest.Mock).mockImplementation(
       (work: (repos: unknown) => Promise<unknown>) =>
-        work({ trips: repository, pdfDocuments }),
+        work({ trips: repository, pdfDocuments, customProperties }),
     );
 
     logger = { setContext: jest.fn(), log: jest.fn(), warn: jest.fn() };
@@ -148,6 +158,10 @@ describe("TripService.importTrips", () => {
             ),
           ),
       } as unknown as TripPlanningDataService,
+      {
+        applyToNewTrip: jest.fn(),
+        synchronise: jest.fn(),
+      } as unknown as AutomaticFlatPropertyService,
       eventBus as unknown as DomainEventBus,
       logger as unknown as AppLoggerService,
     );
@@ -156,7 +170,7 @@ describe("TripService.importTrips", () => {
   it("writes the document and the Trips in one transaction", async () => {
     await service.importTrips(buildCommand());
 
-    expect(repository.runImportTransaction).toHaveBeenCalledTimes(1);
+    expect(repository.runTripWriteTransaction).toHaveBeenCalledTimes(1);
     expect(pdfDocuments.create).toHaveBeenCalledTimes(1);
     expect(repository.create).toHaveBeenCalledTimes(1);
   });

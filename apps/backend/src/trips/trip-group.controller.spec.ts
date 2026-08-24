@@ -1,3 +1,4 @@
+import { AutomaticFlatPropertyService } from "./automatic-flat.service";
 import {
   INestApplication,
   ValidationPipe,
@@ -73,6 +74,7 @@ describe("TripGroupController (integration)", () => {
     findById: jest.Mock;
     update: jest.Mock;
     runInTransaction: jest.Mock;
+    runTripWriteTransaction: jest.Mock;
   };
 
   beforeEach(async () => {
@@ -83,6 +85,7 @@ describe("TripGroupController (integration)", () => {
       findById: jest.fn().mockResolvedValue(null),
       update: jest.fn(),
       runInTransaction: jest.fn(),
+      runTripWriteTransaction: jest.fn(),
     };
 
     repository.runInTransaction.mockImplementation(
@@ -102,6 +105,12 @@ describe("TripGroupController (integration)", () => {
       controllers: [TripGroupController, TripController],
       providers: [
         TripService,
+        // Not exercised here; the Trips these tests build require no automatic
+        // property. It only has to exist for TripService to be constructible.
+        {
+          provide: AutomaticFlatPropertyService,
+          useValue: { applyToNewTrip: jest.fn(), synchronise: jest.fn() },
+        },
         // TripController is mounted here too; its documents endpoint has its
         // own tests and only has to be resolvable.
         {

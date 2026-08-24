@@ -12,6 +12,10 @@ import { AppLoggerService } from "../logger/app-logger.service";
 import { VehicleService } from "../vehicles/vehicle.service";
 import { TripController } from "./trip.controller";
 import { TripPlanningDataService } from "./trip-planning-data.service";
+import { stubTripWriteTransaction } from "./trip-write-transaction.double";
+import { CustomPropertyService } from "../custom-properties/custom-property.service";
+import { AutomaticFlatPropertyService } from "./automatic-flat.service";
+import { FLAT_CUSTOM_PROPERTY_NAME } from "./flat-container-rule";
 import { TripRepository } from "./trip.repository";
 import { TripDocumentsService } from "./trip-documents.service";
 import { TripService } from "./trip.service";
@@ -36,14 +40,33 @@ const BASE = "/api/v1/trips";
 const VEHICLE_ID = "25fed53c-1399-4b99-b667-2f7e508eda88";
 const PDF_ID = "447c3e09-dc0e-4349-9f2d-8c11b3632c0a";
 
+/** The one configured Custom Property this path can be obliged to assign. */
+const FLAT_PROPERTY = {
+  id: "0f1a1a1a-1111-4111-8111-111111111111",
+  name: FLAT_CUSTOM_PROPERTY_NAME,
+  defaultPrice: "80.00",
+  pricingComponentId: null,
+  isActive: true,
+};
+
 describe("Manual Trip creation", () => {
   let app: INestApplication;
   let repository: jest.Mocked<TripRepository>;
   let eventBus: { publish: jest.Mock };
   let created: Record<string, unknown> | null;
+  /** Every Custom Property assignment the creation wrote, in order. */
+  let assignments: Record<string, unknown>[];
+  /** The configuration the rule reads the Flat property from. */
+  let customProperties: { findActiveByName: jest.Mock };
 
   beforeEach(async () => {
     created = null;
+    assignments = [];
+    customProperties = {
+      findActiveByName: jest.fn((name: string) =>
+        Promise.resolve(name === FLAT_CUSTOM_PROPERTY_NAME ? FLAT_PROPERTY : null),
+      ),
+    };
 
     repository = {
       pdfDocumentExists: jest.fn().mockResolvedValue(true),
@@ -51,6 +74,7 @@ describe("Manual Trip creation", () => {
       findById: jest.fn().mockResolvedValue(null),
       findPage: jest.fn().mockResolvedValue({ items: [], totalItems: 0 }),
       runInTransaction: jest.fn(),
+      runTripWriteTransaction: jest.fn(),
       create: jest.fn(async (data: Record<string, unknown>) => {
         created = data;
 
@@ -79,6 +103,18 @@ describe("Manual Trip creation", () => {
     (repository.runInTransaction as jest.Mock).mockImplementation(
       (work: (repo: TripRepository) => Promise<unknown>) => work(repository),
     );
+    (repository.runTripWriteTransaction as jest.Mock).mockImplementation(
+      stubTripWriteTransaction(repository, {
+        customProperties: {
+          create: jest.fn((data: Record<string, unknown>) => {
+            const row = { id: `assignment-${assignments.length + 1}`, ...data };
+            assignments.push(row);
+            return Promise.resolve(row);
+          }),
+          findByTripAndProperty: jest.fn().mockResolvedValue(null),
+        },
+      }),
+    );
 
     eventBus = { publish: jest.fn().mockResolvedValue(undefined) };
 
@@ -86,6 +122,13 @@ describe("Manual Trip creation", () => {
       controllers: [TripController],
       providers: [
         TripService,
+        /*
+         * The REAL rule, over the one configured property these tests need.
+         * A manually created 20FL owes Flat exactly as an imported one does,
+         * and that is asserted below rather than assumed.
+         */
+        AutomaticFlatPropertyService,
+        { provide: CustomPropertyService, useValue: customProperties },
         // The documents endpoint has its own tests; this controller only needs
         // it to exist so the rest of the routes can be exercised.
         {
@@ -376,6 +419,81 @@ describe("Manual Trip creation", () => {
         .expect(201);
 
       expect(response.body.data.effectiveDriver).toBeNull();
+    });
+  });
+  /**
+   * The container type obliges the Trip, whoever entered it.
+   *
+   * A Trip typed in by hand is not a lesser Trip: a 20FL announced by phone
+   * carries the same flat-rack handling as one that arrived on a document, and
+   * an operator who has to remember to tick it will eventually not. So the rule
+   * runs on this path too, inside the same transaction as the insert.
+   */
+  describe("the automatic Flat property", () => {
+    async function createWith(containerType: string | null) {
+      return request(app.getHttpServer())
+        .post(BASE)
+        .send(containerType === null ? {} : { containerType })
+        .expect(201);
+    }
+
+    it.each(["20FL", "20ST"])("assigns Flat to a %s", async (containerType) => {
+      await createWith(containerType);
+
+      expect(assignments).toEqual([
+        expect.objectContaining({
+          customPropertyId: FLAT_PROPERTY.id,
+          isAutomatic: true,
+        }),
+      ]);
+    });
+
+    it("assigns it for a lower-case container type too", async () => {
+      // Only trimmed on the way in, so the rule is what handles the capitals.
+      await createWith("20fl");
+
+      expect(assignments).toHaveLength(1);
+    });
+
+    it.each(["45PH", "45OS", "20STUFF", null])(
+      "assigns nothing for %p",
+      async (containerType) => {
+        await createWith(containerType);
+
+        expect(assignments).toEqual([]);
+      },
+    );
+
+    it("assigns it inside the transaction that inserts the Trip", async () => {
+      await createWith("20FL");
+
+      expect(repository.runTripWriteTransaction).toHaveBeenCalledTimes(1);
+    });
+
+    /**
+     * Atomicity, from the failing side. With no Flat property configured the
+     * Trip must not be stored at all — a 20FL without it is under-charged from
+     * then on, and silently.
+     */
+    it("refuses the whole creation when no Flat property is configured", async () => {
+      customProperties.findActiveByName.mockResolvedValue(null);
+
+      await request(app.getHttpServer())
+        .post(BASE)
+        .send({ containerType: "20FL" })
+        .expect(422);
+
+      expect(assignments).toEqual([]);
+    });
+
+    it("still creates a 45PH Trip when no Flat property is configured", async () => {
+      // Nothing is required, so nothing is missing.
+      customProperties.findActiveByName.mockResolvedValue(null);
+
+      await request(app.getHttpServer())
+        .post(BASE)
+        .send({ containerType: "45PH" })
+        .expect(201);
     });
   });
 });

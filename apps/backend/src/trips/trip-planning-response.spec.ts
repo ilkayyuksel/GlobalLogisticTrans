@@ -1,3 +1,4 @@
+import { AutomaticFlatPropertyService } from "./automatic-flat.service";
 import {
   INestApplication,
   ValidationPipe,
@@ -107,6 +108,12 @@ describe("Trip responses carry planning data", () => {
       controllers: [TripController],
       providers: [
         TripService,
+        // Not exercised here; the Trips these tests build require no automatic
+        // property. It only has to exist for TripService to be constructible.
+        {
+          provide: AutomaticFlatPropertyService,
+          useValue: { applyToNewTrip: jest.fn(), synchronise: jest.fn() },
+        },
         // The documents endpoint has its own tests; this controller only needs
         // it to exist so the rest of the routes can be exercised.
         {

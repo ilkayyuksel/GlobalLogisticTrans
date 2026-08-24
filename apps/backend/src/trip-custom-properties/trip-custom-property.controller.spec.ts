@@ -50,6 +50,8 @@ function buildAssignment(
     id: ASSIGNMENT_ID,
     tripId: TRIP_ID,
     customPropertyId: PROPERTY_ID,
+    // Somebody chose it, which is what every assignment made through the API is.
+    isAutomatic: false,
     createdAt: new Date("2026-08-01T00:00:00Z"),
     updatedAt: new Date("2026-08-01T00:00:00Z"),
     customProperty: buildProperty(),
@@ -80,7 +82,13 @@ describe("TripCustomPropertyController (integration)", () => {
       delete: jest.fn().mockResolvedValue(buildAssignment()),
     } as unknown as jest.Mocked<TripCustomPropertyRepository>;
 
-    tripService = { findById: jest.fn().mockResolvedValue({ id: TRIP_ID }) };
+    // A 45PH: no container type in these tests requires a property, which is
+    // what keeps them about assignment rather than about the Flat rule.
+    tripService = {
+      findById: jest
+        .fn()
+        .mockResolvedValue({ id: TRIP_ID, containerType: "45PH" }),
+    };
     customPropertyService = {
       findById: jest
         .fn()

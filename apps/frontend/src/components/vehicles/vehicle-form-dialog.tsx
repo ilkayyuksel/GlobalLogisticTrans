@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState } from "react";
 
 import { RittenDialog } from "@/components/ritten/ritten-dialog";
@@ -42,7 +43,9 @@ import { useTranslation } from "@/lib/i18n/language-provider";
  * An EXISTING vehicle's driver is deliberately not editable here. Changing it
  * means ending one assignment and starting another, which is a dated decision
  * with history behind it; the vehicle page owns that, and duplicating it in a
- * create form would be a second way to do the same thing.
+ * create form would be a second way to do the same thing. So this form LINKS
+ * there rather than only stating the rule — an explanation with nowhere to go
+ * reads as "this cannot be done".
  * ────────────────────────────────────────────────────────────────────────────
  *
  * Validation is the backend's. The only checks here are the ones the browser
@@ -179,7 +182,7 @@ export function VehicleFormDialog({
           />
 
           <DriverField
-            isCreating={vehicle === null}
+            vehicleId={vehicle?.id ?? null}
             drivers={drivers}
             value={values.driverId}
             onChange={(driverId) => update({ driverId })}
@@ -212,27 +215,35 @@ export function VehicleFormDialog({
  * The driver this truck will be assigned to, from today.
  *
  * A plain select over the active drivers the page already loaded. When editing
- * it becomes a sentence rather than a control: the change belongs to the
- * vehicle page, where the assignment's dates are visible.
+ * it becomes a sentence and a link rather than a control: the change belongs to
+ * the vehicle page, where the assignment's dates are visible and where the
+ * previous driver's period is kept.
  */
 function DriverField({
-  isCreating,
+  vehicleId,
   drivers,
   value,
   onChange,
 }: {
-  isCreating: boolean;
+  /** Null while creating; the vehicle being edited otherwise. */
+  vehicleId: string | null;
   drivers: readonly Driver[];
   value: string;
   onChange: (driverId: string) => void;
 }) {
   const t = useTranslation();
 
-  if (!isCreating) {
+  if (vehicleId !== null) {
     return (
       <Field label={t("vehicles.form.driver")} htmlFor="vehicle-driver-note">
         <p id="vehicle-driver-note" className="text-xs text-muted">
-          {t("vehicles.form.driverEditHint")}
+          {t("vehicles.form.driverEditHint")}{" "}
+          <Link
+            href={`/vehicles/${vehicleId}`}
+            className="font-medium text-primary hover:underline"
+          >
+            {t("vehicles.form.driverEditLink")}
+          </Link>
         </p>
       </Field>
     );

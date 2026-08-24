@@ -488,6 +488,19 @@ model TripCustomProperty {
   tripId           String @map("trip_id") @db.Uuid
   customPropertyId String @map("custom_property_id") @db.Uuid
 
+  /// How this assignment came to exist, and therefore who may withdraw it.
+  ///
+  /// True means a domain rule put it here — today only the Flat rule, which
+  /// assigns Flat to every Trip whose container type is 20FL or 20ST. Such an
+  /// assignment is maintained by that rule and is removed again when the
+  /// container type stops requiring it.
+  ///
+  /// False means a person chose it. A manual assignment is never withdrawn
+  /// automatically, and never converted into an automatic one: the operator's
+  /// decision outlives any rule that happens to agree with it. The default is
+  /// what makes every row written before this column existed correct.
+  isAutomatic Boolean @default(false) @map("is_automatic")
+
   /// Doubles as the "Added Timestamp" — a separate column would duplicate it.
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)

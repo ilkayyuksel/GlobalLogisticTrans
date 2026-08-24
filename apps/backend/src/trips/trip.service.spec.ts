@@ -14,8 +14,10 @@ import {
   TripNotFoundException,
   UnknownPdfDocumentException,
 } from "./exceptions/trip.exceptions";
+import { stubTripWriteTransaction } from "./trip-write-transaction.double";
 import { TripRepository } from "./trip.repository";
 import { TripService } from "./trip.service";
+import { AutomaticFlatPropertyService } from "./automatic-flat.service";
 import { TripPlanningDataService } from "./trip-planning-data.service";
 
 const TRIP_ID = "3f2504e0-4f89-41d3-9a0c-0305e82c3301";
@@ -85,12 +87,16 @@ describe("TripService", () => {
       update: jest.fn().mockResolvedValue(buildTrip()),
       setStatus: jest.fn().mockResolvedValue(buildTrip()),
       runInTransaction: jest.fn(),
+      runTripWriteTransaction: jest.fn(),
     } as unknown as jest.Mocked<TripRepository>;
 
     // The transaction hands the callback a repository; the double simply passes
     // the same one through so the assertions see every call.
     (repository.runInTransaction as jest.Mock).mockImplementation(
       (work: (repo: TripRepository) => Promise<unknown>) => work(repository),
+    );
+    (repository.runTripWriteTransaction as jest.Mock).mockImplementation(
+      stubTripWriteTransaction(repository),
     );
 
     vehicleService = {
@@ -119,6 +125,10 @@ describe("TripService", () => {
             ),
           ),
       } as unknown as TripPlanningDataService,
+      {
+        applyToNewTrip: jest.fn(),
+        synchronise: jest.fn(),
+      } as unknown as AutomaticFlatPropertyService,
       eventBus as unknown as DomainEventBus,
       logger as unknown as AppLoggerService,
     );
@@ -360,10 +370,10 @@ describe("TripService", () => {
       ).rejects.toBeInstanceOf(InactiveAssignmentException);
     });
 
-    it("runs the checks and the insert in one transaction", async () => {
+    it("runs the checks, the insert and the automatic properties in one transaction", async () => {
       await service.create(buildCreateDto());
 
-      expect(repository.runInTransaction).toHaveBeenCalledTimes(1);
+      expect(repository.runTripWriteTransaction).toHaveBeenCalledTimes(1);
     });
 
     it("logs identifiers only, never business values", async () => {

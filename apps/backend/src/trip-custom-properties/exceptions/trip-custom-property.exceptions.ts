@@ -41,3 +41,31 @@ export class InactiveCustomPropertyException extends ConflictException {
     );
   }
 }
+
+/**
+ * The container type requires this property, so it may not be unassigned.
+ *
+ * A 20FL and a 20ST always carry Flat. The rule assigns it, and while the type
+ * still requires it the assignment cannot be taken away — not by the automatic
+ * path, which would put it straight back, and not by hand either. Removing it
+ * would leave the Trip under-charged with nothing on it to show why.
+ *
+ * It applies whatever the assignment's source is. An operator who assigned Flat
+ * themselves before the type demanded it is in the same position as the rule:
+ * the invariant is about what the Trip CARRIES, not about who put it there.
+ *
+ * Change the container type and the automatic assignment goes by itself.
+ *
+ * The container type is named because it is the reason and the way out. No
+ * price appears, here or anywhere in this module.
+ */
+export class RequiredCustomPropertyException extends ConflictException {
+  constructor(
+    readonly tripId: string,
+    readonly containerType: string,
+  ) {
+    super(
+      `Trip "${tripId}" has container type "${containerType}", which requires this Custom Property. It cannot be removed while the container type requires it.`,
+    );
+  }
+}
