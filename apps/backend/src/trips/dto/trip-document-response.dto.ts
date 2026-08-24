@@ -64,9 +64,23 @@ export class TripDocumentDto {
 
   @ApiProperty({
     description:
-      "False when the document arrived but changed nothing on this Trip: an update after cancellation, a repeated cancellation, or a new order for a booking number already held.",
+      "False when the document arrived but changed nothing on this Trip: a repeated cancellation, or a document for a CLOSED Trip.",
   })
   applied!: boolean;
+
+  @ApiProperty({
+    format: "date-time",
+    nullable: true,
+    description:
+      "When the email carrying this document was received. Null for a document uploaded by hand, which has no email — `occurredAt` is then the upload time.",
+  })
+  receivedAt!: Date | null;
+
+  @ApiProperty({
+    description:
+      "True for the one document that currently governs this Trip: the latest applied transport document by arrival time. Cost Confirmations never govern a Trip and are never effective.",
+  })
+  isEffective!: boolean;
 
   @ApiProperty({
     description:

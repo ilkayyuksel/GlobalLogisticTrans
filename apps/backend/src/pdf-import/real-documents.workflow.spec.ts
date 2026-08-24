@@ -50,15 +50,58 @@ const UPDATE_DOCUMENTS: readonly { file: string; bookings: string[] }[] = [
 ];
 
 /** Every CANCEL fixture, with the booking its document names. */
-const CANCEL_DOCUMENTS: readonly { file: string; booking: string }[] = [
-  { file: "CANCEL/cancelled_transportorder1353889.pdf", booking: "ANRBEL2772352" },
-  { file: "CANCEL/cancelled_transportorder1354204.pdf", booking: "ANRDUB2767189" },
-  { file: "CANCEL/cancelled_transportorder1365387.pdf", booking: "DUBANR2776470" },
-  { file: "CANCEL/cancelled_transportorder1367320.pdf", booking: "ANRCRK2786825" },
-  { file: "CANCEL/cancelled_transportorder1367583.pdf", booking: "ANRCRK2786827" },
-  { file: "CANCEL/cancelled_transportorder1367584.pdf", booking: "ANRDUB2787843" },
-  { file: "CANCEL/cancelled_transportorder1369485.pdf", booking: "ANRDUB2790203" },
-  { file: "CANCEL/cancelled_transportorder1369488.pdf", booking: "ANRDUB2790211" },
+/**
+ * Every cancellation, with the identity it names.
+ *
+ * The container number is the other half of a Trip's identity, so it is pinned
+ * here beside the booking: a cancellation reaches the Trip that shares BOTH,
+ * and most of these documents are collections that name none.
+ */
+const CANCEL_DOCUMENTS: readonly {
+  file: string;
+  booking: string;
+  container: string | null;
+}[] = [
+  {
+    file: "CANCEL/cancelled_transportorder1353889.pdf",
+    booking: "ANRBEL2772352",
+    container: "EUCU 200024/9",
+  },
+  {
+    file: "CANCEL/cancelled_transportorder1354204.pdf",
+    booking: "ANRDUB2767189",
+    container: null,
+  },
+  {
+    file: "CANCEL/cancelled_transportorder1365387.pdf",
+    booking: "DUBANR2776470",
+    container: "EUCU 455132/2",
+  },
+  {
+    file: "CANCEL/cancelled_transportorder1367320.pdf",
+    booking: "ANRCRK2786825",
+    container: null,
+  },
+  {
+    file: "CANCEL/cancelled_transportorder1367583.pdf",
+    booking: "ANRCRK2786827",
+    container: null,
+  },
+  {
+    file: "CANCEL/cancelled_transportorder1367584.pdf",
+    booking: "ANRDUB2787843",
+    container: null,
+  },
+  {
+    file: "CANCEL/cancelled_transportorder1369485.pdf",
+    booking: "ANRDUB2790203",
+    container: null,
+  },
+  {
+    file: "CANCEL/cancelled_transportorder1369488.pdf",
+    booking: "ANRDUB2790211",
+    container: null,
+  },
 ];
 
 /** The booking both folders name, which is what makes the pair testable. */
@@ -215,7 +258,9 @@ describe("every real UPDATE and CANCEL document, through the real workflow", () 
     });
   });
 
-  describe.each(CANCEL_DOCUMENTS)("$file as a cancellation", ({ file, booking }) => {
+  describe.each(CANCEL_DOCUMENTS)(
+    "$file as a cancellation",
+    ({ file, booking, container }) => {
     it("cancels the Trip it names and keeps everything", async () => {
       const created = await importAsNew(file.replace("CANCEL/", "CANCEL/"));
 
@@ -232,7 +277,8 @@ describe("every real UPDATE and CANCEL document, through the real workflow", () 
         id: `trip-${harness.trips.length + 1}`,
         bookingNumber: booking,
         status: TripStatus.OPEN,
-        containerNumber: null,
+        // The document's own container: the other half of the identity it names.
+        containerNumber: container,
         containerType: "45PH",
         terminal: "PSA Quay 869",
         destinationCity: "Antwerpen",
@@ -303,45 +349,69 @@ describe("every real UPDATE and CANCEL document, through the real workflow", () 
       ]);
     });
 
-    it("stays cancelled when the revision arrives after: NEW → CANCEL → UPDATE", async () => {
+    /**
+     * The same real booking, cancelled and then revised. Both documents state
+     * ANRDUB2790203 and neither states a container, so (booking, null) is the
+     * identity they share — which is exactly why the revision finds the Trip.
+     */
+    it("reopens the Trip when the revision arrives after: NEW → CANCEL → UPDATE", async () => {
       const created = await importPlanned();
       await harness.importer.cancel(readFixture(CANCELLED_1369485), "cancel.pdf");
 
-      await expect(
-        harness.importer.revise(readFixture(PLANNED_1369485), "late-update.pdf"),
-      ).rejects.toThrow();
+      const result = await harness.importer.revise(
+        readFixture(PLANNED_1369485),
+        "late-update.pdf",
+      );
 
-      expect(tripFor(SHARED_BOOKING)?.status).toBe(TripStatus.CANCELLED);
-      // The refused revision is kept and recorded, and it changed nothing.
+      expect(result.revisions[0].action).toBe("UPDATED");
+      expect(tripFor(SHARED_BOOKING)?.status).toBe(TripStatus.OPEN);
+      // Every document is kept, and the reopening is recorded beside them.
       expect(harness.pdfDocuments).toHaveLength(3);
       expect(historyOf(created.id)).toContainEqual(
-        expect.objectContaining({ eventType: "UPDATE_REFUSED" }),
+        expect.objectContaining({ eventType: "REOPENED" }),
       );
     });
 
-    it("does not let a refused revision become the latest update", async () => {
+    it("lets the reopening revision become the latest update", async () => {
+      const created = await importPlanned();
+      await harness.importer.revise(readFixture(PLANNED_1369485), "update.pdf");
+
+      await harness.importer.cancel(readFixture(CANCELLED_1369485), "cancel.pdf");
+      await harness.importer.revise(
+        readFixture(PLANNED_1369485),
+        "late-update.pdf",
+      );
+
+      const late = harness.pdfDocuments.at(-1) as { id: string };
+      const latest = await harness.latestUpdateOf(created.id);
+
+      expect(latest?.pdfDocumentId).toBe(late.id);
+    });
+
+    it("reopens rather than creating a second Trip: NEW → CANCEL → NEW", async () => {
+      await importPlanned();
+      await harness.importer.cancel(readFixture(CANCELLED_1369485), "cancel.pdf");
+
+      const result = await importAsNew(PLANNED_1369485);
+
+      expect(result.trips).toEqual([]);
+      expect(result.revisions[0].action).toBe("REOPENED");
+      expect(harness.trips).toHaveLength(1);
+      expect(tripFor(SHARED_BOOKING)?.status).toBe(TripStatus.OPEN);
+    });
+
+    /** A NEW restates the order; it never becomes the Trip's latest update. */
+    it("does not let a reopening NEW become the latest update", async () => {
       const created = await importPlanned();
       await harness.importer.revise(readFixture(PLANNED_1369485), "update.pdf");
       const applied = harness.pdfDocuments.at(-1) as { id: string };
 
       await harness.importer.cancel(readFixture(CANCELLED_1369485), "cancel.pdf");
-      await expect(
-        harness.importer.revise(readFixture(PLANNED_1369485), "late-update.pdf"),
-      ).rejects.toThrow();
+      await importPlanned();
 
       const latest = await harness.latestUpdateOf(created.id);
 
       expect(latest?.pdfDocumentId).toBe(applied.id);
-    });
-
-    it("creates no second Trip for a cancelled booking: NEW → CANCEL → NEW", async () => {
-      await importPlanned();
-      await harness.importer.cancel(readFixture(CANCELLED_1369485), "cancel.pdf");
-
-      await expect(importPlanned()).rejects.toThrow();
-
-      expect(harness.trips).toHaveLength(1);
-      expect(tripFor(SHARED_BOOKING)?.status).toBe(TripStatus.CANCELLED);
     });
 
     it("records a second cancellation without moving anything", async () => {
@@ -396,7 +466,7 @@ describe("every real UPDATE and CANCEL document, through the real workflow", () 
       // Move the Trip away from the document between revisions, so the next
       // one is a genuine change of exactly the fields moved.
       Object.assign(tripFor("ANRDUB2790449") as Record<string, unknown>, {
-        containerNumber: "ABC123",
+        containerType: "45PH",
       });
       await harness.importer.revise(readFixture(FILE), "update-1.pdf");
       const first = harness.pdfDocuments.at(-1) as { id: string };
@@ -410,7 +480,7 @@ describe("every real UPDATE and CANCEL document, through the real workflow", () 
       await harness.importer.revise(readFixture(FILE), "update-3.pdf");
       const third = harness.pdfDocuments.at(-1) as { id: string };
 
-      expect(changedFieldsOf(created.id, first.id)).toEqual(["containerNumber"]);
+      expect(changedFieldsOf(created.id, first.id)).toEqual(["containerType"]);
       expect(changedFieldsOf(created.id, second.id)).toEqual(["terminal"]);
       // The third repeats what the second left; nothing moved.
       expect(changedFieldsOf(created.id, third.id)).toEqual([]);
@@ -435,23 +505,23 @@ describe("every real UPDATE and CANCEL document, through the real workflow", () 
       const created = (await importAsNew(FILE)).trips[0];
       const trip = tripFor("ANRDUB2790449") as Record<string, unknown>;
 
-      Object.assign(trip, { containerNumber: "ABC123" });
+      Object.assign(trip, { containerType: "45PH" });
       await harness.importer.revise(readFixture(FILE), "update-1.pdf");
       const first = harness.pdfDocuments.at(-1) as { id: string };
 
-      Object.assign(trip, { containerNumber: "ABC123" });
+      Object.assign(trip, { containerType: "45PH" });
       await harness.importer.revise(readFixture(FILE), "update-2.pdf");
       const second = harness.pdfDocuments.at(-1) as { id: string };
 
-      expect(changedFieldsOf(created.id, first.id)).toEqual(["containerNumber"]);
-      expect(changedFieldsOf(created.id, second.id)).toEqual(["containerNumber"]);
+      expect(changedFieldsOf(created.id, first.id)).toEqual(["containerType"]);
+      expect(changedFieldsOf(created.id, second.id)).toEqual(["containerType"]);
     });
 
     it("reports the newest revision as the latest update", async () => {
       const created = (await importAsNew(FILE)).trips[0];
 
       Object.assign(tripFor("ANRDUB2790449") as Record<string, unknown>, {
-        containerNumber: "ABC123",
+        containerType: "45PH",
       });
       await harness.importer.revise(readFixture(FILE), "update-1.pdf");
 
@@ -479,11 +549,18 @@ describe("every real UPDATE and CANCEL document, through the real workflow", () 
       expect(readFixture(COPY)).toEqual(readFixture(FILE));
     });
 
+    /**
+     * The same order under another filename is the same identity, so it is
+     * applied to the Trip that holds it rather than refused — and still creates
+     * no second Trip.
+     */
     it("creates no second Trip when re-imported under another name", async () => {
       await importAsNew(FILE);
 
-      await expect(importAsNew(COPY)).rejects.toThrow();
+      const result = await importAsNew(COPY);
 
+      expect(result.trips).toEqual([]);
+      expect(result.revisions[0].action).toBe("REAPPLIED");
       expect(harness.trips).toHaveLength(1);
     });
 
@@ -520,14 +597,14 @@ describe("every real UPDATE and CANCEL document, through the real workflow", () 
       const created = (await importAsNew(FILE)).trips[0];
       const trip = tripFor("ANRDUB2765105") as Record<string, unknown>;
       trip.status = TripStatus.CLOSED;
-      trip.containerNumber = "ABC123";
+      trip.containerType = "45PH";
 
       await expect(
         harness.importer.revise(readFixture(FILE), "late-update.pdf"),
       ).rejects.toThrow();
 
       expect(trip.status).toBe(TripStatus.CLOSED);
-      expect(trip.containerNumber).toBe("ABC123");
+      expect(trip.containerType).toBe("45PH");
       expect(harness.pdfDocuments).toHaveLength(2);
       expect(historyOf(created.id)).toContainEqual(
         expect.objectContaining({ eventType: "UPDATE_REFUSED" }),
@@ -556,12 +633,15 @@ describe("every real UPDATE and CANCEL document, through the real workflow", () 
     it("lists the order, its revisions and its cancellation", async () => {
       const created = (await importAsNew(PLANNED_1369485)).trips[0];
 
+      // The document states 45PH, so moving the Trip away from it makes the
+      // next revision a genuine change of exactly that field.
       Object.assign(tripFor(SHARED_BOOKING) as Record<string, unknown>, {
-        containerNumber: "ABC123",
+        containerType: "45RH",
       });
       await harness.importer.revise(readFixture(PLANNED_1369485), "update-1.pdf");
       await harness.importer.revise(readFixture(PLANNED_1369485), "update-2.pdf");
       await harness.importer.cancel(readFixture(CANCELLED_1369485), "cancel.pdf");
+
 
       const { items } = await harness.documents.findForTrip(created.id);
 
@@ -578,7 +658,7 @@ describe("every real UPDATE and CANCEL document, through the real workflow", () 
         "transportorder1369485.pdf",
       ]);
       // Only the first revision moved anything.
-      expect(items[2].changedFields).toEqual(["containerNumber"]);
+      expect(items[2].changedFields).toEqual(["containerType"]);
       expect(items[1].changedFields).toEqual([]);
     });
 
@@ -649,7 +729,10 @@ describe("every real UPDATE and CANCEL document, through the real workflow", () 
 
     it("writes nothing partial when a revision is refused", async () => {
       const created = (await importAsNew(PLANNED_1369485)).trips[0];
-      await harness.importer.cancel(readFixture(CANCELLED_1369485), "cancel.pdf");
+      // CLOSED is the one state a document cannot move. A cancellation is
+      // superseded by a later document rather than protected from it.
+      (tripFor(SHARED_BOOKING) as Record<string, unknown>).status =
+        TripStatus.CLOSED;
       const before = { ...(tripFor(SHARED_BOOKING) as Record<string, unknown>) };
 
       await expect(

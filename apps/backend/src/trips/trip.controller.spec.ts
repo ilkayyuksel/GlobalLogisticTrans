@@ -85,6 +85,8 @@ describe("TripController (integration)", () => {
       findPage: jest.fn().mockResolvedValue({ items: [], totalItems: 0 }),
       findById: jest.fn().mockResolvedValue(null),
       findByBookingNumber: jest.fn().mockResolvedValue(null),
+      findByIdentity: jest.fn().mockResolvedValue(null),
+      findManyByBookingNumber: jest.fn().mockResolvedValue([]),
       pdfDocumentExists: jest.fn().mockResolvedValue(true),
       create: jest.fn().mockResolvedValue(buildTrip()),
       update: jest.fn().mockResolvedValue(buildTrip()),
@@ -348,8 +350,8 @@ describe("TripController (integration)", () => {
         .expect(404);
     });
 
-    it("returns 409 for a booking number already in use", async () => {
-      repository.findByBookingNumber.mockResolvedValue(
+    it("returns 409 for an identity already in use", async () => {
+      repository.findByIdentity.mockResolvedValue(
         buildTrip({ id: OTHER_TRIP_ID }),
       );
 
@@ -578,11 +580,11 @@ describe("TripController (integration)", () => {
         .expect(409);
     });
 
-    it("returns 409 when the booking number was taken meanwhile", async () => {
+    it("returns 409 when the identity was taken meanwhile", async () => {
       repository.findById.mockResolvedValue(
         buildTrip({ status: TripStatus.DELETED }),
       );
-      repository.findByBookingNumber.mockResolvedValue(
+      repository.findByIdentity.mockResolvedValue(
         buildTrip({ id: OTHER_TRIP_ID }),
       );
 

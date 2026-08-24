@@ -14,7 +14,7 @@ import {
   detectFieldChanges,
 } from "./trip-history";
 import { AutomaticFlatPropertyService } from "./automatic-flat.service";
-import { TripRepository } from "./trip.repository";
+import { TripIdentity, TripRepository } from "./trip.repository";
 
 /**
  * What a LATER transport order does to a Trip that already exists.
@@ -32,11 +32,27 @@ import { TripRepository } from "./trip.repository";
  * ────────────────────────────────────────────────────────────────────────────
  *
  * ── HOW AN EXISTING TRIP IS FOUND ───────────────────────────────────────────
- * By EXACT booking number, among the statuses that hold one. Nothing else:
- * not the destination, not the container, not the date, and not a similarity
- * of any kind. Two real orders in the fixture set share a city, a date and a
- * container type and differ only in their booking number — they are two
- * transports, and any looser rule would silently merge them.
+ * By its IDENTITY: the booking number AND the container number the document
+ * states, among the statuses that hold one. Nothing else — not the destination,
+ * not the date, not a similarity of any kind. Two real orders in the fixture set
+ * share a city, a date and a container type and differ only in their booking
+ * number; any looser rule would silently merge them.
+ *
+ * An ABSENT container number is part of the identity, matched with `IS NULL`
+ * rather than compared. Most orders are collections that name no container, and
+ * a rule that could not match them would create a second Trip for every CANCEL
+ * and every UPDATE of one.
+ *
+ * A document naming a DIFFERENT container is therefore a different Trip, and
+ * matches nothing here. That is deliberate: rewriting the container number of
+ * the Trip it did not name would move that Trip's identity out from under it.
+ * ────────────────────────────────────────────────────────────────────────────
+ *
+ * ── THE LATEST DOCUMENT DECIDES ─────────────────────────────────────────────
+ * Documents do not arrive in business order. A cancellation is no longer the end
+ * of a Trip's life: a later NEW or UPDATE for the same identity REOPENS it and
+ * becomes its effective document. Only CLOSED is terminal — finished, priced
+ * work is never rewritten by a document that arrives afterwards.
  * ────────────────────────────────────────────────────────────────────────────
  */
 
@@ -54,8 +70,14 @@ export type CancellationOutcome =
 /** What a revision did. `NO_MATCHING_TRIP` and the refusals are failures. */
 export type RevisionOutcome =
   | "UPDATED"
+  /** A CANCELLED Trip was reopened by this document and its fields applied. */
+  | "REOPENED"
+  /**
+   * CLOSED is the only terminal state left. There is deliberately no
+   * "refused because cancelled": a cancellation is superseded by a later
+   * document rather than protected from it.
+   */
   | "REFUSED_CLOSED"
-  | "REFUSED_CANCELLED"
   | "NO_MATCHING_TRIP";
 
 export interface RevisionResult {
@@ -80,6 +102,20 @@ export interface DocumentReference {
   readonly pdfDocumentId: string;
 }
 
+/**
+ * The Trip a parsed document is about.
+ *
+ * Both halves come from the document itself and neither is normalised: the
+ * booking number and the container number are stored exactly as printed, and
+ * they are compared exactly as stored.
+ */
+export function identityOf(document: ImportedTripData): TripIdentity {
+  return {
+    bookingNumber: document.bookingNumber,
+    containerNumber: document.containerNumber,
+  };
+}
+
 @Injectable()
 export class TripRevisionService {
   constructor(
@@ -100,23 +136,28 @@ export class TripRevisionService {
    *   OPEN       → CANCELLED. The one case that writes.
    *   CANCELLED  → nothing. Re-sending a cancellation must be harmless, and it
    *                is the same message arriving twice more often than not.
+   *                A CANCEL never reopens anything, so nothing is written.
    *   CLOSED     → nothing. The transport was carried out and priced; a later
    *                cancellation does not un-drive a truck, and rewriting a
    *                closed Trip would falsify what was invoiced. It is reported,
    *                not applied.
    *   no Trip    → nothing. Never created.
    *
+   * Matched by IDENTITY: a cancellation for booking A container 1 must not
+   * cancel booking A container 2, which is a different transport that nobody
+   * cancelled.
+   *
    * The read and the write share one transaction, so a Trip that closes between
    * them cannot be cancelled on the strength of a stale read.
    */
-  async cancelByBookingNumber(
-    bookingNumber: string,
+  async cancelByIdentity(
+    identity: TripIdentity,
     document?: DocumentReference,
   ): Promise<CancellationOutcome> {
     const outcome = await this.repository.runInTransaction(
       async (repository): Promise<CancellationOutcome> => {
-        const trip = await repository.findByBookingNumber({
-          bookingNumber,
+        const trip = await repository.findByIdentity({
+          identity,
           statuses: BOOKING_NUMBER_HOLDING_STATUSES,
         });
 
@@ -162,7 +203,7 @@ export class TripRevisionService {
     );
 
     this.logger.log("Cancellation applied to a transport order", {
-      bookingNumber,
+      bookingNumber: identity.bookingNumber,
       outcome,
     });
 
@@ -191,8 +232,8 @@ export class TripRevisionService {
         trips: repository,
         customProperties,
       }): Promise<RevisionResult> => {
-        const trip = await repository.findByBookingNumber({
-          bookingNumber: document.bookingNumber,
+        const trip = await repository.findByIdentity({
+          identity: identityOf(document),
           statuses: BOOKING_NUMBER_HOLDING_STATUSES,
         });
 
@@ -201,22 +242,34 @@ export class TripRevisionService {
         }
 
         /*
-         * A revision that cannot be applied is still recorded against the Trip
-         * it named. That is what makes "an update arrived after the
-         * cancellation" a visible fact rather than a silent refusal, and it is
-         * why the document is kept: the record and the evidence stay together.
+         * A cancellation is not the end of this Trip's life. A revision that
+         * arrives after one is the LATER statement about the same transport, so
+         * it brings the Trip back and its fields are applied — the alternative
+         * leaves real, re-planned work invisible because two documents crossed.
+         *
+         * Recorded as its own event beside the change set, so the audit trail
+         * shows both that the Trip came back and what brought it back.
          */
-        if (trip.status === TripStatus.CANCELLED) {
-          await this.record(repository, trip.id, source, {
-            eventType: TripHistoryEvent.UpdateRefused,
-            description:
-              "Update received after cancellation. The Trip stays CANCELLED and no field was changed.",
-          });
+        const reopened = trip.status === TripStatus.CANCELLED;
 
-          return { outcome: "REFUSED_CANCELLED", trip, changedFields: [] };
+        if (reopened) {
+          await repository.setStatus(trip.id, TripStatus.OPEN);
+          await this.record(repository, trip.id, source, {
+            eventType: TripHistoryEvent.Reopened,
+            previousValue: { status: TripStatus.CANCELLED },
+            newValue: { status: TripStatus.OPEN },
+            description:
+              "Reopened by an update that arrived after the cancellation.",
+          });
         }
 
-        if (trip.status !== TripStatus.OPEN) {
+        /*
+         * A revision that cannot be applied is still recorded against the Trip
+         * it named. That is what makes "an update arrived after the Trip was
+         * finished" a visible fact rather than a silent refusal, and it is why
+         * the document is kept: the record and the evidence stay together.
+         */
+        if (!reopened && trip.status !== TripStatus.OPEN) {
           await this.record(repository, trip.id, source, {
             eventType: TripHistoryEvent.UpdateRefused,
             description:
@@ -254,7 +307,7 @@ export class TripRevisionService {
         await this.recordUpdate(repository, trip.id, source, changes);
 
         return {
-          outcome: "UPDATED",
+          outcome: reopened ? "REOPENED" : "UPDATED",
           trip: updated,
           changedFields: changes.map((change) => change.field),
         };
@@ -279,29 +332,105 @@ export class TripRevisionService {
    * Bookings that match nothing are skipped, because there is no Trip to
    * record the arrival against.
    */
-  async recordRefusedNewOrder(
-    bookingNumbers: readonly string[],
-    source: DocumentReference,
-  ): Promise<void> {
-    await this.repository.runInTransaction(async (repository) => {
-      for (const bookingNumber of bookingNumbers) {
-        const trip = await repository.findByBookingNumber({
-          bookingNumber,
+  /**
+   * Applies a NEW order to the Trip that already holds its identity.
+   *
+   * ── WHY A REPEATED NEW IS NOT A DUPLICATE ANY MORE ────────────────────────
+   * A NEW used to be refused whenever its booking number was taken. That was
+   * right while the booking number WAS the identity; it is not right now. The
+   * same booking legitimately carries several containers, and a NEW restating an
+   * order we already hold is the sender's latest word on that transport — the
+   * order as it now stands, not a second transport.
+   *
+   * So it becomes the Trip's effective document: the parser-controlled fields
+   * are re-read from it, and a CANCELLED Trip comes back OPEN. Nothing an
+   * operator owns is touched, and no field-level change set is written — a NEW
+   * revises nothing, it restates, which is why `latestUpdate` is left alone.
+   *
+   * CLOSED is the exception and stays one. Finished, priced work is never
+   * rewritten by a document that arrives afterwards; the arrival is recorded
+   * and the Trip is left exactly as it is.
+   * ──────────────────────────────────────────────────────────────────────────
+   */
+  async applyNewOrder(
+    document: ImportedTripData,
+    source?: DocumentReference,
+  ): Promise<RevisionResult> {
+    const result = await this.repository.runTripWriteTransaction(
+      async ({
+        trips: repository,
+        customProperties,
+      }): Promise<RevisionResult> => {
+        const trip = await repository.findByIdentity({
+          identity: identityOf(document),
           statuses: BOOKING_NUMBER_HOLDING_STATUSES,
         });
 
         if (!trip) {
-          continue;
+          return { outcome: "NO_MATCHING_TRIP", trip: null, changedFields: [] };
         }
 
+        if (trip.status === TripStatus.CLOSED) {
+          await this.record(repository, trip.id, source, {
+            eventType: TripHistoryEvent.NewRefusedDuplicate,
+            description:
+              "New order received for a CLOSED Trip. Finished work is not rewritten.",
+          });
+
+          return { outcome: "REFUSED_CLOSED", trip, changedFields: [] };
+        }
+
+        const reopened = trip.status === TripStatus.CANCELLED;
+
+        if (reopened) {
+          await repository.setStatus(trip.id, TripStatus.OPEN);
+          await this.record(repository, trip.id, source, {
+            eventType: TripHistoryEvent.Reopened,
+            previousValue: { status: TripStatus.CANCELLED },
+            newValue: { status: TripStatus.OPEN },
+            description:
+              "Reopened by a new order that arrived after the cancellation.",
+          });
+        }
+
+        const updated = await repository.update(
+          trip.id,
+          this.toRevisedFields(trip, document),
+        );
+
+        // The container type may have moved with the rest; Flat follows it.
+        await this.automaticFlat.synchronise(
+          customProperties,
+          updated.id,
+          updated.containerType,
+        );
+
+        /*
+         * One row, no change set. The fields were re-read rather than revised,
+         * and inventing "containerType: 45PH → 45PH" entries would put an
+         * update in the Trip's history that nobody sent.
+         */
         await this.record(repository, trip.id, source, {
-          eventType: TripHistoryEvent.NewRefusedDuplicate,
-          description: `New order received for a booking number this Trip still holds. The Trip stays ${trip.status}.`,
+          eventType: TripHistoryEvent.NewReapplied,
+          description:
+            "New order received for a Trip that already holds this identity. Its transport data was re-read from this document.",
         });
-      }
+
+        return {
+          outcome: reopened ? "REOPENED" : "UPDATED",
+          trip: updated,
+          changedFields: [],
+        };
+      },
+    );
+
+    this.logger.log("New order applied to an existing Trip", {
+      bookingNumber: document.bookingNumber,
+      outcome: result.outcome,
+      tripId: result.trip?.id ?? null,
     });
 
-    this.logger.log("Refused new order recorded", { bookingNumbers });
+    return result;
   }
 
   /**

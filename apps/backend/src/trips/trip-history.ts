@@ -48,8 +48,25 @@ export const TripHistoryEvent = {
   CancelRedundant: "CANCEL_REDUNDANT",
   /** A CANCEL document arrived for a CLOSED Trip. Finished work is not undone. */
   CancelRefused: "CANCEL_REFUSED",
-  /** A NEW document arrived for a booking number this Trip still holds. */
+  /** A NEW document arrived for a Trip whose state does not accept it. */
   NewRefusedDuplicate: "NEW_REFUSED_DUPLICATE",
+  /**
+   * A NEW document arrived for an identity this Trip already holds, and became
+   * its effective document: the parser-controlled fields were re-read from it.
+   *
+   * Deliberately NOT an applied update. A NEW is not a revision of anything —
+   * it is the order restated — so it writes no field-level change set and never
+   * becomes the Trip's "latest update".
+   */
+  NewReapplied: "NEW_REAPPLIED",
+  /**
+   * A CANCELLED Trip was reopened, because a later document for the same
+   * identity superseded the cancellation.
+   *
+   * The document that did it is recorded alongside, so the audit trail shows
+   * both that the Trip came back and what brought it back.
+   */
+  Reopened: "REOPENED",
   /** Eucon confirmed a cost for this Trip. Changes nothing about the Trip. */
   CostConfirmed: "COST_CONFIRMED",
   /** A second, different confirmation arrived. The first one stands. */

@@ -316,11 +316,23 @@ model Trip {
 
   /// Original PDF value, one per Trip — the two Trips of a Combination carry
   /// DIFFERENT booking numbers and are linked by trip_group_id instead.
-  /// Deliberately NOT unique: a DELETED Trip releases its booking number so it
-  /// can be re-entered, which a database constraint would forbid. Uniqueness
-  /// among the statuses that hold it is enforced by TripService.
+  ///
+  /// Not unique on its own: a booking may carry several containers, and each is
+  /// its own Trip. The IDENTITY is (booking_number, container_number); see the
+  /// note on container_number below.
   bookingNumber   String? @map("booking_number") @db.Text
   /// Empty on a Loading until the driver reports the container.
+  ///
+  /// Part of the Trip's IDENTITY together with booking_number, and ABSENT is
+  /// part of it: a COLLECTION fetches an empty container the document cannot
+  /// name, so (booking, NULL) identifies exactly one Trip.
+  ///
+  /// Enforced by a hand-written partial index, `trip_identity_key`, because
+  /// Prisma can express neither half of what it needs: `NULLS NOT DISTINCT`, so
+  /// two Trips with no container number collide rather than both being allowed,
+  /// and `WHERE status <> 'DELETED'`, because a deleted Trip releases its
+  /// identity for re-entry. TripService enforces the same rule in its own terms
+  /// so the refusal is a domain error rather than a constraint violation.
   containerNumber String? @map("container_number") @db.Text
   containerType   String? @map("container_type") @db.Text
   /// Not part of the parser's validated field set, so it may be missing.

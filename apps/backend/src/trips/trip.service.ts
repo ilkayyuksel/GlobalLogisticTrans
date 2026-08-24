@@ -42,7 +42,7 @@ import {
   canTransition,
 } from "./trip-status.rules";
 import { TripPlanningDataService } from "./trip-planning-data.service";
-import { TripRepository } from "./trip.repository";
+import { TripIdentity, TripRepository } from "./trip.repository";
 
 /**
  * A group is a relationship, and one Trip is not a relationship.
@@ -254,7 +254,10 @@ export class TripService {
     const created = await this.repository.runTripWriteTransaction(
       async ({ trips: repository, customProperties }) => {
         if (bookingNumber !== null) {
-          await this.assertBookingNumberFree(repository, bookingNumber);
+          await this.assertIdentityFree(repository, {
+            bookingNumber,
+            containerNumber: dto.containerNumber ?? null,
+          });
         }
 
         const trip = await repository.create({
@@ -345,8 +348,21 @@ export class TripService {
    * may name a booking this system has never seen, and inventing the Trip it
    * refers to is exactly what must not happen.
    */
-  async findByBookingNumberOrNull(bookingNumber: string): Promise<Trip | null> {
-    return this.repository.findByBookingNumber({
+  /**
+   * Every Trip holding a booking number, whatever their containers.
+   *
+   * NOT an identity lookup, and the only caller is the one that cannot do
+   * better: a Cost Confirmation prints its container reference in a different
+   * format from a transport order, and sometimes not at all, so it has the
+   * booking number and nothing else to go on.
+   *
+   * It returns the LIST rather than the first match on purpose. One booking can
+   * now carry several Trips, and a confirmation that picked one of them would
+   * put money on a transport nobody checked. The caller refuses instead — see
+   * `CostConfirmationAmbiguousException`.
+   */
+  async findAllByBookingNumber(bookingNumber: string): Promise<Trip[]> {
+    return this.repository.findManyByBookingNumber({
       bookingNumber,
       statuses: BOOKING_NUMBER_HOLDING_STATUSES,
     });
@@ -456,7 +472,10 @@ export class TripService {
         const written: Trip[] = [];
 
         for (const trip of command.trips) {
-          await this.assertBookingNumberFree(trips, trip.bookingNumber);
+          await this.assertIdentityFree(trips, {
+            bookingNumber: trip.bookingNumber,
+            containerNumber: trip.containerNumber,
+          });
 
           const stored = await trips.create({
             pdfDocumentId,
@@ -723,27 +742,33 @@ export class TripService {
    * The database index is deliberately non-unique all the same, because a
    * DELETED Trip does not hold its booking number: soft delete is the
    * documented remedy for a Trip created in error, and it would be no remedy if
-   * the booking could never be re-entered. A database constraint cannot express
-   * "unique among the statuses that hold it", so the rule is enforced here.
+   * the booking could never be re-entered. `trip_identity_key` expresses the
+   * same rule in the database — partial, and `NULLS NOT DISTINCT` so an absent
+   * container number counts as a value — but the check stays here so a clash is
+   * a domain refusal rather than a constraint violation surfacing as a 500.
    */
-  private async assertBookingNumberFree(
+  private async assertIdentityFree(
     repository: TripRepository,
-    bookingNumber: string,
+    identity: TripIdentity,
     excludeTripId?: string,
   ): Promise<void> {
-    const holder = await repository.findByBookingNumber({
-      bookingNumber,
+    const holder = await repository.findByIdentity({
+      identity,
       statuses: BOOKING_NUMBER_HOLDING_STATUSES,
       excludeTripId,
     });
 
     if (holder) {
-      this.logger.warn("Rejected duplicate booking number", {
+      this.logger.warn("Rejected duplicate Trip identity", {
         tripId: excludeTripId,
         conflictingTripId: holder.id,
       });
 
-      throw new DuplicateBookingNumberException(bookingNumber, holder.id);
+      throw new DuplicateBookingNumberException(
+        identity.bookingNumber,
+        holder.id,
+        identity.containerNumber,
+      );
     }
   }
 
@@ -763,24 +788,35 @@ export class TripService {
    */
 
   /**
-   * Re-acquires the booking number a Trip gave up.
+   * Re-acquires the identity a Trip gave up.
    *
-   * Only the booking number: a Vehicle is no longer exclusive to one interval,
-   * so a restored Trip cannot be refused on the grounds that its truck has
-   * since been planned elsewhere.
+   * Only the identity: a Vehicle is no longer exclusive to one interval, so a
+   * restored Trip cannot be refused on the grounds that its truck has since
+   * been planned elsewhere.
+   *
+   * The whole identity, not the booking number alone — another Trip may have
+   * been created for the SAME booking with a different container while this one
+   * was deleted, and that one is not in the way.
    */
   private async assertReclaimable(
     repository: TripRepository,
     trip: Trip,
   ): Promise<void> {
-    // A Trip with no booking number has none to re-acquire. Uniqueness applies
-    // to the booking numbers that exist, and absence is not a value that can
-    // collide.
+    // A Trip with no booking number has no identity to re-acquire. Uniqueness
+    // applies to the booking numbers that exist, and absence is not a value
+    // that can collide.
     if (trip.bookingNumber === null) {
       return;
     }
 
-    await this.assertBookingNumberFree(repository, trip.bookingNumber, trip.id);
+    await this.assertIdentityFree(
+      repository,
+      {
+        bookingNumber: trip.bookingNumber,
+        containerNumber: trip.containerNumber,
+      },
+      trip.id,
+    );
   }
 
   private assertTransitionAllowed(from: TripStatus, to: TripStatus): void {

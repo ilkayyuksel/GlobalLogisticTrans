@@ -12,6 +12,7 @@ import { DomainEventBus } from "../common/events/domain-event-bus";
 import { AllExceptionsFilter } from "../common/filters/all-exceptions.filter";
 import { ResponseInterceptor } from "../common/interceptors/response.interceptor";
 import { AppLoggerService } from "../logger/app-logger.service";
+import { CustomPropertyService } from "../custom-properties/custom-property.service";
 import { PdfDocumentRepository } from "../pdf-documents/pdf-document.repository";
 import { PrismaService } from "../prisma/prisma.service";
 import { TripPlanningDataService } from "../trips/trip-planning-data.service";
@@ -82,6 +83,17 @@ describe("Manual PDF upload, end to end over HTTP", () => {
       // Content-addressed, as the real column is: the second upload of the same
       // bytes finds the first document, which is what stops cleanup from
       // deleting a file an earlier import still owns.
+      deleteById: jest.fn((id: string) => {
+        const index = createdPdfDocuments.findIndex(
+          (document) => document.id === id,
+        );
+
+        if (index >= 0) {
+          createdPdfDocuments.splice(index, 1);
+        }
+
+        return Promise.resolve();
+      }),
       findByFileHash: jest.fn((fileHash: string) =>
         Promise.resolve(
           createdPdfDocuments.find(
@@ -113,6 +125,41 @@ describe("Manual PDF upload, end to end over HTTP", () => {
           );
         },
       ),
+      /** The identity rule, with ABSENT compared as a value. */
+      findByIdentity: jest.fn(
+        ({
+          identity,
+        }: {
+          identity: { bookingNumber: string; containerNumber: string | null };
+        }) => {
+          const index = createdTrips.findIndex(
+            (trip) =>
+              trip.bookingNumber === identity.bookingNumber &&
+              ((trip as { containerNumber?: string | null }).containerNumber ??
+                null) === identity.containerNumber,
+          );
+
+          return Promise.resolve(
+            index === -1
+              ? null
+              : { id: `trip-${index + 1}`, ...createdTrips[index] },
+          );
+        },
+      ),
+      /*
+       * Applying a NEW to a Trip that already exists writes through these. A
+       * double that stopped at `create` would report the whole import as an
+       * unexpected failure rather than as the re-statement it is.
+       */
+      setStatus: jest.fn((id: string, status: string) =>
+        Promise.resolve({ id, ...createdTrips[0], status }),
+      ),
+      update: jest.fn((id: string, data: Record<string, unknown>) => {
+        Object.assign(createdTrips[0], data);
+
+        return Promise.resolve({ id, ...createdTrips[0] });
+      }),
+      recordHistory: jest.fn().mockResolvedValue(undefined),
       createTripGroup: jest.fn().mockResolvedValue({ id: TRIP_GROUP_ID }),
       create: jest.fn((data: CreatedTrip) => {
         createdTrips.push(data);
@@ -202,6 +249,8 @@ describe("Manual PDF upload, end to end over HTTP", () => {
       .useValue(tripRepository)
       .overrideProvider(PdfDocumentRepository)
       .useValue(pdfDocumentRepository)
+      .overrideProvider(CustomPropertyService)
+      .useValue({ findActiveByName: jest.fn().mockResolvedValue(null) })
       .overrideProvider(TripPlanningDataService)
       .useValue({
         resolveOne: () =>
@@ -371,17 +420,23 @@ describe("Manual PDF upload, end to end over HTTP", () => {
   });
 
   describe("uploading the same document twice", () => {
-    it("refuses the second one as a duplicate booking", async () => {
+    /**
+     * The same order twice is not a duplicate to refuse — it is the sender's
+     * latest word on a transport we already hold. The second upload is applied
+     * to the Trip that holds the identity, and creates none.
+     */
+    it("applies the second one to the Trip that already exists", async () => {
       const response = await upload()
         .attach("files", readFixture("1page.pdf"), "1page.pdf")
         .attach("files", readFixture("1page.pdf"), "1page.pdf")
         .expect(200);
 
       expect(response.body.data.results[0].ok).toBe(true);
-      expect(response.body.data.results[1]).toMatchObject({
-        ok: false,
-        code: "IMPORT_DUPLICATE_BOOKING",
-      });
+      // Accepted, and it created nothing: the identity already existed, so the
+      // document was applied to the Trip that holds it.
+      expect(response.body.data.results[1].ok).toBe(true);
+      expect(response.body.data.results[1].trips).toEqual([]);
+      expect(createdTrips).toHaveLength(1);
     });
 
     it("creates the Trip only once", async () => {

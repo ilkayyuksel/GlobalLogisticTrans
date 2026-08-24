@@ -82,6 +82,8 @@ describe("TripService", () => {
       findPage: jest.fn().mockResolvedValue({ items: [], totalItems: 0 }),
       findById: jest.fn().mockResolvedValue(null),
       findByBookingNumber: jest.fn().mockResolvedValue(null),
+      findByIdentity: jest.fn().mockResolvedValue(null),
+      findManyByBookingNumber: jest.fn().mockResolvedValue([]),
       pdfDocumentExists: jest.fn().mockResolvedValue(true),
       create: jest.fn().mockResolvedValue(buildTrip()),
       update: jest.fn().mockResolvedValue(buildTrip()),
@@ -274,8 +276,8 @@ describe("TripService", () => {
       expect(data).not.toHaveProperty("tripGroupId");
     });
 
-    it("rejects a booking number already held by another Trip", async () => {
-      repository.findByBookingNumber.mockResolvedValue(
+    it("rejects an identity already held by another Trip", async () => {
+      repository.findByIdentity.mockResolvedValue(
         buildTrip({ id: OTHER_TRIP_ID }),
       );
 
@@ -285,10 +287,10 @@ describe("TripService", () => {
       expect(repository.create).not.toHaveBeenCalled();
     });
 
-    it("ignores DELETED Trips when checking the booking number", async () => {
+    it("ignores DELETED Trips when checking the identity", async () => {
       await service.create(buildCreateDto());
 
-      expect(repository.findByBookingNumber).toHaveBeenCalledWith(
+      expect(repository.findByIdentity).toHaveBeenCalledWith(
         expect.objectContaining({
           statuses: expect.not.arrayContaining([TripStatus.DELETED]),
         }),
@@ -584,11 +586,11 @@ describe("TripService", () => {
       expect(repository.setStatus).not.toHaveBeenCalled();
     });
 
-    it("rejects reopening when another Trip took the booking number", async () => {
+    it("rejects reopening when another Trip took the identity", async () => {
       repository.findById.mockResolvedValue(
         buildTrip({ status: TripStatus.CANCELLED }),
       );
-      repository.findByBookingNumber.mockResolvedValue(
+      repository.findByIdentity.mockResolvedValue(
         buildTrip({ id: OTHER_TRIP_ID }),
       );
 
@@ -706,8 +708,8 @@ describe("TripService", () => {
       },
     );
 
-    it("refuses when another Trip took the booking number meanwhile", async () => {
-      repository.findByBookingNumber.mockResolvedValue(
+    it("refuses when another Trip took the identity meanwhile", async () => {
+      repository.findByIdentity.mockResolvedValue(
         buildTrip({ id: OTHER_TRIP_ID }),
       );
 
@@ -725,7 +727,7 @@ describe("TripService", () => {
       await expect(service.restore(TRIP_ID)).resolves.toBeDefined();
     });
 
-    it("excludes itself from the booking-number reclaim check", async () => {
+    it("excludes itself from the identity reclaim check", async () => {
       repository.findById.mockResolvedValue(
         buildTrip({
           status: TripStatus.DELETED,
@@ -737,7 +739,7 @@ describe("TripService", () => {
 
       await service.restore(TRIP_ID);
 
-      expect(repository.findByBookingNumber).toHaveBeenCalledWith(
+      expect(repository.findByIdentity).toHaveBeenCalledWith(
         expect.objectContaining({ excludeTripId: TRIP_ID }),
       );
     });

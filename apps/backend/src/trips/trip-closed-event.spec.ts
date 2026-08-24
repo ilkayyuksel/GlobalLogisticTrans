@@ -64,6 +64,8 @@ describe("TripService — TripClosed event", () => {
     repository = {
       findById: jest.fn().mockResolvedValue(buildTrip()),
       findByBookingNumber: jest.fn().mockResolvedValue(null),
+      findByIdentity: jest.fn().mockResolvedValue(null),
+      findManyByBookingNumber: jest.fn().mockResolvedValue([]),
       findVehicleOverlaps: jest.fn().mockResolvedValue([]),
       setStatus: jest.fn(),
       runInTransaction: jest.fn(),

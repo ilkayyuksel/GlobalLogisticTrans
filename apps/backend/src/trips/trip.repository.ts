@@ -50,6 +50,27 @@ export interface TripPage {
   totalItems: number;
 }
 
+/**
+ * What identifies one Trip: the booking number AND the container number.
+ *
+ * A booking may carry several containers, and each is its own transport. An
+ * ABSENT container number is part of the identity rather than a missing value —
+ * a COLLECTION fetches an empty container the document cannot name, so
+ * `(ANR123456, null)` identifies exactly one Trip and every later document for
+ * that collection finds it.
+ */
+export interface TripIdentity {
+  readonly bookingNumber: string;
+  readonly containerNumber: string | null;
+}
+
+export interface TripIdentityQuery {
+  identity: TripIdentity;
+  /** Only these statuses count as holding the identity. */
+  statuses: readonly TripStatus[];
+  excludeTripId?: string;
+}
+
 export interface BookingNumberQuery {
   bookingNumber: string;
   /** Only these statuses count as holding the booking number. */
@@ -231,7 +252,11 @@ export class TripRepository {
 
   /** The document a Trip was created from. Read-only, for its history list. */
   findPdfDocument(pdfDocumentId: string) {
-    return this.prisma.pdfDocument.findUnique({ where: { id: pdfDocumentId } });
+    return this.prisma.pdfDocument.findUnique({
+      where: { id: pdfDocumentId },
+      // The email is what dates the document; see `findHistoryForTrip`.
+      include: { importedEmail: true },
+    });
   }
 
   /**
@@ -244,7 +269,13 @@ export class TripRepository {
     return this.prisma.tripHistory.findMany({
       where: { tripId },
       orderBy: { occurredAt: "desc" },
-      include: { pdfDocument: true },
+      /*
+       * The email is included because it carries the only authoritative
+       * chronology there is: `received_at` is when the mail server accepted the
+       * message, which is the order the sender sent them in. Processing time is
+       * not — a retry, a restart or a slow poll reorders it.
+       */
+      include: { pdfDocument: { include: { importedEmail: true } } },
     });
   }
 
@@ -289,6 +320,52 @@ export class TripRepository {
           ? { status: { notIn: [...excludeStatuses] } }
           : {}),
       },
+    });
+  }
+
+  /**
+   * The Trip currently holding an identity, if any.
+   *
+   * ── HOW AN ABSENT CONTAINER NUMBER IS MATCHED ─────────────────────────────
+   * By `IS NULL`, never by `= NULL`. Prisma compiles `containerNumber: null`
+   * to `container_number IS NULL` and a concrete value to `= '...'`, which
+   * together is exactly the `IS NOT DISTINCT FROM` semantics this identity
+   * needs — a collection's CANCEL and its later UPDATE find the same Trip
+   * instead of matching nothing and creating a second one.
+   *
+   * The database agrees: `trip_identity_key` is declared
+   * `NULLS NOT DISTINCT`, so a pair the code treats as taken cannot be
+   * inserted twice behind its back either.
+   * ──────────────────────────────────────────────────────────────────────────
+   */
+  findByIdentity(query: TripIdentityQuery): Promise<Trip | null> {
+    return this.prisma.trip.findFirst({
+      where: {
+        bookingNumber: query.identity.bookingNumber,
+        containerNumber: query.identity.containerNumber,
+        status: { in: [...query.statuses] },
+        ...(query.excludeTripId ? { id: { not: query.excludeTripId } } : {}),
+      },
+    });
+  }
+
+  /**
+   * Every Trip holding a booking number, whatever their containers.
+   *
+   * Not an identity lookup: it deliberately ignores the container number, and
+   * exists for the one caller that has only a booking number to go on — a Cost
+   * Confirmation, whose documents print a container reference in a different
+   * format and sometimes not at all. That caller uses the COUNT to refuse when
+   * the booking is ambiguous rather than to pick one.
+   */
+  findManyByBookingNumber(query: BookingNumberQuery): Promise<Trip[]> {
+    return this.prisma.trip.findMany({
+      where: {
+        bookingNumber: query.bookingNumber,
+        status: { in: [...query.statuses] },
+        ...(query.excludeTripId ? { id: { not: query.excludeTripId } } : {}),
+      },
+      orderBy: { createdAt: "asc" },
     });
   }
 

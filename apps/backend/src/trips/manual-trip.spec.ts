@@ -71,6 +71,8 @@ describe("Manual Trip creation", () => {
     repository = {
       pdfDocumentExists: jest.fn().mockResolvedValue(true),
       findByBookingNumber: jest.fn().mockResolvedValue(null),
+      findByIdentity: jest.fn().mockResolvedValue(null),
+      findManyByBookingNumber: jest.fn().mockResolvedValue([]),
       findById: jest.fn().mockResolvedValue(null),
       findPage: jest.fn().mockResolvedValue({ items: [], totalItems: 0 }),
       runInTransaction: jest.fn(),
@@ -377,8 +379,8 @@ describe("Manual Trip creation", () => {
         .expect(404);
     });
 
-    it("still refuses a booking number another Trip holds", async () => {
-      repository.findByBookingNumber.mockResolvedValue({
+    it("still refuses an identity another Trip holds", async () => {
+      repository.findByIdentity.mockResolvedValue({
         id: "22222222-2222-4222-8222-222222222222",
       } as never);
 

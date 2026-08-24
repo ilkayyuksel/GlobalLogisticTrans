@@ -85,12 +85,39 @@ const IMPORTABLE: readonly ExpectedImport[] = [
  * The CANCELLED orders. Every one of them stamps itself in the page header, and
  * none of them may become planned work through any route.
  */
+/**
+ * Each cancellation with the identity it names.
+ *
+ * The container number is the other half of a Trip's identity, so a seeded Trip
+ * has to carry the one its document states. Most of these are collections,
+ * which name none — and (booking, null) is a whole identity, not a gap.
+ */
 const CANCELLED_DOCUMENTS = [
-  { file: "CANCEL/cancelled_transportorder1353889.pdf", booking: "ANRBEL2772352" },
-  { file: "CANCEL/cancelled_transportorder1354204.pdf", booking: "ANRDUB2767189" },
-  { file: "CANCEL/cancelled_transportorder1365387.pdf", booking: "DUBANR2776470" },
-  { file: "CANCEL/cancelled_transportorder1367583.pdf", booking: "ANRCRK2786827" },
-  { file: "CANCEL/cancelled_transportorder1367584.pdf", booking: "ANRDUB2787843" },
+  {
+    file: "CANCEL/cancelled_transportorder1353889.pdf",
+    booking: "ANRBEL2772352",
+    container: "EUCU 200024/9",
+  },
+  {
+    file: "CANCEL/cancelled_transportorder1354204.pdf",
+    booking: "ANRDUB2767189",
+    container: null,
+  },
+  {
+    file: "CANCEL/cancelled_transportorder1365387.pdf",
+    booking: "DUBANR2776470",
+    container: "EUCU 455132/2",
+  },
+  {
+    file: "CANCEL/cancelled_transportorder1367583.pdf",
+    booking: "ANRCRK2786827",
+    container: null,
+  },
+  {
+    file: "CANCEL/cancelled_transportorder1367584.pdf",
+    booking: "ANRDUB2787843",
+    container: null,
+  },
 ] as const;
 
 function readFixture(name: string): Uint8Array {
@@ -187,26 +214,35 @@ describe("every real transport order, through the real import pipeline", () => {
      * booking number in the document is already held, so the second import is
      * refused as a whole.
      */
-    it("refuses the same document a second time", async () => {
+    /**
+     * The same order twice is not a duplicate to refuse. It is the sender's
+     * latest word on a transport we already hold, so it is applied to the Trip
+     * holding that identity — and creates no second one.
+     */
+    it("applies the same document a second time to the Trip it names", async () => {
       await harness.importer.import(readFixture(expected.file), expected.file);
       const afterFirst = harness.trips.length;
 
-      await expect(
-        harness.importer.import(readFixture(expected.file), expected.file),
-      ).rejects.toThrow();
+      const result = await harness.importer.import(
+        readFixture(expected.file),
+        expected.file,
+      );
 
+      expect(result.trips).toEqual([]);
+      expect(result.revisions.map((revision) => revision.action)).toEqual(
+        expected.bookings.map(() => "REAPPLIED"),
+      );
       expect(harness.trips).toHaveLength(afterFirst);
       expect(harness.tripGroups).toHaveLength(expected.combination ? 1 : 0);
 
       /*
-       * The refused document is KEPT, and recorded against the Trip that still
-       * holds the booking number. No Trip was created and none was changed —
-       * what is preserved is the fact that the order arrived again, which for a
-       * cancelled booking is exactly what an operator needs to see.
+       * Both documents are KEPT, and the second is recorded against the Trip it
+       * restated. What is preserved is the fact that the order arrived again,
+       * which is exactly what an operator needs to see.
        */
       expect(harness.pdfDocuments).toHaveLength(2);
       expect(harness.history).toContainEqual(
-        expect.objectContaining({ eventType: "NEW_REFUSED_DUPLICATE" }),
+        expect.objectContaining({ eventType: "NEW_REAPPLIED" }),
       );
     });
 
@@ -214,16 +250,15 @@ describe("every real transport order, through the real import pipeline", () => {
      * A renamed attachment is the same document. Storage is content-addressed,
      * so the file must not be duplicated on disk either.
      */
-    it("refuses the same bytes under a different filename", async () => {
+    it("creates no second Trip for the same bytes under a different filename", async () => {
       await harness.importer.import(readFixture(expected.file), expected.file);
 
-      await expect(
-        harness.importer.import(
-          readFixture(expected.file),
-          "renamed-by-the-mail-client.pdf",
-        ),
-      ).rejects.toThrow();
+      const result = await harness.importer.import(
+        readFixture(expected.file),
+        "renamed-by-the-mail-client.pdf",
+      );
 
+      expect(result.trips).toEqual([]);
       expect(harness.trips).toHaveLength(expected.bookings.length);
       expect(readdirSync(storageDirectory)).toHaveLength(1);
     });
@@ -264,7 +299,7 @@ describe("every real transport order, through the real import pipeline", () => {
    * does not create.
    * ────────────────────────────────────────────────────────────────────────────
    */
-  describe.each(CANCELLED_DOCUMENTS)("$file", ({ file, booking }) => {
+  describe.each(CANCELLED_DOCUMENTS)("$file", ({ file, booking, container }) => {
     it("creates no Trip and no TripGroup, but keeps the document", async () => {
       const result = await harness.importer.import(readFixture(file), file);
 
@@ -296,6 +331,7 @@ describe("every real transport order, through the real import pipeline", () => {
       harness.trips.push({
         id: "trip-existing",
         bookingNumber: booking,
+        containerNumber: container,
         status: TripStatus.OPEN,
       });
 
@@ -310,6 +346,7 @@ describe("every real transport order, through the real import pipeline", () => {
       harness.trips.push({
         id: "trip-existing",
         bookingNumber: booking,
+        containerNumber: container,
         status: TripStatus.OPEN,
       });
 
@@ -324,6 +361,7 @@ describe("every real transport order, through the real import pipeline", () => {
       harness.trips.push({
         id: "trip-existing",
         bookingNumber: booking,
+        containerNumber: container,
         status: TripStatus.CLOSED,
       });
 
@@ -443,14 +481,27 @@ describe("every real transport order, through the real import pipeline", () => {
       ).rejects.toThrow(/CLOSED/);
     });
 
-    it("refuses to revise a CANCELLED Trip, and does not reopen it", async () => {
+    /** A cancellation is superseded by the document that arrives after it. */
+    it("reopens a CANCELLED Trip rather than refusing the revision", async () => {
       await harness.importer.import(readFixture(FILE), FILE);
       harness.trips[0].status = TripStatus.CANCELLED;
 
+      const result = await harness.importer.revise(readFixture(FILE), FILE);
+
+      expect(result.revisions[0].action).toBe("UPDATED");
+      expect(harness.trips[0].status).toBe(TripStatus.OPEN);
+      expect(harness.trips).toHaveLength(1);
+    });
+
+    /** CLOSED is the state that still refuses everything. */
+    it("refuses to revise a CLOSED Trip, and does not reopen it", async () => {
+      await harness.importer.import(readFixture(FILE), FILE);
+      harness.trips[0].status = TripStatus.CLOSED;
+
       await expect(
         harness.importer.revise(readFixture(FILE), FILE),
-      ).rejects.toThrow(/cancelled/);
-      expect(harness.trips[0].status).toBe(TripStatus.CANCELLED);
+      ).rejects.toThrow(/CLOSED/);
+      expect(harness.trips[0].status).toBe(TripStatus.CLOSED);
     });
 
     it("is idempotent", async () => {
@@ -477,6 +528,8 @@ describe("every real transport order, through the real import pipeline", () => {
       harness.trips.push({
         id: "trip-existing",
         bookingNumber: cancelled.booking,
+        // The identity the document names, container included.
+        containerNumber: cancelled.container,
         status: TripStatus.OPEN,
       });
 
@@ -545,26 +598,25 @@ describe("every real transport order, through the real import pipeline", () => {
    * are two Trips; only an identical booking number collides.
    */
   describe("how an existing Trip is identified", () => {
-    it("matches on the exact booking number and on nothing else", async () => {
+    it("matches on the exact identity and on nothing else", async () => {
       await harness.importer.import(
         readFixture("UPDATE/transportorder1368223.pdf"),
         "a.pdf",
       );
 
-      // A different booking number with everything else alike: imported.
+      // A different booking number with everything else alike: its own Trip.
       await harness.importer.import(
         readFixture("UPDATE/transportorder1368224.pdf"),
         "b.pdf",
       );
       expect(harness.trips).toHaveLength(2);
 
-      // The identical booking number: refused.
-      await expect(
-        harness.importer.import(
-          readFixture("UPDATE/transportorder1368223.pdf"),
-          "c.pdf",
-        ),
-      ).rejects.toThrow();
+      // The identical identity: applied to the Trip that holds it, never a third.
+      const again = await harness.importer.import(
+        readFixture("UPDATE/transportorder1368223.pdf"),
+        "c.pdf",
+      );
+      expect(again.trips).toEqual([]);
       expect(harness.trips).toHaveLength(2);
     });
 

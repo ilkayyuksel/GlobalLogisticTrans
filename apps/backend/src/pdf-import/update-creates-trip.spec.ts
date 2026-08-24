@@ -300,7 +300,9 @@ describe("an UPDATE document with no Trip to revise", () => {
       const createdId = trip.id;
 
       // Move the Trip away from the document, so the next one is a real change.
-      trip.containerNumber = "ABC123";
+      // Not the container number: that is half the identity, and changing it
+      // would put the Trip out of the document's reach entirely.
+      trip.containerType = "45RH";
 
       const second = await harness.importer.revise(
         readFixture(FILE),
@@ -311,13 +313,13 @@ describe("an UPDATE document with no Trip to revise", () => {
       expect(second.revisions[0]).toMatchObject({
         tripId: createdId,
         action: "UPDATED",
-        changedFields: ["containerNumber"],
+        changedFields: ["containerType"],
       });
     });
 
     it("keeps both documents and both events", async () => {
       await harness.importer.revise(readFixture(FILE), "update-1.pdf");
-      (tripFor(BOOKING) as Record<string, unknown>).containerNumber = "ABC123";
+      (tripFor(BOOKING) as Record<string, unknown>).containerType = "45RH";
       await harness.importer.revise(readFixture(FILE), "update-2.pdf");
 
       const trip = tripFor(BOOKING) as { id: string };
@@ -343,7 +345,7 @@ describe("an UPDATE document with no Trip to revise", () => {
 
     it("revises again on a third document", async () => {
       await harness.importer.revise(readFixture(FILE), "update-1.pdf");
-      (tripFor(BOOKING) as Record<string, unknown>).containerNumber = "ABC123";
+      (tripFor(BOOKING) as Record<string, unknown>).containerType = "45RH";
       await harness.importer.revise(readFixture(FILE), "update-2.pdf");
       (tripFor(BOOKING) as Record<string, unknown>).terminal = "Quay 869";
       const third = await harness.importer.revise(
@@ -400,26 +402,35 @@ describe("an UPDATE document with no Trip to revise", () => {
       expect(harness.pdfDocuments).toHaveLength(2);
     });
 
-    it("refuses a NEW order for the booking it now holds: UPDATE → NEW", async () => {
+    /**
+     * The Trip this UPDATE created holds the identity, so the NEW that follows
+     * is applied to it — the sender's latest word — and creates no second one.
+     */
+    it("applies a NEW order to the Trip it created: UPDATE → NEW", async () => {
       await harness.importer.revise(readFixture(FILE), "update.pdf");
 
-      await expect(
-        harness.importer.import(readFixture(FILE), "order.pdf"),
-      ).rejects.toThrow();
+      const result = await harness.importer.import(
+        readFixture(FILE),
+        "order.pdf",
+      );
 
+      expect(result.trips).toEqual([]);
+      expect(result.revisions[0].action).toBe("REAPPLIED");
       expect(harness.trips).toHaveLength(1);
     });
 
-    it("does not create a second Trip after cancellation", async () => {
+    it("reopens rather than creating a second Trip after cancellation", async () => {
       await harness.importer.revise(readFixture(FILE), "update.pdf");
       await harness.importer.cancel(readFixture(CANCELLED), "cancel.pdf");
 
-      await expect(
-        harness.importer.revise(readFixture(FILE), "late-update.pdf"),
-      ).rejects.toThrow();
+      const result = await harness.importer.revise(
+        readFixture(FILE),
+        "late-update.pdf",
+      );
 
+      expect(result.revisions[0].action).toBe("UPDATED");
       expect(harness.trips).toHaveLength(1);
-      expect(tripFor(BOOKING)?.status).toBe(TripStatus.CANCELLED);
+      expect(tripFor(BOOKING)?.status).toBe(TripStatus.OPEN);
     });
 
     it("does not create a second Trip when the existing one is CLOSED", async () => {

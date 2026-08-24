@@ -23,6 +23,7 @@ import {
   CancellationOutcome,
   RevisionOutcome,
   TripRevisionService,
+  identityOf,
 } from "../trips/trip-revision.service";
 import { CostConfirmationService } from "../cost-confirmations/cost-confirmation.service";
 import { DuplicateBookingNumberException } from "../trips/exceptions/trip.exceptions";
@@ -38,6 +39,26 @@ import {
 /** A Combination is one leg out and one leg back — never more, never fewer. */
 const TRIPS_PER_COMBINATION = 2;
 
+/**
+ * What a NEW document did to the Trip that already held its identity.
+ *
+ * `NO_MATCHING_TRIP` cannot occur here — this path runs only because the insert
+ * was refused for a taken identity — but it is mapped rather than asserted
+ * away, so a future change cannot turn it into a silent wrong label.
+ */
+function toNewOrderAction(outcome: RevisionOutcome): RevisionAction {
+  switch (outcome) {
+    case "REOPENED":
+      return "REOPENED";
+    case "REFUSED_CLOSED":
+      return "REFUSED_CLOSED";
+    case "UPDATED":
+      return "REAPPLIED";
+    default:
+      return "REFUSED_CLOSED";
+  }
+}
+
 /** One booking a cancelled document referred to, and what became of it. */
 export interface CancelledBooking {
   readonly bookingNumber: string;
@@ -45,13 +66,23 @@ export interface CancelledBooking {
 }
 
 /**
- * What a revised document did to one booking.
+ * What a document did to one booking.
  *
  * `UPDATED` revised a Trip that already existed. `CREATED_FROM_UPDATE` created
- * one, because no Trip held that booking number — the original order never
- * reached us, and refusing the revision would leave real transport unplanned.
+ * one, because no Trip held that identity — the original order never reached
+ * us, and refusing the revision would leave real transport unplanned.
+ *
+ * `REOPENED` brought a CANCELLED Trip back, because a later NEW or UPDATE for
+ * the same identity superseded the cancellation. `REAPPLIED` re-read the
+ * transport data of a Trip that was already open. `REFUSED_CLOSED` is the one
+ * refusal left: finished, priced work is never rewritten.
  */
-export type RevisionAction = "UPDATED" | "CREATED_FROM_UPDATE";
+export type RevisionAction =
+  | "UPDATED"
+  | "CREATED_FROM_UPDATE"
+  | "REOPENED"
+  | "REAPPLIED"
+  | "REFUSED_CLOSED";
 
 export interface RevisedBooking {
   readonly bookingNumber: string;
@@ -221,16 +252,19 @@ export class PdfTripImporter {
       };
     } catch (error: unknown) {
       /*
-       * A booking number this system still holds is not a broken document - it
-       * is an order we already know about, most often a cancelled one being
-       * re-sent. The Trips are left exactly as they are, and the document is
-       * KEPT and recorded against them, so the arrival is visible instead of
-       * being thrown away with the error.
+       * An identity this system already holds is not a broken document — it is
+       * the sender's LATEST word on a transport we already know about, most
+       * often a cancelled one being re-sent. So the document is kept and
+       * applied to the Trips that hold those identities: a cancelled one comes
+       * back OPEN, an open one has its transport data re-read, and a CLOSED one
+       * is left alone.
        */
       if (error instanceof DuplicateBookingNumberException) {
-        await this.recordRefusedNewOrder(prepared, parsed, originalFilename);
-
-        throw error;
+        return this.applyNewOrderToExistingTrips(
+          prepared,
+          parsed,
+          originalFilename,
+        );
       }
 
       // The transaction rolled the database back; the file is the only thing
@@ -242,41 +276,60 @@ export class PdfTripImporter {
   }
 
   /**
-   * Keeps a NEW document that was refused because its booking number is taken.
+   * Applies a NEW document to the Trips that already hold its identities.
    *
    * Committed outside the failed transaction, because that transaction is gone:
-   * this is a second, small write recording that the document arrived. It
-   * creates no Trip and changes none - the existing Trip keeps its status,
-   * which for a cancelled order is exactly the point.
+   * the insert was refused, and this is a second, self-contained piece of work
+   * that stores the document and applies it. It creates no Trip — every
+   * identity here is one we already have.
+   *
+   * A failure to apply is not swallowed: the document is discarded with it, so
+   * a file is never left behind describing work that did not happen.
    */
-  private async recordRefusedNewOrder(
+  private async applyNewOrderToExistingTrips(
     prepared: PreparedPdfDocument,
     parsed: ParseSuccess,
     originalFilename: string,
-  ): Promise<void> {
+  ): Promise<PdfImportResult> {
+    const document = await this.pdfDocumentService.persist(prepared);
+    const stored: StoredDocument = { id: document.id, storedFile: prepared };
+
     try {
-      const stored = await this.pdfDocumentService.persist(prepared);
+      const revisions: RevisedBooking[] = [];
 
-      await this.tripRevision.recordRefusedNewOrder(
-        parsed.trips.map((trip) => trip.bookingNumber),
-        { pdfDocumentId: stored.id },
-      );
+      for (const trip of parsed.trips) {
+        const result = await this.tripRevision.applyNewOrder(
+          this.toImportedTrip(trip),
+          { pdfDocumentId: stored.id },
+        );
 
-      this.logger.log("New order refused: its booking number is still held", {
+        revisions.push({
+          bookingNumber: trip.bookingNumber,
+          tripId: result.trip?.id ?? null,
+          action: toNewOrderAction(result.outcome),
+          // A NEW restates an order rather than revising it, so it reports no
+          // field-level changes — see TripRevisionService.applyNewOrder.
+          changedFields: [],
+        });
+      }
+
+      this.logger.log("New order applied to Trips that already existed", {
         originalFilename,
         pdfDocumentId: stored.id,
-        bookingNumbers: parsed.trips.map((trip) => trip.bookingNumber),
+        outcomes: revisions.map((revision) => revision.action),
       });
-    } catch (recordError: unknown) {
-      // The caller is already reporting the duplicate; a failure to record the
-      // arrival must not replace that with a different, less useful error.
-      this.logger.error("Could not record a refused new order", {
-        originalFilename,
-        reason:
-          recordError instanceof Error
-            ? recordError.message
-            : String(recordError),
-      });
+
+      return {
+        trips: [],
+        combination: false,
+        cancellations: [],
+        revisions,
+        costConfirmations: [],
+      };
+    } catch (error: unknown) {
+      await this.forgetQuietly(stored, originalFilename);
+
+      throw error;
     }
   }
 
@@ -436,7 +489,8 @@ export class PdfTripImporter {
           continue;
         }
 
-        if (result.outcome !== "UPDATED") {
+        // REOPENED is an applied revision that also brought the Trip back.
+        if (result.outcome !== "UPDATED" && result.outcome !== "REOPENED") {
           documentIsReferenced = true;
 
           throw new RevisionRefusedException(
@@ -531,7 +585,7 @@ export class PdfTripImporter {
 
     this.assertSubjectAgrees(options.subject, confirmation, originalFilename);
 
-    const trip = await this.tripService.findByBookingNumberOrNull(
+    const candidates = await this.tripService.findAllByBookingNumber(
       confirmation.bookingNumber,
     );
 
@@ -540,12 +594,40 @@ export class PdfTripImporter {
      * Trip to record the arrival against, so a stored document would reference
      * nothing — and the message is retried, which would store it again.
      */
-    if (!trip) {
+    if (candidates.length === 0) {
       throw new CostConfirmationRefusedException(
         confirmation.ccNumber,
         `No Trip holds booking number ${confirmation.bookingNumber}.`,
       );
     }
+
+    /*
+     * ── WHY A CONFIRMATION CAN BE AMBIGUOUS ─────────────────────────────────
+     * A Trip is identified by its booking number AND its container number, so
+     * one booking may hold several Trips. A confirmation names only the
+     * booking: its own container reference is printed in a different format
+     * from a transport order's — `EUCU4530818` against `EUCU 453232/2` — and
+     * some confirmations print none at all, so it cannot be matched on.
+     *
+     * With more than one candidate this REFUSES rather than choosing. The
+     * document carries money, and attaching it to the wrong leg of a booking is
+     * a silent invoicing error nobody would find. A person decides.
+     * ────────────────────────────────────────────────────────────────────────
+     */
+    if (candidates.length > 1) {
+      this.logger.warn("Cost confirmation refused: the booking is ambiguous", {
+        originalFilename,
+        ccNumber: confirmation.ccNumber,
+        candidateTripIds: candidates.map((candidate) => candidate.id),
+      });
+
+      throw new CostConfirmationRefusedException(
+        confirmation.ccNumber,
+        `Booking number ${confirmation.bookingNumber} is held by ${candidates.length} Trips with different containers, and the confirmation names no container that can tell them apart.`,
+      );
+    }
+
+    const [trip] = candidates;
 
     const document = await this.storeDocument(
       content,
@@ -718,8 +800,10 @@ export class PdfTripImporter {
       for (const trip of parsed.trips) {
         cancellations.push({
           bookingNumber: trip.bookingNumber,
-          outcome: await this.tripRevision.cancelByBookingNumber(
-            trip.bookingNumber,
+          // The whole identity: a cancellation for one container must not
+          // cancel the same booking's other container.
+          outcome: await this.tripRevision.cancelByIdentity(
+            identityOf(this.toImportedTrip(trip)),
             { pdfDocumentId: document.id },
           ),
         });
@@ -959,15 +1043,11 @@ export class PdfTripImporter {
  * resolve any of them on its own.
  */
 function describeRevisionRefusal(
-  outcome: Exclude<RevisionOutcome, "UPDATED">,
+  outcome: Exclude<RevisionOutcome, "UPDATED" | "REOPENED">,
 ): string {
   if (outcome === "NO_MATCHING_TRIP") {
-    return "no Trip holds that booking number, and a revision never creates one";
+    return "no Trip holds that booking number and container, and a revision never creates one here";
   }
 
-  if (outcome === "REFUSED_CLOSED") {
-    return "the Trip is CLOSED, and finished work is not rewritten automatically";
-  }
-
-  return "the Trip was cancelled, and a revision does not reopen cancelled work";
+  return "the Trip is CLOSED, and finished work is not rewritten automatically";
 }

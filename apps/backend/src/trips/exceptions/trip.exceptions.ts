@@ -37,10 +37,26 @@ export class UnknownPdfDocumentException extends NotFoundException {
   }
 }
 
+/**
+ * A Trip already holds this identity.
+ *
+ * The identity is the booking number AND the container number, so the message
+ * names both: "ANR123456 is taken" would be wrong and confusing now that the
+ * same booking legitimately carries several containers, each its own Trip.
+ *
+ * An absent container number is spelled out rather than omitted — it is part of
+ * the identity, not a missing value.
+ */
 export class DuplicateBookingNumberException extends ConflictException {
-  constructor(bookingNumber: string, conflictingTripId: string) {
+  constructor(
+    bookingNumber: string,
+    conflictingTripId: string,
+    containerNumber: string | null = null,
+  ) {
     super(
-      `Booking number "${bookingNumber}" is already used by Trip "${conflictingTripId}".`,
+      `Booking number "${bookingNumber}" with container ${
+        containerNumber === null ? "(none)" : `"${containerNumber}"`
+      } is already used by Trip "${conflictingTripId}".`,
     );
   }
 }

@@ -174,6 +174,49 @@ export function buildHarness(storageDirectory: string) {
           ) ?? null,
         ),
     ),
+    /** Every Trip on a booking, whatever their containers — what a CC asks. */
+    findManyByBookingNumber: jest.fn(
+      ({
+        bookingNumber,
+        statuses,
+      }: {
+        bookingNumber: string;
+        statuses: readonly TripStatus[];
+      }) =>
+        Promise.resolve(
+          trips.filter(
+            (trip) =>
+              trip.bookingNumber === bookingNumber &&
+              statuses.includes(trip.status as TripStatus),
+          ),
+        ),
+    ),
+    /**
+     * The real identity rule, in memory: the booking number AND the container
+     * number, with ABSENT compared as a value rather than as an unknown. A
+     * double that used `=` on the container would match nothing for a
+     * collection and every test here would silently create second Trips.
+     */
+    findByIdentity: jest.fn(
+      ({
+        identity,
+        statuses,
+        excludeTripId,
+      }: {
+        identity: { bookingNumber: string; containerNumber: string | null };
+        statuses: readonly TripStatus[];
+        excludeTripId?: string;
+      }) =>
+        Promise.resolve(
+          trips.find(
+            (trip) =>
+              trip.bookingNumber === identity.bookingNumber &&
+              (trip.containerNumber ?? null) === identity.containerNumber &&
+              statuses.includes(trip.status as TripStatus) &&
+              trip.id !== excludeTripId,
+          ) ?? null,
+        ),
+    ),
     findById: jest.fn((id: string) =>
       Promise.resolve(trips.find((trip) => trip.id === id) ?? null),
     ),

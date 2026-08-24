@@ -145,6 +145,41 @@ describe("IMAP import, end to end with a real transport order", () => {
        * already exists. Without it a CANCEL or an UPDATE would find nothing in
        * these tests and pass for the wrong reason.
        */
+      findManyByBookingNumber: jest.fn(
+        ({
+          bookingNumber,
+          statuses,
+        }: {
+          bookingNumber: string;
+          statuses: readonly TripStatus[];
+        }) =>
+          Promise.resolve(
+            createdTrips.filter(
+              (trip) =>
+                trip.bookingNumber === bookingNumber &&
+                statuses.includes(trip.status as TripStatus),
+            ),
+          ),
+      ),
+      /** The identity rule, with ABSENT compared as a value rather than unknown. */
+      findByIdentity: jest.fn(
+        ({
+          identity,
+          statuses,
+        }: {
+          identity: { bookingNumber: string; containerNumber: string | null };
+          statuses: readonly TripStatus[];
+        }) =>
+          Promise.resolve(
+            createdTrips.find(
+              (trip) =>
+                trip.bookingNumber === identity.bookingNumber &&
+                ((trip as { containerNumber?: string | null }).containerNumber ??
+                  null) === identity.containerNumber &&
+                statuses.includes(trip.status as TripStatus),
+            ) ?? null,
+          ),
+      ),
       findByBookingNumber: jest.fn(
         ({
           bookingNumber,
@@ -755,7 +790,7 @@ describe("IMAP import, end to end with a real transport order", () => {
       });
 
       /** The dangerous order: the cancellation first, the revision after it. */
-      it("keeps the Trip cancelled when the revision arrives last", async () => {
+      it("reopens the Trip when the revision arrives last", async () => {
         messageCarrying(PLANNED, {
           messageId: "<real-new@carrier.test>",
           subject: "NEW: Trucking Order 1369485",
@@ -774,18 +809,18 @@ describe("IMAP import, end to end with a real transport order", () => {
         });
         const result = await scanService.scan();
 
-        expect(createdTrips[0].status).toBe(TripStatus.CANCELLED);
-        // The refusal is a failure for the MESSAGE — it stays unread and is
-        // offered again — while the Trip and its documents are untouched.
-        expect(result).toMatchObject({ failed: 1, imported: 0 });
-        expect(importedEmailStatus.status).toBe("FAILED");
+        // The update is the later statement about the same transport, so it
+        // supersedes the cancellation and the Trip comes back.
+        expect(createdTrips[0].status).toBe(TripStatus.OPEN);
+        expect(result).toMatchObject({ failed: 0, imported: 1 });
+        expect(importedEmailStatus.status).toBe("PROCESSED");
         expect(recordedHistory).toContainEqual(
-          expect.objectContaining({ eventType: "UPDATE_REFUSED" }),
+          expect.objectContaining({ eventType: "REOPENED" }),
         );
       });
 
-      /** A second NEW for the same booking must not create a second Trip. */
-      it("creates no second Trip when the order is re-sent after cancelling", async () => {
+      /** A second NEW for the same identity reopens rather than duplicating. */
+      it("reopens rather than creating a second Trip when the order is re-sent", async () => {
         messageCarrying(PLANNED, {
           messageId: "<real-new@carrier.test>",
           subject: "NEW: Trucking Order 1369485",
@@ -805,11 +840,13 @@ describe("IMAP import, end to end with a real transport order", () => {
         const result = await scanService.scan();
 
         expect(createdTrips).toHaveLength(1);
-        expect(createdTrips[0].status).toBe(TripStatus.CANCELLED);
-        // Its Trips already exist, which is not a failure.
-        expect(result).toMatchObject({ alreadyProcessed: 1, failed: 0 });
+        expect(createdTrips[0].status).toBe(TripStatus.OPEN);
+        expect(result).toMatchObject({ imported: 1, failed: 0 });
         expect(recordedHistory).toContainEqual(
-          expect.objectContaining({ eventType: "NEW_REFUSED_DUPLICATE" }),
+          expect.objectContaining({ eventType: "REOPENED" }),
+        );
+        expect(recordedHistory).toContainEqual(
+          expect.objectContaining({ eventType: "NEW_REAPPLIED" }),
         );
       });
     });

@@ -86,11 +86,25 @@ describe("Flat through a Trip's revisions", () => {
     } as unknown as AppLoggerService;
 
     const repository = {
-      findByBookingNumber: jest.fn(({ bookingNumber }: { bookingNumber: string }) =>
-        Promise.resolve(bookingNumber === trip.bookingNumber ? trip : null),
+      findByIdentity: jest.fn(
+        ({
+          identity,
+        }: {
+          identity: { bookingNumber: string; containerNumber: string | null };
+        }) =>
+          Promise.resolve(
+            identity.bookingNumber === trip.bookingNumber &&
+              identity.containerNumber === trip.containerNumber
+              ? trip
+              : null,
+          ),
       ),
       update: jest.fn((_id: string, data: Partial<Trip>) => {
         trip = { ...trip, ...data };
+        return Promise.resolve(trip);
+      }),
+      setStatus: jest.fn((_id: string, status: TripStatus) => {
+        trip = { ...trip, status };
         return Promise.resolve(trip);
       }),
       recordHistory: jest.fn().mockResolvedValue(undefined),
@@ -265,20 +279,29 @@ describe("Flat through a Trip's revisions", () => {
   /**
    * A revision that is refused never reaches the rule: the Trip's fields are
    * not written either, and a CLOSED Trip's properties are part of what was
-   * invoiced.
+   * invoiced. CLOSED is the only state that refuses one — a cancellation is
+   * superseded by a later document rather than protected from it.
    */
   describe("a revision that is refused", () => {
-    it.each([TripStatus.CLOSED, TripStatus.CANCELLED])(
-      "changes nothing on a %s Trip",
-      async (status) => {
-        trip = { ...buildTrip("45PH"), status };
+    it("changes nothing on a CLOSED Trip", async () => {
+      trip = { ...buildTrip("45PH"), status: TripStatus.CLOSED };
 
-        await service.applyDocumentRevision(revisionWith("20FL"));
+      await service.applyDocumentRevision(revisionWith("20FL"));
 
-        expect(trip.containerType).toBe("45PH");
-        expect(assignments).toEqual([]);
-      },
-    );
+      expect(trip.containerType).toBe("45PH");
+      expect(assignments).toEqual([]);
+    });
+
+    /** Reopened, and the rule runs on the type the document brought. */
+    it("reopens a CANCELLED Trip and applies the rule to it", async () => {
+      trip = { ...buildTrip("45PH"), status: TripStatus.CANCELLED };
+
+      await service.applyDocumentRevision(revisionWith("20FL"));
+
+      expect(trip.status).toBe(TripStatus.OPEN);
+      expect(trip.containerType).toBe("20FL");
+      expect(flat()).toMatchObject({ isAutomatic: true });
+    });
 
     it("leaves a CLOSED 20FL Trip's Flat exactly as it was", async () => {
       trip = { ...buildTrip("20FL"), status: TripStatus.CLOSED };

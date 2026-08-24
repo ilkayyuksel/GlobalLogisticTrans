@@ -19,13 +19,17 @@ import { TripRepository } from "./trip.repository";
 const Decimal = Prisma.Decimal;
 
 const BOOKING = "ANRDUB2602247";
+/** The container the documents in this spec name. Half of the Trip's identity. */
+const CONTAINER = "EUCU 455075/3";
 
 function buildTrip(overrides: Partial<Trip> = {}): Trip {
   return {
     id: "trip-1",
     status: TripStatus.OPEN,
     bookingNumber: BOOKING,
-    containerNumber: null,
+    // The same container the documents in this spec name: the pair is the
+    // Trip's identity, so a revision only reaches a Trip that shares it.
+    containerNumber: CONTAINER,
     containerType: "45PH",
     terminal: "PSA Quay 869",
     destinationCity: "Dourges",
@@ -54,7 +58,7 @@ function buildDocument(
 ): ImportedTripData {
   return {
     bookingNumber: BOOKING,
-    containerNumber: "EUCU 455075/3",
+    containerNumber: CONTAINER,
     containerType: "45RH",
     terminal: "Quay 869",
     destinationCity: "Lessines",
@@ -72,6 +76,7 @@ describe("TripRevisionService", () => {
   let stored: Trip[];
   let history: unknown[];
   let repository: {
+    findByIdentity: jest.Mock;
     findByBookingNumber: jest.Mock;
     setStatus: jest.Mock;
     update: jest.Mock;
@@ -86,6 +91,24 @@ describe("TripRevisionService", () => {
     history = [];
 
     repository = {
+      findByIdentity: jest.fn(
+        ({
+          identity,
+          statuses,
+        }: {
+          identity: { bookingNumber: string; containerNumber: string | null };
+          statuses: readonly TripStatus[];
+        }) =>
+          Promise.resolve(
+            stored.find(
+              (trip) =>
+                trip.bookingNumber === identity.bookingNumber &&
+                // The real rule: absent is a value, so `null` matches `null`.
+                trip.containerNumber === identity.containerNumber &&
+                statuses.includes(trip.status),
+            ) ?? null,
+          ),
+      ),
       findByBookingNumber: jest.fn(
         ({
           bookingNumber,
@@ -145,7 +168,7 @@ describe("TripRevisionService", () => {
     it("moves an OPEN Trip to CANCELLED", async () => {
       stored.push(buildTrip());
 
-      const outcome = await service.cancelByBookingNumber(BOOKING);
+      const outcome = await service.cancelByIdentity({ bookingNumber: BOOKING, containerNumber: CONTAINER });
 
       expect(outcome).toBe("CANCELLED");
       expect(stored[0].status).toBe(TripStatus.CANCELLED);
@@ -154,7 +177,7 @@ describe("TripRevisionService", () => {
     it("does nothing to a Trip that is already CANCELLED", async () => {
       stored.push(buildTrip({ status: TripStatus.CANCELLED }));
 
-      const outcome = await service.cancelByBookingNumber(BOOKING);
+      const outcome = await service.cancelByIdentity({ bookingNumber: BOOKING, containerNumber: CONTAINER });
 
       expect(outcome).toBe("ALREADY_CANCELLED");
       expect(repository.setStatus).not.toHaveBeenCalled();
@@ -167,7 +190,7 @@ describe("TripRevisionService", () => {
     it("leaves a CLOSED Trip exactly as it is", async () => {
       stored.push(buildTrip({ status: TripStatus.CLOSED }));
 
-      const outcome = await service.cancelByBookingNumber(BOOKING);
+      const outcome = await service.cancelByIdentity({ bookingNumber: BOOKING, containerNumber: CONTAINER });
 
       expect(outcome).toBe("REFUSED_CLOSED");
       expect(stored[0].status).toBe(TripStatus.CLOSED);
@@ -175,7 +198,7 @@ describe("TripRevisionService", () => {
     });
 
     it("creates nothing when no Trip holds the booking number", async () => {
-      const outcome = await service.cancelByBookingNumber("ANRDUB9999999");
+      const outcome = await service.cancelByIdentity({ bookingNumber: "ANRDUB9999999", containerNumber: null });
 
       expect(outcome).toBe("NO_MATCHING_TRIP");
       expect(stored).toEqual([]);
@@ -186,8 +209,8 @@ describe("TripRevisionService", () => {
     it("is idempotent", async () => {
       stored.push(buildTrip());
 
-      const first = await service.cancelByBookingNumber(BOOKING);
-      const second = await service.cancelByBookingNumber(BOOKING);
+      const first = await service.cancelByIdentity({ bookingNumber: BOOKING, containerNumber: CONTAINER });
+      const second = await service.cancelByIdentity({ bookingNumber: BOOKING, containerNumber: CONTAINER });
 
       expect(first).toBe("CANCELLED");
       expect(second).toBe("ALREADY_CANCELLED");
@@ -199,7 +222,10 @@ describe("TripRevisionService", () => {
       stored.push(buildTrip({ id: "trip-1", bookingNumber: "ANRDUB2790449" }));
       stored.push(buildTrip({ id: "trip-2", bookingNumber: "ANRDUB2790528" }));
 
-      await service.cancelByBookingNumber("ANRDUB2790528");
+      await service.cancelByIdentity({
+        bookingNumber: "ANRDUB2790528",
+        containerNumber: CONTAINER,
+      });
 
       // Same city, same date, same container type — only the booking decides.
       expect(stored[0].status).toBe(TripStatus.OPEN);
@@ -210,7 +236,7 @@ describe("TripRevisionService", () => {
       stored.push(buildTrip());
       repository.setStatus.mockRejectedValue(new Error("database unavailable"));
 
-      await expect(service.cancelByBookingNumber(BOOKING)).rejects.toThrow();
+      await expect(service.cancelByIdentity({ bookingNumber: BOOKING, containerNumber: CONTAINER })).rejects.toThrow();
       expect(stored[0].status).toBe(TripStatus.OPEN);
     });
   });
@@ -223,7 +249,7 @@ describe("TripRevisionService", () => {
 
       expect(result.outcome).toBe("UPDATED");
       expect(stored[0]).toMatchObject({
-        containerNumber: "EUCU 455075/3",
+        containerNumber: CONTAINER,
         containerType: "45RH",
         terminal: "Quay 869",
         destinationCity: "Lessines",
@@ -331,14 +357,23 @@ describe("TripRevisionService", () => {
       expect(stored[0]).toEqual(before);
     });
 
-    it("refuses a CANCELLED Trip and does not reopen it", async () => {
+    /**
+     * A cancellation is no longer terminal. An update that arrives after one is
+     * the LATER statement about the same transport, so it brings the Trip back
+     * and its fields are applied — the alternative leaves real, re-planned work
+     * invisible because two documents crossed in the post.
+     */
+    it("reopens a CANCELLED Trip and applies the update", async () => {
       stored.push(buildTrip({ status: TripStatus.CANCELLED }));
 
       const result = await service.applyDocumentRevision(buildDocument());
 
-      expect(result.outcome).toBe("REFUSED_CANCELLED");
-      expect(stored[0].status).toBe(TripStatus.CANCELLED);
-      expect(repository.update).not.toHaveBeenCalled();
+      expect(result.outcome).toBe("REOPENED");
+      expect(stored[0].status).toBe(TripStatus.OPEN);
+      expect(stored[0].destinationCity).toBe("Lessines");
+      expect(history).toContainEqual(
+        expect.objectContaining({ eventType: "REOPENED" }),
+      );
     });
 
     it("creates nothing when no Trip holds the booking number", async () => {

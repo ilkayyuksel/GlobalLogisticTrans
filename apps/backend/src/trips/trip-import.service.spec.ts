@@ -119,6 +119,8 @@ describe("TripService.importTrips", () => {
 
     repository = {
       findByBookingNumber: jest.fn().mockResolvedValue(null),
+      findByIdentity: jest.fn().mockResolvedValue(null),
+      findManyByBookingNumber: jest.fn().mockResolvedValue([]),
       createTripGroup: jest.fn().mockResolvedValue({ id: GROUP_ID }),
       create: jest.fn().mockImplementation((data) =>
         Promise.resolve(
@@ -260,15 +262,19 @@ describe("TripService.importTrips", () => {
       expect(first.tripGroupId).toBe(GROUP_ID);
     });
 
-    it("checks uniqueness for each Trip independently", async () => {
+    it("checks the identity of each Trip independently", async () => {
       await service.importTrips(buildRealCombination());
 
-      expect(repository.findByBookingNumber).toHaveBeenCalledTimes(2);
-      expect(repository.findByBookingNumber).toHaveBeenCalledWith(
-        expect.objectContaining({ bookingNumber: DELIVERY_BOOKING }),
+      expect(repository.findByIdentity).toHaveBeenCalledTimes(2);
+      expect(repository.findByIdentity).toHaveBeenCalledWith(
+        expect.objectContaining({
+          identity: expect.objectContaining({ bookingNumber: DELIVERY_BOOKING }),
+        }),
       );
-      expect(repository.findByBookingNumber).toHaveBeenCalledWith(
-        expect.objectContaining({ bookingNumber: COLLECTION_BOOKING }),
+      expect(repository.findByIdentity).toHaveBeenCalledWith(
+        expect.objectContaining({
+          identity: expect.objectContaining({ bookingNumber: COLLECTION_BOOKING }),
+        }),
       );
     });
 
@@ -277,7 +283,7 @@ describe("TripService.importTrips", () => {
      * see rows the transaction has not committed yet. The double models that
      * visibility; the real guarantee comes from running inside the transaction.
      */
-    it("refuses a second leg repeating the first leg's booking number", async () => {
+    it("refuses a second leg repeating the first leg's identity", async () => {
       const written: string[] = [];
 
       (repository.create as jest.Mock).mockImplementation((data) => {
@@ -286,11 +292,11 @@ describe("TripService.importTrips", () => {
           buildTrip({ bookingNumber: data.bookingNumber }),
         );
       });
-      (repository.findByBookingNumber as jest.Mock).mockImplementation(
-        ({ bookingNumber }) =>
+      (repository.findByIdentity as jest.Mock).mockImplementation(
+        ({ identity }) =>
           Promise.resolve(
-            written.includes(bookingNumber)
-              ? buildTrip({ bookingNumber })
+            written.includes(identity.bookingNumber)
+              ? buildTrip({ bookingNumber: identity.bookingNumber })
               : null,
           ),
       );
@@ -366,8 +372,8 @@ describe("TripService.importTrips", () => {
     expect(eventBus.publish).not.toHaveBeenCalled();
   });
 
-  it("refuses a booking number already held by another Trip", async () => {
-    (repository.findByBookingNumber as jest.Mock).mockResolvedValue(
+  it("refuses an identity already held by another Trip", async () => {
+    (repository.findByIdentity as jest.Mock).mockResolvedValue(
       buildTrip(),
     );
 
@@ -376,8 +382,8 @@ describe("TripService.importTrips", () => {
     );
   });
 
-  it("checks the booking number before writing anything", async () => {
-    (repository.findByBookingNumber as jest.Mock).mockResolvedValue(
+  it("checks the identity before writing anything", async () => {
+    (repository.findByIdentity as jest.Mock).mockResolvedValue(
       buildTrip(),
     );
 
@@ -391,7 +397,7 @@ describe("TripService.importTrips", () => {
    * the check has to see uncommitted rows. Running inside the transaction is
    * what makes that true; this proves the second one is checked at all.
    */
-  it("checks the booking number of every Trip in a Combination", async () => {
+  it("checks the identity of every Trip in a Combination", async () => {
     await service.importTrips(
       buildCommand({
         asCombination: true,
@@ -402,11 +408,15 @@ describe("TripService.importTrips", () => {
       }),
     );
 
-    expect(repository.findByBookingNumber).toHaveBeenCalledWith(
-      expect.objectContaining({ bookingNumber: "DUBANR2598395" }),
+    expect(repository.findByIdentity).toHaveBeenCalledWith(
+      expect.objectContaining({
+        identity: expect.objectContaining({ bookingNumber: "DUBANR2598395" }),
+      }),
     );
-    expect(repository.findByBookingNumber).toHaveBeenCalledWith(
-      expect.objectContaining({ bookingNumber: "ANRBEL2603249" }),
+    expect(repository.findByIdentity).toHaveBeenCalledWith(
+      expect.objectContaining({
+        identity: expect.objectContaining({ bookingNumber: "ANRBEL2603249" }),
+      }),
     );
   });
 

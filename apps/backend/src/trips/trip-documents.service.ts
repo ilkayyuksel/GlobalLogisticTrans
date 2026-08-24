@@ -1,5 +1,5 @@
 import { Injectable } from "@nestjs/common";
-import { PdfDocument, TripHistory } from "@prisma/client";
+import { ImportedEmail, PdfDocument, TripHistory } from "@prisma/client";
 
 import { AppLoggerService } from "../logger/app-logger.service";
 import {
@@ -25,6 +25,18 @@ import { TripRepository } from "./trip.repository";
  * One UPDATE writes one row per changed field, so the events are grouped back
  * into one entry per document — an update that moved two fields is one document
  * with two changed fields, not two documents.
+ * ────────────────────────────────────────────────────────────────────────────
+ *
+ * ── WHICH DOCUMENT CURRENTLY GOVERNS THE TRIP ───────────────────────────────
+ * Documents do not arrive in business order: a CANCEL can reach us after the
+ * UPDATE that supersedes it. So exactly one entry is marked `isEffective` — the
+ * latest APPLIED transport document by ARRIVAL time, which is what the Trip's
+ * status and its parser-controlled fields reflect.
+ *
+ * Arrival time is the email's `received_at`, the moment the mail server accepted
+ * the message, falling back to the upload time for a document somebody uploaded
+ * by hand. Processing time is deliberately not used: a retry, a restart or a
+ * slow poll reorders it, and the sender's order is the one that matters.
  * ────────────────────────────────────────────────────────────────────────────
  *
  * Two queries, whatever the length of the history. Nothing here reads a file:
@@ -73,12 +85,53 @@ export class TripDocumentsService {
       }
     }
 
+    markEffective(items);
+
     return { items };
   }
 }
 
 /** An event carrying the document it was caused by, as the repository reads it. */
-type EventWithDocument = TripHistory & { pdfDocument: PdfDocument | null };
+type EventWithDocument = TripHistory & {
+  pdfDocument: (PdfDocument & { importedEmail: ImportedEmail | null }) | null;
+};
+
+/** When a document reached us, which is what orders the history. */
+function arrivedAt(entry: TripDocumentDto): number {
+  return (entry.receivedAt ?? entry.occurredAt).getTime();
+}
+
+/**
+ * Marks the one document that currently governs the Trip.
+ *
+ * Only an APPLIED transport document can: a refused one changed nothing, and a
+ * Cost Confirmation carries money rather than transport data — it never decides
+ * a Trip's state or its fields.
+ *
+ * Ties are broken by taking the LAST of the equal entries, which is the older
+ * one in this newest-first list. Two documents sharing an arrival time is
+ * something the data cannot resolve, and preferring the one already in effect
+ * keeps the answer stable instead of flipping between reads.
+ */
+function markEffective(items: TripDocumentDto[]): void {
+  let effective: TripDocumentDto | null = null;
+
+  for (const item of items) {
+    item.isEffective = false;
+
+    if (!item.applied || item.action === TripDocumentAction.CostConfirmation) {
+      continue;
+    }
+
+    if (!effective || arrivedAt(item) >= arrivedAt(effective)) {
+      effective = item;
+    }
+  }
+
+  if (effective) {
+    effective.isEffective = true;
+  }
+}
 
 /**
  * One entry per document, in the order the events arrived.
@@ -110,10 +163,13 @@ function groupByDocument(events: readonly EventWithDocument[]): TripDocumentDto[
       action,
       originalFilename: document.originalFilename,
       occurredAt: event.occurredAt,
+      receivedAt: document.importedEmail?.receivedAt ?? null,
       changedFields: changedFieldsOf(event),
       outcome: event.description,
       applied: APPLIED_EVENTS.includes(event.eventType),
       createdTrip: event.eventType === TripHistoryEvent.UpdateCreatedTrip,
+      // Decided once the whole list is known.
+      isEffective: false,
     });
   }
 
@@ -132,6 +188,7 @@ const APPLIED_EVENTS: readonly string[] = [
   TripHistoryEvent.UpdateCreatedTrip,
   TripHistoryEvent.Cancelled,
   TripHistoryEvent.CostConfirmed,
+  TripHistoryEvent.NewReapplied,
 ];
 
 function actionOf(eventType: string): TripDocumentAction | null {
@@ -152,11 +209,18 @@ function actionOf(eventType: string): TripDocumentAction | null {
   }
 
   /*
-   * A NEW document refused because its booking number was still held. It is a
-   * NEW order that arrived, and listing it as anything else would misdescribe
-   * what the sender sent.
+   * Both are NEW orders that arrived for a Trip we already had: one was applied
+   * and re-read the Trip's transport data, the other was refused because the
+   * Trip is CLOSED. Listing either as anything but NEW would misdescribe what
+   * the sender sent.
+   *
+   * REOPENED is deliberately absent. It is written alongside the document that
+   * caused it, and giving it an action of its own would list one arrival twice.
    */
-  if (eventType === TripHistoryEvent.NewRefusedDuplicate) {
+  if (
+    eventType === TripHistoryEvent.NewRefusedDuplicate ||
+    eventType === TripHistoryEvent.NewReapplied
+  ) {
     return TripDocumentAction.New;
   }
 
@@ -171,16 +235,20 @@ function actionOf(eventType: string): TripDocumentAction | null {
 }
 
 /** The Trip's own source document, which no event describes. */
-function toOriginalEntry(document: PdfDocument): TripDocumentDto {
+function toOriginalEntry(
+  document: PdfDocument & { importedEmail?: ImportedEmail | null },
+): TripDocumentDto {
   return {
     pdfDocumentId: document.id,
     action: TripDocumentAction.New,
     originalFilename: document.originalFilename,
     occurredAt: document.uploadedAt,
+    receivedAt: document.importedEmail?.receivedAt ?? null,
     changedFields: [],
     outcome: null,
     applied: true,
     createdTrip: true,
+    isEffective: false,
   };
 }
 

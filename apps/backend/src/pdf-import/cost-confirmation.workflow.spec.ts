@@ -265,6 +265,83 @@ describe("every real Cost Confirmation, through the real workflow", () => {
     });
   });
 
+  /**
+   * ── WHY A CONFIRMATION CAN BE AMBIGUOUS ───────────────────────────────────
+   * A Trip is identified by its booking number AND its container number, so one
+   * booking may hold several Trips. A confirmation names only the booking: its
+   * own container reference is printed in another format than a transport
+   * order's — `EUCU4530818` against `EUCU 453232/2` — and one of the four real
+   * confirmations prints none at all.
+   *
+   * It therefore REFUSES rather than choosing. The document carries money, and
+   * putting it on the wrong leg of a booking is a silent invoicing error nobody
+   * would find afterwards.
+   * ──────────────────────────────────────────────────────────────────────────
+   */
+  describe("a booking held by more than one Trip", () => {
+    const { file, bookingNumber } = EXPECTED[0];
+
+    function twoTripsOnOneBooking(): void {
+      harness.trips.push(
+        {
+          id: "trip-container-1",
+          bookingNumber,
+          containerNumber: "EUCU 453232/2",
+          status: TripStatus.OPEN,
+        },
+        {
+          id: "trip-container-2",
+          bookingNumber,
+          containerNumber: "PVDU 301326/0",
+          status: TripStatus.OPEN,
+        },
+      );
+    }
+
+    it("is refused rather than attached to one of them", async () => {
+      twoTripsOnOneBooking();
+
+      await expect(
+        harness.importer.confirmCost(readConfirmation(file), file),
+      ).rejects.toThrow(/was not recorded/);
+
+      expect(harness.costConfirmations).toEqual([]);
+    });
+
+    it("says which booking is ambiguous and how many Trips hold it", async () => {
+      twoTripsOnOneBooking();
+
+      await expect(
+        harness.importer.confirmCost(readConfirmation(file), file),
+      ).rejects.toThrow(/2 Trips/);
+    });
+
+    it("stores nothing, because the message will be retried", async () => {
+      twoTripsOnOneBooking();
+
+      await expect(
+        harness.importer.confirmCost(readConfirmation(file), file),
+      ).rejects.toThrow();
+
+      expect(harness.pdfDocuments).toEqual([]);
+      expect(readdirSync(storageDirectory)).toEqual([]);
+    });
+
+    /** One Trip on the booking is unambiguous, and still works. */
+    it("records it normally when the booking holds one Trip", async () => {
+      harness.trips.push({
+        id: "trip-only",
+        bookingNumber,
+        containerNumber: null,
+        status: TripStatus.OPEN,
+      });
+
+      await harness.importer.confirmCost(readConfirmation(file), file);
+
+      expect(harness.costConfirmations).toHaveLength(1);
+    });
+  });
+
   describe("the same confirmation twice", () => {
     const { file, bookingNumber, ccNumber } = EXPECTED[0];
 
