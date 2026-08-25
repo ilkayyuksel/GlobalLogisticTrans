@@ -393,30 +393,33 @@ describe("Ritten row actions", () => {
     });
   });
 
-  describe("Details bewerken", () => {
-    /**
-     * The three editable fields with no column — distance, execution time and
-     * internal notes — kept their dialog when the menu that opened it went.
-     */
-    it("opens the fields that have no column", async () => {
+  /**
+   * The lifecycle action is the ONLY control this column carries.
+   *
+   * Editing a Trip's less common fields is the Trip detail page's job - the
+   * booking number in every row links to it - and the row gains no edit
+   * button, no "more", and no second menu by another name.
+   */
+  describe("no edit control in the row", () => {
+    it.each(["OPEN", "CLOSED", "CANCELLED", "DELETED"] as const)(
+      "offers none for a %s Trip",
+      async (status) => {
+        await showTrip({ status });
+
+        expect(
+          screen.queryByRole("button", { name: /Details bewerken/ }),
+        ).not.toBeInTheDocument();
+        expect(
+          screen.queryByRole("button", { name: /Bewerken/ }),
+        ).not.toBeInTheDocument();
+      },
+    );
+
+    it("opens no dialog for the fields that have no column", async () => {
       await showTrip();
 
-      await userEvent.click(
-        screen.getByRole("button", { name: "Details bewerken ANRDUB2602247" }),
-      );
-
-      const dialog = await screen.findByRole("dialog");
-
-      expect(within(dialog).getByLabelText("Afstand in km")).toBeInTheDocument();
-    });
-
-    /** A DELETED Trip is read-only until it is restored. */
-    it("is not offered for a DELETED Trip", async () => {
-      await showTrip({ status: "DELETED" });
-
-      expect(
-        screen.queryByRole("button", { name: /Details bewerken/ }),
-      ).not.toBeInTheDocument();
+      expect(screen.queryByLabelText("Afstand in km")).not.toBeInTheDocument();
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     });
   });
 

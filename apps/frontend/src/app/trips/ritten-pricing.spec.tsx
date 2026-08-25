@@ -514,6 +514,11 @@ describe("the confirmed cost in Ritten", () => {
     expect(headers).not.toContain("Tarief");
   });
 
+  /**
+   * Read-only still means read-only. The one control in the cell OPENS the
+   * confirmation document; nothing there changes the number, the amount or the
+   * confirmation itself.
+   */
   it("offers no control to change it", async () => {
     respondWith(requestMock, { trips: buildPage([CONFIRMED]) });
     renderRitten();
@@ -521,7 +526,12 @@ describe("the confirmed cost in Ritten", () => {
       "td",
     ) as HTMLElement;
 
-    expect(within(cell).queryByRole("button")).toBeNull();
+    expect(within(cell).getAllByRole("button")).toHaveLength(1);
+    expect(
+      within(cell).getByRole("button", {
+        name: "Kostenbevestiging-PDF bekijken CC4132482",
+      }),
+    ).toBeInTheDocument();
     expect(within(cell).queryByRole("textbox")).toBeNull();
   });
 
@@ -574,7 +584,9 @@ describe("the confirmed cost in Ritten", () => {
     const row = await showWithPrices();
     const cell = within(row).getByText("CC4132482").closest("td") as HTMLElement;
 
-    expect(within(cell).queryByRole("button")).toBeNull();
+    // Only the viewer, and it opens a document rather than editing one.
+    expect(within(cell).getAllByRole("button")).toHaveLength(1);
     expect(within(cell).queryByRole("textbox")).toBeNull();
+    expect(within(cell).queryByRole("spinbutton")).toBeNull();
   });
 });

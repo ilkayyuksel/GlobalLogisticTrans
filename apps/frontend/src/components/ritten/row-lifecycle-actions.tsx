@@ -2,7 +2,7 @@
 
 import type { Trip } from "@/lib/api/types";
 import { useTranslation } from "@/lib/i18n/language-provider";
-import { STATUS_LABEL_KEYS, canEdit, type RittenActions } from "@/lib/ritten/row-actions";
+import { STATUS_LABEL_KEYS, type RittenActions } from "@/lib/ritten/row-actions";
 import { primaryRowAction } from "@/lib/trip-actions";
 
 /**
@@ -24,11 +24,12 @@ import { primaryRowAction } from "@/lib/trip-actions";
  * matter. Reopening is the undo of a cancellation and needs no ceremony either.
  * Cancelling, which is the one an operator would regret, is not offered here at
  * all; it keeps its confirmation on the Trip detail page.
- * ────────────────────────────────────────────────────────────────────────────
  *
- * "Meer" opens the three editable fields that have no column — distance,
- * execution time and internal notes. Its dialog would otherwise be unreachable
- * from the list.
+ * AND NOTHING ELSE BELONGS HERE. The lifecycle action is the only control this
+ * column carries — no edit button, no "more", no second menu by another name.
+ * Editing a Trip's less common fields is the Trip detail page's job, which the
+ * booking number in every row links to.
+ * ────────────────────────────────────────────────────────────────────────────
  */
 export function RowLifecycleActions({
   trip,
@@ -73,18 +74,6 @@ export function RowLifecycleActions({
           className="whitespace-nowrap rounded-md border border-primary/40 px-2 py-1 text-xs font-medium text-primary hover:bg-primary/10 disabled:cursor-not-allowed disabled:opacity-40"
         >
           {t(STATUS_LABEL_KEYS[action.target])}
-        </button>
-      ) : null}
-
-      {canEdit(trip) ? (
-        <button
-          type="button"
-          disabled={isBusy}
-          onClick={() => actions.openDetails(trip)}
-          aria-label={nameFor(t("ritten.menu.editDetails"))}
-          className="whitespace-nowrap rounded-md border border-border px-2 py-1 text-xs font-medium text-secondary hover:bg-hover hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
-        >
-          {t("ritten.menu.editDetails")}
         </button>
       ) : null}
     </span>

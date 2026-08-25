@@ -25,7 +25,6 @@ import {
   toFilterParams,
 } from "@/components/ritten/ritten-filters";
 import { RittenPagination } from "@/components/ritten/ritten-pagination";
-import { TripDetailsDialog } from "@/components/ritten/trip-details-dialog";
 import { ViewSwitcher } from "@/components/ritten/view-switcher";
 import { EmptyState, ErrorState, LoadingState } from "@/components/ui/states";
 import { Spinner } from "@/components/ui/spinner";
@@ -55,6 +54,7 @@ import {
 } from "@/lib/api/trips";
 import type {
   ChangeableTripStatus,
+  CostConfirmation,
   PricingSnapshot,
   Trip,
 } from "@/lib/api/types";
@@ -62,6 +62,7 @@ import { downloadBlob } from "@/lib/download";
 import { useTranslation } from "@/lib/i18n/language-provider";
 import type { TranslationKey } from "@/lib/i18n/translations";
 import { buildSections } from "@/lib/ritten/sections";
+import { toCostConfirmationLabel } from "@/lib/trips/cost-confirmation";
 import type { RittenActions } from "@/lib/ritten/row-actions";
 import {
   periodEnd,
@@ -108,6 +109,19 @@ const PAGE_SIZE_BY_VIEW: Record<RittenView, number> = {
   month: MAX_PAGE_SIZE,
 };
 
+/**
+ * A document the viewer was asked to open, and what to call it.
+ *
+ * `pdfDocumentId` is omitted for the transport order, which the viewer already
+ * defaults to. It is supplied for a Cost Confirmation, which is a DIFFERENT
+ * document belonging to the same Trip.
+ */
+interface ViewedDocument {
+  readonly trip: Trip;
+  readonly pdfDocumentId?: string;
+  readonly title?: string;
+}
+
 /** The backend's own minimum; below it there is nothing to group. */
 const MINIMUM_TRIPS_PER_GROUP = 2;
 
@@ -149,10 +163,17 @@ export default function RittenPage() {
 
   const [selectedTripIds, setSelectedTripIds] = useState<Set<string>>(new Set());
   const [isGroupDialogOpen, setIsGroupDialogOpen] = useState(false);
-  const [pdfTrip, setPdfTrip] = useState<Trip | null>(null);
+  /*
+   * What the PDF viewer was asked to show.
+   *
+   * The Trip alone is no longer enough: a Trip has its transport order AND, at
+   * most, one Cost Confirmation, which is a different document that arrived
+   * later. The document id travels with the request so the viewer opens the one
+   * that was clicked rather than defaulting to the order.
+   */
+  const [viewing, setViewing] = useState<ViewedDocument | null>(null);
   const [openCombinationId, setOpenCombinationId] = useState<string | null>(null);
   const [customPropertiesTrip, setCustomPropertiesTrip] = useState<Trip | null>(null);
-  const [detailsTrip, setDetailsTrip] = useState<Trip | null>(null);
   const [isCreating, setIsCreating] = useState(false);
 
   const [busyTripId, setBusyTripId] = useState<string | null>(null);
@@ -500,7 +521,24 @@ export default function RittenPage() {
         () => removeTripFromGroup(trip.id),
         "ritten.group.unlinked",
       ),
-    openPdf: setPdfTrip,
+    openPdf: (trip) => setViewing({ trip }),
+    /*
+     * The confirmation's own document, resolved from the CostConfirmation the
+     * list response already carried — no request per row to find it, and never
+     * the Trip's `pdfDocumentId`, which is the transport order.
+     *
+     * Only reachable for a Trip that has one: the button is not rendered
+     * otherwise, which is why the id can be asserted here.
+     */
+    openCostConfirmationPdf: (trip) => {
+      const confirmation = trip.costConfirmation as CostConfirmation;
+
+      setViewing({
+        trip,
+        pdfDocumentId: confirmation.pdfDocumentId,
+        title: toCostConfirmationLabel(confirmation),
+      });
+    },
     /**
      * Downloading fetches the same resource the viewer shows. No second copy
      * is kept anywhere, and the file is never re-uploaded or re-parsed.
@@ -526,7 +564,6 @@ export default function RittenPage() {
     },
     openCombination: setOpenCombinationId,
     openCustomProperties: setCustomPropertiesTrip,
-    openDetails: setDetailsTrip,
   };
 
   return (
@@ -736,8 +773,13 @@ export default function RittenPage() {
         />
       ) : null}
 
-      {pdfTrip ? (
-        <PdfViewerDialog trip={pdfTrip} onClose={() => setPdfTrip(null)} />
+      {viewing ? (
+        <PdfViewerDialog
+          trip={viewing.trip}
+          pdfDocumentId={viewing.pdfDocumentId}
+          title={viewing.title}
+          onClose={() => setViewing(null)}
+        />
       ) : null}
 
       {openCombinationId ? (
@@ -772,14 +814,6 @@ export default function RittenPage() {
           trip={customPropertiesTrip}
           onChanged={trips.reload}
           onClose={() => setCustomPropertiesTrip(null)}
-        />
-      ) : null}
-
-      {detailsTrip ? (
-        <TripDetailsDialog
-          trip={detailsTrip}
-          onSave={actions.saveTrip}
-          onClose={() => setDetailsTrip(null)}
         />
       ) : null}
     </div>

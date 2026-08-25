@@ -523,45 +523,44 @@ describe("Ritten editing", () => {
     });
   });
 
+  /**
+   * -- FIELDS WITHOUT A COLUMN ARE EDITED ON THE TRIP ----------------------
+   * Distance, execution time and internal notes have no place in an
+   * operational table, and the row offers no way to edit them: they belong to
+   * the Trip detail page's edit form, which the booking number in every row
+   * links to.
+   *
+   * The row carries the lifecycle action and nothing else. It gains no edit
+   * button, no "more", and no second menu by another name.
+   * ------------------------------------------------------------------------
+   */
   describe("fields without a column", () => {
-    /** A direct button in the row now; there is no menu to open first. */
-    async function openDetails(): Promise<void> {
-      await userEvent.click(
-        await screen.findByRole("button", {
-          name: "Details bewerken ANRDUB2602247",
-        }),
-      );
-    }
-
-    it("edits distance, execution time and notes together", async () => {
+    it("offers no edit control in the row", async () => {
       await showTrip();
-      await openDetails();
 
-      await userEvent.type(screen.getByLabelText("Afstand in km"), "132.5");
-      await userEvent.type(
-        screen.getByLabelText("Interne notities"),
-        "Chauffeur gebeld",
-      );
-      await userEvent.click(screen.getByRole("button", { name: "Opslaan" }));
-
-      await waitFor(() => {
-        expect(patchCalls()[0][1]?.body).toMatchObject({
-          distanceKm: 132.5,
-          internalNotes: "Chauffeur gebeld",
-          executionDatetime: null,
-        });
-      });
+      expect(
+        screen.queryByRole("button", { name: /Details bewerken/ }),
+      ).not.toBeInTheDocument();
     });
 
-    /** Both are parser-controlled, and the backend refuses them. */
-    it("never offers the start or end time", async () => {
+    it("shows no editor for them anywhere in the list", async () => {
       await showTrip();
-      await openDetails();
 
-      const dialog = screen.getByRole("dialog");
+      expect(screen.queryByLabelText("Afstand in km")).not.toBeInTheDocument();
+      expect(
+        screen.queryByLabelText("Interne notities"),
+      ).not.toBeInTheDocument();
+      expect(screen.queryByLabelText("Uitgevoerd op")).not.toBeInTheDocument();
+    });
 
-      expect(within(dialog).queryByLabelText(/Begin/)).not.toBeInTheDocument();
-      expect(within(dialog).queryByLabelText(/Eind/)).not.toBeInTheDocument();
+    /** The booking number is the way through to them. */
+    it("links every row to its Trip", async () => {
+      await showTrip();
+
+      expect(screen.getByRole("link", { name: "ANRDUB2602247" })).toHaveAttribute(
+        "href",
+        "/trips/trip-1",
+      );
     });
   });
 

@@ -308,6 +308,17 @@ Verwijderd → none. It returns only through restoration.
 
 A row never offers an action the backend would refuse.
 
+The lifecycle action is the ONLY control in its column.
+
+No edit button, no "more", no second menu under another name. Editing a
+record's less common fields belongs to its detail page, which the row already
+links to.
+
+A read-only value may carry a control that OPENS something - a document viewer
+beside a confirmed amount, for instance. That is not an edit control, and it
+appears only when there is something to open: never a disabled icon pointing at
+a document that does not exist.
+
 An action that is not routine — cancelling, unlinking, deleting — does not
 belong in a row. It keeps its confirmation and lives on the detail page, or
 beside the thing it affects.

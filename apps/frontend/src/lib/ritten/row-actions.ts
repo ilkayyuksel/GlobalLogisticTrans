@@ -10,11 +10,12 @@ import type { TranslationKey } from "@/lib/i18n/translations";
  * page owns that sequence. A row never mutates anything itself, and never
  * decides that something succeeded.
  *
- * Deleting, restoring and reprocessing pricing are deliberately NOT here. They
- * left with the "Acties" dropdown, and all three live on the Trip detail page —
- * one click away through the booking number in every row. Restoring in
- * particular was unreachable from this list in any case: a DELETED Trip is
- * hidden from it and cannot be filtered back into view.
+ * Deleting, restoring, reprocessing pricing and editing a Trip's less common
+ * fields are deliberately NOT here. They left with the "Acties" dropdown, and
+ * all of them live on the Trip detail page — one click away through the booking
+ * number in every row. Restoring in particular was unreachable from this list
+ * in any case: a DELETED Trip is hidden from it and cannot be filtered back
+ * into view.
  */
 export interface RittenActions {
   /** Resolves when the backend accepted the change AND the list was refetched. */
@@ -26,7 +27,14 @@ export interface RittenActions {
   openPdf: (trip: Trip) => void;
   downloadPdf: (trip: Trip) => Promise<void>;
   openCustomProperties: (trip: Trip) => void;
-  openDetails: (trip: Trip) => void;
+  /**
+   * The Cost Confirmation's OWN document — never the transport order.
+   *
+   * A Trip's `pdfDocumentId` is the order it came from; the confirmation is a
+   * separate document that arrived later, and opening the wrong one would show
+   * an operator a transport order where they asked for the money.
+   */
+  openCostConfirmationPdf: (trip: Trip) => void;
 }
 
 /** Translations for the transitions `statusActionsFor` offers. */

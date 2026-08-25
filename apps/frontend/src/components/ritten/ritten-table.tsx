@@ -417,7 +417,7 @@ function RittenRow({
         <RowLifecycleActions trip={trip} actions={actions} isBusy={isBusy} />
       </td>
 
-      <CostConfirmationCell trip={trip} />
+      <CostConfirmationCell trip={trip} actions={actions} isBusy={isBusy} />
 
       {showPricing ? (
         <PricingCells snapshot={pricingByTripId.get(trip.id) ?? null} />
@@ -519,12 +519,30 @@ export function toDestination(value: string): UpdateTripPayload {
  * Read-only, and always visible: it does not follow the pricing toggle, because
  * an operator checks a confirmation while working the list rather than while
  * looking at margins. An empty marker means nothing has been confirmed, which
- * is not the same as an amount of zero.
+ * is not the same as an amount of zero — and a Trip with none shows no button
+ * either, rather than a disabled icon pointing at a document that does not
+ * exist.
+ *
+ * ── THE BUTTON OPENS THE CONFIRMATION, NOT THE ORDER ────────────────────────
+ * `confirmation.pdfDocumentId` is the confirmation's OWN document. The Trip's
+ * own `pdfDocumentId` is the transport order it came from, and the two are
+ * never the same file — opening the order here would show an operator a
+ * transport order where they asked to see the money.
+ * ────────────────────────────────────────────────────────────────────────────
  *
  * It costs no request of its own. The confirmation travels on the Trip the list
- * endpoint already returned, so a page of fifty rows is still one call.
+ * endpoint already returned — id included — so a page of fifty rows is still
+ * one call, and the button needs nothing fetched to decide whether to appear.
  */
-function CostConfirmationCell({ trip }: { trip: Trip }) {
+function CostConfirmationCell({
+  trip,
+  actions,
+  isBusy,
+}: {
+  trip: Trip;
+  actions: RittenActions;
+  isBusy: boolean;
+}) {
   const t = useTranslation();
   const confirmation = trip.costConfirmation;
 
@@ -538,11 +556,23 @@ function CostConfirmationCell({ trip }: { trip: Trip }) {
 
   return (
     <td className="whitespace-nowrap px-3 py-2 text-right">
-      <span className="text-[11px] text-muted">
-        {toCostConfirmationLabel(confirmation)}
-      </span>{" "}
-      <span className="font-medium tabular-nums text-foreground">
-        {confirmation.amount}
+      <span className="inline-flex items-center gap-1">
+        <PdfButton
+          label={`${t("ritten.cc.viewPdf")} ${toCostConfirmationLabel(confirmation)}`}
+          isDisabled={isBusy}
+          onClick={() => actions.openCostConfirmationPdf(trip)}
+        >
+          {/* An open document. */}
+          <path d="M4 3.5h5.5L14 8v8.5H4z" />
+          <path d="M9.5 3.5V8H14" />
+        </PdfButton>
+
+        <span className="text-[11px] text-muted">
+          {toCostConfirmationLabel(confirmation)}
+        </span>{" "}
+        <span className="font-medium tabular-nums text-foreground">
+          {confirmation.amount}
+        </span>
       </span>
     </td>
   );
