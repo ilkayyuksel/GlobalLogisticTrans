@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import {
   buildPage,
   buildTrip,
+  lastListCall,
   listCalls,
   mutationCalls,
   renderRitten,
@@ -135,18 +136,29 @@ describe("Ritten selection and grouping", () => {
     });
 
     /** A selection that survived a filter change could group unseen Trips. */
-    it("clears the selection when the filters change", async () => {
+    /**
+     * ── THE SELECTION SURVIVES NAVIGATION ─────────────────────────────────
+     * It used to be cleared on every filter, period and page change, which made
+     * a cross-day Combination impossible to select: the operator has to change
+     * day between ticking the outbound leg and the return one.
+     *
+     * So nothing clears it but the operator and a completed action. A Trip that
+     * is off screen is still selected, and the toolbar keeps saying so.
+     * ──────────────────────────────────────────────────────────────────────
+     */
+    it("keeps the selection when the filters change", async () => {
       await showTwoTrips();
       await selectRow("AAA-1");
 
       await userEvent.type(screen.getByLabelText("Zoeken"), "psa");
 
       await waitFor(() => {
-        expect(screen.queryByText("1 geselecteerd")).not.toBeInTheDocument();
+        expect(lastListCall(requestMock).search).toBe("psa");
       });
+      expect(screen.getByText("1 geselecteerd")).toBeInTheDocument();
     });
 
-    it("clears the selection when the period changes", async () => {
+    it("keeps the selection when the period changes", async () => {
       await showTwoTrips();
       await selectRow("AAA-1");
 
@@ -155,24 +167,21 @@ describe("Ritten selection and grouping", () => {
       });
 
       await waitFor(() => {
-        expect(screen.queryByText("1 geselecteerd")).not.toBeInTheDocument();
+        expect(lastListCall(requestMock).planningDate).toBe("2026-09-02");
       });
+      expect(screen.getByText("1 geselecteerd")).toBeInTheDocument();
     });
 
-    it("clears the selection when the page changes", async () => {
-      await showTwoTrips({
-        trips: buildPage([TRIP_A, TRIP_B], { totalItems: 120, totalPages: 3 }),
-      });
+    it("keeps the selection when the view changes from day to week", async () => {
+      await showTwoTrips();
       await selectRow("AAA-1");
 
-      const pagination = screen.getByRole("navigation", { name: "Pagina" });
-      await userEvent.click(
-        within(pagination).getByRole("button", { name: "Volgende" }),
-      );
+      await userEvent.click(screen.getByRole("radio", { name: "Week" }));
 
       await waitFor(() => {
-        expect(screen.queryByText("1 geselecteerd")).not.toBeInTheDocument();
+        expect(lastListCall(requestMock).planningDateFrom).toBeDefined();
       });
+      expect(screen.getByText("1 geselecteerd")).toBeInTheDocument();
     });
   });
 

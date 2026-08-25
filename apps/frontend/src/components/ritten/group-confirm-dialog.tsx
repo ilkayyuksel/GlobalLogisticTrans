@@ -32,10 +32,19 @@ function spansSeveralDays(trips: readonly Trip[]): boolean {
 
 export function GroupConfirmDialog({
   trips,
+  hiddenCount,
   onConfirm,
   onClose,
 }: {
+  /** The selected Trips that are on screen, so their details can be shown. */
   trips: readonly Trip[];
+  /**
+   * How many more are selected on days that are not on screen.
+   *
+   * They are grouped too — the selection is what is sent — so the count is
+   * stated rather than left as a surprise.
+   */
+  hiddenCount: number;
   onConfirm: () => Promise<void>;
   onClose: () => void;
 }) {
@@ -66,8 +75,14 @@ export function GroupConfirmDialog({
         </p>
 
         <p className="mt-2 text-sm font-medium text-foreground">
-          {trips.length} {t("ritten.group.tripCount")}
+          {trips.length + hiddenCount} {t("ritten.group.tripCount")}
         </p>
+
+        {hiddenCount > 0 ? (
+          <p className="mt-2 rounded-md border border-border bg-hover px-3 py-2 text-xs text-secondary">
+            {hiddenCount} {t("ritten.group.hiddenSelected")}
+          </p>
+        ) : null}
 
         {/* Said only when it applies, so it reads as information, not noise. */}
         {spansSeveralDays(trips) ? (

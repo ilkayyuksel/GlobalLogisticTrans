@@ -7,7 +7,7 @@ import type { TripStatus } from "@/lib/api/types";
 import { cn } from "@/lib/cn";
 
 /**
- * Open · Afgewerkt · Totaal for the selected period.
+ * Open · Afgewerkt · Geannuleerd · Totaal for the selected period.
  *
  * EVERY FIGURE IS THE BACKEND'S COUNT over the whole period, not a tally of the
  * rows on screen — a paged list would otherwise report "8 open" when the period
@@ -16,6 +16,13 @@ import { cn } from "@/lib/cn";
  * They double as the status filter, which is how a planner actually uses them:
  * seeing "12 open" and wanting to see those twelve is one thought, so it should
  * be one click.
+ *
+ * ── WHY GEANNULEERD IS ONE OF THEM ──────────────────────────────────────────
+ * Totaal is every Trip the planning list shows — OPEN, CLOSED and CANCELLED,
+ * everything except the administratively DELETED. Without a cancelled figure
+ * the row read "18 open, 0 afgewerkt, 19 totaal", which looks like a filter
+ * that loses a Trip rather than one that includes a cancelled one.
+ * ────────────────────────────────────────────────────────────────────────────
  */
 export function RittenCounters({
   counts,
@@ -31,7 +38,7 @@ export function RittenCounters({
   const t = useTranslation();
 
   return (
-    <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
       <Counter
         label={t("ritten.counters.open")}
         value={counts ? counts.open : null}
@@ -45,6 +52,15 @@ export function RittenCounters({
         isLoading={isLoading}
         isActive={status === "CLOSED"}
         onSelect={() => onStatusChange(status === "CLOSED" ? "" : "CLOSED")}
+      />
+      <Counter
+        label={t("ritten.counters.cancelled")}
+        value={counts ? counts.cancelled : null}
+        isLoading={isLoading}
+        isActive={status === "CANCELLED"}
+        onSelect={() =>
+          onStatusChange(status === "CANCELLED" ? "" : "CANCELLED")
+        }
       />
       <Counter
         label={t("ritten.counters.total")}

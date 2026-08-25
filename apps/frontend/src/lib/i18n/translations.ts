@@ -128,6 +128,7 @@ const nl = {
   "ritten.title": "Ritten",
   "ritten.counters.open": "Open ritten",
   "ritten.counters.closed": "Afgewerkt",
+  "ritten.counters.cancelled": "Geannuleerd",
   "ritten.counters.total": "Totaal",
   "ritten.view.legend": "Weergave",
   "ritten.view.day": "Dag",
@@ -338,6 +339,8 @@ const nl = {
   "ritten.group.confirmDescription":
     "Deze ritten worden samengevoegd tot één groep. Dit is een handmatige groep, geen combinatie uit een PDF.",
   "ritten.group.confirmAction": "Groeperen",
+  "ritten.group.hiddenSelected":
+    "van de geselecteerde ritten staan op een dag die nu niet zichtbaar is. Ze worden mee gegroepeerd.",
   "ritten.group.crossDay":
     "Deze ritten staan op verschillende dagen. Dat mag: elke rit houdt zijn eigen planningsdatum, voertuig en chauffeur.",
   "ritten.group.created": "Groep aangemaakt",
@@ -857,6 +860,7 @@ const tr: Translations = {
   "ritten.title": "Seferler",
   "ritten.counters.open": "Açık seferler",
   "ritten.counters.closed": "Tamamlanan",
+  "ritten.counters.cancelled": "İptal",
   "ritten.counters.total": "Toplam",
   "ritten.view.legend": "Görünüm",
   "ritten.view.day": "Gün",
@@ -1066,6 +1070,8 @@ const tr: Translations = {
   "ritten.group.confirmDescription":
     "Bu seferler tek bir grupta birleştirilir. Bu elle oluşturulmuş bir gruptur, PDF'ten gelen bir kombinasyon değildir.",
   "ritten.group.confirmAction": "Grupla",
+  "ritten.group.hiddenSelected":
+    "seçili sefer şu anda görünmeyen bir günde. Onlar da gruplanır.",
   "ritten.group.crossDay":
     "Bu seferler farklı günlerde. Bu mümkündür: her sefer kendi planlama tarihini, aracını ve şoförünü korur.",
   "ritten.group.created": "Grup oluşturuldu",

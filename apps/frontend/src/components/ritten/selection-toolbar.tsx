@@ -5,10 +5,11 @@ import { useTranslation } from "@/lib/i18n/language-provider";
 /**
  * What is selected, and what can be done with it.
  *
- * SELECTION IS PER PAGE, and the wording says so: "alle zichtbare ritten" is
- * the honest description of what the control does when the list is paginated.
- * Implying a whole period would matter the moment someone grouped a month they
- * could not see.
+ * THE SELECTION IS NOT PER PAGE. It is everything the operator has ticked, on
+ * whatever day, and it survives navigating away — a Combination that goes out
+ * on Monday and comes back on Tuesday cannot be selected any other way.
+ * "Alle zichtbare ritten" still says only "visible", because that is what that
+ * one button does: it ADDS the rows on screen to what is already selected.
  *
  * The toolbar only appears once something is selected — an empty row of
  * disabled buttons above every list would be permanent clutter for an action
@@ -22,7 +23,7 @@ import { useTranslation } from "@/lib/i18n/language-provider";
  */
 export function SelectionToolbar({
   selectedCount,
-  visibleCount,
+  canSelectAllVisible,
   canGroup,
   canComplete,
   isBusy,
@@ -31,8 +32,10 @@ export function SelectionToolbar({
   onGroup,
   onComplete,
 }: {
+  /** Everything selected, including Trips on days that are not on screen. */
   selectedCount: number;
-  visibleCount: number;
+  /** False once every row on screen is already selected. */
+  canSelectAllVisible: boolean;
   /** False below two Trips: one Trip is not a group. */
   canGroup: boolean;
   /** False when nothing in the selection is in a state that can be closed. */
@@ -54,7 +57,7 @@ export function SelectionToolbar({
       <button
         type="button"
         onClick={onSelectAllVisible}
-        disabled={selectedCount === visibleCount}
+        disabled={!canSelectAllVisible}
         className="text-sm font-medium text-primary hover:underline disabled:cursor-not-allowed disabled:text-muted disabled:no-underline"
       >
         {t("ritten.select.allVisible")}

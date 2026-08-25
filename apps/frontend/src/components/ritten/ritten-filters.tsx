@@ -73,7 +73,24 @@ export function toFilterParams(
   };
 }
 
-const STATUS_CHOICES: readonly (TripStatus | "")[] = ["OPEN", "CLOSED", ""];
+/**
+ * The statuses a planner filters by, and "" for all of them.
+ *
+ * CANCELLED is here because it is a state the planning list SHOWS: "Alles" is
+ * every Trip in the period that is not DELETED, so a cancelled Trip appears
+ * there — and without a choice of its own it could be seen but never isolated,
+ * which made "Alles" look like it was hiding things rather than including more.
+ *
+ * DELETED is deliberately absent. It is an administrative state the planning
+ * list does not show at all, and offering it here would be offering a filter
+ * that can only ever return nothing.
+ */
+const STATUS_CHOICES: readonly (TripStatus | "")[] = [
+  "OPEN",
+  "CLOSED",
+  "CANCELLED",
+  "",
+];
 
 export function RittenFilters({
   values,

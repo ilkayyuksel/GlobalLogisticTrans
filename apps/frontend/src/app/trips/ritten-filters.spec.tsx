@@ -289,7 +289,8 @@ describe("Ritten filters", () => {
           path === "/api/v1/trips" && options?.query?.pageSize === 1,
       );
 
-      expect(counting).toHaveLength(3);
+      // Open, Afgewerkt, Geannuleerd and Totaal.
+      expect(counting).toHaveLength(4);
       expect(
         counting.every(
           ([, options]) => options?.query?.planningDate === "2026-08-13",

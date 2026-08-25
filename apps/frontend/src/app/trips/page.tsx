@@ -91,8 +91,25 @@ import {
  * closes a Trip in week 34 stays in week 34.
  */
 
-/** A day fits comfortably; a busy month pages, and says so. */
-const PAGE_SIZE = 50;
+/**
+ * How many rows one page holds, per period.
+ *
+ * ── WHY THIS IS NOT ONE NUMBER ──────────────────────────────────────────────
+ * A day holds a handful of Trips; a month holds every day of them. With one
+ * size for all three, a wider STATUS filter made the result larger and pushed
+ * rows onto page two — so a Trip an operator had just seen under "Open"
+ * vanished under "Alles", which looks exactly like a broken filter and is
+ * really the page ending.
+ *
+ * A month therefore asks for the endpoint's maximum. That is one request either
+ * way: the size changes, the number of requests does not.
+ * ────────────────────────────────────────────────────────────────────────────
+ */
+const PAGE_SIZE_BY_VIEW: Record<RittenView, number> = {
+  day: 50,
+  week: 100,
+  month: MAX_PAGE_SIZE,
+};
 
 /** The backend's own minimum; below it there is nothing to group. */
 const MINIMUM_TRIPS_PER_GROUP = 2;
@@ -116,6 +133,22 @@ export default function RittenPage() {
   const [anchor, setAnchor] = useState<string>(todayAnchor);
   const [filters, setFilters] = useState<RittenFilterValues>(EMPTY_RITTEN_FILTERS);
   const [page, setPage] = useState(1);
+
+  /*
+   * ── THE SELECTION IS NOT PER PAGE ─────────────────────────────────────────
+   * It used to be cleared on every filter, page or view change, which made the
+   * thing it exists for impossible: a Combination that runs over two days —
+   * out on Monday, empty back on Tuesday — cannot be selected without changing
+   * day between the two ticks.
+   *
+   * So selected ids live at the page level and survive navigation. They are
+   * Trip IDS, never booking numbers: two Trips legitimately share a booking
+   * number now, and identity is the pair (booking, container).
+   *
+   * Nothing is cleared for being off screen. A Trip the operator picked on
+   * Monday is still picked on Tuesday, and the toolbar keeps saying so.
+   * ──────────────────────────────────────────────────────────────────────────
+   */
 
   const [selectedTripIds, setSelectedTripIds] = useState<Set<string>>(new Set());
   const [isGroupDialogOpen, setIsGroupDialogOpen] = useState(false);
@@ -172,24 +205,15 @@ export default function RittenPage() {
     setPage(1);
   }, [query]);
 
-  /*
-   * Selection is per page, and it says so.
-   *
-   * Ticking rows and then changing the filter would otherwise leave a selection
-   * the operator can no longer see — and then grouping it would act on Trips
-   * that are not on screen. Clearing is the only honest behaviour.
-   */
-  useEffect(() => {
-    setSelectedTripIds(new Set());
-  }, [query, page, view]);
+  const pageSizeForView = PAGE_SIZE_BY_VIEW[view];
 
   const trips = useAsync(
     useCallback(
       (signal: AbortSignal) =>
-        listTrips({ ...query, page, pageSize: PAGE_SIZE }, signal),
-      [query, page],
+        listTrips({ ...query, page, pageSize: pageSizeForView }, signal),
+      [query, page, pageSizeForView],
     ),
-    [query, page],
+    [query, page, pageSizeForView],
   );
 
   const counts = useAsync(
@@ -357,17 +381,39 @@ export default function RittenPage() {
    */
 
   const visibleTrips = trips.data?.items ?? [];
-  const selectedTrips = visibleTrips.filter((trip) =>
+
+  /**
+   * THE selection: every Trip id the operator has ticked, wherever it was.
+   *
+   * This is what the actions send. Filtering it down to the current page would
+   * quietly drop Monday's Trip when the operator moved to Tuesday to tick the
+   * second half of a Combination — which is the whole reason a cross-day
+   * selection exists.
+   */
+  const selectedIds = [...selectedTripIds];
+
+  /*
+   * The ones that happen to be on screen. Used only to SHOW something about
+   * them — the confirmation lists their bookings and dates — never to decide
+   * what is sent.
+   */
+  const selectedVisibleTrips = visibleTrips.filter((trip) =>
     selectedTripIds.has(trip.id),
   );
+
   /*
-   * Which of the selection completing would move. The backend refuses the whole
-   * request if it names a Trip that cannot be closed, so only the ones it can
-   * are sent — and the button is off when that leaves nothing to do.
+   * Whether completing has anything to do.
+   *
+   * Only decidable for the Trips on screen: the status of one selected two days
+   * ago is not loaded, and fetching it to grey out a button would be a request
+   * per selected row. So the guard applies when the WHOLE selection is visible,
+   * and otherwise the backend decides — which it does anyway, atomically.
    */
-  const completableSelection = selectedTrips.filter((trip) =>
-    canComplete(trip),
-  );
+  const isSelectionFullyVisible =
+    selectedVisibleTrips.length === selectedTripIds.size;
+  const canCompleteSelection =
+    selectedTripIds.size > 0 &&
+    (!isSelectionFullyVisible || selectedVisibleTrips.some(canComplete));
 
   function toggleSelection(tripId: string): void {
     setSelectedTripIds((current) => {
@@ -390,7 +436,9 @@ export default function RittenPage() {
    * backend, never from here, so the marker in the table is the real one.
    */
   async function groupSelected(): Promise<void> {
-    await createTripGroup(selectedTrips.map((trip) => trip.id));
+    // Every selected id, including Trips on days that are not on screen:
+    // grouping across days is exactly what this is for.
+    await createTripGroup(selectedIds);
 
     trips.reload();
     counts.reload();
@@ -413,7 +461,7 @@ export default function RittenPage() {
     setFeedback(null);
 
     try {
-      await completeTrips(completableSelection.map((trip) => trip.id));
+      await completeTrips(selectedIds);
 
       trips.reload();
       counts.reload();
@@ -581,12 +629,22 @@ export default function RittenPage() {
       {selectedTripIds.size > 0 ? (
         <SelectionToolbar
           selectedCount={selectedTripIds.size}
-          visibleCount={visibleTrips.length}
-          canGroup={selectedTrips.length >= MINIMUM_TRIPS_PER_GROUP}
-          canComplete={completableSelection.length > 0}
+          // Against the ROWS ON SCREEN, not against the total selected: with
+          // Monday's Trip selected and Tuesday's showing, the two counts match
+          // by coincidence while there is still a row left to add.
+          canSelectAllVisible={visibleTrips.some(
+            (trip) => !selectedTripIds.has(trip.id),
+          )}
+          canGroup={selectedIds.length >= MINIMUM_TRIPS_PER_GROUP}
+          canComplete={canCompleteSelection}
           isBusy={busyTripId !== null}
           onSelectAllVisible={() =>
-            setSelectedTripIds(new Set(visibleTrips.map((trip) => trip.id)))
+            // Added to what is already selected, never replacing it: five
+            // picked on Monday plus three on Tuesday is eight.
+            setSelectedTripIds(
+              (current) =>
+                new Set([...current, ...visibleTrips.map((trip) => trip.id)]),
+            )
           }
           onClear={() => setSelectedTripIds(new Set())}
           onGroup={() => setIsGroupDialogOpen(true)}
@@ -684,7 +742,8 @@ export default function RittenPage() {
 
       {isGroupDialogOpen ? (
         <GroupConfirmDialog
-          trips={selectedTrips}
+          trips={selectedVisibleTrips}
+          hiddenCount={selectedTripIds.size - selectedVisibleTrips.length}
           onConfirm={groupSelected}
           onClose={() => setIsGroupDialogOpen(false)}
         />

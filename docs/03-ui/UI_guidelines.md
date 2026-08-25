@@ -489,6 +489,46 @@ Filters should remain visible.
 
 Frequently used filters should be easy to access.
 
+A status filter NARROWS.
+
+"All" is the union of every status the screen shows.
+
+It is never a status of its own, and it never shows less than a narrower filter.
+
+Every status the screen can show needs its own choice.
+
+Without one, rows exist that can only ever be seen unfiltered - and the counters
+stop adding up, which reads as a filter losing rows even when it is not.
+
+---
+
+# Selection
+
+A selection survives navigation.
+
+Changing the day, the week, the month, the page or a filter does not clear it.
+
+One movement often spans two days, and its two Trips cannot be selected at all
+if changing day throws the first tick away.
+
+A selection is keyed by Trip id.
+
+Never by booking number: several Trips may share one.
+
+Never by row position.
+
+"Select all visible rows" ADDS the rows on screen to the selection.
+
+It never replaces it.
+
+Five picked on Monday plus three on Tuesday is eight.
+
+Only the operator clears a selection, or an action that consumes it.
+
+A row is never dropped from a selection for being off screen.
+
+Actions act on the WHOLE selection, including the rows that are not visible.
+
 ---
 
 # Sorting
@@ -504,6 +544,12 @@ Current sorting should always be visible.
 Large datasets should be paginated.
 
 Avoid extremely long pages.
+
+A page should be large enough for the period it shows.
+
+A month holds many times what a day holds. With one page size for both, widening
+a filter makes the result larger and pushes rows onto the next page - so a row
+that was just visible under a narrow filter disappears under a wider one.
 
 ---
 
