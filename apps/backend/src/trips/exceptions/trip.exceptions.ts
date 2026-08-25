@@ -163,21 +163,49 @@ export class MissingRequiredCustomPropertyException extends UnprocessableEntityE
 }
 
 /**
- * The destination of an IMPORTED Trip cannot be edited by hand.
+ * A field the DOCUMENT owns cannot be edited by hand on an imported Trip.
  *
- * The destination is parser-controlled exactly where a parser exists. On a Trip
+ * These fields are parser-controlled exactly where a parser exists. On a Trip
  * that came from a transport order the document is the authority: a later
- * UPDATE re-reads the destination from it, so a manual change would be silently
+ * UPDATE re-reads them from it, so a manual change would be silently
  * overwritten and the two sources would disagree in the meantime.
  *
  * A Trip created by hand has no document and therefore no other way to correct
- * a destination, so it accepts one. This exception is the refusal for the other
- * case, and it names the document so the reason is actionable.
+ * one, so it accepts them. This exception is the refusal for the other case,
+ * and it names both the field and the document so the reason is actionable.
  */
-export class DestinationNotEditableException extends ConflictException {
-  constructor(tripId: string, pdfDocumentId: string) {
+export class DocumentControlledFieldException extends ConflictException {
+  constructor(tripId: string, pdfDocumentId: string, field: string) {
     super(
-      `Trip "${tripId}" was imported from PDF document "${pdfDocumentId}", which is the authority for its destination. Only a Trip created by hand accepts a manually entered destination.`,
+      `Trip "${tripId}" was imported from PDF document "${pdfDocumentId}", which is the authority for its ${field}. Only a Trip created by hand accepts a manually entered ${field}.`,
+    );
+  }
+}
+
+/**
+ * A Trip in a TripGroup cannot be classified LOSRIT by the bulk action.
+ *
+ * NOTE ON WHERE THIS RULE LIVES. The data model does not forbid the
+ * combination: `is_loose_trip` and `trip_group_id` are independent columns, and
+ * a Trip that was already a LOSRIT before it joined a group keeps its
+ * classification. This is a rule of the bulk OPERATION — a losrit is a loose
+ * trip, and a leg of a Combination is by definition not loose — so it is
+ * enforced where that operation is, not as a database invariant that would
+ * retroactively invalidate existing rows.
+ */
+export class GroupedTripCannotBeLooseException extends ConflictException {
+  constructor(tripId: string, tripGroupId: string) {
+    super(
+      `Trip "${tripId}" belongs to group "${tripGroupId}" and cannot be marked as a loose trip. Remove it from the group first.`,
+    );
+  }
+}
+
+/** A DELETED Trip is read-only until it is restored. */
+export class DeletedTripCannotBeLooseException extends ConflictException {
+  constructor(tripId: string) {
+    super(
+      `Trip "${tripId}" is DELETED and cannot be classified. Restore it first.`,
     );
   }
 }

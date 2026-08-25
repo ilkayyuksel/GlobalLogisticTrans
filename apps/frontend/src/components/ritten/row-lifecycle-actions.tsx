@@ -3,7 +3,7 @@
 import type { Trip } from "@/lib/api/types";
 import { useTranslation } from "@/lib/i18n/language-provider";
 import { STATUS_LABEL_KEYS, type RittenActions } from "@/lib/ritten/row-actions";
-import { primaryRowAction } from "@/lib/trip-actions";
+import { canDelete, primaryRowAction } from "@/lib/trip-actions";
 
 /**
  * What a row can do, as buttons rather than as a menu.
@@ -25,20 +25,29 @@ import { primaryRowAction } from "@/lib/trip-actions";
  * Cancelling, which is the one an operator would regret, is not offered here at
  * all; it keeps its confirmation on the Trip detail page.
  *
- * AND NOTHING ELSE BELONGS HERE. The lifecycle action is the only control this
- * column carries — no edit button, no "more", no second menu by another name.
- * Editing a Trip's less common fields is the Trip detail page's job, which the
- * booking number in every row links to.
+ * DELETING IS THE ONE THAT ASKS. It is not routine, it takes a transport out of
+ * the planning, and an operator who did it by accident will not see it in the
+ * list to put it back — so it opens the application's own confirmation rather
+ * than acting, and it is styled as destructive so it is never mistaken for the
+ * routine button beside it. It appears only where the backend accepts it, which
+ * today is an OPEN Trip; see `canDelete`.
+ *
+ * AND NOTHING ELSE BELONGS HERE. No edit button, no "more", no second menu by
+ * another name. Editing a Trip's less common fields is the Trip detail page's
+ * job, which the booking number in every row links to.
  * ────────────────────────────────────────────────────────────────────────────
  */
 export function RowLifecycleActions({
   trip,
   actions,
   isBusy,
+  onDelete,
 }: {
   trip: Trip;
   actions: RittenActions;
   isBusy: boolean;
+  /** Opens the confirmation. The row never deletes anything itself. */
+  onDelete: (trip: Trip) => void;
 }) {
   const t = useTranslation();
   const action = primaryRowAction(trip);
@@ -74,6 +83,18 @@ export function RowLifecycleActions({
           className="whitespace-nowrap rounded-md border border-primary/40 px-2 py-1 text-xs font-medium text-primary hover:bg-primary/10 disabled:cursor-not-allowed disabled:opacity-40"
         >
           {t(STATUS_LABEL_KEYS[action.target])}
+        </button>
+      ) : null}
+
+      {canDelete(trip) ? (
+        <button
+          type="button"
+          disabled={isBusy}
+          onClick={() => onDelete(trip)}
+          aria-label={nameFor(t("ritten.menu.delete"))}
+          className="whitespace-nowrap rounded-md border border-danger/40 px-2 py-1 text-xs font-medium text-danger hover:bg-danger/10 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          {t("ritten.menu.delete")}
         </button>
       ) : null}
     </span>

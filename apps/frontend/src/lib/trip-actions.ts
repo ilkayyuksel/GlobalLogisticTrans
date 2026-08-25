@@ -36,7 +36,15 @@ const OFFERED_TRANSITIONS: Readonly<
   DELETED: [],
 };
 
-/** Mirrors DELETABLE_FROM_STATUS: restore must return to a known status. */
+/**
+ * Mirrors DELETABLE_FROM_STATUS in the backend's `trip-status.rules.ts`.
+ *
+ * ONE status, and not an oversight: restore returns a Trip to OPEN, and the
+ * status it held before deletion is recorded nowhere, so allowing a CANCELLED
+ * Trip to be deleted would let it come back OPEN — silently undoing the
+ * cancellation. Widening this is a backend decision about how restore should
+ * behave, not a frontend one.
+ */
 const DELETABLE_FROM: TripStatus = "OPEN";
 
 /**
@@ -116,7 +124,12 @@ export function primaryRowAction(trip: Trip): StatusAction | null {
   );
 }
 
-/** Soft delete is offered only where the backend accepts it. */
+/**
+ * Soft delete is offered only where the backend accepts it.
+ *
+ * Offering it on a CLOSED or CANCELLED Trip would be a button that can only
+ * ever return a 409.
+ */
 export function canDelete(trip: Trip): boolean {
   return trip.status === DELETABLE_FROM;
 }

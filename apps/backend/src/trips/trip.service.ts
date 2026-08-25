@@ -23,8 +23,10 @@ import { TripClosedEvent } from "./events/trip-closed.event";
 import { ImportTripsCommand } from "./import-trips.command";
 import {
   AssignmentSubject,
-  DestinationNotEditableException,
+  DeletedTripCannotBeLooseException,
+  DocumentControlledFieldException,
   DuplicateBookingNumberException,
+  GroupedTripCannotBeLooseException,
   InactiveAssignmentException,
   InvalidTripStatusTransitionException,
   TooFewTripsToGroupException,
@@ -316,13 +318,14 @@ export class TripService {
    * actually changes: the rule applies to new assignments, and a Trip that
    * already carries a since-deactivated Vehicle must stay editable.
    *
-   * The destination is checked separately, because whether it is manual depends
-   * on the Trip rather than on the field — see `assertDestinationEditable`.
+   * The destination and the transport times are checked separately, because
+   * whether they are manual depends on the TRIP rather than on the field — see
+   * `assertDocumentFieldsEditable`.
    */
   async update(id: string, dto: UpdateTripDto): Promise<TripResponseDto> {
     const existing = await this.requireTrip(id);
 
-    this.assertDestinationEditable(existing, dto);
+    this.assertDocumentFieldsEditable(existing, dto);
 
     if (dto.vehicleId !== undefined && dto.vehicleId !== existing.vehicleId) {
       await this.assertAssignable("vehicle", dto.vehicleId);
@@ -485,6 +488,77 @@ export class TripService {
     return this.toResponses(
       tripIds.map((id) => byId.get(id) as Trip),
     );
+  }
+
+  /**
+   * Marks several Trips as LOSRIT in one request.
+   *
+   * ── A CLASSIFICATION, NOT A TRANSITION ────────────────────────────────────
+   * This writes ONE column. It touches no status, no planning date, no booking
+   * number, no container, no vehicle, no driver, no custom property, no group
+   * and no document — and it publishes nothing, so no pricing runs. A LOSRIT is
+   * what the operator calls the Trip; it is not something that happens to it.
+   *
+   * ── WHY A GROUPED TRIP IS REFUSED ─────────────────────────────────────────
+   * A losrit is a loose trip, and a leg of a Combination is by definition not
+   * loose. The database does not forbid the combination — the two columns are
+   * independent, and a Trip that was already a LOSRIT before it joined a group
+   * keeps its classification — so this is a rule of the operation rather than
+   * an invariant of the data.
+   *
+   * ── ALL OR NOTHING ────────────────────────────────────────────────────────
+   * Every Trip is checked before any is written. A selection of one ungrouped
+   * and one grouped Trip changes NEITHER: applying it to the half that
+   * qualifies would leave the operator with a partly-done action they did not
+   * ask for and cannot see the shape of.
+   *
+   * A Trip that is already a LOSRIT is left alone rather than refused, so the
+   * action is idempotent and a mixed selection needs no thought from the
+   * operator.
+   */
+  async markManyLoose(tripIds: readonly string[]): Promise<TripResponseDto[]> {
+    const trips = await this.repository.findManyByIds(tripIds);
+
+    this.assertAllTripsExist(tripIds, trips);
+
+    for (const trip of trips) {
+      if (trip.status === TripStatus.DELETED) {
+        throw new DeletedTripCannotBeLooseException(trip.id);
+      }
+
+      if (trip.tripGroupId !== null) {
+        throw new GroupedTripCannotBeLooseException(trip.id, trip.tripGroupId);
+      }
+    }
+
+    // Already classified: nothing to write, and nothing to report as changed.
+    const toMark = trips.filter((trip) => !trip.isLooseTrip);
+
+    const marked = await this.repository.runInTransaction(
+      async (repository) => {
+        const written: Trip[] = [];
+
+        for (const trip of toMark) {
+          written.push(await repository.update(trip.id, { isLooseTrip: true }));
+        }
+
+        return written;
+      },
+    );
+
+    this.logger.log("Trips marked as loose", {
+      tripIds: trips.map((trip) => trip.id),
+      markedCount: marked.length,
+      alreadyLooseCount: trips.length - marked.length,
+    });
+
+    // Every requested Trip, in the order the caller asked for them, whether it
+    // was written now or already carried the classification.
+    const byId = new Map(
+      [...trips, ...marked].map((trip) => [trip.id, trip] as const),
+    );
+
+    return this.toResponses(tripIds.map((id) => byId.get(id) as Trip));
   }
 
   /**
@@ -906,27 +980,47 @@ export class TripService {
   }
 
   /**
-   * Who owns this Trip's destination.
+   * Who owns the fields a transport order states.
    *
    * A Trip created by hand has no source document, so the operator is the only
-   * possible author of its destination — and until now there was no way to
-   * change one entered wrongly, because the destination was excluded from every
-   * update as "parser-controlled". That description is only true where a parser
-   * exists.
+   * possible author of its destination and of its transport times — and until
+   * now there was no way to change either after creation, because both were
+   * excluded from every update as "parser-controlled". That description is only
+   * true where a parser exists.
    *
-   * On an IMPORTED Trip it still is: a later UPDATE document re-reads the
-   * destination and would overwrite anything typed here, so the request is
-   * refused rather than accepted and silently reverted.
+   * On an IMPORTED Trip it still is: a later UPDATE document re-reads them and
+   * would overwrite anything typed here, so the request is refused rather than
+   * accepted and silently reverted. Both are in `COMPARED_FIELDS`, which is
+   * what makes a document's change to them visible in the first place.
    *
-   * Only a destination actually being SENT is checked. An update that leaves
-   * both fields alone is not a destination change, whatever the Trip's origin.
+   * Only a field actually being SENT is checked. An update that leaves them
+   * alone is not a change to them, whatever the Trip's origin.
+   *
+   * There is deliberately no rule that the end must follow the start. A
+   * transport running past midnight is ordinary, and a single-time order stores
+   * the same value in both — inventing an ordering rule here would refuse
+   * planning the parser itself produces.
    */
-  private assertDestinationEditable(trip: Trip, dto: UpdateTripDto): void {
-    const changesDestination =
-      dto.destinationCity !== undefined || dto.destinationCountry !== undefined;
+  private assertDocumentFieldsEditable(trip: Trip, dto: UpdateTripDto): void {
+    if (trip.pdfDocumentId === null) {
+      return;
+    }
 
-    if (changesDestination && trip.pdfDocumentId !== null) {
-      throw new DestinationNotEditableException(trip.id, trip.pdfDocumentId);
+    const owned: ReadonlyArray<[keyof UpdateTripDto, string]> = [
+      ["destinationCity", "destination"],
+      ["destinationCountry", "destination"],
+      ["startTime", "transport times"],
+      ["endTime", "transport times"],
+    ];
+
+    for (const [field, description] of owned) {
+      if (dto[field] !== undefined) {
+        throw new DocumentControlledFieldException(
+          trip.id,
+          trip.pdfDocumentId,
+          description,
+        );
+      }
     }
   }
 
@@ -969,6 +1063,10 @@ export class TripService {
       internalNotes: dto.internalNotes,
       destinationCity: dto.destinationCity,
       destinationCountry: dto.destinationCountry,
+      startTime:
+        dto.startTime === undefined ? undefined : toNullableTime(dto.startTime),
+      endTime:
+        dto.endTime === undefined ? undefined : toNullableTime(dto.endTime),
       isLooseTrip: dto.isLooseTrip,
     };
   }

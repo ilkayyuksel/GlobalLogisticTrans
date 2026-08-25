@@ -15,6 +15,7 @@ import {
 
 import { toOptionalBoolean, trimToNull } from "../../common/dto/transforms";
 import { IsCalendarDateString } from "../../common/validators/is-calendar-date-string.validator";
+import { IsClockTimeString } from "../../common/validators/is-clock-time-string.validator";
 import {
   CONTAINER_NUMBER_MAX_LENGTH,
   DESTINATION_MAX_LENGTH,
@@ -41,16 +42,22 @@ import {
  *   - `bookingNumber`, `originalPlanningDate` and `pdfDocumentId` are immutable.
  *   - `status` moves through the status, deletion and restoration endpoints.
  *   - `terminal` and `containerType` are parser-controlled.
- *   - `startTime` and `endTime` are parser-controlled, and changing them would
- *     silently re-open the Vehicle overlap question for an existing booking.
  *   - `parserMetadata` is never a manual field.
  *
- * THE DESTINATION IS THE EXCEPTION, AND ONLY ON A MANUAL TRIP. It is
- * parser-controlled exactly when there is a parser: a Trip created by hand has
- * no source document, so nothing else can ever correct a destination typed
- * wrongly — it was write-once, and a Trip planned to the wrong city stayed
- * planned to the wrong city. The service refuses it on an IMPORTED Trip, where
- * the document remains the authority; see `DestinationNotEditableException`.
+ * THE DOCUMENT'S OWN FIELDS ARE THE EXCEPTION, AND ONLY ON A MANUAL TRIP.
+ * The destination and the transport times are parser-controlled exactly when
+ * there IS a parser. A Trip created by hand has no source document, so nothing
+ * else can ever correct a city or a time typed wrongly at creation — both were
+ * write-once, and a Trip planned to the wrong place, or at the wrong hour,
+ * stayed that way for the rest of its life. The service refuses them on an
+ * IMPORTED Trip, where the document remains the authority and a later UPDATE
+ * would silently overwrite anything typed here; see
+ * `DocumentControlledFieldException`.
+ *
+ * (`startTime` and `endTime` were also excluded because changing them "would
+ * re-open the Vehicle overlap question". That reason is stale: the
+ * vehicle-overlap rule was removed by an explicit decision of the business —
+ * see the note in TripService — and nothing checks an interval any more.)
  *
  * `isLooseTrip` is accepted on any Trip: it is the operator's own
  * classification, no parser ever writes it, and a box ticked by mistake has to
@@ -178,6 +185,26 @@ export class UpdateTripDto {
   @IsString()
   @MaxLength(DESTINATION_MAX_LENGTH)
   destinationCountry?: string | null;
+
+  @ApiPropertyOptional({
+    description:
+      "Planned start of the transport. Accepted only on a Trip created by hand; on an imported Trip the document is the authority and this is refused. Send null to clear. There is deliberately no rule that the end must follow the start: a transport that runs past midnight is ordinary, and a single-time order stores the same value in both.",
+    nullable: true,
+    example: "08:00",
+  })
+  @IsOptional()
+  @IsClockTimeString()
+  startTime?: string | null;
+
+  @ApiPropertyOptional({
+    description:
+      "Planned end of the transport. Same rule as the start: manual Trips only. Send null to clear.",
+    nullable: true,
+    example: "12:30",
+  })
+  @IsOptional()
+  @IsClockTimeString()
+  endTime?: string | null;
 
   @ApiPropertyOptional({
     description:

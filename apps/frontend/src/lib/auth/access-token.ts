@@ -21,7 +21,20 @@
  * the token: this application must not depend on a token's internals, which
  * belong to Auth0 and to the backend that verifies them.
  * ────────────────────────────────────────────────────────────────────────────
+ *
+ * ── WHEN A REFRESH GENUINELY FAILS ──────────────────────────────────────────
+ * An expired access token is renewed by the endpoint and nobody notices. An
+ * expired or revoked SESSION cannot be renewed by anything, and the endpoint
+ * answers 401 — at which point the cached token is dropped and the browser is
+ * sent to sign in, because a page that keeps running would show an
+ * authentication error on every call while still looking signed in.
+ *
+ * A failure that is NOT 401 is left alone: the endpoint being down is not the
+ * session ending, and the call that follows fails on its own terms.
+ * ────────────────────────────────────────────────────────────────────────────
  */
+
+import { redirectToLogin } from "./login-redirect";
 
 const ACCESS_TOKEN_ENDPOINT = "/auth/access-token";
 
@@ -30,6 +43,8 @@ const ACCESS_TOKEN_ENDPOINT = "/auth/access-token";
  * check and the backend verifying it.
  */
 const EXPIRY_MARGIN_MS = 30_000;
+
+const UNAUTHORIZED = 401;
 
 interface CachedToken {
   token: string;
@@ -83,6 +98,24 @@ async function fetchAccessToken(): Promise<string | null> {
 
   if (!response.ok) {
     cached = null;
+
+    /*
+     * 401 is the endpoint's way of saying the SESSION is gone — the refresh
+     * token has expired, been revoked, or there was never one. No amount of
+     * retrying fixes that, and a page left running would show an error on every
+     * call while looking signed in, so the browser is sent to sign in again.
+     *
+     * Only 401. A 500 or a gateway error is the endpoint failing, not the
+     * session ending, and bouncing somebody to a login page for a transient
+     * fault would lose the work in front of them.
+     *
+     * This is NOT a logout: nothing calls /auth/logout and the Auth0 session is
+     * not ended here. It is a request to sign in, which is what a browser with
+     * no session has to do.
+     */
+    if (response.status === UNAUTHORIZED) {
+      redirectToLogin();
+    }
 
     return null;
   }

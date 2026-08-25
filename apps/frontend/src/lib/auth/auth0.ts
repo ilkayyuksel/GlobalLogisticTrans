@@ -30,6 +30,39 @@ import { Auth0Client } from "@auth0/nextjs-auth0/server";
  * NEXT_PUBLIC_* variable — the client secret stays server-side by construction,
  * because this module is only ever imported by middleware and server code.
  */
+const SECONDS_PER_DAY = 60 * 60 * 24;
+
+/**
+ * How long a signed-in session survives, and why these numbers.
+ *
+ * ── THIS IS THE SESSION, NOT THE ACCESS TOKEN ───────────────────────────────
+ * The access token stays short-lived and is refreshed by the SDK through the
+ * refresh token that `offline_access` obtains. Nothing here extends a token's
+ * validity — these bound the encrypted SESSION COOKIE, which is what says the
+ * browser may ask for a refreshed token at all.
+ *
+ * The SDK's defaults are three days absolute and one day of inactivity, and
+ * they are why an operator was sent back to Universal Login: the absolute
+ * ceiling ends a session on the third day however continuously it has been
+ * used, and a long weekend crosses the inactivity limit on its own. Refresh
+ * tokens never came into it — the cookie carrying the session was already gone.
+ *
+ * ── THE NUMBERS ────────────────────────────────────────────────────────────
+ * INACTIVITY covers a weekend and a public holiday either side of it, so a
+ * planner who leaves on Friday afternoon is still signed in on Tuesday morning.
+ *
+ * ABSOLUTE is a real ceiling and deliberately not "forever": a session that
+ * could never age out would keep a stolen laptop signed in indefinitely. Thirty
+ * days means the longest-lived session in the system is a month old, and an
+ * operator signs in roughly once a month rather than twice a week.
+ *
+ * Rolling is left at the SDK's default of true, which is what makes the
+ * inactivity window a window rather than a countdown from login.
+ * ────────────────────────────────────────────────────────────────────────────
+ */
+const SESSION_INACTIVITY_SECONDS = 7 * SECONDS_PER_DAY;
+const SESSION_ABSOLUTE_SECONDS = 30 * SECONDS_PER_DAY;
+
 export const auth0 = new Auth0Client({
   authorizationParameters: {
     /*
@@ -38,8 +71,14 @@ export const auth0 = new Auth0Client({
      * Without an audience Auth0 issues an opaque token, which the backend
      * cannot verify — it would reject every request while the user appeared to
      * be signed in perfectly. `openid profile email` is the minimum needed to
-     * show who is signed in; `offline_access` lets the SDK refresh the token
-     * without sending the operator back through a login screen mid-shift.
+     * show who is signed in.
+     *
+     * `offline_access` asks for a REFRESH TOKEN, which is what lets the SDK
+     * mint a new access token when the old one expires, without sending the
+     * operator back through a login screen mid-shift. It only produces one if
+     * the API in the Auth0 dashboard has "Allow Offline Access" enabled —
+     * without that, Auth0 ignores the scope silently and the session ends when
+     * the first access token does.
      */
     audience: process.env.AUTH0_AUDIENCE,
     scope: "openid profile email offline_access",
@@ -52,6 +91,16 @@ export const auth0 = new Auth0Client({
    * extra hop is visible as a flash.
    */
   signInReturnToPath: "/dashboard",
+
+  /*
+   * Stated rather than left to the SDK's defaults, which are three days
+   * absolute and one day idle — short enough that an operator was signed out
+   * mid-week. See the note above each value.
+   */
+  session: {
+    inactivityDuration: SESSION_INACTIVITY_SECONDS,
+    absoluteDuration: SESSION_ABSOLUTE_SECONDS,
+  },
 });
 
 /**

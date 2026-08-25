@@ -430,11 +430,11 @@ describe("Ritten editing", () => {
       await screen.findByRole("table");
 
       await openCell("Voertuig");
+      // Choosing IS the decision: there is no Save step for a plate.
       await userEvent.selectOptions(
         screen.getByLabelText("Voertuig"),
         "vehicle-2",
       );
-      await userEvent.click(screen.getByRole("button", { name: "Opslaan" }));
 
       await waitFor(() => {
         expect(patchCalls()[0][1]?.body).toEqual({ vehicleId: "vehicle-2" });
@@ -446,7 +446,6 @@ describe("Ritten editing", () => {
       await openCell("Voertuig");
 
       await userEvent.selectOptions(screen.getByLabelText("Voertuig"), "");
-      await userEvent.click(screen.getByRole("button", { name: "Opslaan" }));
 
       await waitFor(() => {
         expect(patchCalls()[0][1]?.body).toEqual({ vehicleId: null });

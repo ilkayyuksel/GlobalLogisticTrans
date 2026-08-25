@@ -22,9 +22,34 @@ import { useTranslation } from "@/lib/i18n/language-provider";
  * A rejection stays in the cell: the message is the backend's own, and the
  * field-level details it returns are listed underneath, which is what makes a
  * validation failure actionable rather than merely visible.
+ *
+ * ── A CHOICE SAVES ITSELF; TYPED TEXT DOES NOT ──────────────────────────────
+ * `savesOnSelect` turns a dropdown into a control that persists the moment an
+ * option is picked. Choosing IS the decision — there is no half-finished state
+ * to protect, the way there is while somebody is typing a container number and
+ * may still change their mind — so a Save button after it only asks the
+ * operator to confirm what they have just said.
+ *
+ * Nothing about the contract changes: still no optimistic paint, still closed
+ * only once the backend accepted it, still the backend's own words on a
+ * refusal, and the previous value still on screen behind the open cell.
+ * ────────────────────────────────────────────────────────────────────────────
  */
 
-export type InlineCellKind = "text" | "number" | "date";
+export type InlineCellKind = "text" | "number" | "date" | "time";
+
+/**
+ * The browser control each kind uses.
+ *
+ * `time` gives the browser's own `HH:mm` handling — the same widget the
+ * waiting-time editor uses — so nothing here parses or formats a clock value.
+ */
+const INPUT_TYPE_BY_KIND: Record<InlineCellKind, string> = {
+  text: "text",
+  number: "number",
+  date: "date",
+  time: "time",
+};
 
 export interface InlineOption {
   readonly value: string;
@@ -37,6 +62,7 @@ export function InlineCell({
   editValue,
   kind = "text",
   options,
+  savesOnSelect = false,
   maxLength,
   min,
   max,
@@ -51,6 +77,13 @@ export function InlineCell({
   kind?: InlineCellKind;
   /** Present for a select; the empty option is supplied by the caller. */
   options?: readonly InlineOption[];
+  /**
+   * Persist as soon as an option is chosen, with no Save button.
+   *
+   * Only meaningful together with `options`: a choice is complete the moment it
+   * is made, where typed text is not.
+   */
+  savesOnSelect?: boolean;
   maxLength?: number;
   min?: number;
   max?: number;
@@ -81,14 +114,24 @@ export function InlineCell({
     setError(null);
   }
 
-  async function save(): Promise<void> {
+  /*
+   * Takes the value explicitly, because a select saves from inside its own
+   * change handler — where the state update has not landed yet, and reading
+   * `value` would persist the PREVIOUS option.
+   */
+  async function save(nextValue: string = value): Promise<void> {
     setIsSaving(true);
     setError(null);
 
     try {
-      await onSave(value);
+      await onSave(nextValue);
       setIsEditing(false);
     } catch (caught: unknown) {
+      /*
+       * The cell stays open showing the reason, and `value` keeps what was
+       * attempted so it can be corrected. The ROW behind it still shows the
+       * previous vehicle: nothing was painted, so nothing has to be undone.
+       */
       setError(caught);
     } finally {
       setIsSaving(false);
@@ -121,7 +164,13 @@ export function InlineCell({
           ref={inputRef as React.Ref<HTMLSelectElement>}
           value={value}
           disabled={isSaving}
-          onChange={(event) => setValue(event.target.value)}
+          onChange={(event) => {
+            setValue(event.target.value);
+
+            if (savesOnSelect) {
+              void save(event.target.value);
+            }
+          }}
           onKeyDown={(event) => event.key === "Escape" && cancel()}
           className="w-full rounded border border-border bg-card px-1.5 py-1 text-sm text-foreground"
         >
@@ -135,7 +184,7 @@ export function InlineCell({
         <input
           id={`inline-${label}`}
           ref={inputRef as React.Ref<HTMLInputElement>}
-          type={kind === "number" ? "number" : kind === "date" ? "date" : "text"}
+          type={INPUT_TYPE_BY_KIND[kind]}
           value={value}
           disabled={isSaving}
           maxLength={maxLength}
@@ -156,14 +205,26 @@ export function InlineCell({
       )}
 
       <div className="mt-1 flex items-center gap-1">
-        <button
-          type="button"
-          onClick={() => void save()}
-          disabled={isSaving}
-          className="rounded bg-primary px-2 py-0.5 text-xs font-medium text-white hover:bg-primary-hover disabled:opacity-50"
-        >
-          {isSaving ? t("ritten.edit.saving") : t("ritten.edit.save")}
-        </button>
+        {/*
+          No Save where choosing already saved. The saving state still shows,
+          because the row does not change until the backend has answered.
+        */}
+        {savesOnSelect ? (
+          isSaving ? (
+            <span className="px-2 py-0.5 text-xs font-medium text-muted">
+              {t("ritten.edit.saving")}
+            </span>
+          ) : null
+        ) : (
+          <button
+            type="button"
+            onClick={() => void save()}
+            disabled={isSaving}
+            className="rounded bg-primary px-2 py-0.5 text-xs font-medium text-white hover:bg-primary-hover disabled:opacity-50"
+          >
+            {isSaving ? t("ritten.edit.saving") : t("ritten.edit.save")}
+          </button>
+        )}
         <button
           type="button"
           onClick={cancel}

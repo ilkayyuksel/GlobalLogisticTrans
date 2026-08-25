@@ -327,6 +327,19 @@ A routine action asks NOTHING. No browser confirmation, no dialog, no warning.
 A dialog in front of a routine action is one people learn to dismiss without
 reading, which then dismisses the dialogs that matter.
 
+A DESTRUCTIVE action asks, and it asks with the application's own dialog.
+
+A browser confirmation cannot name the record it is about, cannot mark one
+button destructive, and looks like every other dialog the browser has ever
+shown.
+
+The dialog must say WHICH record, and what the action really does. If a delete
+is soft, do not imply that anything is erased; if it is permanent, say so.
+
+The destructive button is never the easy one. Put the way out first, leave
+focus on a control that is not destructive, and give the destructive button the
+danger tone so it can never be mistaken for the routine action beside it.
+
 Where several rows carry the same action, the accessible name distinguishes
 them: the visible label stays short, and the identifier of the row is added to
 it.
@@ -334,6 +347,15 @@ it.
 ---
 
 # Tables
+
+An identifier is never wrapped.
+
+A value that reads as one thing - a container number, a booking, a plate - must
+occupy one line. Browsers break lines at spaces AND at slashes, so an
+identifier like CNEU 452297/0 wraps twice in a narrow column and leaves a line
+ending in a bare slash, which reads as a stray escape character. Give the column
+the width the format needs and stop it wrapping; never alter the value to make
+it fit.
 
 Tables are one of the most important components.
 
@@ -356,6 +378,22 @@ Column resizing (future)
 Column visibility (future)
 
 Tables should remain readable with many rows.
+
+---
+
+# Editing In Place
+
+A CHOICE saves itself; typed text does not.
+
+Picking from a dropdown is the whole decision - there is no half-finished state
+to protect - so it persists immediately and there is no Save button after it.
+Free text is different: somebody typing may still change their mind, so it keeps
+its Save.
+
+Nothing is painted optimistically either way. The cell closes only once the
+backend has accepted the change, and what appears afterwards is what the
+refetched record says. On a refusal the previous value stays on screen, the
+editor stays open, and the backend's own words explain why.
 
 ---
 
@@ -585,6 +623,28 @@ Only the operator clears a selection, or an action that consumes it.
 A row is never dropped from a selection for being off screen.
 
 Actions act on the WHOLE selection, including the rows that are not visible.
+
+A bulk action sends ONE request for the whole selection, never one per row.
+
+Whether the selection may be acted on is the backend's answer, and it answers
+for all of it at once. A refusal applies to the entire selection: applying an
+action to the half that qualifies leaves an operator with a partly-done action
+they did not ask for and cannot see the shape of.
+
+---
+
+# Ordering For Display
+
+A view may order what it shows differently from the order it received.
+
+Do it in the view, on a COPY. Never reorder the fetched array in place - other
+views read the same objects - and never persist a display order: a refresh
+fetches the ordinary data and applies the rule again.
+
+Order only what the rule is about. A broad alphabetical sort would also reorder
+the entries the rule says nothing about, whose order carries meaning the rule
+was never told about. Use a stable sort so equal entries keep the order they
+arrived in.
 
 ---
 

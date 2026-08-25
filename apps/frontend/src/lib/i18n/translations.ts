@@ -256,6 +256,8 @@ const nl = {
   "ritten.edit.clear": "Leegmaken",
   "ritten.edit.planningDate": "Planningsdatum",
   "ritten.edit.destination": "Bestemming (stad, land)",
+  "ritten.edit.startTime": "Begin transport",
+  "ritten.edit.endTime": "Einde transport",
   "ritten.edit.containerNumber": "Containernummer",
   "ritten.edit.waitingTime": "Wachttijd in minuten",
   "ritten.edit.vehicle": "Voertuig",
@@ -331,6 +333,13 @@ const nl = {
   "ritten.new.sectionExecution": "Uitvoering",
   "ritten.new.dateHint": "Zonder datum verschijnt de rit onder “Zonder datum”.",
   "ritten.losrit.badge": "LOSRIT",
+  "ritten.feedback.markedLoose": "Als losrit gemarkeerd",
+  "ritten.delete.title": "Rit verwijderen?",
+  "ritten.delete.description":
+    "Deze rit wordt verwijderd uit de planning.",
+  "ritten.delete.consequence":
+    "De rit en zijn documenten blijven bewaard, maar de rit verdwijnt uit de lijst en kan alleen door een beheerder worden hersteld.",
+  "ritten.delete.confirm": "Verwijderen",
   "ritten.losrit.label": "Losrit",
   "ritten.losrit.hint":
     "Een losrit is een aparte rit. De status blijft gewoon Open, Afgewerkt of Geannuleerd.",
@@ -993,6 +1002,8 @@ const tr: Translations = {
   "ritten.edit.clear": "Temizle",
   "ritten.edit.planningDate": "Planlama tarihi",
   "ritten.edit.destination": "Varış yeri (şehir, ülke)",
+  "ritten.edit.startTime": "Taşıma başlangıcı",
+  "ritten.edit.endTime": "Taşıma bitişi",
   "ritten.edit.containerNumber": "Konteyner numarası",
   "ritten.edit.waitingTime": "Bekleme süresi (dakika)",
   "ritten.edit.vehicle": "Araç",
@@ -1068,6 +1079,12 @@ const tr: Translations = {
   "ritten.new.sectionExecution": "Gerçekleşme",
   "ritten.new.dateHint": "Tarihsiz sefer “Tarihsiz” başlığı altında görünür.",
   "ritten.losrit.badge": "LOSRIT",
+  "ritten.feedback.markedLoose": "Tekil sefer olarak işaretlendi",
+  "ritten.delete.title": "Sefer silinsin mi?",
+  "ritten.delete.description": "Bu sefer planlamadan kaldırılır.",
+  "ritten.delete.consequence":
+    "Sefer ve belgeleri saklanır, ancak sefer listeden kaybolur ve yalnızca bir yönetici tarafından geri alınabilir.",
+  "ritten.delete.confirm": "Sil",
   "ritten.losrit.label": "Tekil sefer",
   "ritten.losrit.hint":
     "Tekil sefer ayrı bir seferdir. Durumu yine Açık, Tamamlandı veya İptal olur.",

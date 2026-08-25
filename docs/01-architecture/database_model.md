@@ -766,6 +766,25 @@ manually created LOSRIT that later receives a matching PDF stays a LOSRIT.
 It is never inferred. An absent PDF or an empty booking number describes a
 manual Trip, which is a different fact.
 
+## LOSRIT and TripGroup
+
+The DATA MODEL permits both at once. is_loose_trip and trip_group_id are
+independent columns and no constraint relates them, so a Trip that was already
+classified before it joined a group keeps its classification and keeps its
+badge.
+
+The BULK ACTION refuses it. A losrit is a loose trip, and a leg of a
+Combination is by definition not loose, so POST /trips/loose rejects a
+selection containing a grouped Trip - all of it, never the qualifying half.
+
+The distinction matters: this is a rule of one operation, not an invariant of
+the data. Enforcing it in the database would retroactively invalidate rows that
+were written legitimately, and would have to decide what grouping a LOSRIT
+means, which nobody has asked for.
+
+Taking the classification off is a single-Trip edit through PATCH /trips/:id.
+There is no bulk counterpart.
+
 ---
 
 # Combination Trips
@@ -792,24 +811,44 @@ Both Trips simply share a common group.
 
 ---
 
-# The Destination of a Manual Trip
+# Document-Controlled Fields On A Manual Trip
 
-The destination is parser-controlled exactly where a parser exists.
+Some fields are parser-controlled exactly where a parser exists:
 
-On an IMPORTED Trip the document is the authority. A later UPDATE re-reads the
-destination from it, so a manually entered destination would be silently
-overwritten. The backend refuses one.
+destination city and country
+
+transport start and end time
+
+On an IMPORTED Trip the document is the authority. A later UPDATE re-reads all
+of them from it, so a manually entered value would be silently overwritten. The
+backend refuses one.
 
 On a Trip created BY HAND there is no document, and therefore no other possible
-author. Its destination city and country are manual fields and remain editable
-for the life of the Trip.
+author. These fields are manual and remain editable for the life of the Trip.
 
-Without this, a city typed wrongly at creation could never be corrected: the
-transport stayed planned to the wrong place permanently.
+Without this, a city or an hour typed wrongly at creation could never be
+corrected: the transport stayed planned to the wrong place, or at the wrong
+time, permanently.
 
 The rule keys on the ABSENCE OF A SOURCE DOCUMENT, not on LOSRIT. LOSRIT is
 informational and must not decide what may be edited; a manual Trip that is not
 a LOSRIT has exactly the same problem and gets exactly the same answer.
+
+## The transport times have no ordering rule
+
+The end is not required to follow the start.
+
+An end BEFORE the start is a transport running past midnight.
+
+An end EQUAL to the start is what a single-time order produces: a document
+stating "21/08/2026 15:00" stores 15:00 in both fields.
+
+Each field moves independently. Refusing either combination would refuse
+planning the parser itself produces.
+
+These are NOT the waiting time. Waiting time is entered as its own two clock
+times and stored as waiting_time_minutes, and nothing about the transport
+window reads or writes it.
 
 ---
 

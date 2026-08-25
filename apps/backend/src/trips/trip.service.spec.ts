@@ -6,7 +6,7 @@ import { AppLoggerService } from "../logger/app-logger.service";
 import { VehicleService } from "../vehicles/vehicle.service";
 import { CreateTripDto } from "./dto/create-trip.dto";
 import {
-  DestinationNotEditableException,
+  DocumentControlledFieldException,
   DuplicateBookingNumberException,
   InactiveAssignmentException,
   InvalidTripStatusTransitionException,
@@ -90,6 +90,10 @@ describe("TripService", () => {
       create: jest.fn().mockResolvedValue(buildTrip()),
       update: jest.fn().mockResolvedValue(buildTrip()),
       setStatus: jest.fn().mockResolvedValue(buildTrip()),
+      // Present so "not called" assertions have something real to check: an
+      // absent member would make every such expectation vacuously pass.
+      assignToGroup: jest.fn().mockResolvedValue(0),
+      recordHistory: jest.fn().mockResolvedValue(undefined),
       runInTransaction: jest.fn(),
       runTripWriteTransaction: jest.fn(),
     } as unknown as jest.Mocked<TripRepository>;
@@ -575,7 +579,7 @@ describe("TripService", () => {
       it("is refused on an imported Trip", async () => {
         await expect(
           service.update(TRIP_ID, { destinationCity: "Rotterdam" }),
-        ).rejects.toBeInstanceOf(DestinationNotEditableException);
+        ).rejects.toBeInstanceOf(DocumentControlledFieldException);
       });
 
       it("is refused before anything is written", async () => {
@@ -584,7 +588,7 @@ describe("TripService", () => {
             destinationCity: "Rotterdam",
             internalNotes: "moved",
           }),
-        ).rejects.toBeInstanceOf(DestinationNotEditableException);
+        ).rejects.toBeInstanceOf(DocumentControlledFieldException);
 
         expect(repository.update).not.toHaveBeenCalled();
       });
@@ -594,6 +598,149 @@ describe("TripService", () => {
         await service.update(TRIP_ID, { internalNotes: "call the customer" });
 
         expect(repository.update).toHaveBeenCalled();
+      });
+    });
+
+    /**
+     * ── THE TRANSPORT TIMES ─────────────────────────────────────────────────
+     * The same rule as the destination, for the same reason: a Trip created by
+     * hand has no document, so nothing but the operator can ever correct a time
+     * typed wrongly at creation.
+     *
+     * And no ordering rule. A transport running past midnight is ordinary, and
+     * a single-time order — "21/08/2026 15:00" — stores 15:00 in BOTH fields;
+     * refusing an end that precedes a start would refuse planning the parser
+     * itself produces.
+     * ────────────────────────────────────────────────────────────────────────
+     */
+    describe("the transport times", () => {
+      const manualTrip = () =>
+        repository.findById.mockResolvedValue(buildTrip({ pdfDocumentId: null }));
+
+      it("accepts a start time on a Trip created by hand", async () => {
+        manualTrip();
+
+        await service.update(TRIP_ID, { startTime: "08:00" });
+
+        expect(repository.update).toHaveBeenCalledWith(
+          TRIP_ID,
+          expect.objectContaining({
+            startTime: new Date("1970-01-01T08:00:00.000Z"),
+          }),
+        );
+      });
+
+      it("accepts an end time", async () => {
+        manualTrip();
+
+        await service.update(TRIP_ID, { endTime: "12:30" });
+
+        expect(repository.update).toHaveBeenCalledWith(
+          TRIP_ID,
+          expect.objectContaining({
+            endTime: new Date("1970-01-01T12:30:00.000Z"),
+          }),
+        );
+      });
+
+      it("accepts both together", async () => {
+        manualTrip();
+
+        await service.update(TRIP_ID, { startTime: "08:00", endTime: "12:30" });
+
+        expect(repository.update).toHaveBeenCalledWith(
+          TRIP_ID,
+          expect.objectContaining({
+            startTime: new Date("1970-01-01T08:00:00.000Z"),
+            endTime: new Date("1970-01-01T12:30:00.000Z"),
+          }),
+        );
+      });
+
+      it("accepts one without the other", async () => {
+        manualTrip();
+
+        await service.update(TRIP_ID, { startTime: "08:00" });
+
+        expect(repository.update).toHaveBeenCalledWith(
+          TRIP_ID,
+          expect.objectContaining({ endTime: undefined }),
+        );
+      });
+
+      it("can clear a time", async () => {
+        manualTrip();
+
+        await service.update(TRIP_ID, { startTime: null });
+
+        expect(repository.update).toHaveBeenCalledWith(
+          TRIP_ID,
+          expect.objectContaining({ startTime: null }),
+        );
+      });
+
+      /** Overnight: no rule says the end must follow the start. */
+      it("accepts an end that precedes the start", async () => {
+        manualTrip();
+
+        await service.update(TRIP_ID, { startTime: "22:00", endTime: "02:00" });
+
+        expect(repository.update).toHaveBeenCalled();
+      });
+
+      /** A single-time order stores the same value in both fields. */
+      it("accepts an end equal to the start", async () => {
+        manualTrip();
+
+        await service.update(TRIP_ID, { startTime: "15:00", endTime: "15:00" });
+
+        expect(repository.update).toHaveBeenCalled();
+      });
+
+      it("lets one half of a single-time order be moved alone", async () => {
+        repository.findById.mockResolvedValue(
+          buildTrip({
+            pdfDocumentId: null,
+            startTime: new Date("1970-01-01T15:00:00.000Z"),
+            endTime: new Date("1970-01-01T15:00:00.000Z"),
+          }),
+        );
+
+        await service.update(TRIP_ID, { endTime: "16:00" });
+
+        expect(repository.update).toHaveBeenCalledWith(
+          TRIP_ID,
+          expect.objectContaining({
+            startTime: undefined,
+            endTime: new Date("1970-01-01T16:00:00.000Z"),
+          }),
+        );
+      });
+
+      it("is refused on an imported Trip", async () => {
+        await expect(
+          service.update(TRIP_ID, { startTime: "08:00" }),
+        ).rejects.toBeInstanceOf(DocumentControlledFieldException);
+      });
+
+      it("is refused before anything is written", async () => {
+        await expect(
+          service.update(TRIP_ID, { endTime: "12:30", internalNotes: "x" }),
+        ).rejects.toBeInstanceOf(DocumentControlledFieldException);
+
+        expect(repository.update).not.toHaveBeenCalled();
+      });
+
+      /** Changing a time is not a waiting time. */
+      it("never touches the waiting time", async () => {
+        manualTrip();
+
+        await service.update(TRIP_ID, { startTime: "08:00", endTime: "12:30" });
+
+        expect(repository.update).toHaveBeenCalledWith(
+          TRIP_ID,
+          expect.objectContaining({ waitingTimeMinutes: undefined }),
+        );
       });
     });
 
@@ -834,6 +981,115 @@ describe("TripService", () => {
       await expect(service.softDelete(TRIP_ID)).rejects.toBeInstanceOf(
         TripNotFoundException,
       );
+    });
+
+    /**
+     * ── WHAT DELETING DOES NOT TOUCH ────────────────────────────────────────
+     * It is a SOFT delete: one column moves and the record stays. Everything
+     * asserted below is something an operator would only discover was gone
+     * long after the fact — the source document, the revision history, the
+     * Combination the Trip belongs to, a Cost Confirmation that arrived for it.
+     * The service writes through `setStatus`, which is why none of it can be
+     * affected; these tests keep it that way.
+     * ────────────────────────────────────────────────────────────────────────
+     */
+    describe("what it leaves alone", () => {
+      it("writes the status and nothing else", async () => {
+        repository.findById.mockResolvedValue(buildTrip());
+        repository.setStatus.mockResolvedValue(
+          buildTrip({ status: TripStatus.DELETED }),
+        );
+
+        await service.softDelete(TRIP_ID);
+
+        expect(repository.setStatus).toHaveBeenCalledWith(
+          TRIP_ID,
+          TripStatus.DELETED,
+        );
+        // Never the general update path, which could carry anything else.
+        expect(repository.update).not.toHaveBeenCalled();
+      });
+
+      it("keeps the source document on the Trip", async () => {
+        repository.findById.mockResolvedValue(buildTrip());
+        repository.setStatus.mockResolvedValue(
+          buildTrip({ status: TripStatus.DELETED }),
+        );
+
+        const result = await service.softDelete(TRIP_ID);
+
+        expect(result.pdfDocumentId).toBe(PDF_ID);
+      });
+
+      it("keeps the Trip in its group", async () => {
+        const groupId = "97777777-7777-4777-8777-777777777777";
+        repository.findById.mockResolvedValue(
+          buildTrip({ tripGroupId: groupId }),
+        );
+        repository.setStatus.mockResolvedValue(
+          buildTrip({ tripGroupId: groupId, status: TripStatus.DELETED }),
+        );
+
+        const result = await service.softDelete(TRIP_ID);
+
+        expect(result.tripGroupId).toBe(groupId);
+      });
+
+      /** One Trip is deleted, not the Combination it is half of. */
+      it("does not touch the other legs of the group", async () => {
+        repository.findById.mockResolvedValue(
+          buildTrip({ tripGroupId: "97777777-7777-4777-8777-777777777777" }),
+        );
+        repository.setStatus.mockResolvedValue(
+          buildTrip({ status: TripStatus.DELETED }),
+        );
+
+        await service.softDelete(TRIP_ID);
+
+        expect(repository.setStatus).toHaveBeenCalledTimes(1);
+        expect(repository.assignToGroup).not.toHaveBeenCalled();
+      });
+
+      /**
+       * Addressed by ID. A booking number identifies several Trips now, so
+       * deleting by booking would take an unrelated transport with it — the
+       * service never looks one up.
+       */
+      it("never looks the Trip up by its booking number", async () => {
+        repository.findById.mockResolvedValue(buildTrip());
+        repository.setStatus.mockResolvedValue(
+          buildTrip({ status: TripStatus.DELETED }),
+        );
+
+        await service.softDelete(TRIP_ID);
+
+        expect(repository.findByBookingNumber).not.toHaveBeenCalled();
+        expect(repository.findManyByBookingNumber).not.toHaveBeenCalled();
+        expect(repository.findById).toHaveBeenCalledWith(TRIP_ID);
+      });
+
+      it("writes no history of its own", async () => {
+        repository.findById.mockResolvedValue(buildTrip());
+        repository.setStatus.mockResolvedValue(
+          buildTrip({ status: TripStatus.DELETED }),
+        );
+
+        await service.softDelete(TRIP_ID);
+
+        expect(repository.recordHistory).not.toHaveBeenCalled();
+      });
+
+      /** Deleting is not a completion: nothing downstream prices anything. */
+      it("announces nothing", async () => {
+        repository.findById.mockResolvedValue(buildTrip());
+        repository.setStatus.mockResolvedValue(
+          buildTrip({ status: TripStatus.DELETED }),
+        );
+
+        await service.softDelete(TRIP_ID);
+
+        expect(eventBus.publish).not.toHaveBeenCalled();
+      });
     });
   });
 

@@ -12,6 +12,7 @@ import { useTranslation } from "@/lib/i18n/language-provider";
 import { toClockLabel } from "@/lib/calendar/clock";
 import { formatCalendarDate } from "@/lib/calendar/calendar-dates";
 import { combinationClasses, combinationLabel } from "@/lib/ritten/combination";
+import { toGroupDisplayOrder } from "@/lib/ritten/group-order";
 import { RittenDialog } from "./ritten-dialog";
 
 /**
@@ -83,7 +84,12 @@ export function CombinationDialog({
             </li>
           ) : null}
 
-          {(members.data?.items ?? []).map((trip) => (
+          {/*
+            Read in the direction the containers travel — DUB first, ANR second
+            — which is a DISPLAY order only. The fetched array is left as it
+            came; see `group-order.ts`.
+          */}
+          {toGroupDisplayOrder(members.data?.items ?? []).map((trip) => (
             <li key={trip.id} className="px-4 py-3">
               <Member
                 trip={trip}

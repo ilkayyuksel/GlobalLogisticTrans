@@ -88,6 +88,7 @@ describe("TripController (integration)", () => {
       findByBookingNumber: jest.fn().mockResolvedValue(null),
       findByIdentity: jest.fn().mockResolvedValue(null),
       findManyByBookingNumber: jest.fn().mockResolvedValue([]),
+      findManyByIds: jest.fn().mockResolvedValue([]),
       pdfDocumentExists: jest.fn().mockResolvedValue(true),
       create: jest.fn().mockResolvedValue(buildTrip()),
       update: jest.fn().mockResolvedValue(buildTrip()),
@@ -444,8 +445,6 @@ describe("TripController (integration)", () => {
       ["parserMetadata", {}],
       ["containerType", "20TK"],
       ["terminal", "Other"],
-      ["startTime", "09:00"],
-      ["endTime", "13:00"],
     ])("rejects %s, which is not a manual field", async (field, value) => {
       await request(app.getHttpServer())
         .patch(`${BASE}/${TRIP_ID}`)
@@ -454,20 +453,34 @@ describe("TripController (integration)", () => {
     });
 
     /**
-     * The destination is the one field whose owner depends on the TRIP.
+     * The fields a transport order states are the ones whose owner depends on
+     * the TRIP: the destination and the transport times.
      *
      * This fixture came from a PDF, so the document is still the authority and
      * the request is refused — but as a 409, not a 400: the field exists and is
      * well-formed, and it is this Trip that cannot take it. A Trip created by
-     * hand accepts the same body; see `manual-trip.spec.ts`.
+     * hand accepts the same body; see the service tests.
      */
-    it("refuses a destination on an imported Trip", async () => {
+    it.each([
+      ["destinationCity", "Rotterdam"],
+      ["destinationCountry", "Netherlands"],
+      ["startTime", "09:00"],
+      ["endTime", "13:00"],
+    ])("refuses %s on an imported Trip", async (field, value) => {
       await request(app.getHttpServer())
         .patch(`${BASE}/${TRIP_ID}`)
-        .send({ destinationCity: "Rotterdam" })
+        .send({ [field]: value })
         .expect(409);
 
       expect(repository.update).not.toHaveBeenCalled();
+    });
+
+    /** Well-formed but wrong shape is still a 400, not a 409. */
+    it("refuses a start time that is not a clock time", async () => {
+      await request(app.getHttpServer())
+        .patch(`${BASE}/${TRIP_ID}`)
+        .send({ startTime: "half twaalf" })
+        .expect(400);
     });
 
     it("returns 404 for an unknown Trip", async () => {
@@ -608,6 +621,116 @@ describe("TripController (integration)", () => {
       await request(app.getHttpServer())
         .patch(`${BASE}/${TRIP_ID}/restoration`)
         .expect(409);
+    });
+  });
+
+  /**
+   * The bulk classification route.
+   *
+   * A collection sub-resource like `completions`, with the same shape of body
+   * and the same all-or-nothing refusal. What it must never become is a generic
+   * bulk update: the ids are the entire body, and the classification is what
+   * the endpoint is.
+   */
+  describe("POST /trips/loose", () => {
+    const OTHER_ID = "6ba7b810-9dad-41d1-80b4-00c04fd430c8";
+    const GROUP_ID = "97777777-7777-4777-8777-777777777777";
+
+    function given(...trips: ReturnType<typeof buildTrip>[]): void {
+      (repository.findManyByIds as jest.Mock).mockResolvedValue(trips);
+    }
+
+    it("marks the named Trips", async () => {
+      given(buildTrip({ id: TRIP_ID, isLooseTrip: false }));
+      (repository.update as jest.Mock).mockResolvedValue(
+        buildTrip({ id: TRIP_ID, isLooseTrip: true }),
+      );
+
+      const response = await request(app.getHttpServer())
+        .post(`${BASE}/loose`)
+        .send({ tripIds: [TRIP_ID] })
+        .expect(200);
+
+      expect(response.body.data[0].isLooseTrip).toBe(true);
+      expect(repository.update).toHaveBeenCalledWith(TRIP_ID, {
+        isLooseTrip: true,
+      });
+    });
+
+    it("refuses an empty list", async () => {
+      await request(app.getHttpServer())
+        .post(`${BASE}/loose`)
+        .send({ tripIds: [] })
+        .expect(400);
+    });
+
+    it("refuses the same id twice", async () => {
+      await request(app.getHttpServer())
+        .post(`${BASE}/loose`)
+        .send({ tripIds: [TRIP_ID, TRIP_ID] })
+        .expect(400);
+    });
+
+    it("refuses a malformed id", async () => {
+      await request(app.getHttpServer())
+        .post(`${BASE}/loose`)
+        .send({ tripIds: ["not-a-uuid"] })
+        .expect(400);
+    });
+
+    /** The ids are the whole body: nothing else may be smuggled through. */
+    it("refuses a body that names anything else", async () => {
+      await request(app.getHttpServer())
+        .post(`${BASE}/loose`)
+        .send({ tripIds: [TRIP_ID], isLooseTrip: false })
+        .expect(400);
+    });
+
+    it("returns 404 when a Trip does not exist", async () => {
+      given();
+
+      await request(app.getHttpServer())
+        .post(`${BASE}/loose`)
+        .send({ tripIds: [TRIP_ID] })
+        .expect(404);
+    });
+
+    it("returns 409 for a Trip that belongs to a group", async () => {
+      given(buildTrip({ id: TRIP_ID, tripGroupId: GROUP_ID }));
+
+      const response = await request(app.getHttpServer())
+        .post(`${BASE}/loose`)
+        .send({ tripIds: [TRIP_ID] })
+        .expect(409);
+
+      expect(response.body.error.message).toContain(GROUP_ID);
+      expect(repository.update).not.toHaveBeenCalled();
+    });
+
+    it("returns 409 for a DELETED Trip", async () => {
+      given(buildTrip({ id: TRIP_ID, status: TripStatus.DELETED }));
+
+      await request(app.getHttpServer())
+        .post(`${BASE}/loose`)
+        .send({ tripIds: [TRIP_ID] })
+        .expect(409);
+
+      expect(repository.update).not.toHaveBeenCalled();
+    });
+
+    /** One grouped Trip refuses the selection it appears in. */
+    it("writes nothing when one of several is grouped", async () => {
+      given(
+        buildTrip({ id: TRIP_ID }),
+        buildTrip({ id: OTHER_ID, tripGroupId: GROUP_ID }),
+      );
+
+      await request(app.getHttpServer())
+        .post(`${BASE}/loose`)
+        .send({ tripIds: [TRIP_ID, OTHER_ID] })
+        .expect(409);
+
+      expect(repository.update).not.toHaveBeenCalled();
     });
   });
 

@@ -24,7 +24,7 @@ import {
 } from "@/lib/trips/latest-update";
 import {
   canEdit,
-  canEditDestination,
+  canEditDocumentFields,
   canViewPdf,
   type RittenActions,
 } from "@/lib/ritten/row-actions";
@@ -129,6 +129,8 @@ export interface RittenTableProps {
   showPricing: boolean;
   /** The stored snapshots of the Trips on this page, keyed by Trip id. */
   pricingByTripId: ReadonlyMap<string, PricingSnapshot>;
+  /** Opens the delete confirmation. A row never deletes anything itself. */
+  onDeleteTrip: (trip: Trip) => void;
 }
 
 export function RittenTable(props: RittenTableProps) {
@@ -144,7 +146,12 @@ export function RittenTable(props: RittenTableProps) {
               <th
                 key={key}
                 scope="col"
-                className="whitespace-nowrap px-3 py-2 font-medium"
+                className={[
+                  "whitespace-nowrap px-3 py-2 font-medium",
+                  // The container column reserves the width its values need;
+                  // see the cell below for why they must not wrap.
+                  key === "ritten.column.container" ? "min-w-[9.5rem]" : "",
+                ].join(" ")}
               >
                 {/* The selection column is a control, not a heading. */}
                 <span className={key === "ritten.select.row" ? "sr-only" : ""}>
@@ -218,6 +225,7 @@ function RittenRow({
   onToggleSelection,
   showPricing,
   pricingByTripId,
+  onDeleteTrip,
 }: RittenTableProps & { trip: Trip }) {
   const t = useTranslation();
   const empty = t("ritten.value.empty");
@@ -337,19 +345,44 @@ function RittenRow({
         />
       </td>
 
-      {/* Parser-controlled: the backend refuses both, so they are read-only. */}
       <td className="px-3 py-2 tabular-nums text-secondary">
         <UpdatedValue trip={trip} field="startTime">
-          {trip.startTime ? toClockLabel(trip.startTime) : empty}
+          <TransportTimeCell
+            trip={trip}
+            field="startTime"
+            label={t("ritten.edit.startTime")}
+            isBusy={isBusy}
+            onSave={save}
+          />
         </UpdatedValue>
       </td>
       <td className="px-3 py-2 tabular-nums text-secondary">
         <UpdatedValue trip={trip} field="endTime">
-          {trip.endTime ? toClockLabel(trip.endTime) : empty}
+          <TransportTimeCell
+            trip={trip}
+            field="endTime"
+            label={t("ritten.edit.endTime")}
+            isBusy={isBusy}
+            onSave={save}
+          />
         </UpdatedValue>
       </td>
 
-      <td className="px-3 py-2 text-secondary">
+      {/*
+        ── ONE LINE, ALWAYS ──────────────────────────────────────────────────
+        A container number is a single identifier that happens to contain a
+        space and a slash: `CNEU 452297/0`. In a narrow column the browser
+        breaks it at BOTH — after the space, and after the slash, which leaves a
+        line ending in a stray "/" that reads like a typo or an escape
+        character. Two lines also make a column of them impossible to scan.
+
+        `whitespace-nowrap` on the cell, and a minimum width that fits the
+        format, so it never wraps. The STORED VALUE IS UNTOUCHED: nothing is
+        stripped, replaced or normalised here — the fix is that the text is
+        allowed the room it needs.
+        ──────────────────────────────────────────────────────────────────────
+      */}
+      <td className="w-[9.5rem] min-w-[9.5rem] whitespace-nowrap px-3 py-2 text-secondary">
         <UpdatedValue trip={trip} field="containerNumber">
           <InlineCell
             label={t("ritten.edit.containerNumber")}
@@ -414,7 +447,12 @@ function RittenRow({
       </td>
 
       <td className="px-3 py-2">
-        <RowLifecycleActions trip={trip} actions={actions} isBusy={isBusy} />
+        <RowLifecycleActions
+          trip={trip}
+          actions={actions}
+          isBusy={isBusy}
+          onDelete={onDeleteTrip}
+        />
       </td>
 
       <CostConfirmationCell trip={trip} actions={actions} isBusy={isBusy} />
@@ -463,7 +501,7 @@ function DestinationCell({
   );
   const display = parts.length > 0 ? parts.join(", ") : empty;
 
-  if (!canEditDestination(trip)) {
+  if (!canEditDocumentFields(trip)) {
     return <>{display}</>;
   }
 
@@ -475,6 +513,66 @@ function DestinationCell({
       maxLength={DESTINATION_FIELD_MAX_LENGTH}
       isDisabled={isBusy}
       onSave={(value) => onSave(toDestination(value))}
+    />
+  );
+}
+
+/**
+ * One end of the TRANSPORT window.
+ *
+ * ── NOT THE WAITING TIME ────────────────────────────────────────────────────
+ * These are the hours the transport itself is planned for, as the order states
+ * them. The waiting time is a different thing entirely — entered as its own two
+ * clock times in its own column and stored as `waitingTimeMinutes` — and
+ * nothing here reads or writes it.
+ *
+ * ── EDITABLE ONLY ON A TRIP CREATED BY HAND ─────────────────────────────────
+ * The same rule as the destination, for the same reason: an imported Trip
+ * belongs to its document, which a later UPDATE re-reads, so anything typed
+ * here would be silently overwritten and the backend refuses it. A manual Trip
+ * has no document, so its times were write-once until now.
+ *
+ * There is deliberately NO check that the end follows the start. A transport
+ * running past midnight is ordinary, and a single-time order — "21/08/2026
+ * 15:00" — carries 15:00 in both fields; refusing that here would refuse
+ * planning the parser itself produces. Each field moves on its own.
+ * ────────────────────────────────────────────────────────────────────────────
+ */
+function TransportTimeCell({
+  trip,
+  field,
+  label,
+  isBusy,
+  onSave,
+}: {
+  trip: Trip;
+  field: "startTime" | "endTime";
+  label: string;
+  isBusy: boolean;
+  onSave: (payload: UpdateTripPayload) => Promise<void>;
+}) {
+  const t = useTranslation();
+  const empty = t("ritten.value.empty");
+  const stored = trip[field];
+  const display = stored ? (toClockLabel(stored) as string) : empty;
+
+  if (!canEditDocumentFields(trip)) {
+    return <>{display}</>;
+  }
+
+  return (
+    <InlineCell
+      label={label}
+      displayValue={display}
+      // `HH:MM` is what an <input type="time"> exchanges; the backend sends
+      // `HH:MM:SS`.
+      editValue={stored ? (toClockLabel(stored) as string) : ""}
+      kind="time"
+      isDisabled={isBusy}
+      // An emptied box means "no time recorded", which the backend spells null.
+      onSave={(value) =>
+        onSave({ [field]: value.trim() === "" ? null : value.trim() })
+      }
     />
   );
 }
@@ -667,6 +765,17 @@ const VISIBLE_CUSTOM_PROPERTIES = 2;
  * Only the first few names fit a table cell, so the rest are counted rather
  * than wrapped. The full set is one click away, and the title attribute carries
  * it for anyone hovering.
+ *
+ * ── A TRIP WITH NONE SAYS NOTHING ───────────────────────────────────────────
+ * It shows the same empty marker every other column uses. It used to read
+ * "Custom waarden beheren", which was an instruction sitting in a data column:
+ * down a list it looked like a value, and a column of identical blue prompts
+ * said nothing about which Trips actually carry anything.
+ *
+ * The cell stays clickable, and its accessible name still says what opening it
+ * does — nothing about managing Custom Properties is removed, here or on the
+ * Trip detail page. Only the visible prompt is gone.
+ * ────────────────────────────────────────────────────────────────────────────
  */
 function CustomPropertiesCell({
   trip,
@@ -693,9 +802,7 @@ function CustomPropertiesCell({
       className="flex max-w-40 flex-wrap items-center gap-1 rounded px-1 py-0.5 text-left hover:bg-hover"
     >
       {assigned.length === 0 ? (
-        <span className="text-xs font-medium text-primary hover:underline">
-          {t("ritten.custom.open")}
-        </span>
+        <span className="text-secondary">{t("ritten.value.empty")}</span>
       ) : (
         <>
           {visible.map((property) => (
@@ -829,6 +936,12 @@ function PdfButton({
  * two different drivers on one day with nothing to say which was true, and it
  * made the assignment screen advisory rather than authoritative. Changing a
  * driver now means changing the assignment, in one place.
+ *
+ * ── THE PLATE SAVES ITSELF ──────────────────────────────────────────────────
+ * Picking a truck persists immediately: there is no Save step, because a choice
+ * from a list is already the whole decision. The driver underneath follows from
+ * the backend's own resolution after the refetch — it is never worked out here,
+ * and no VehicleAssignment is touched by planning a Trip onto a truck.
  * ────────────────────────────────────────────────────────────────────────────
  */
 function VehicleCell({
@@ -884,6 +997,8 @@ function VehicleCell({
         }
         editValue={trip.vehicleId ?? ""}
         options={vehicleOptions}
+        // Choosing a truck IS the decision; there is nothing further to confirm.
+        savesOnSelect
         isDisabled={!isEditable}
         onSave={(value) => onSave({ vehicleId: value === "" ? null : value })}
       />

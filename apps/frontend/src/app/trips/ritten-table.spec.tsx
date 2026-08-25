@@ -189,10 +189,23 @@ describe("Ritten table", () => {
       expect(within(table).getByText("Tol")).toHaveClass("line-through");
     });
 
-    it("invites the manager when the Trip carries none", async () => {
+    /**
+     * A Trip with none shows the same empty marker every other column uses.
+     *
+     * It used to read "Custom waarden beheren" — an instruction sitting in a
+     * data column, which down a list looked like a value and said nothing
+     * about which Trips actually carry anything. The cell is still the way in;
+     * only the visible prompt is gone.
+     */
+    it("shows the ordinary empty marker when the Trip carries none", async () => {
       const table = await showRow();
 
-      expect(within(table).getByText("Custom waarden beheren")).toBeInTheDocument();
+      const cell = within(table)
+        .getByRole("button", { name: /^Custom waarden beheren / })
+        .closest("td") as HTMLElement;
+
+      expect(within(cell).getByText("—")).toBeInTheDocument();
+      expect(cell.textContent).not.toContain("Custom waarden beheren");
     });
 
     it("opens the manager for that Trip", async () => {

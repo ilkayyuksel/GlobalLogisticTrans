@@ -21,6 +21,7 @@ import {
 
 import { ChangeTripStatusDto } from "./dto/change-trip-status.dto";
 import { CompleteTripsDto } from "./dto/complete-trips.dto";
+import { MarkTripsLooseDto } from "./dto/mark-trips-loose.dto";
 import { CreateTripDto } from "./dto/create-trip.dto";
 import { ListTripsQueryDto } from "./dto/list-trips-query.dto";
 import { RemoveTripFromGroupDto } from "./dto/remove-trip-from-group.dto";
@@ -205,6 +206,35 @@ export class TripController {
   })
   completeMany(@Body() dto: CompleteTripsDto): Promise<TripResponseDto[]> {
     return this.tripService.completeMany(dto.tripIds);
+  }
+
+  /**
+   * Classifying several Trips as LOSRIT at once.
+   *
+   * A collection sub-resource, like `completions`, and deliberately NOT a
+   * generic "bulk update": the ids are the whole body, the classification is
+   * what the endpoint is, and nothing else about the Trips can be reached
+   * through it. A single Trip is still classified through `PATCH /trips/:id`,
+   * which is also the only way to take the classification back off.
+   */
+  @Post("loose")
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: "Mark several Trips as loose trips (LOSRIT)",
+    description:
+      "Sets isLooseTrip on every named Trip. All or nothing: if any of them belongs to a TripGroup or is DELETED the whole request is refused and none is changed. A Trip that is already a LOSRIT is left as it is rather than refused. Nothing else about a Trip is touched — no status, no planning, no pricing and no document — and no pricing is triggered.",
+  })
+  @ApiOkResponse({ type: [TripResponseDto] })
+  @ApiBadRequestResponse({
+    description: "An empty list, duplicate ids, or a malformed UUID.",
+  })
+  @ApiNotFoundResponse({ description: "One of the Trips does not exist." })
+  @ApiConflictResponse({
+    description:
+      "One of the Trips belongs to a group, or is DELETED. No Trip was changed.",
+  })
+  markManyLoose(@Body() dto: MarkTripsLooseDto): Promise<TripResponseDto[]> {
+    return this.tripService.markManyLoose(dto.tripIds);
   }
 
   /**

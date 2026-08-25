@@ -170,13 +170,47 @@ export interface UpdateTripPayload {
   internalNotes?: string | null;
   /**
    * Accepted only on a Trip created by hand. On an imported Trip the document
-   * is the authority for the destination and the backend refuses it with a 409
-   * — see `canEditDestination`, which is why the field is not offered there.
+   * is the authority for these and the backend refuses them with a 409 — see
+   * `canEditDocumentFields`, which is why they are not offered there.
+   *
+   * The times are the TRANSPORT window, not the waiting time: that is entered
+   * as two clock times and stored as `waitingTimeMinutes`, which this never
+   * touches. There is no rule that the end must follow the start — a transport
+   * running past midnight is ordinary, and a single-time order carries the same
+   * value in both.
    */
   destinationCity?: string | null;
   destinationCountry?: string | null;
+  startTime?: string | null;
+  endTime?: string | null;
   /** The operator's own classification; no document ever writes it. */
   isLooseTrip?: boolean;
+}
+
+/**
+ * Marks several Trips as LOSRIT in one request.
+ *
+ * The classification the operator already applies when creating a Trip by hand,
+ * applied to a selection. ONE request for the whole selection, like completion:
+ * a request per row would be a dozen round trips and a dozen ways to end up
+ * half-applied.
+ *
+ * The backend refuses the whole selection if any Trip belongs to a TripGroup or
+ * is DELETED — a leg of a Combination is not a loose trip — and a Trip that is
+ * already classified is left alone rather than refused.
+ *
+ * There is deliberately no "unmark" counterpart. Taking the classification off
+ * is a single-Trip edit through PATCH, which is where a correction belongs.
+ */
+export function markTripsLoose(
+  tripIds: readonly string[],
+  signal?: AbortSignal,
+): Promise<Trip[]> {
+  return request<Trip[]>(`${TRIPS_PATH}/loose`, {
+    method: "POST",
+    body: { tripIds: [...tripIds] },
+    signal,
+  });
 }
 
 export function updateTrip(

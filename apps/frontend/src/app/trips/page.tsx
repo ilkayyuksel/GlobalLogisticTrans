@@ -7,6 +7,7 @@ import { CustomPropertiesDialog } from "@/components/ritten/custom-properties-di
 import { DateSection } from "@/components/ritten/date-section";
 import { ExportButton } from "@/components/ritten/export-button";
 import { GroupConfirmDialog } from "@/components/ritten/group-confirm-dialog";
+import { DeleteConfirmDialog } from "@/components/ritten/delete-confirm-dialog";
 import { NewTripDialog } from "@/components/ritten/new-trip-dialog";
 import { PdfViewerDialog } from "@/components/ritten/pdf-viewer-dialog";
 import { SelectionToolbar } from "@/components/ritten/selection-toolbar";
@@ -45,7 +46,9 @@ import {
   createTrip,
   createTripGroup,
   listTripTerminals,
+  deleteTrip,
   listTrips,
+  markTripsLoose,
   removeTripFromGroup,
   updateTrip,
   MAX_PAGE_SIZE,
@@ -163,6 +166,8 @@ export default function RittenPage() {
 
   const [selectedTripIds, setSelectedTripIds] = useState<Set<string>>(new Set());
   const [isGroupDialogOpen, setIsGroupDialogOpen] = useState(false);
+  /** The Trip whose deletion is being confirmed, or null. */
+  const [deletingTrip, setDeletingTrip] = useState<Trip | null>(null);
   /*
    * What the PDF viewer was asked to show.
    *
@@ -475,6 +480,41 @@ export default function RittenPage() {
    * rows a moment later, and a dialog in front of a routine action is one
    * people learn to dismiss without reading.
    */
+  /**
+   * Classifies the whole selection as LOSRIT.
+   *
+   * ── NOT A LIFECYCLE ACTION ────────────────────────────────────────────────
+   * One column changes. Nothing is confirmed, nothing is priced, no document is
+   * touched, and no status moves — the badge appearing on the rows after the
+   * refetch is the entire feedback, which is what makes it safe to do without a
+   * dialog in front of it.
+   *
+   * The FULL selection is sent, days and pages included, exactly as grouping
+   * and completion send it. The backend decides whether the selection may be
+   * classified — a Trip in a Combination may not — and refuses all of it or
+   * none, so a partial application is not a state this can reach.
+   */
+  async function markSelectedLoose(): Promise<void> {
+    setFeedback(null);
+
+    try {
+      await markTripsLoose(selectedIds);
+
+      trips.reload();
+      counts.reload();
+      setSelectedTripIds(new Set());
+      setFeedback({ messageKey: "ritten.feedback.markedLoose", isError: false });
+    } catch (error: unknown) {
+      // The backend's own words — it names the Trip and the group that stopped
+      // the request, which is what makes the refusal actionable.
+      setFeedback({
+        messageKey: "ritten.feedback.failed",
+        detail: userFacingMessage(error),
+        isError: true,
+      });
+    }
+  }
+
   async function completeSelected(): Promise<void> {
     setFeedback(null);
 
@@ -495,6 +535,33 @@ export default function RittenPage() {
         isError: true,
       });
     }
+  }
+
+  /**
+   * Soft-deletes one Trip, after the confirmation dialog said so.
+   *
+   * The Trip leaves the planning and its row, documents, history and any Cost
+   * Confirmation stay exactly where they are — the backend sets a status and
+   * writes nothing else. Only THIS Trip: by id, never by booking number, which
+   * several Trips legitimately share.
+   *
+   * Its id also leaves the selection, and only its id. A Trip that is no longer
+   * in the list cannot be acted on, but the other days the operator ticked are
+   * still theirs.
+   */
+  async function deleteOneTrip(trip: Trip): Promise<void> {
+    await deleteTrip(trip.id);
+
+    setSelectedTripIds((current) => {
+      const remaining = new Set(current);
+      remaining.delete(trip.id);
+
+      return remaining;
+    });
+
+    trips.reload();
+    counts.reload();
+    setFeedback({ messageKey: "ritten.feedback.deleted", isError: false });
   }
 
   const actions: RittenActions = {
@@ -562,6 +629,7 @@ export default function RittenPage() {
         });
       }
     },
+    deleteTrip: deleteOneTrip,
     openCombination: setOpenCombinationId,
     openCustomProperties: setCustomPropertiesTrip,
   };
@@ -672,6 +740,7 @@ export default function RittenPage() {
           }
           onClear={() => setSelectedTripIds(new Set())}
           onGroup={() => setIsGroupDialogOpen(true)}
+          onMarkLoose={() => void markSelectedLoose()}
           onComplete={() => void completeSelected()}
         />
       ) : null}
@@ -755,6 +824,7 @@ export default function RittenPage() {
                   onToggleSelection={toggleSelection}
                   showPricing={showPricing}
                   pricingByTripId={pricingByTripId}
+              onDeleteTrip={setDeletingTrip}
                 />
               ))}
             </div>
@@ -779,6 +849,14 @@ export default function RittenPage() {
           pdfDocumentId={viewing.pdfDocumentId}
           title={viewing.title}
           onClose={() => setViewing(null)}
+        />
+      ) : null}
+
+      {deletingTrip ? (
+        <DeleteConfirmDialog
+          trip={deletingTrip}
+          onConfirm={() => deleteOneTrip(deletingTrip)}
+          onClose={() => setDeletingTrip(null)}
         />
       ) : null}
 

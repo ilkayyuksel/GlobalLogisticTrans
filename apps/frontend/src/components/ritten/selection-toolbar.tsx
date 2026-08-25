@@ -31,6 +31,7 @@ export function SelectionToolbar({
   onClear,
   onGroup,
   onComplete,
+  onMarkLoose,
 }: {
   /** Everything selected, including Trips on days that are not on screen. */
   selectedCount: number;
@@ -45,6 +46,14 @@ export function SelectionToolbar({
   onClear: () => void;
   onGroup: () => void;
   onComplete: () => void;
+  /**
+   * Classifies the whole selection as LOSRIT.
+   *
+   * Always available while something is selected: whether a Trip may be
+   * classified depends on its group, which is the backend's answer to give —
+   * and it gives it for the whole selection at once rather than per row.
+   */
+  onMarkLoose: () => void;
 }) {
   const t = useTranslation();
 
@@ -88,6 +97,20 @@ export function SelectionToolbar({
         className="rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-white hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-50"
       >
         {t("ritten.select.complete")}
+      </button>
+
+      {/*
+        A CLASSIFICATION, not a lifecycle action — so it is a quiet button
+        rather than the primary one, and it asks nothing: the LOSRIT badge
+        appears on the rows a moment later, which is the whole confirmation.
+      */}
+      <button
+        type="button"
+        onClick={onMarkLoose}
+        disabled={isBusy}
+        className="rounded-md border border-border bg-card px-3 py-1.5 text-sm font-medium text-foreground hover:bg-hover disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        {t("ritten.losrit.label")}
       </button>
     </div>
   );
