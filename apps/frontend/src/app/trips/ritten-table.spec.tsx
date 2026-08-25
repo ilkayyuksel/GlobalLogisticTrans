@@ -46,6 +46,8 @@ const COLUMNS = [
   "Wachttijd",
   "PDF",
   "Acties",
+  // Beside the buttons, not among the prices: it is always visible.
+  "CC",
 ];
 
 /**
@@ -461,6 +463,7 @@ describe("Ritten table", () => {
         "Bekleme",
         "PDF",
         "İşlemler",
+        "CC",
       ]);
       expect(within(table).getByText("Açık")).toBeInTheDocument();
     });

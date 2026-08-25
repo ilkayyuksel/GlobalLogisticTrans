@@ -70,6 +70,17 @@ const COLUMN_KEYS = [
   "ritten.column.waitingTime",
   "ritten.column.pdf",
   "ritten.column.actions",
+  /*
+   * What Eucon CONFIRMED for this Trip, beside the buttons rather than among
+   * the prices.
+   *
+   * It used to live in the pricing block and disappeared with it. That was
+   * wrong for what the operator does with it: a confirmation is the answer to
+   * a waiting time they reported, and they check it while working the list —
+   * not only when they have turned prices on to look at margins. So it is an
+   * operational column now, always present, and still read-only.
+   */
+  "ritten.column.costConfirmation",
 ] as const;
 
 /**
@@ -92,12 +103,6 @@ const PRICING_COLUMN_KEYS = [
   "ritten.column.others",
   "ritten.column.ek",
   "ritten.column.totaal",
-  /*
-   * What Eucon CONFIRMED for the waiting time, beside what we calculated for
-   * it. It belongs to the pricing columns because it is money, and it appears
-   * and disappears with them for the same reason the others do.
-   */
-  "ritten.column.costConfirmation",
 ] as const;
 
 export interface RittenTableProps {
@@ -107,8 +112,6 @@ export interface RittenTableProps {
   vehicles: readonly Vehicle[];
   /** The Trip a mutation is currently running for. */
   busyTripId: string | null;
-  /** CLOSED Trips found to have no pricing snapshot after closing. */
-  pricingAttentionTripIds: ReadonlySet<string>;
   /** The Trips ticked on the current page. */
   selectedTripIds: ReadonlySet<string>;
   onToggleSelection: (tripId: string) => void;
@@ -207,7 +210,6 @@ function RittenRow({
   actions,
   vehicles,
   busyTripId,
-  pricingAttentionTripIds,
   selectedTripIds,
   onToggleSelection,
   showPricing,
@@ -291,14 +293,13 @@ function RittenRow({
             {t("ritten.status.revised")}
           </span>
         ) : null}
-        {pricingAttentionTripIds.has(trip.id) ? (
-          <span
-            role="status"
-            className="mt-1 block max-w-40 text-[11px] font-medium text-warning"
-          >
-            {t("ritten.feedback.pricingAttention")}
-          </span>
-        ) : null}
+        {/*
+          There is deliberately NO "this Trip has no price" marker here.
+          Completing a Trip whose route is not configured is legitimate finished
+          work, and saying so beside the status read as a failure of the
+          completion. The absence of a price shows where prices show — the
+          pricing cells stay empty — and Opnieuw verwerken remains available.
+        */}
       </td>
 
       <td className="px-3 py-2">
@@ -406,11 +407,10 @@ function RittenRow({
         <RowActionMenu trip={trip} actions={actions} isBusy={isBusy} />
       </td>
 
+      <CostConfirmationCell trip={trip} />
+
       {showPricing ? (
-        <>
-          <PricingCells snapshot={pricingByTripId.get(trip.id) ?? null} />
-          <CostConfirmationCell trip={trip} />
-        </>
+        <PricingCells snapshot={pricingByTripId.get(trip.id) ?? null} />
       ) : null}
     </tr>
   );
@@ -423,8 +423,13 @@ function RittenRow({
  * amount with no CC number cannot be traced, and a number with no amount says
  * nothing. There is at most ONE — a Trip's waiting time is confirmed once.
  *
- * Read-only, like every pricing cell beside it. An empty marker means nothing
- * has been confirmed, which is not the same as an amount of zero.
+ * Read-only, and always visible: it does not follow the pricing toggle, because
+ * an operator checks a confirmation while working the list rather than while
+ * looking at margins. An empty marker means nothing has been confirmed, which
+ * is not the same as an amount of zero.
+ *
+ * It costs no request of its own. The confirmation travels on the Trip the list
+ * endpoint already returned, so a page of fifty rows is still one call.
  */
 function CostConfirmationCell({ trip }: { trip: Trip }) {
   const t = useTranslation();

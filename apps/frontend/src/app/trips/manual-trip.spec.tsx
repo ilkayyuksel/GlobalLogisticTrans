@@ -1,4 +1,4 @@
-import { screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import {
@@ -177,11 +177,15 @@ describe("Manual Trip creation", () => {
       ).toBeInTheDocument();
     });
 
-    it("turns hours and minutes into total minutes", async () => {
+    it("turns two clock times into total minutes", async () => {
       const dialog = await openForm();
 
-      await userEvent.type(within(dialog).getByLabelText("uur"), "2");
-      await userEvent.type(within(dialog).getByLabelText("min"), "30");
+      fireEvent.change(within(dialog).getByLabelText("Wachttijd begin"), {
+        target: { value: "10:00" },
+      });
+      fireEvent.change(within(dialog).getByLabelText("Wachttijd eind"), {
+        target: { value: "12:30" },
+      });
       await userEvent.click(
         within(dialog).getByRole("button", { name: "Rit aanmaken" }),
       );
@@ -193,14 +197,50 @@ describe("Manual Trip creation", () => {
       expect(options.body).toMatchObject({ waitingTimeMinutes: 150 });
     });
 
-    /** The shared utility refuses 90 minutes rather than rewriting it to 1h30. */
-    it("refuses minutes that do not belong to an hour", async () => {
+    /** A window across midnight is four hours, never minus twenty. */
+    it("turns a window across midnight into total minutes", async () => {
       const dialog = await openForm();
 
-      await userEvent.type(within(dialog).getByLabelText("min"), "90");
+      fireEvent.change(within(dialog).getByLabelText("Wachttijd begin"), {
+        target: { value: "22:00" },
+      });
+      fireEvent.change(within(dialog).getByLabelText("Wachttijd eind"), {
+        target: { value: "02:00" },
+      });
+      await userEvent.click(
+        within(dialog).getByRole("button", { name: "Rit aanmaken" }),
+      );
+
+      await waitFor(() => expect(createCall()).toBeDefined());
+
+      const [, options] = createCall() as [string, { body?: never }];
+
+      expect(options.body).toMatchObject({ waitingTimeMinutes: 240 });
+    });
+
+    it("shows the duration the two times describe", async () => {
+      const dialog = await openForm();
+
+      fireEvent.change(within(dialog).getByLabelText("Wachttijd begin"), {
+        target: { value: "10:00" },
+      });
+      fireEvent.change(within(dialog).getByLabelText("Wachttijd eind"), {
+        target: { value: "12:30" },
+      });
+
+      expect(await within(dialog).findByText("2 u 30 min")).toBeInTheDocument();
+    });
+
+    /** Half a window is refused: an end with no beginning is not zero. */
+    it("refuses an end time with no beginning", async () => {
+      const dialog = await openForm();
+
+      fireEvent.change(within(dialog).getByLabelText("Wachttijd eind"), {
+        target: { value: "12:30" },
+      });
 
       expect(await within(dialog).findByRole("alert")).toHaveTextContent(
-        /0 en 59/,
+        /begintijd/,
       );
       expect(
         within(dialog).getByRole("button", { name: "Rit aanmaken" }),

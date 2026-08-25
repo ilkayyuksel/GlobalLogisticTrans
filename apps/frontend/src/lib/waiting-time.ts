@@ -3,28 +3,15 @@
  *
  * ── ONE MODEL, TWO REPRESENTATIONS ──────────────────────────────────────────
  * The column is and stays `waiting_time_minutes`, a single integer. Nobody
- * thinks in 135 minutes though — they think "2 uur 15 min" — so every screen
- * shows and edits hours and minutes, and this module is the ONLY place the two
- * are converted. A second conversion somewhere else would eventually disagree
- * about 60, or about 0, and quietly bill the wrong waiting time.
+ * thinks in 135 minutes though — they read a clock twice and they say
+ * "2 uur 15 min" — so every screen ENTERS two times and DISPLAYS a duration,
+ * and this module is the ONLY place either conversion happens. A second one
+ * somewhere else would eventually disagree about 60, or about midnight, and
+ * quietly bill the wrong waiting time.
  * ────────────────────────────────────────────────────────────────────────────
  */
 
 export const MINUTES_PER_HOUR = 60;
-
-/** What a badly filled editor produced, so a caller can say which field. */
-export type WaitingTimeError =
-  | "hoursNotWholeNumber"
-  | "hoursNegative"
-  | "minutesNotWholeNumber"
-  | "minutesOutOfRange";
-
-export interface WaitingTimeParseResult {
-  /** Total minutes, ready for `waitingTimeMinutes`. Null when input was blank. */
-  readonly totalMinutes: number | null;
-  /** Absent when the input was acceptable. */
-  readonly error?: WaitingTimeError;
-}
 
 export interface WaitingTimeParts {
   readonly hours: number;
@@ -76,45 +63,85 @@ export function formatWaitingTime(totalMinutes: number | null): string | null {
 }
 
 /**
- * Turns what was typed into total minutes, or says what is wrong with it.
+ * ── FROM TWO CLOCK TIMES TO A DURATION ──────────────────────────────────────
+ * An operator does not read a duration off anything — they read a clock twice.
+ * So the editor asks for the two moments and this works out the minutes, which
+ * is what the column stores and what pricing bills from.
  *
- * INVALID INPUT IS REFUSED, NOT REPAIRED. "1 uur 90 min" could be read as 2:30,
- * but silently rewriting what someone typed is how a mistyped 9 becomes an
- * hour and a half of billed waiting: the editor says the minutes must be under
- * 60 and lets them correct it.
+ * The fields hold a TIME OF DAY and nothing else, so the window they describe
+ * is always less than 24 hours:
  *
- * Two blank fields mean "no waiting time recorded" and produce null — which is
- * what the backend stores to clear the value.
+ *   end after begin   → the same day.       10:00 → 12:30 is 2 u 30 min
+ *   end before begin  → the next day.       22:00 → 02:00 is 4 u
+ *   end equal begin   → ZERO, never a day.  10:00 → 10:00 is 0 min
+ *
+ * The last one is a decision, not an oversight. "The truck waited exactly
+ * twenty-four hours" and "it did not wait" look identical in two time fields,
+ * and reading it as a day would bill a full day for a mistyped repeat. Zero is
+ * the safe reading; a genuine 24-hour wait needs a way to say so that these
+ * fields do not have.
+ * ────────────────────────────────────────────────────────────────────────────
  */
-export function parseWaitingTime(
-  hours: string,
-  minutes: string,
-): WaitingTimeParseResult {
-  const trimmedHours = hours.trim();
-  const trimmedMinutes = minutes.trim();
 
-  if (trimmedHours === "" && trimmedMinutes === "") {
+const MINUTES_PER_DAY = 24 * MINUTES_PER_HOUR;
+
+/** `HH:mm`, as an `<input type="time">` produces it. */
+const CLOCK_TIME = /^([01]\d|2[0-3]):([0-5]\d)$/;
+
+export type WaitingWindowError = "beginInvalid" | "endInvalid";
+
+export interface WaitingWindowResult {
+  /** Total minutes, ready for `waitingTimeMinutes`. Null when both are blank. */
+  readonly totalMinutes: number | null;
+  readonly error?: WaitingWindowError;
+}
+
+/** The minutes since midnight, or null when the text is not a clock time. */
+function toMinutesOfDay(value: string): number | null {
+  const match = CLOCK_TIME.exec(value.trim());
+
+  if (!match) {
+    return null;
+  }
+
+  return Number(match[1]) * MINUTES_PER_HOUR + Number(match[2]);
+}
+
+/**
+ * The waiting time between two clock times.
+ *
+ * Both blank means "no waiting time recorded" and produces null, which is what
+ * the backend stores to clear the value. One blank is a half-filled window and
+ * is refused rather than guessed at — an end with no beginning is not zero.
+ */
+export function waitingWindowMinutes(
+  begin: string,
+  end: string,
+): WaitingWindowResult {
+  const trimmedBegin = begin.trim();
+  const trimmedEnd = end.trim();
+
+  if (trimmedBegin === "" && trimmedEnd === "") {
     return { totalMinutes: null };
   }
 
-  const parsedHours = trimmedHours === "" ? 0 : Number(trimmedHours);
-  const parsedMinutes = trimmedMinutes === "" ? 0 : Number(trimmedMinutes);
+  const beginMinutes = toMinutesOfDay(trimmedBegin);
 
-  if (!Number.isInteger(parsedHours)) {
-    return { totalMinutes: null, error: "hoursNotWholeNumber" };
+  if (beginMinutes === null) {
+    return { totalMinutes: null, error: "beginInvalid" };
   }
 
-  if (parsedHours < 0) {
-    return { totalMinutes: null, error: "hoursNegative" };
+  const endMinutes = toMinutesOfDay(trimmedEnd);
+
+  if (endMinutes === null) {
+    return { totalMinutes: null, error: "endInvalid" };
   }
 
-  if (!Number.isInteger(parsedMinutes)) {
-    return { totalMinutes: null, error: "minutesNotWholeNumber" };
-  }
-
-  if (parsedMinutes < 0 || parsedMinutes >= MINUTES_PER_HOUR) {
-    return { totalMinutes: null, error: "minutesOutOfRange" };
-  }
-
-  return { totalMinutes: parsedHours * MINUTES_PER_HOUR + parsedMinutes };
+  // Past midnight the end is on the next day; equal times are zero, never a day.
+  return {
+    totalMinutes:
+      endMinutes >= beginMinutes
+        ? endMinutes - beginMinutes
+        : endMinutes + MINUTES_PER_DAY - beginMinutes,
+  };
 }

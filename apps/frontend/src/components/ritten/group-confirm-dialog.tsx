@@ -17,9 +17,19 @@ import { RittenDialog } from "./ritten-dialog";
  * group and not a Combination, because the two look identical in the table
  * afterwards.
  *
+ * The dates may DIFFER, and that is the point of listing them. One movement
+ * often spans two days — a delivery on the 25th, the empty back on the 26th —
+ * and those belong in one group. Nothing is moved onto a shared day: each Trip
+ * keeps its own planning date, its own truck and its own driver.
+ *
  * The group id is never guessed: nothing appears in the table until the backend
  * has answered and the list has been refetched.
  */
+/** Whether the selection covers more than one planning date. */
+function spansSeveralDays(trips: readonly Trip[]): boolean {
+  return new Set(trips.map((trip) => trip.planningDate)).size > 1;
+}
+
 export function GroupConfirmDialog({
   trips,
   onConfirm,
@@ -58,6 +68,13 @@ export function GroupConfirmDialog({
         <p className="mt-2 text-sm font-medium text-foreground">
           {trips.length} {t("ritten.group.tripCount")}
         </p>
+
+        {/* Said only when it applies, so it reads as information, not noise. */}
+        {spansSeveralDays(trips) ? (
+          <p className="mt-2 rounded-md border border-border bg-hover px-3 py-2 text-xs text-secondary">
+            {t("ritten.group.crossDay")}
+          </p>
+        ) : null}
 
         <ul className="mt-2 divide-y divide-border rounded-md border border-border">
           {trips.map((trip) => (

@@ -280,12 +280,32 @@ describe("Trip management", () => {
       });
     });
 
-    it("asks for confirmation before closing, and stops if declined", async () => {
-      confirmSpy.mockReturnValue(false);
+    /**
+     * Completing asks nothing. It is routine, the page shows the new status
+     * immediately, and a dialog in front of a routine action is one people
+     * learn to dismiss without reading.
+     */
+    it("closes directly, without a browser confirmation", async () => {
+      changeStatusMock.mockResolvedValue(buildTrip({ status: "CLOSED" }));
 
       render(<TripDetailPage />);
       await userEvent.click(
         await screen.findByRole("button", { name: "Afwerken" }),
+      );
+
+      expect(confirmSpy).not.toHaveBeenCalled();
+      await waitFor(() => {
+        expect(changeStatusMock).toHaveBeenCalledWith("trip-1", "CLOSED");
+      });
+    });
+
+    /** Cancelling is not routine, and still asks. */
+    it("still asks before cancelling, and stops if declined", async () => {
+      confirmSpy.mockReturnValue(false);
+
+      render(<TripDetailPage />);
+      await userEvent.click(
+        await screen.findByRole("button", { name: "Annuleren" }),
       );
 
       expect(confirmSpy).toHaveBeenCalled();
@@ -495,9 +515,10 @@ describe("Trip management", () => {
 
       expect(screen.getByLabelText("Datum")).toBeInTheDocument();
       expect(screen.getByLabelText("Container")).toBeInTheDocument();
-      // Waiting time is entered as hours and minutes; the column stays minutes.
-      expect(screen.getByLabelText("uur")).toBeInTheDocument();
-      expect(screen.getByLabelText("min")).toBeInTheDocument();
+      // Waiting time is entered as the two clock times it was read from; the
+      // column stays a single integer of minutes.
+      expect(screen.getByLabelText("Begin")).toBeInTheDocument();
+      expect(screen.getByLabelText("Eind")).toBeInTheDocument();
       expect(screen.getByLabelText("Afstand (km)")).toBeInTheDocument();
       expect(screen.getByLabelText("Uitgevoerd op")).toBeInTheDocument();
       expect(screen.getByLabelText("Interne notities")).toBeInTheDocument();
@@ -531,8 +552,15 @@ describe("Trip management", () => {
       expect(screen.getByLabelText("Container")).toHaveValue(
         "PVDU 301326/0",
       );
-      expect(screen.getByLabelText("uur")).toHaveValue(0);
-      expect(screen.getByLabelText("min")).toHaveValue(45);
+      /*
+       * The waiting times open EMPTY. The Trip stores 45 minutes and never
+       * stored the clock times behind them, so there is nothing to reconstruct
+       * — and the stored duration is shown beside the fields instead of being
+       * turned back into times nobody read.
+       */
+      expect(screen.getByLabelText("Begin")).toHaveValue("");
+      expect(screen.getByLabelText("Eind")).toHaveValue("");
+      expect(screen.getByText(/niet bewaard/)).toBeInTheDocument();
     });
 
     it("saves the edited values", async () => {

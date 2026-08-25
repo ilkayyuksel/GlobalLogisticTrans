@@ -20,6 +20,7 @@ import {
 } from "@nestjs/swagger";
 
 import { ChangeTripStatusDto } from "./dto/change-trip-status.dto";
+import { CompleteTripsDto } from "./dto/complete-trips.dto";
 import { CreateTripDto } from "./dto/create-trip.dto";
 import { ListTripsQueryDto } from "./dto/list-trips-query.dto";
 import { RemoveTripFromGroupDto } from "./dto/remove-trip-from-group.dto";
@@ -172,6 +173,38 @@ export class TripController {
     @Body() dto: ChangeTripStatusDto,
   ): Promise<TripResponseDto> {
     return this.tripService.changeStatus(params.id, dto);
+  }
+
+  /**
+   * Completing several Trips at once.
+   *
+   * A collection sub-resource rather than a verb, matching the way a single
+   * Trip is completed through `:id/status` — and deliberately NOT a generic
+   * "bulk status" endpoint: the only multi-Trip transition the business asked
+   * for is completion, and a generic one would invite bulk cancellation and
+   * bulk deletion without anybody deciding those should exist.
+   *
+   * `POST` because the request creates completions; the ids are a body rather
+   * than a query so a long selection cannot outgrow a URL.
+   */
+  @Post("completions")
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: "Complete several Trips",
+    description:
+      "Marks every named Trip CLOSED, applying exactly the transition rules of the single-Trip status endpoint. All or nothing: if any Trip cannot be closed the whole request is refused and none of them moves. A Trip that is already CLOSED is left as it is rather than refused. Pricing is calculated afterwards per Trip, as it is for a single completion, and a Trip with no configured route still closes.",
+  })
+  @ApiOkResponse({ type: [TripResponseDto] })
+  @ApiBadRequestResponse({
+    description: "An empty list, duplicate ids, or a malformed UUID.",
+  })
+  @ApiNotFoundResponse({ description: "One of the Trips does not exist." })
+  @ApiConflictResponse({
+    description:
+      "One of the Trips cannot be closed from its current status. No Trip was changed.",
+  })
+  completeMany(@Body() dto: CompleteTripsDto): Promise<TripResponseDto[]> {
+    return this.tripService.completeMany(dto.tripIds);
   }
 
   /**

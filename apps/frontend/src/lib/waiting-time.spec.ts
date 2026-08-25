@@ -1,13 +1,13 @@
 import {
   formatWaitingTime,
-  parseWaitingTime,
   toWaitingTimeParts,
+  waitingWindowMinutes,
 } from "./waiting-time";
 
 /**
- * The single conversion between stored minutes and the hours-and-minutes an
- * operator types. Every screen uses this, so every screen is only as correct as
- * these cases.
+ * The single conversion between the two clock times an operator reads and the
+ * minutes the database stores, and back again for display. Every screen uses
+ * this, so every screen is only as correct as these cases.
  */
 describe("Waiting time", () => {
   describe("displaying", () => {
@@ -57,74 +57,102 @@ describe("Waiting time", () => {
     });
   });
 
-  describe("parsing what was typed", () => {
+  /**
+   * ── THE WINDOW, AND THE DAY IT MUST NOT INVENT ────────────────────────────
+   * An operator reads a clock twice, so these are the two times they read. The
+   * fields carry a time of day and nothing else, which is why every window is
+   * shorter than a day — and why equal times are ZERO rather than 24 hours.
+   *
+   * That last one is the expensive mistake: "the truck waited exactly a day"
+   * and "it did not wait" look identical in two time fields, and reading it as
+   * a day would bill twenty-four hours for a mistyped repeat.
+   * ──────────────────────────────────────────────────────────────────────────
+   */
+  describe("the waiting window", () => {
     it.each([
-      ["0", "0", 0],
-      ["0", "15", 15],
-      ["1", "0", 60],
-      ["1", "30", 90],
-      ["2", "0", 120],
-      ["2", "15", 135],
-      ["", "45", 45],
-      ["3", "", 180],
-    ])("reads %s uur %s min as %i minutes", (hours, minutes, expected) => {
-      expect(parseWaitingTime(hours, minutes)).toEqual({
-        totalMinutes: expected,
-      });
+      ["10:00", "12:30", 150],
+      ["11:00", "13:30", 150],
+      ["08:15", "08:45", 30],
+      ["00:00", "23:59", 1439],
+    ])("reads %s to %s as %i minutes", (begin, end, totalMinutes) => {
+      expect(waitingWindowMinutes(begin, end)).toEqual({ totalMinutes });
     });
 
-    /** Both fields empty means "not recorded", which the backend stores as null. */
-    it("treats two empty fields as no waiting time", () => {
-      expect(parseWaitingTime("", "")).toEqual({ totalMinutes: null });
-      expect(parseWaitingTime("  ", " ")).toEqual({ totalMinutes: null });
+    /** Past midnight the end is on the next day. */
+    it.each([
+      ["22:00", "02:00", 240],
+      ["23:30", "00:30", 60],
+      ["23:59", "00:00", 1],
+    ])("crosses midnight: %s to %s is %i minutes", (begin, end, totalMinutes) => {
+      expect(waitingWindowMinutes(begin, end)).toEqual({ totalMinutes });
     });
 
-    /**
-     * Refused rather than repaired: "1 uur 90 min" could be read as 2:30, but
-     * rewriting what someone typed is how a mistyped 9 becomes 90 minutes of
-     * billed waiting.
-     */
-    it("refuses minutes of 60 or more instead of normalising them", () => {
-      expect(parseWaitingTime("1", "90")).toEqual({
+    it.each(["00:00", "10:00", "23:59"])(
+      "reads %s to itself as zero, never as a day",
+      (time) => {
+        expect(waitingWindowMinutes(time, time)).toEqual({ totalMinutes: 0 });
+      },
+    );
+
+    it("never produces a negative duration", () => {
+      // The bug this rule exists for: 22:00 → 02:00 as a plain subtraction is
+      // minus twenty hours.
+      expect(waitingWindowMinutes("22:00", "02:00").totalMinutes).toBe(240);
+    });
+
+    it("never reaches a full day", () => {
+      for (const [begin, end] of [
+        ["00:00", "23:59"],
+        ["12:00", "11:59"],
+        ["23:59", "23:58"],
+      ]) {
+        expect(waitingWindowMinutes(begin, end).totalMinutes).toBeLessThan(
+          24 * 60,
+        );
+      }
+    });
+
+    it("treats two blank fields as no waiting time recorded", () => {
+      expect(waitingWindowMinutes("", "")).toEqual({ totalMinutes: null });
+      expect(waitingWindowMinutes("  ", " ")).toEqual({ totalMinutes: null });
+    });
+
+    /** Half a window is refused, not guessed at: an end alone is not zero. */
+    it.each([
+      ["", "12:30", "beginInvalid"],
+      ["10:00", "", "endInvalid"],
+    ])("refuses %p to %p", (begin, end, error) => {
+      expect(waitingWindowMinutes(begin, end)).toEqual({
         totalMinutes: null,
-        error: "minutesOutOfRange",
+        error,
       });
-      expect(parseWaitingTime("0", "60")).toEqual({
-        totalMinutes: null,
-        error: "minutesOutOfRange",
-      });
-    });
-
-    it("accepts the last valid minute", () => {
-      expect(parseWaitingTime("1", "59")).toEqual({ totalMinutes: 119 });
     });
 
     it.each([
-      ["negative hours", "-1", "0", "hoursNegative"],
-      ["negative minutes", "0", "-5", "minutesOutOfRange"],
-      ["fractional hours", "1.5", "0", "hoursNotWholeNumber"],
-      ["fractional minutes", "0", "12.5", "minutesNotWholeNumber"],
-      ["hours that are not a number", "abc", "0", "hoursNotWholeNumber"],
-      ["minutes that are not a number", "0", "abc", "minutesNotWholeNumber"],
-    ])("refuses %s", (_case, hours, minutes, error) => {
-      expect(parseWaitingTime(hours, minutes)).toEqual({
+      ["24:00", "01:00", "beginInvalid"],
+      ["10:60", "11:00", "beginInvalid"],
+      ["1000", "11:00", "beginInvalid"],
+      ["10:00", "25:00", "endInvalid"],
+      ["10:00", "half twaalf", "endInvalid"],
+    ])("refuses %p to %p as not a clock time", (begin, end, error) => {
+      expect(waitingWindowMinutes(begin, end)).toEqual({
         totalMinutes: null,
         error,
       });
     });
   });
 
-  /** What is stored must survive a round trip through the editor unchanged. */
-  describe("round trip", () => {
-    it.each([0, 15, 45, 60, 90, 120, 135, 599])(
-      "returns %i unchanged",
-      (total) => {
-        const parts = toWaitingTimeParts(total);
+  /** What the window produces is what the column shows. */
+  describe("from a window to what the operator reads", () => {
+    it.each([
+      ["10:00", "12:30", "2 u 30 min"],
+      ["10:00", "10:00", "0 min"],
+      ["22:00", "02:00", "4 u"],
+      ["10:00", "11:15", "1 u 15 min"],
+    ])("shows %s to %s as %p", (begin, end, formatted) => {
+      const { totalMinutes } = waitingWindowMinutes(begin, end);
 
-        expect(
-          parseWaitingTime(String(parts?.hours), String(parts?.minutes)),
-        ).toEqual({ totalMinutes: total });
-      },
-    );
+      expect(formatWaitingTime(totalMinutes)).toBe(formatted);
+    });
   });
 });

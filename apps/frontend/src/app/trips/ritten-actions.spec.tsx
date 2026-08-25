@@ -258,7 +258,7 @@ describe("Ritten actions", () => {
   });
 
   describe("status changes", () => {
-    it("closes a Trip after confirmation and refetches", async () => {
+    it("closes a Trip directly and refetches", async () => {
       const menu = await openMenu();
       const listsBefore = listCalls(requestMock).length;
 
@@ -275,21 +275,25 @@ describe("Ritten actions", () => {
           }),
         );
       });
-      expect(confirmSpy).toHaveBeenCalled();
+      // Nothing was asked. Completing is routine, and the row says so a moment
+      // later; a dialog in front of it is one people learn to dismiss unread.
+      expect(confirmSpy).not.toHaveBeenCalled();
       await waitFor(() => {
         expect(listCalls(requestMock).length).toBeGreaterThan(listsBefore);
       });
       expect(await screen.findByText("Status gewijzigd")).toBeInTheDocument();
     });
 
-    it("sends nothing when the confirmation is declined", async () => {
+    /** Cancelling is not routine, and it still asks. */
+    it("still asks before cancelling, and sends nothing when declined", async () => {
       confirmSpy.mockReturnValue(false);
       const menu = await openMenu();
 
       await userEvent.click(
-        within(menu).getByRole("menuitem", { name: "Afwerken" }),
+        within(menu).getByRole("menuitem", { name: "Annuleren" }),
       );
 
+      expect(confirmSpy).toHaveBeenCalled();
       expect(mutations()).toHaveLength(0);
     });
 
@@ -315,21 +319,54 @@ describe("Ritten actions", () => {
     });
   });
 
+  /**
+   * ── COMPLETING A TRIP WITH NO PRICE ───────────────────────────────────────
+   * A Trip whose route is not configured is legitimately finished work. Closing
+   * it used to be followed by a warning that read as a failure of the
+   * completion, and it never was one.
+   *
+   * The absence of a price stays visible where prices are — the pricing cells
+   * are empty and Opnieuw verwerken is still offered — but nothing is said at
+   * the moment somebody ticks a Trip off.
+   * ──────────────────────────────────────────────────────────────────────────
+   */
   describe("closing without a price", () => {
-    /**
-     * Pricing runs automatically at closing and can fail. The Trip is CLOSED
-     * either way — it is never reopened to hide that.
-     */
-    it("says pricing needs attention when no snapshot exists", async () => {
+    it("closes without warning about the missing price", async () => {
       const menu = await openMenu({}, { pricing: null });
 
       await userEvent.click(
         within(menu).getByRole("menuitem", { name: "Afwerken" }),
       );
 
+      await waitFor(() => {
+        expect(requestMock).toHaveBeenCalledWith(
+          "/api/v1/trips/trip-1/status",
+          expect.objectContaining({ body: { status: "CLOSED" } }),
+        );
+      });
+      expect(screen.queryByText(/geen prijsberekening/)).toBeNull();
+      expect(await screen.findByText("Status gewijzigd")).toBeInTheDocument();
+    });
+
+    /** And it asks the backend nothing extra to find that out. */
+    it("does not read the pricing of the Trip it just closed", async () => {
+      const menu = await openMenu({}, { pricing: null });
+
+      await userEvent.click(
+        within(menu).getByRole("menuitem", { name: "Afwerken" }),
+      );
+
+      await waitFor(() => {
+        expect(requestMock).toHaveBeenCalledWith(
+          "/api/v1/trips/trip-1/status",
+          expect.objectContaining({ body: { status: "CLOSED" } }),
+        );
+      });
       expect(
-        await screen.findByText(/geen prijsberekening/),
-      ).toBeInTheDocument();
+        requestMock.mock.calls.filter(([path]) =>
+          String(path).includes("/trip-pricing/trip/"),
+        ),
+      ).toHaveLength(0);
     });
 
     it("says nothing when the snapshot is there", async () => {

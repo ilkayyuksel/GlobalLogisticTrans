@@ -789,6 +789,118 @@ Trip B
 
 ---
 
+# Trip Grouping Across Days
+
+A TripGroup does NOT require its Trips to share a planning date.
+
+One movement often spans two days: the container is delivered on the 25th and
+the empty is collected on the 26th. Both belong to one group.
+
+Grouping changes nothing about the Trips themselves. Each keeps its own
+planningDate, its own vehicle, its own driver resolution and its own operational
+data. No planning date is ever copied from one Trip onto another.
+
+Combination recognition is unaffected: a Combination is identified by the shared
+source PdfDocument and the two directions, never by a shared date. A cross-day
+Combination is priced exactly as a same-day one.
+
+The export is unaffected: one row per Trip, each with its own Datum, Begin,
+Eind, Bookingnr and Container. The group appears only as the shared Combination
+label.
+
+---
+
+# Waiting Time
+
+The stored value is and remains waitingTimeMinutes, a single integer.
+
+It is ENTERED as the two clock times it was read from — a begin and an end —
+and the duration is calculated from them.
+
+The two times are input only. They are not stored, and no begin/end is ever
+reconstructed from a stored duration: a Trip edited before this existed shows
+its duration and opens with empty time fields.
+
+The calculation:
+
+- end after begin: the same day
+- end before begin: the end is on the next day
+- end equal to begin: ZERO, never twenty-four hours
+
+Because both fields hold a time of day, the represented duration is always less
+than 24 hours. A genuine 24-hour waiting period cannot be expressed and would
+need its own decision.
+
+Pricing is unchanged. It continues to receive waitingTimeMinutes and applies the
+configured free allowance, threshold and billing blocks to it.
+
+---
+
+# Trip Identity
+
+A Trip is identified by:
+
+bookingNumber + containerNumber
+
+One booking may carry several containers, and each is its own Trip with its own
+truck, its own day and its own lifecycle.
+
+An ABSENT container number is part of the identity, not a missing value. A
+COLLECTION fetches an empty container the document cannot name, so
+(bookingNumber, none) identifies exactly one Trip and every later document for
+that collection finds it.
+
+Matching therefore compares the container with IS NOT DISTINCT FROM, never with
+equality. The database enforces the same rule through `trip_identity_key`, a
+partial unique index declared NULLS NOT DISTINCT.
+
+A DELETED Trip releases its identity, which is why the index is partial.
+
+---
+
+# Document Lifecycle
+
+The LATEST document decides what a Trip looks like.
+
+Documents do not arrive in the order they were sent, so the current state
+follows the last document that arrived for the Trip's identity — not the order
+they were processed in.
+
+Arrival order is ImportedEmail.receivedAt, falling back to PdfDocument.uploadedAt
+for a document uploaded by hand.
+
+A CANCELLED Trip is reopened by a later NEW or UPDATE for the same identity, and
+that document's parser-controlled fields are applied.
+
+A CLOSED Trip refuses every document. Finished, priced work is never rewritten.
+
+A NEW arriving for an identity that already exists is applied to that Trip
+rather than refused: it restates the order. It writes no field-level change set
+and never becomes the Trip's latest update.
+
+An UPDATE naming a DIFFERENT container is a different identity. It never
+rewrites the container number of the Trip it did not name; with no Trip for that
+identity it creates one, by the existing UPDATE-creates-a-Trip rule.
+
+Every accepted document is retained. Exactly one is EFFECTIVE: the latest
+applied transport document by arrival time. A refused document and a Cost
+Confirmation are never effective.
+
+---
+
+# Cost Confirmation Matching
+
+A Cost Confirmation is matched by exact bookingNumber only.
+
+Its container reference is printed in a different format from a transport
+order's, and some confirmations print none, so it cannot identify a Trip.
+
+When more than one non-deleted Trip holds the booking number, the confirmation
+is REFUSED rather than attached to one of them. It carries money, and the wrong
+leg of a booking is a silent invoicing error.
+
+---
+
 # Driver Assignment
 
 The Driver of a Trip is primarily resolved from the active VehicleAssignment for the Trip's assigned Vehicle on the Trip's planning date.

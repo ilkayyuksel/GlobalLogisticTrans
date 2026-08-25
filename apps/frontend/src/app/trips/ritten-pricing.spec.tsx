@@ -1,4 +1,4 @@
-import { screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import { request } from "@/lib/api/client";
@@ -86,6 +86,10 @@ function snapshotCalls() {
 
 beforeEach(() => {
   requestMock.mockReset();
+  // The language is stored, so a test that switches it must not leak into the
+  // next one — every assertion here reads Dutch labels.
+  window.localStorage.clear();
+  document.documentElement.classList.remove("dark");
 });
 
 describe("showing prices in Ritten", () => {
@@ -292,10 +296,12 @@ describe("keeping the displayed prices current", () => {
       await screen.findByRole("button", { name: "Wachttijd in minuten" }),
     );
 
-    await userEvent.clear(screen.getByLabelText("uur"));
-    await userEvent.type(screen.getByLabelText("uur"), "2");
-    await userEvent.clear(screen.getByLabelText("min"));
-    await userEvent.type(screen.getByLabelText("min"), "30");
+    fireEvent.change(screen.getByLabelText("Begin"), {
+      target: { value: "10:00" },
+    });
+    fireEvent.change(screen.getByLabelText("Eind"), {
+      target: { value: "12:30" },
+    });
     await userEvent.click(screen.getByRole("button", { name: "Opslaan" }));
 
     await waitFor(() => {
@@ -461,14 +467,85 @@ describe("the confirmed cost in Ritten", () => {
     ).toBeInTheDocument();
   });
 
-  /** It is money: it follows the pricing toggle like every other amount. */
-  it("is hidden while prices are hidden", async () => {
+  /**
+   * It does NOT follow the pricing toggle.
+   *
+   * A confirmation is the sender's answer to a waiting time the operator
+   * reported, and it is checked while working the list — not only when prices
+   * are turned on to look at margins. So the column is operational and always
+   * there, while staying read-only.
+   */
+  it("stays visible while prices are hidden", async () => {
     respondWith(requestMock, { trips: buildPage([CONFIRMED]) });
     renderRitten();
     await screen.findByText("ANRDUB2789089");
 
-    expect(screen.queryByText("CC4132482")).toBeNull();
-    expect(screen.queryByRole("columnheader", { name: "CC" })).toBeNull();
+    expect(screen.getByText("CC4132482")).toBeInTheDocument();
+    expect(screen.getByText("25.00")).toBeInTheDocument();
+    expect(
+      screen.getByRole("columnheader", { name: "CC" }),
+    ).toBeInTheDocument();
+  });
+
+  /** And it costs no request of its own: it travels on the Trip. */
+  it("asks the backend for nothing extra to show it", async () => {
+    respondWith(requestMock, { trips: buildPage([CONFIRMED]) });
+    renderRitten();
+    await screen.findByText("CC4132482");
+
+    expect(
+      requestMock.mock.calls.filter(([path]) =>
+        String(path).includes("cost-confirmation"),
+      ),
+    ).toHaveLength(0);
+  });
+
+  /** Beside the buttons, and never an editable control. */
+  it("sits with the operational columns, not among the prices", async () => {
+    respondWith(requestMock, { trips: buildPage([CONFIRMED]) });
+    renderRitten();
+    await screen.findByText("CC4132482");
+
+    const headers = screen
+      .getAllByRole("columnheader")
+      .map((header) => header.textContent);
+
+    expect(headers.indexOf("CC")).toBe(headers.indexOf("Acties") + 1);
+    expect(headers).not.toContain("Tarief");
+  });
+
+  it("offers no control to change it", async () => {
+    respondWith(requestMock, { trips: buildPage([CONFIRMED]) });
+    renderRitten();
+    const cell = (await screen.findByText("CC4132482")).closest(
+      "td",
+    ) as HTMLElement;
+
+    expect(within(cell).queryByRole("button")).toBeNull();
+    expect(within(cell).queryByRole("textbox")).toBeNull();
+  });
+
+  it("is translated", async () => {
+    window.localStorage.setItem("tms.language", "tr");
+    respondWith(requestMock, { trips: buildPage([CONFIRMED]) });
+    renderRitten();
+
+    await screen.findByText("CC4132482");
+    expect(
+      screen.getByRole("columnheader", { name: "CC" }),
+    ).toBeInTheDocument();
+  });
+
+  it.each(["light", "dark"])("uses design tokens in %s mode", async (theme) => {
+    document.documentElement.classList.toggle("dark", theme === "dark");
+    respondWith(requestMock, { trips: buildPage([CONFIRMED]) });
+    renderRitten();
+
+    const cell = (await screen.findByText("CC4132482")).closest(
+      "td",
+    ) as HTMLElement;
+
+    expect(cell.innerHTML).not.toMatch(/#[0-9a-f]{3,8}\b/i);
   });
 
   it("shows the empty marker for a Trip with nothing confirmed", async () => {

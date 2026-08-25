@@ -402,6 +402,83 @@ export class TripService {
   }
 
   /**
+   * Marks several Trips CLOSED in one operation.
+   *
+   * ── THE SAME RULE, APPLIED TO EACH ────────────────────────────────────────
+   * There is no second lifecycle here. Every Trip is checked with
+   * `assertTransitionAllowed`, the same state machine the single-Trip endpoint
+   * uses, and a Trip already CLOSED is left alone exactly as `changeStatus`
+   * leaves it — asking for the status something already has is not a change.
+   *
+   * ── ALL OR NOTHING ────────────────────────────────────────────────────────
+   * Every Trip is validated BEFORE anything is written, and the writes share one
+   * transaction. So a selection containing one cancelled Trip closes none of
+   * them and says which one was in the way, rather than closing four and
+   * leaving the operator to work out what happened to the fifth.
+   *
+   * That is the convention this codebase already has for a multi-Trip
+   * operation: grouping is one transaction, "either every Trip joins or none
+   * does", for the same reason.
+   *
+   * ── PRICING IS NOT PART OF IT ─────────────────────────────────────────────
+   * Closing announces itself once per Trip after the commit, and pricing
+   * happens on that announcement — outside this transaction, as it already does
+   * for a single Trip. A Trip whose route is not configured still closes: the
+   * absence of a price is a configuration fact to look at later, never a reason
+   * to refuse an operator's completion.
+   * ──────────────────────────────────────────────────────────────────────────
+   */
+  async completeMany(tripIds: readonly string[]): Promise<TripResponseDto[]> {
+    const trips = await this.repository.findManyByIds(tripIds);
+
+    this.assertAllTripsExist(tripIds, trips);
+
+    // Checked in full first: a refusal must leave every Trip untouched.
+    const toClose = trips.filter((trip) => trip.status !== TripStatus.CLOSED);
+
+    for (const trip of toClose) {
+      this.assertTransitionAllowed(trip.status, TripStatus.CLOSED);
+    }
+
+    const closed = await this.repository.runInTransaction(
+      async (repository) => {
+        const written: Trip[] = [];
+
+        for (const trip of toClose) {
+          written.push(await repository.setStatus(trip.id, TripStatus.CLOSED));
+        }
+
+        return written;
+      },
+    );
+
+    this.logger.log("Trips completed", {
+      tripIds: trips.map((trip) => trip.id),
+      closedCount: closed.length,
+      alreadyClosedCount: trips.length - closed.length,
+    });
+
+    /*
+     * After the commit, one announcement per Trip that actually moved — the
+     * same event a single completion publishes, so pricing behaves identically
+     * however the Trip was closed.
+     */
+    for (const trip of closed) {
+      await this.announceIfClosed(trip);
+    }
+
+    // Every requested Trip, in the order the caller asked for them, whether it
+    // moved now or was already closed.
+    const byId = new Map(
+      [...trips, ...closed].map((trip) => [trip.id, trip] as const),
+    );
+
+    return this.toResponses(
+      tripIds.map((id) => byId.get(id) as Trip),
+    );
+  }
+
+  /**
    * Publishes the fact that a Trip has closed, once it truly has.
    *
    * Deliberately AFTER the transaction has committed and after the status log.

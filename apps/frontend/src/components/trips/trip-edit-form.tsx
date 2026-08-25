@@ -12,9 +12,8 @@ import type { Trip, Vehicle } from "@/lib/api/types";
 import { toFleetOptions, type FleetOption } from "@/lib/fleet-options";
 import { useTranslation } from "@/lib/i18n/language-provider";
 import {
-  MINUTES_PER_HOUR,
-  parseWaitingTime,
-  toWaitingTimeParts,
+  formatWaitingTime,
+  waitingWindowMinutes,
 } from "@/lib/waiting-time";
 
 /**
@@ -49,35 +48,33 @@ interface FormValues {
   containerNumber: string;
   planningDate: string;
   vehicleId: string;
-  /* Hours and minutes on screen; one integer in the database. */
-  waitingHours: string;
-  waitingMinutes: string;
+  /* Two clock times on screen; one integer in the database. */
+  waitingBegin: string;
+  waitingEnd: string;
   distanceKm: string;
   executionDatetime: string;
   internalNotes: string;
 }
 
 /**
- * The stored minutes as the two fields a person fills in.
+ * The stored minutes, as the table and the export read them.
  *
  * Strings because that is what an input holds; the conversion itself is
  * shared with the Ritten table so the two cannot disagree.
  */
-function waitingParts(trip: Trip): { hours: string; minutes: string } | null {
-  const parts = toWaitingTimeParts(trip.waitingTimeMinutes);
-
-  return parts
-    ? { hours: String(parts.hours), minutes: String(parts.minutes) }
-    : null;
-}
-
 function toFormValues(trip: Trip): FormValues {
   return {
     containerNumber: trip.containerNumber ?? "",
     planningDate: trip.planningDate ?? "",
     vehicleId: trip.vehicleId ?? NONE,
-    waitingHours: waitingParts(trip)?.hours ?? "",
-    waitingMinutes: waitingParts(trip)?.minutes ?? "",
+    /*
+     * Deliberately EMPTY. The Trip stores a DURATION and never stored the two
+     * clock times it was read from, so there is nothing to reconstruct — and
+     * inventing "10:00 → 12:15" out of 135 minutes would show times nobody
+     * ever read. The existing duration is shown beside the fields instead.
+     */
+    waitingBegin: "",
+    waitingEnd: "",
     distanceKm: trip.distanceKm ?? "",
     // The input needs `YYYY-MM-DDTHH:mm`; the backend sends a full ISO string.
     executionDatetime: trip.executionDatetime
@@ -211,23 +208,27 @@ export function TripEditForm({
               </span>
               <div className="flex items-end gap-2">
                 <TextField
-                  id="waitingHours"
-                  label={t("ritten.waiting.hours")}
-                  type="number"
-                  value={values.waitingHours}
-                  onChange={(value) => update({ waitingHours: value })}
-                  min={0}
+                  id="waitingBegin"
+                  label={t("ritten.waiting.begin")}
+                  type="time"
+                  value={values.waitingBegin}
+                  onChange={(value) => update({ waitingBegin: value })}
                 />
                 <TextField
-                  id="waitingMinutes"
-                  label={t("ritten.waiting.minutes")}
-                  type="number"
-                  value={values.waitingMinutes}
-                  onChange={(value) => update({ waitingMinutes: value })}
-                  min={0}
-                  max={MINUTES_PER_HOUR - 1}
+                  id="waitingEnd"
+                  label={t("ritten.waiting.end")}
+                  type="time"
+                  value={values.waitingEnd}
+                  onChange={(value) => update({ waitingEnd: value })}
                 />
               </div>
+
+              <WaitingTimeSummary
+                begin={values.waitingBegin}
+                end={values.waitingEnd}
+                storedMinutes={trip.waitingTimeMinutes}
+              />
+
               <p className="mt-1 text-xs text-muted">
                 {t("tripDetail.edit.waitingTimeHint")}
               </p>
@@ -327,9 +328,14 @@ function toPayload(values: FormValues): UpdateTripPayload {
     // Trip that still carries an old override keeps it rather than having it
     // silently cleared by an unrelated edit.
     vehicleId: values.vehicleId === NONE ? null : values.vehicleId,
-    waitingTimeMinutes: parseWaitingTime(
-      values.waitingHours,
-      values.waitingMinutes,
+    /*
+     * The window becomes the minutes the column stores. Blank on both sides
+     * means "not entered here", and the Trip keeps whatever it already had —
+     * see `toUpdatePayload`, which leaves the field out entirely then.
+     */
+    waitingTimeMinutes: waitingWindowMinutes(
+      values.waitingBegin,
+      values.waitingEnd,
     ).totalMinutes,
     distanceKm: emptyToNullNumber(values.distanceKm),
     executionDatetime: values.executionDatetime
@@ -337,6 +343,48 @@ function toPayload(values: FormValues): UpdateTripPayload {
       : null,
     internalNotes: emptyToNull(values.internalNotes),
   };
+}
+
+/**
+ * The duration these two times describe, and the one already stored.
+ *
+ * Two different facts, so both are shown. The stored value came from an earlier
+ * edit — possibly one made when the editor still asked for hours and minutes —
+ * and the Trip never kept the clock times behind it. Saying so is what stops an
+ * operator wondering why the fields are empty on a Trip that clearly waited.
+ *
+ * The formatting is `formatWaitingTime`, the same function the table column and
+ * the Excel export use: one vocabulary for a duration, in one place.
+ */
+function WaitingTimeSummary({
+  begin,
+  end,
+  storedMinutes,
+}: {
+  begin: string;
+  end: string;
+  storedMinutes: number | null;
+}) {
+  const t = useTranslation();
+  const window = waitingWindowMinutes(begin, end);
+  const entered = !window.error && window.totalMinutes !== null;
+
+  return (
+    <div className="mt-1 space-y-0.5">
+      <p className="text-xs text-muted">
+        {t("ritten.waiting.calculated")}:{" "}
+        <span className="font-medium text-foreground">
+          {entered
+            ? formatWaitingTime(window.totalMinutes)
+            : t("ritten.value.empty")}
+        </span>
+      </p>
+
+      {!entered && storedMinutes !== null ? (
+        <p className="text-[11px] text-muted">{t("ritten.waiting.legacy")}</p>
+      ) : null}
+    </div>
+  );
 }
 
 /** Plate first, because that is how a planner refers to a truck. */

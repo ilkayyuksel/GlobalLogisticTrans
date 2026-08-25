@@ -37,12 +37,13 @@ import { listActiveVehicles } from "@/lib/api/fleet";
 import { fetchPdfDocument } from "@/lib/api/pdf-documents";
 import {
   fetchPricingSnapshots,
-  getTripPricing,
   reprocessTripPricing,
 } from "@/lib/api/pricing";
 import { getRittenCounts } from "@/lib/api/ritten";
+import { canComplete } from "@/lib/trip-actions";
 import {
   changeTripStatus,
+  completeTrips,
   createTrip,
   createTripGroup,
   deleteTrip,
@@ -126,8 +127,6 @@ export default function RittenPage() {
 
   const [busyTripId, setBusyTripId] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<Feedback | null>(null);
-  /** CLOSED Trips found to have no pricing snapshot after closing. */
-  const [pricingAttention, setPricingAttention] = useState<Set<string>>(new Set());
 
   const [sort, setSort] = useState<RittenSort>(DEFAULT_RITTEN_SORT);
   /*
@@ -343,38 +342,31 @@ export default function RittenPage() {
     }
   }
 
-  /**
-   * Closing may or may not produce a price.
+  /*
+   * ── WHY NOTHING IS CHECKED AFTER CLOSING ──────────────────────────────────
+   * Completing used to read the Trip's pricing straight afterwards and mark the
+   * row when there was none. It read as a failure of the completion, which it
+   * never was: a Trip whose route is not configured is legitimately finished
+   * work, and the operator had done nothing wrong.
    *
-   * Pricing runs automatically when a Trip closes, but it can fail — a route
-   * that is not configured, for instance. The Trip is CLOSED either way and is
-   * never reopened to hide that; instead the row says so and Reprocess stays
-   * available. This is the only place a Trip's pricing is read, so the list
-   * itself never makes a request per row.
+   * The absence of a price is still visible where prices are — the pricing
+   * cells stay empty, and Opnieuw verwerken stays available — but it is a
+   * configuration fact to look at, not an error to report at the moment
+   * somebody ticks a Trip off.
+   * ──────────────────────────────────────────────────────────────────────────
    */
-  async function noteMissingPricing(trip: Trip): Promise<void> {
-    try {
-      const pricing = await getTripPricing(trip.id);
-
-      setPricingAttention((current) => {
-        const next = new Set(current);
-
-        if (pricing) {
-          next.delete(trip.id);
-        } else {
-          next.add(trip.id);
-        }
-
-        return next;
-      });
-    } catch {
-      // A failed check must not turn a successful close into an error.
-    }
-  }
 
   const visibleTrips = trips.data?.items ?? [];
   const selectedTrips = visibleTrips.filter((trip) =>
     selectedTripIds.has(trip.id),
+  );
+  /*
+   * Which of the selection completing would move. The backend refuses the whole
+   * request if it names a Trip that cannot be closed, so only the ones it can
+   * are sent — and the button is off when that leaves nothing to do.
+   */
+  const completableSelection = selectedTrips.filter((trip) =>
+    canComplete(trip),
   );
 
   function toggleSelection(tripId: string): void {
@@ -406,6 +398,39 @@ export default function RittenPage() {
     setFeedback({ messageKey: "ritten.group.created", isError: false });
   }
 
+  /**
+   * Marks every selected Trip that can be closed as CLOSED.
+   *
+   * ONE request for the whole selection. The backend applies the same rule to
+   * each and refuses the lot if any Trip cannot be closed, so nothing here
+   * loops or decides — it sends the ids and reports what came back.
+   *
+   * No confirmation is asked for. Completing is routine, it is visible in the
+   * rows a moment later, and a dialog in front of a routine action is one
+   * people learn to dismiss without reading.
+   */
+  async function completeSelected(): Promise<void> {
+    setFeedback(null);
+
+    try {
+      await completeTrips(completableSelection.map((trip) => trip.id));
+
+      trips.reload();
+      counts.reload();
+      setSelectedTripIds(new Set());
+      setFeedback({
+        messageKey: "ritten.feedback.completed",
+        isError: false,
+      });
+    } catch (error: unknown) {
+      setFeedback({
+        messageKey: "ritten.feedback.completeFailed",
+        detail: userFacingMessage(error),
+        isError: true,
+      });
+    }
+  }
+
   const actions: RittenActions = {
     saveTrip: async (tripId, payload: UpdateTripPayload) => {
       const trip = trips.data?.items.find((item) => item.id === tripId);
@@ -423,27 +448,17 @@ export default function RittenPage() {
         "ritten.feedback.statusChanged",
       );
 
-      if (status === "CLOSED") {
-        await noteMissingPricing(trip);
-      }
     },
     deleteTrip: (trip) =>
       runMutation(trip, () => deleteTrip(trip.id), "ritten.feedback.deleted"),
     restoreTrip: (trip) =>
       runMutation(trip, () => restoreTrip(trip.id), "ritten.feedback.restored"),
-    reprocessPricing: async (trip) => {
-      await runMutation(
+    reprocessPricing: (trip) =>
+      runMutation(
         trip,
         () => reprocessTripPricing(trip.id),
         "ritten.feedback.reprocessed",
-      );
-
-      setPricingAttention((current) => {
-        const next = new Set(current);
-        next.delete(trip.id);
-        return next;
-      });
-    },
+      ),
     unlinkFromGroup: (trip) =>
       runMutation(
         trip,
@@ -568,11 +583,14 @@ export default function RittenPage() {
           selectedCount={selectedTripIds.size}
           visibleCount={visibleTrips.length}
           canGroup={selectedTrips.length >= MINIMUM_TRIPS_PER_GROUP}
+          canComplete={completableSelection.length > 0}
+          isBusy={busyTripId !== null}
           onSelectAllVisible={() =>
             setSelectedTripIds(new Set(visibleTrips.map((trip) => trip.id)))
           }
           onClear={() => setSelectedTripIds(new Set())}
           onGroup={() => setIsGroupDialogOpen(true)}
+          onComplete={() => void completeSelected()}
         />
       ) : null}
 
@@ -651,7 +669,6 @@ export default function RittenPage() {
                   actions={actions}
                   vehicles={vehicles.data ? vehicles.data.items : []}
                   busyTripId={busyTripId}
-                  pricingAttentionTripIds={pricingAttention}
                   selectedTripIds={selectedTripIds}
                   onToggleSelection={toggleSelection}
                   showPricing={showPricing}

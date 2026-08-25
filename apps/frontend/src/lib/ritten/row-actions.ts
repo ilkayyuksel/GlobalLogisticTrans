@@ -38,10 +38,21 @@ export const STATUS_LABEL_KEYS: Record<ChangeableTripStatus, TranslationKey> = {
  *
  * Reopening needs none: it is the undo of cancelling.
  */
+/**
+ * The transitions that ask before they happen.
+ *
+ * COMPLETING IS DELIBERATELY ABSENT. It is a state an operator sets a dozen
+ * times an afternoon, the row says so immediately afterwards, and a dialog in
+ * front of a routine action is one people learn to dismiss without reading —
+ * which is worse protection than none, because it trains the habit that then
+ * dismisses the cancellation dialog too.
+ *
+ * Cancelling still asks. It is not routine, and it is the one an operator would
+ * regret.
+ */
 export const STATUS_CONFIRM_KEYS: Partial<
   Record<ChangeableTripStatus, TranslationKey>
 > = {
-  CLOSED: "ritten.confirm.close",
   CANCELLED: "ritten.confirm.cancel",
 };
 

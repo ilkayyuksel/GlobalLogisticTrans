@@ -13,22 +13,35 @@ import { useTranslation } from "@/lib/i18n/language-provider";
  * The toolbar only appears once something is selected — an empty row of
  * disabled buttons above every list would be permanent clutter for an action
  * used occasionally.
+ *
+ * Completing asks for no confirmation. It is a state an operator sets a dozen
+ * times an afternoon, it is visible in the row immediately afterwards, and a
+ * dialog in front of a routine action is one people learn to dismiss without
+ * reading — which is worse than none at all. Cancelling and deleting still ask,
+ * because those are not routine.
  */
 export function SelectionToolbar({
   selectedCount,
   visibleCount,
   canGroup,
+  canComplete,
+  isBusy,
   onSelectAllVisible,
   onClear,
   onGroup,
+  onComplete,
 }: {
   selectedCount: number;
   visibleCount: number;
   /** False below two Trips: one Trip is not a group. */
   canGroup: boolean;
+  /** False when nothing in the selection is in a state that can be closed. */
+  canComplete: boolean;
+  isBusy: boolean;
   onSelectAllVisible: () => void;
   onClear: () => void;
   onGroup: () => void;
+  onComplete: () => void;
 }) {
   const t = useTranslation();
 
@@ -58,10 +71,20 @@ export function SelectionToolbar({
       <button
         type="button"
         onClick={onGroup}
-        disabled={!canGroup}
-        className="ml-auto rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-white hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-50"
+        disabled={!canGroup || isBusy}
+        className="ml-auto rounded-md border border-border bg-card px-3 py-1.5 text-sm font-medium text-foreground hover:bg-hover disabled:cursor-not-allowed disabled:opacity-50"
       >
         {t("ritten.group.create")}
+      </button>
+
+      {/* Directly: no confirmation, and the rows say what happened. */}
+      <button
+        type="button"
+        onClick={onComplete}
+        disabled={!canComplete || isBusy}
+        className="rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-white hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        {t("ritten.select.complete")}
       </button>
     </div>
   );

@@ -6,7 +6,11 @@ import { ApiError, userFacingMessage } from "@/lib/api/client";
 import type { CreateTripPayload } from "@/lib/api/trips";
 import type { Vehicle } from "@/lib/api/types";
 import { useTranslation } from "@/lib/i18n/language-provider";
-import { parseWaitingTime, type WaitingTimeError } from "@/lib/waiting-time";
+import {
+  formatWaitingTime,
+  waitingWindowMinutes,
+  type WaitingWindowError,
+} from "@/lib/waiting-time";
 import { RittenDialog } from "./ritten-dialog";
 
 /**
@@ -45,7 +49,6 @@ const TERMINAL_MAX_LENGTH = 200;
 const DESTINATION_MAX_LENGTH = 200;
 const INTERNAL_NOTES_MAX_LENGTH = 2000;
 const DISTANCE_KM_MAX = 999_999.99;
-const MAX_MINUTES = 59;
 
 interface FormValues {
   bookingNumber: string;
@@ -58,8 +61,9 @@ interface FormValues {
   terminal: string;
   destinationCity: string;
   destinationCountry: string;
-  waitingHours: string;
-  waitingMinutes: string;
+  /* Two clock times on screen; one integer in the database. */
+  waitingBegin: string;
+  waitingEnd: string;
   distanceKm: string;
   internalNotes: string;
 }
@@ -75,8 +79,8 @@ const EMPTY_FORM: FormValues = {
   terminal: "",
   destinationCity: "",
   destinationCountry: "",
-  waitingHours: "",
-  waitingMinutes: "",
+  waitingBegin: "",
+  waitingEnd: "",
   distanceKm: "",
   internalNotes: "",
 };
@@ -100,9 +104,9 @@ export function toCreatePayload(values: FormValues): CreateTripPayload {
     terminal: emptyToNull(values.terminal),
     destinationCity: emptyToNull(values.destinationCity),
     destinationCountry: emptyToNull(values.destinationCountry),
-    waitingTimeMinutes: parseWaitingTime(
-      values.waitingHours,
-      values.waitingMinutes,
+    waitingTimeMinutes: waitingWindowMinutes(
+      values.waitingBegin,
+      values.waitingEnd,
     ).totalMinutes,
     distanceKm: distance === "" ? null : Number(distance),
     internalNotes: emptyToNull(values.internalNotes),
@@ -134,7 +138,7 @@ export function NewTripDialog({
    * it to 1h30 — what someone typed is what they meant, and quietly changing it
    * is worse than saying it is wrong.
    */
-  const waiting = parseWaitingTime(values.waitingHours, values.waitingMinutes);
+  const waiting = waitingWindowMinutes(values.waitingBegin, values.waitingEnd);
 
   async function submit(event: React.FormEvent): Promise<void> {
     event.preventDefault();
@@ -297,36 +301,46 @@ export function NewTripDialog({
             <span className="mb-1 block text-xs font-medium uppercase tracking-wide text-muted">
               {t("ritten.column.waitingTime")}
             </span>
+            {/*
+              The two clock times the waiting was read from, not a duration.
+              These are NOT the transport order's start and end times, which
+              are their own fields above and mean something else entirely.
+            */}
             <div className="grid grid-cols-2 gap-3">
-              <Field label={t("ritten.waiting.hours")} htmlFor="new-waiting-hours">
+              <Field
+                label={t("ritten.waiting.beginField")}
+                htmlFor="new-waiting-begin"
+              >
                 <input
-                  id="new-waiting-hours"
-                  type="number"
-                  min={0}
-                  value={values.waitingHours}
+                  id="new-waiting-begin"
+                  type="time"
+                  value={values.waitingBegin}
                   onChange={(event) =>
-                    update({ waitingHours: event.target.value })
+                    update({ waitingBegin: event.target.value })
                   }
                   className={INPUT_CLASS}
                 />
               </Field>
-              <Field
-                label={t("ritten.waiting.minutes")}
-                htmlFor="new-waiting-minutes"
-              >
+              <Field label={t("ritten.waiting.endField")} htmlFor="new-waiting-end">
                 <input
-                  id="new-waiting-minutes"
-                  type="number"
-                  min={0}
-                  max={MAX_MINUTES}
-                  value={values.waitingMinutes}
-                  onChange={(event) =>
-                    update({ waitingMinutes: event.target.value })
-                  }
+                  id="new-waiting-end"
+                  type="time"
+                  value={values.waitingEnd}
+                  onChange={(event) => update({ waitingEnd: event.target.value })}
                   className={INPUT_CLASS}
                 />
               </Field>
             </div>
+
+            <p className="mt-1 text-xs text-muted">
+              {t("ritten.waiting.calculated")}:{" "}
+              <span className="font-medium text-foreground">
+                {waiting.error || waiting.totalMinutes === null
+                  ? t("ritten.value.empty")
+                  : formatWaitingTime(waiting.totalMinutes)}
+              </span>
+            </p>
+
             {waiting.error ? (
               <p role="alert" className="mt-1 text-xs font-medium text-danger">
                 {t(waitingErrorKey(waiting.error))}
@@ -388,8 +402,10 @@ const INPUT_CLASS =
   "w-full rounded-md border border-border bg-card px-3 py-1.5 text-sm text-foreground";
 
 /** The shared waiting-time utility's own reasons, translated. */
-function waitingErrorKey(error: WaitingTimeError) {
-  return `ritten.waiting.${error === "hoursNotWholeNumber" ? "hoursWhole" : error === "hoursNegative" ? "hoursPositive" : error === "minutesNotWholeNumber" ? "minutesWhole" : "minutesRange"}` as const;
+function waitingErrorKey(error: WaitingWindowError) {
+  return error === "beginInvalid"
+    ? ("ritten.waiting.beginRequired" as const)
+    : ("ritten.waiting.endRequired" as const);
 }
 
 function Section({

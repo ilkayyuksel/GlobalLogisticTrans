@@ -302,6 +302,8 @@ const nl = {
 
   "ritten.feedback.saved": "Rit bijgewerkt",
   "ritten.feedback.statusChanged": "Status gewijzigd",
+  "ritten.feedback.completed": "Ritten afgewerkt",
+  "ritten.feedback.completeFailed": "Afwerken is niet gelukt",
   "ritten.feedback.deleted": "Rit verwijderd",
   "ritten.feedback.restored": "Rit hersteld",
   "ritten.feedback.reprocessed": "Prijs opnieuw berekend",
@@ -309,8 +311,6 @@ const nl = {
   "ritten.feedback.customRemoved": "Custom waarde verwijderd",
   "ritten.feedback.failed": "Actie mislukt",
   "ritten.feedback.dismiss": "Sluiten",
-  "ritten.feedback.pricingAttention":
-    "Deze rit is afgewerkt, maar er is geen prijsberekening. Gebruik Opnieuw verwerken.",
 
   "ritten.select.row": "Selecteer rit",
   "ritten.sort.label": "Sorteren op",
@@ -331,12 +331,15 @@ const nl = {
   "ritten.new.created": "Rit aangemaakt",
   "ritten.select.allVisible": "Selecteer alle zichtbare ritten",
   "ritten.select.clear": "Selectie wissen",
+  "ritten.select.complete": "Afwerken",
   "ritten.select.count": "geselecteerd",
   "ritten.group.create": "Groepeer geselecteerde ritten",
   "ritten.group.confirmTitle": "Ritten groeperen",
   "ritten.group.confirmDescription":
     "Deze ritten worden samengevoegd tot één groep. Dit is een handmatige groep, geen combinatie uit een PDF.",
   "ritten.group.confirmAction": "Groeperen",
+  "ritten.group.crossDay":
+    "Deze ritten staan op verschillende dagen. Dat mag: elke rit houdt zijn eigen planningsdatum, voertuig en chauffeur.",
   "ritten.group.created": "Groep aangemaakt",
   "ritten.group.tripCount": "ritten in deze groep",
   "ritten.group.unlinked": "Rit losgekoppeld van de groep",
@@ -571,6 +574,20 @@ const nl = {
 
   "ritten.waiting.hours": "uur",
   "ritten.waiting.minutes": "min",
+  "ritten.waiting.begin": "Begin",
+  "ritten.waiting.end": "Eind",
+  /*
+   * The same two moments, named in full for the one form that also asks for
+   * the transport order's own start and end times. Two fields called "Begin"
+   * on one screen would be two different things with one name.
+   */
+  "ritten.waiting.beginField": "Wachttijd begin",
+  "ritten.waiting.endField": "Wachttijd eind",
+  "ritten.waiting.calculated": "Berekend",
+  "ritten.waiting.beginRequired": "Vul een begintijd in, bijvoorbeeld 10:00.",
+  "ritten.waiting.endRequired": "Vul een eindtijd in, bijvoorbeeld 12:30.",
+  "ritten.waiting.legacy":
+    "Deze wachttijd is als duur ingevoerd; de oorspronkelijke begin- en eindtijd zijn niet bewaard. Vul hieronder een nieuwe begin- en eindtijd in om ze te vervangen.",
   "ritten.waiting.hoursWhole": "Uren moeten een heel getal zijn.",
   "ritten.waiting.hoursPositive": "Uren kunnen niet negatief zijn.",
   "ritten.waiting.minutesWhole": "Minuten moeten een heel getal zijn.",
@@ -1013,6 +1030,8 @@ const tr: Translations = {
 
   "ritten.feedback.saved": "Sefer güncellendi",
   "ritten.feedback.statusChanged": "Durum değişti",
+  "ritten.feedback.completed": "Seferler tamamlandı",
+  "ritten.feedback.completeFailed": "Tamamlama başarısız oldu",
   "ritten.feedback.deleted": "Sefer silindi",
   "ritten.feedback.restored": "Sefer geri alındı",
   "ritten.feedback.reprocessed": "Fiyat yeniden hesaplandı",
@@ -1020,8 +1039,6 @@ const tr: Translations = {
   "ritten.feedback.customRemoved": "Özel değer kaldırıldı",
   "ritten.feedback.failed": "İşlem başarısız",
   "ritten.feedback.dismiss": "Kapat",
-  "ritten.feedback.pricingAttention":
-    "Bu sefer tamamlandı ama fiyat hesabı yok. Yeniden hesapla'yı kullanın.",
 
   "ritten.select.row": "Seferi seç",
   "ritten.sort.label": "Sıralama",
@@ -1042,12 +1059,15 @@ const tr: Translations = {
   "ritten.new.created": "Sefer oluşturuldu",
   "ritten.select.allVisible": "Görünen tüm seferleri seç",
   "ritten.select.clear": "Seçimi temizle",
+  "ritten.select.complete": "Tamamla",
   "ritten.select.count": "seçildi",
   "ritten.group.create": "Seçili seferleri grupla",
   "ritten.group.confirmTitle": "Seferleri grupla",
   "ritten.group.confirmDescription":
     "Bu seferler tek bir grupta birleştirilir. Bu elle oluşturulmuş bir gruptur, PDF'ten gelen bir kombinasyon değildir.",
   "ritten.group.confirmAction": "Grupla",
+  "ritten.group.crossDay":
+    "Bu seferler farklı günlerde. Bu mümkündür: her sefer kendi planlama tarihini, aracını ve şoförünü korur.",
   "ritten.group.created": "Grup oluşturuldu",
   "ritten.group.tripCount": "sefer bu grupta",
   "ritten.group.unlinked": "Sefer gruptan çıkarıldı",
@@ -1280,6 +1300,15 @@ const tr: Translations = {
 
   "ritten.waiting.hours": "saat",
   "ritten.waiting.minutes": "dk",
+  "ritten.waiting.begin": "Başlangıç",
+  "ritten.waiting.end": "Bitiş",
+  "ritten.waiting.beginField": "Bekleme başlangıcı",
+  "ritten.waiting.endField": "Bekleme bitişi",
+  "ritten.waiting.calculated": "Hesaplanan",
+  "ritten.waiting.beginRequired": "Bir başlangıç saati girin, örneğin 10:00.",
+  "ritten.waiting.endRequired": "Bir bitiş saati girin, örneğin 12:30.",
+  "ritten.waiting.legacy":
+    "Bu bekleme süresi süre olarak girilmiş; özgün başlangıç ve bitiş saatleri saklanmadı. Değiştirmek için aşağıya yeni bir başlangıç ve bitiş saati girin.",
   "ritten.waiting.hoursWhole": "Saat tam sayı olmalı.",
   "ritten.waiting.hoursPositive": "Saat negatif olamaz.",
   "ritten.waiting.minutesWhole": "Dakika tam sayı olmalı.",

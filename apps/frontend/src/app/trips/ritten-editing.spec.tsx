@@ -1,4 +1,4 @@
-import { screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import {
@@ -244,35 +244,93 @@ describe("Ritten editing", () => {
       ).toHaveTextContent("1 u 30 min");
     });
 
-    it("opens with the stored value split into hours and minutes", async () => {
+    /**
+     * ── WHY THE FIELDS OPEN EMPTY ─────────────────────────────────────────
+     * The Trip stores a DURATION and never stored the clock times behind it,
+     * so there is nothing to reconstruct. Inventing "10:00 → 12:15" out of 135
+     * minutes would put times on screen that nobody read off a clock; the
+     * stored duration stays visible on the button instead.
+     * ──────────────────────────────────────────────────────────────────────
+     */
+    it("opens with empty times rather than inventing them", async () => {
       await showTrip({ waitingTimeMinutes: 135 });
       await openWaitingTime();
 
-      expect(screen.getByLabelText("uur")).toHaveValue(2);
-      expect(screen.getByLabelText("min")).toHaveValue(15);
+      expect(screen.getByLabelText("Begin")).toHaveValue("");
+      expect(screen.getByLabelText("Eind")).toHaveValue("");
     });
 
-    it("saves hours and minutes as total minutes", async () => {
+    it("turns two clock times into total minutes", async () => {
       await showTrip({ waitingTimeMinutes: null });
       await openWaitingTime();
 
-      await userEvent.clear(screen.getByLabelText("uur"));
-      await userEvent.type(screen.getByLabelText("uur"), "1");
-      await userEvent.clear(screen.getByLabelText("min"));
-      await userEvent.type(screen.getByLabelText("min"), "30");
+      fireEvent.change(screen.getByLabelText("Begin"), {
+        target: { value: "10:00" },
+      });
+      fireEvent.change(screen.getByLabelText("Eind"), {
+        target: { value: "12:30" },
+      });
       await userEvent.click(screen.getByRole("button", { name: "Opslaan" }));
 
       await waitFor(() => {
-        expect(patchCalls()[0][1]?.body).toEqual({ waitingTimeMinutes: 90 });
+        expect(patchCalls()[0][1]?.body).toEqual({ waitingTimeMinutes: 150 });
       });
     });
 
-    it("sends null when both fields are emptied", async () => {
+    /** The window may cross midnight; it is four hours, not minus twenty. */
+    it("handles a window that crosses midnight", async () => {
+      await showTrip({ waitingTimeMinutes: null });
+      await openWaitingTime();
+
+      fireEvent.change(screen.getByLabelText("Begin"), {
+        target: { value: "22:00" },
+      });
+      fireEvent.change(screen.getByLabelText("Eind"), {
+        target: { value: "02:00" },
+      });
+      await userEvent.click(screen.getByRole("button", { name: "Opslaan" }));
+
+      await waitFor(() => {
+        expect(patchCalls()[0][1]?.body).toEqual({ waitingTimeMinutes: 240 });
+      });
+    });
+
+    /** Equal times are zero. A full day would be billed, and nobody meant it. */
+    it("sends zero for two identical times", async () => {
+      await showTrip({ waitingTimeMinutes: null });
+      await openWaitingTime();
+
+      fireEvent.change(screen.getByLabelText("Begin"), {
+        target: { value: "10:00" },
+      });
+      fireEvent.change(screen.getByLabelText("Eind"), {
+        target: { value: "10:00" },
+      });
+      await userEvent.click(screen.getByRole("button", { name: "Opslaan" }));
+
+      await waitFor(() => {
+        expect(patchCalls()[0][1]?.body).toEqual({ waitingTimeMinutes: 0 });
+      });
+    });
+
+    it("shows the duration it will store before it is stored", async () => {
+      await showTrip({ waitingTimeMinutes: null });
+      await openWaitingTime();
+
+      fireEvent.change(screen.getByLabelText("Begin"), {
+        target: { value: "10:00" },
+      });
+      fireEvent.change(screen.getByLabelText("Eind"), {
+        target: { value: "12:30" },
+      });
+
+      expect(await screen.findByText("2 u 30 min")).toBeInTheDocument();
+    });
+
+    it("sends null when both fields are left empty", async () => {
       await showTrip({ waitingTimeMinutes: 45 });
       await openWaitingTime();
 
-      await userEvent.clear(screen.getByLabelText("uur"));
-      await userEvent.clear(screen.getByLabelText("min"));
       await userEvent.click(screen.getByRole("button", { name: "Opslaan" }));
 
       await waitFor(() => {
@@ -280,31 +338,33 @@ describe("Ritten editing", () => {
       });
     });
 
-    /** Refused rather than silently rewritten as 2 u 30 min. */
-    it("refuses 90 minutes instead of normalising it", async () => {
+    /** Half a window is refused, not guessed at: an end alone is not zero. */
+    it("refuses an end time with no beginning", async () => {
       await showTrip({ waitingTimeMinutes: 60 });
       await openWaitingTime();
 
-      await userEvent.clear(screen.getByLabelText("min"));
-      await userEvent.type(screen.getByLabelText("min"), "90");
+      fireEvent.change(screen.getByLabelText("Eind"), {
+        target: { value: "12:30" },
+      });
       await userEvent.click(screen.getByRole("button", { name: "Opslaan" }));
 
       expect(
-        await screen.findByText("Minuten moeten tussen 0 en 59 liggen."),
+        await screen.findByText("Vul een begintijd in, bijvoorbeeld 10:00."),
       ).toBeInTheDocument();
       expect(patchCalls()).toHaveLength(0);
     });
 
-    it("refuses a fractional hour", async () => {
+    it("refuses a beginning with no end", async () => {
       await showTrip({ waitingTimeMinutes: 60 });
       await openWaitingTime();
 
-      await userEvent.clear(screen.getByLabelText("uur"));
-      await userEvent.type(screen.getByLabelText("uur"), "1.5");
+      fireEvent.change(screen.getByLabelText("Begin"), {
+        target: { value: "10:00" },
+      });
       await userEvent.click(screen.getByRole("button", { name: "Opslaan" }));
 
       expect(
-        await screen.findByText("Uren moeten een heel getal zijn."),
+        await screen.findByText("Vul een eindtijd in, bijvoorbeeld 12:30."),
       ).toBeInTheDocument();
       expect(patchCalls()).toHaveLength(0);
     });
@@ -315,7 +375,7 @@ describe("Ritten editing", () => {
 
       await userEvent.click(screen.getByRole("button", { name: "Annuleren" }));
 
-      expect(screen.queryByLabelText("uur")).not.toBeInTheDocument();
+      expect(screen.queryByLabelText("Begin")).not.toBeInTheDocument();
       expect(patchCalls()).toHaveLength(0);
     });
 
@@ -339,8 +399,10 @@ describe("Ritten editing", () => {
         await screen.findByRole("button", { name: "Bekleme süresi (dakika)" }),
       );
 
-      expect(screen.getByLabelText("saat")).toHaveValue(1);
-      expect(screen.getByLabelText("dk")).toHaveValue(30);
+      expect(screen.getByLabelText("Başlangıç")).toBeInTheDocument();
+      expect(screen.getByLabelText("Bitiş")).toBeInTheDocument();
+      // The stored duration keeps its own translated reading behind the editor.
+      expect(screen.getByText(/Hesaplanan/)).toBeInTheDocument();
     });
   });
 

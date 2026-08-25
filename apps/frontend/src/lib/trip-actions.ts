@@ -71,6 +71,17 @@ export function canDelete(trip: Trip): boolean {
   return trip.status === DELETABLE_FROM;
 }
 
+/**
+ * Whether completing this Trip would move it.
+ *
+ * Read from the same transition table the row menu uses, so a bulk selection
+ * offers completion for exactly the Trips a row would offer it for. A Trip
+ * already CLOSED is not "completable" — there is nothing left to do to it.
+ */
+export function canComplete(trip: Trip): boolean {
+  return statusActionsFor(trip).some((action) => action.target === "CLOSED");
+}
+
 export function canRestore(trip: Trip): boolean {
   return trip.status === "DELETED";
 }

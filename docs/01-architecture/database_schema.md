@@ -441,7 +441,8 @@ No `CHECK` on `end_time >= start_time`: the model does not state whether a plann
 | Index | Columns | Type | Purpose |
 |---|---|---|---|
 | PK | `id` | Primary key | |
-| Lookup | `booking_number` | B-tree, **not unique** | Matching `UPDATE:` / `CANCEL:` documents to their Trip. Not unique because a `DELETED` Trip releases its booking number so it can be re-entered; uniqueness among the statuses that hold it is enforced by `TripService` |
+| Lookup | `booking_number` | B-tree, **not unique** | Matching documents to their Trip. Not unique on its own: one booking may carry several containers, and each is its own Trip |
+| `trip_identity_key` | `booking_number`, `container_number` | **UNIQUE**, `NULLS NOT DISTINCT`, `WHERE status <> 'DELETED'` | The Trip's IDENTITY. `NULLS NOT DISTINCT` because an ABSENT container number is part of the identity rather than an unknown — a COLLECTION names none, and `(booking, none)` must identify exactly one Trip. Partial because a `DELETED` Trip releases its identity for re-entry. Hand-written SQL: Prisma can express neither half. `TripService` enforces the same rule so a clash is a domain refusal rather than a constraint violation |
 | Lookup | `planning_date` | B-tree | Daily/weekly planning views and exports |
 | Lookup | `status` | B-tree | Filtering out `DELETED` / `CANCELLED` |
 | Lookup | `status`, `planning_date` | B-tree | Primary planning-board query |

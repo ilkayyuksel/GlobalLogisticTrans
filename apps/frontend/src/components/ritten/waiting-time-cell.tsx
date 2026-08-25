@@ -7,30 +7,31 @@ import { useTranslation } from "@/lib/i18n/language-provider";
 import type { TranslationKey } from "@/lib/i18n/translations";
 import {
   formatWaitingTime,
-  parseWaitingTime,
-  toWaitingTimeParts,
-  type WaitingTimeError,
+  waitingWindowMinutes,
+  type WaitingWindowError,
 } from "@/lib/waiting-time";
 
 /**
- * Waiting time, entered as hours and minutes.
+ * Waiting time, entered as the two clock times it was read from.
  *
- * The database stores one integer — total minutes — and that never changes.
- * This is purely how a person reads and writes it, and the conversion lives in
- * `waiting-time.ts` so the table, this editor and the Trip detail page cannot
- * drift apart.
+ * ── WHY BEGIN AND EIND, NOT A DURATION ──────────────────────────────────────
+ * Nobody measures a duration. A driver notes the time the truck arrived and the
+ * time it left, and subtracting them in your head at the end of a shift is
+ * exactly the step that produces "1 uur 90 min" and mistyped hours. So the
+ * editor asks for the two moments and the duration is computed.
  *
- * Invalid input is REFUSED rather than repaired. "1 uur 90 min" could be read
- * as 2:30, but silently rewriting what someone typed is how a mistyped 9
- * becomes an hour and a half of billed waiting; the editor says what is wrong
- * and lets them correct it.
+ * The database is unchanged: one integer, `waiting_time_minutes`, which is what
+ * is sent and what pricing bills from. The two times are input, not storage —
+ * the Trip does not keep them, and nothing here pretends otherwise.
+ *
+ * A window that crosses midnight is ordinary and is handled: 22:00 → 02:00 is
+ * four hours. Equal times are zero, never a full day — see `waiting-time.ts`.
+ * ────────────────────────────────────────────────────────────────────────────
  */
 
-const ERROR_KEYS: Record<WaitingTimeError, TranslationKey> = {
-  hoursNotWholeNumber: "ritten.waiting.hoursWhole",
-  hoursNegative: "ritten.waiting.hoursPositive",
-  minutesNotWholeNumber: "ritten.waiting.minutesWhole",
-  minutesOutOfRange: "ritten.waiting.minutesRange",
+const ERROR_KEYS: Record<WaitingWindowError, TranslationKey> = {
+  beginInvalid: "ritten.waiting.beginRequired",
+  endInvalid: "ritten.waiting.endRequired",
 };
 
 export function WaitingTimeCell({
@@ -44,32 +45,45 @@ export function WaitingTimeCell({
   onSave: (totalMinutes: number | null) => Promise<void>;
 }) {
   const t = useTranslation();
-  const parts = toWaitingTimeParts(totalMinutes);
 
   const [isEditing, setIsEditing] = useState(false);
-  const [hours, setHours] = useState("");
-  const [minutes, setMinutes] = useState("");
+  const [begin, setBegin] = useState("");
+  const [end, setEnd] = useState("");
   const [isSaving, setIsSaving] = useState(false);
-  const [localError, setLocalError] = useState<WaitingTimeError | null>(null);
+  const [localError, setLocalError] = useState<WaitingWindowError | null>(null);
   const [saveError, setSaveError] = useState<unknown>(null);
-  const hoursRef = useRef<HTMLInputElement>(null);
+  const beginRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (isEditing) {
-      hoursRef.current?.focus();
+      beginRef.current?.focus();
     }
   }, [isEditing]);
 
+  /*
+   * The duration as it stands while typing, so the operator sees what will be
+   * stored before storing it. Errors are not shown here — they belong to the
+   * save, where they can be acted on.
+   */
+  const preview = waitingWindowMinutes(begin, end);
+
   function open(): void {
-    setHours(parts ? String(parts.hours) : "");
-    setMinutes(parts ? String(parts.minutes) : "");
+    /*
+     * Deliberately EMPTY, even for a Trip that already has a waiting time.
+     * The Trip stores a duration and never stored the two times it came from,
+     * so there is nothing to reconstruct — and inventing "10:00 → 12:15" from
+     * 135 minutes would put times on screen that nobody ever read off a clock.
+     * The existing duration stays visible behind this editor.
+     */
+    setBegin("");
+    setEnd("");
     setLocalError(null);
     setSaveError(null);
     setIsEditing(true);
   }
 
   async function save(): Promise<void> {
-    const result = parseWaitingTime(hours, minutes);
+    const result = waitingWindowMinutes(begin, end);
 
     if (result.error) {
       setLocalError(result.error);
@@ -107,29 +121,36 @@ export function WaitingTimeCell({
   return (
     <div className="min-w-44 rounded border border-primary bg-card p-1">
       <div className="flex items-end gap-2">
-        <NumberField
-          id="waiting-hours"
-          ref={hoursRef}
-          label={t("ritten.waiting.hours")}
-          value={hours}
-          min={0}
-          onChange={setHours}
+        <ClockField
+          id="waiting-begin"
+          ref={beginRef}
+          label={t("ritten.waiting.begin")}
+          value={begin}
+          onChange={setBegin}
           onEnter={() => void save()}
           onEscape={() => setIsEditing(false)}
           isDisabled={isSaving}
         />
-        <NumberField
-          id="waiting-minutes"
-          label={t("ritten.waiting.minutes")}
-          value={minutes}
-          min={0}
-          max={59}
-          onChange={setMinutes}
+        <ClockField
+          id="waiting-end"
+          label={t("ritten.waiting.end")}
+          value={end}
+          onChange={setEnd}
           onEnter={() => void save()}
           onEscape={() => setIsEditing(false)}
           isDisabled={isSaving}
         />
       </div>
+
+      {/* What will be stored, in the same words the column uses. */}
+      <p className="mt-1 text-[11px] text-muted">
+        {t("ritten.waiting.calculated")}:{" "}
+        <span className="font-medium text-foreground">
+          {preview.error || preview.totalMinutes === null
+            ? t("ritten.value.empty")
+            : formatWaitingTime(preview.totalMinutes)}
+        </span>
+      </p>
 
       <div className="mt-1 flex items-center gap-1">
         <button
@@ -161,13 +182,12 @@ export function WaitingTimeCell({
   );
 }
 
-function NumberField({
+/** A time of day. `type="time"` gives the browser's own HH:mm handling. */
+function ClockField({
   id,
   ref,
   label,
   value,
-  min,
-  max,
   onChange,
   onEnter,
   onEscape,
@@ -177,8 +197,6 @@ function NumberField({
   ref?: React.Ref<HTMLInputElement>;
   label: string;
   value: string;
-  min: number;
-  max?: number;
   onChange: (value: string) => void;
   onEnter: () => void;
   onEscape: () => void;
@@ -189,12 +207,9 @@ function NumberField({
       <input
         id={id}
         ref={ref}
-        type="number"
-        inputMode="numeric"
+        type="time"
         aria-label={label}
         value={value}
-        min={min}
-        max={max}
         disabled={isDisabled}
         onChange={(event) => onChange(event.target.value)}
         onKeyDown={(event) => {
@@ -206,7 +221,7 @@ function NumberField({
             onEscape();
           }
         }}
-        className="w-16 rounded border border-border bg-card px-1.5 py-1 text-sm text-foreground"
+        className="w-24 rounded border border-border bg-card px-1.5 py-1 text-sm text-foreground"
       />
       <span className="mt-0.5 block text-center text-[11px] text-muted">
         {label}

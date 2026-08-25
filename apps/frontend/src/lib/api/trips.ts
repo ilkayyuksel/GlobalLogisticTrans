@@ -243,6 +243,25 @@ export function deleteTrip(
  * Trips and that none of them is already grouped. It answers with the group and
  * its Trips, or refuses the whole request — there is no partial grouping.
  */
+/**
+ * Marks several Trips CLOSED in one request.
+ *
+ * ONE request for the whole selection, not one per row: the backend applies the
+ * same transition rule to each and refuses the lot if any Trip cannot be
+ * closed, so a per-Trip loop here would turn one atomic decision into a partial
+ * one that nobody asked for.
+ */
+export function completeTrips(
+  tripIds: readonly string[],
+  signal?: AbortSignal,
+): Promise<Trip[]> {
+  return request<Trip[]>("/api/v1/trips/completions", {
+    method: "POST",
+    body: { tripIds: [...tripIds] },
+    signal,
+  });
+}
+
 export function createTripGroup(
   tripIds: readonly string[],
   signal?: AbortSignal,
