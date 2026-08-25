@@ -312,27 +312,40 @@ describe("Ritten selection and grouping", () => {
     });
   });
 
+  /**
+   * Unlinking lives in the Combination dialog now.
+   *
+   * It used to be an entry in the row's "Acties" dropdown, which is gone. This
+   * is its proper home anyway: a link is dissolved from the thing that shows
+   * the link, beside the leg it removes.
+   */
   describe("unlinking", () => {
-    async function openMenuFor(bookingNumber: string) {
+    /** Opens the Combination, which is what the group badge in a row does. */
+    async function openCombination() {
       await userEvent.click(
-        await screen.findByRole("button", {
-          name: new RegExp(`Acties ${bookingNumber}`),
-        }),
+        await screen.findByRole("button", { name: /^G-/ }),
       );
 
-      return screen.getByRole("menu");
+      return screen.getByRole("dialog");
     }
 
     it("asks first, then clears the group", async () => {
       respondWith(requestMock, {
         trips: buildPage([buildTrip({ tripGroupId: GROUP_ID })]),
+        // What the Combination dialog fetches by group id: the legs of the
+        // group, which may include days that are not on screen.
+        groupMembers: [buildTrip({ tripGroupId: GROUP_ID })],
       });
       renderRitten();
       await screen.findByRole("table");
 
-      const menu = await openMenuFor("ANRDUB2602247");
+      const dialog = await openCombination();
       await userEvent.click(
-        within(menu).getByRole("menuitem", { name: "Loskoppelen van groep" }),
+        (
+          await within(dialog).findAllByRole("button", {
+            name: "Loskoppelen van groep",
+          })
+        )[0],
       );
 
       expect(confirmSpy).toHaveBeenCalledWith(
@@ -356,13 +369,20 @@ describe("Ritten selection and grouping", () => {
       confirmSpy.mockReturnValue(false);
       respondWith(requestMock, {
         trips: buildPage([buildTrip({ tripGroupId: GROUP_ID })]),
+        // What the Combination dialog fetches by group id: the legs of the
+        // group, which may include days that are not on screen.
+        groupMembers: [buildTrip({ tripGroupId: GROUP_ID })],
       });
       renderRitten();
       await screen.findByRole("table");
 
-      const menu = await openMenuFor("ANRDUB2602247");
+      const dialog = await openCombination();
       await userEvent.click(
-        within(menu).getByRole("menuitem", { name: "Loskoppelen van groep" }),
+        (
+          await within(dialog).findAllByRole("button", {
+            name: "Loskoppelen van groep",
+          })
+        )[0],
       );
 
       expect(mutationCalls(requestMock)).toHaveLength(0);
@@ -371,17 +391,24 @@ describe("Ritten selection and grouping", () => {
     it("reports a refusal", async () => {
       respondWith(requestMock, {
         trips: buildPage([buildTrip({ tripGroupId: GROUP_ID })]),
+        // What the Combination dialog fetches by group id: the legs of the
+        // group, which may include days that are not on screen.
+        groupMembers: [buildTrip({ tripGroupId: GROUP_ID })],
       });
       renderRitten();
       await screen.findByRole("table");
 
-      const menu = await openMenuFor("ANRDUB2602247");
+      const dialog = await openCombination();
       requestMock.mockRejectedValueOnce(
         new ApiError("CONFLICT", "Trip does not belong to a group.", 409),
       );
 
       await userEvent.click(
-        within(menu).getByRole("menuitem", { name: "Loskoppelen van groep" }),
+        (
+          await within(dialog).findAllByRole("button", {
+            name: "Loskoppelen van groep",
+          })
+        )[0],
       );
 
       expect(

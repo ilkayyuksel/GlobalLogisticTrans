@@ -32,6 +32,7 @@ function buildTrip(overrides: Partial<Trip> = {}): Trip {
     vehicleId: null,
     driverId: null,
     status: TripStatus.OPEN,
+    isLooseTrip: false,
     direction: null,
     bookingNumber: "ANRDUB2602247",
     containerNumber: null,

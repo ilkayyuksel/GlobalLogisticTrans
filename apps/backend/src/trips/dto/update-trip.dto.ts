@@ -1,6 +1,7 @@
 import { ApiPropertyOptional } from "@nestjs/swagger";
 import { Transform } from "class-transformer";
 import {
+  IsBoolean,
   IsDateString,
   IsInt,
   IsNumber,
@@ -12,10 +13,11 @@ import {
   Min,
 } from "class-validator";
 
-import { trimToNull } from "../../common/dto/transforms";
+import { toOptionalBoolean, trimToNull } from "../../common/dto/transforms";
 import { IsCalendarDateString } from "../../common/validators/is-calendar-date-string.validator";
 import {
   CONTAINER_NUMBER_MAX_LENGTH,
+  DESTINATION_MAX_LENGTH,
   DISTANCE_DECIMAL_PLACES,
   DISTANCE_KM_MAX,
   INTERNAL_NOTES_MAX_LENGTH,
@@ -38,10 +40,21 @@ import {
  * Everything else is excluded on purpose:
  *   - `bookingNumber`, `originalPlanningDate` and `pdfDocumentId` are immutable.
  *   - `status` moves through the status, deletion and restoration endpoints.
- *   - `terminal`, `containerType` and the destination are parser-controlled.
+ *   - `terminal` and `containerType` are parser-controlled.
  *   - `startTime` and `endTime` are parser-controlled, and changing them would
  *     silently re-open the Vehicle overlap question for an existing booking.
  *   - `parserMetadata` is never a manual field.
+ *
+ * THE DESTINATION IS THE EXCEPTION, AND ONLY ON A MANUAL TRIP. It is
+ * parser-controlled exactly when there is a parser: a Trip created by hand has
+ * no source document, so nothing else can ever correct a destination typed
+ * wrongly — it was write-once, and a Trip planned to the wrong city stayed
+ * planned to the wrong city. The service refuses it on an IMPORTED Trip, where
+ * the document remains the authority; see `DestinationNotEditableException`.
+ *
+ * `isLooseTrip` is accepted on any Trip: it is the operator's own
+ * classification, no parser ever writes it, and a box ticked by mistake has to
+ * be untickable.
  *
  * The global ValidationPipe runs with forbidNonWhitelisted, so sending any of
  * them is rejected with 400 rather than ignored.
@@ -139,4 +152,46 @@ export class UpdateTripDto {
   @IsString()
   @MaxLength(INTERNAL_NOTES_MAX_LENGTH)
   internalNotes?: string | null;
+
+  @ApiPropertyOptional({
+    description:
+      "Destination city. Accepted only on a Trip created by hand; on an imported Trip the document is the authority and this is refused. Send null to clear.",
+    maxLength: DESTINATION_MAX_LENGTH,
+    nullable: true,
+    example: "Bousbecque",
+  })
+  @Transform(trimToNull)
+  @IsOptional()
+  @IsString()
+  @MaxLength(DESTINATION_MAX_LENGTH)
+  destinationCity?: string | null;
+
+  @ApiPropertyOptional({
+    description:
+      "Destination country. Same rule as the city: manual Trips only. Send null to clear.",
+    maxLength: DESTINATION_MAX_LENGTH,
+    nullable: true,
+    example: "France",
+  })
+  @Transform(trimToNull)
+  @IsOptional()
+  @IsString()
+  @MaxLength(DESTINATION_MAX_LENGTH)
+  destinationCountry?: string | null;
+
+  @ApiPropertyOptional({
+    description:
+      "LOSRIT: a loose trip. The operator's own classification, independent of the lifecycle and never written by a document.",
+    example: true,
+  })
+  /*
+   * The RAW value, because the pipe's implicit conversion would otherwise turn
+   * any non-empty string into `true` — a typo would silently classify a Trip as
+   * LOSRIT. `toOptionalBoolean` passes anything it does not recognise straight
+   * through so @IsBoolean can reject it.
+   */
+  @Transform(toOptionalBoolean)
+  @IsOptional()
+  @IsBoolean()
+  isLooseTrip?: boolean;
 }

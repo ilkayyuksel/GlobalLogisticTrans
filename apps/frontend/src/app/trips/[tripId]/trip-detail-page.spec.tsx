@@ -120,6 +120,7 @@ function buildTrip(overrides: Partial<Trip> = {}): Trip {
     vehicleId: null,
     driverId: null,
     customProperties: [],
+    isLooseTrip: false,
     direction: null,
     vehicle: null,
     effectiveDriver: null,

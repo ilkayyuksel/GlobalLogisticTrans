@@ -309,6 +309,19 @@ model Trip {
 
   status TripStatus @default(OPEN)
 
+  /// LOSRIT: a loose trip, classified as such by the operator.
+  ///
+  /// NOT a lifecycle state, which is why it is a column of its own rather than
+  /// a TripStatus value: a Trip is LOSRIT *and* OPEN, or LOSRIT *and* CLOSED.
+  /// Folding it into status would have made those combinations unrepresentable
+  /// and would have broken every transition rule that reasons about the four
+  /// real states.
+  ///
+  /// Operator-controlled and purely informational. No parser writes it, no
+  /// document clears it, and pricing does not read it. False by default, so
+  /// every Trip that existed before this column is an ordinary Trip.
+  isLooseTrip Boolean @default(false) @map("is_loose_trip")
+
   /// COLLECTION fetches a container, DELIVERY brings one. Null on a manually
   /// created Trip: it is what the DOCUMENT said, and a manual Trip has none.
   /// Nullable also keeps every Trip imported before this column existed valid.

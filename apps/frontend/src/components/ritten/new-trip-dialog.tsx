@@ -66,6 +66,8 @@ interface FormValues {
   waitingEnd: string;
   distanceKm: string;
   internalNotes: string;
+  /** LOSRIT: the operator's classification, not a status. */
+  isLooseTrip: boolean;
 }
 
 const EMPTY_FORM: FormValues = {
@@ -83,6 +85,7 @@ const EMPTY_FORM: FormValues = {
   waitingEnd: "",
   distanceKm: "",
   internalNotes: "",
+  isLooseTrip: false,
 };
 
 /** Empty means "not known", which the backend stores as null. */
@@ -110,6 +113,7 @@ export function toCreatePayload(values: FormValues): CreateTripPayload {
     ).totalMinutes,
     distanceKm: distance === "" ? null : Number(distance),
     internalNotes: emptyToNull(values.internalNotes),
+    isLooseTrip: values.isLooseTrip,
   };
 }
 
@@ -193,6 +197,31 @@ export function NewTripDialog({
               className={INPUT_CLASS}
             />
           </Field>
+
+          {/*
+            LOSRIT is a CLASSIFICATION, and it belongs with what the Trip is
+            rather than with how it is planned. Ticking it sets nothing else:
+            not the status, not the date, not the vehicle. The Trip still starts
+            OPEN and is planned, priced and documented like any other.
+          */}
+          <div>
+            <label
+              htmlFor="new-losrit"
+              className="flex items-center gap-2 text-sm text-foreground"
+            >
+              <input
+                id="new-losrit"
+                type="checkbox"
+                checked={values.isLooseTrip}
+                onChange={(event) =>
+                  update({ isLooseTrip: event.target.checked })
+                }
+                className="h-4 w-4 rounded border-border accent-primary"
+              />
+              {t("ritten.losrit.label")}
+            </label>
+            <p className="mt-1 text-xs text-muted">{t("ritten.losrit.hint")}</p>
+          </div>
         </Section>
 
         <Section title={t("ritten.new.sectionPlanning")}>

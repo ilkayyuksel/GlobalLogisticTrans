@@ -136,8 +136,10 @@ describe("Ritten with several containers on one booking", () => {
       // The row's own cells carry no literal colour. The vehicle's planning
       // colour is a configured hex and is deliberately inline; it is not one.
       for (const container of ["EUCU 453232/2", "PVDU 301326/0"]) {
+        // The BADGE, not the row's "Openen" button, which carries the same
+        // word and is a control rather than a status.
         const status = within(rowOf(container)).getByText(
-          /Open|Geannuleerd/,
+          /^(Open|Geannuleerd)$/,
         );
 
         expect(status.className).toMatch(/bg-(info|danger)/);

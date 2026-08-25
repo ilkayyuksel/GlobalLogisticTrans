@@ -6,6 +6,7 @@ import { AppLoggerService } from "../logger/app-logger.service";
 import { VehicleService } from "../vehicles/vehicle.service";
 import { CreateTripDto } from "./dto/create-trip.dto";
 import {
+  DestinationNotEditableException,
   DuplicateBookingNumberException,
   InactiveAssignmentException,
   InvalidTripStatusTransitionException,
@@ -34,6 +35,7 @@ function buildTrip(overrides: Partial<Trip> = {}): Trip {
     vehicleId: null,
     driverId: null,
     status: TripStatus.OPEN,
+    isLooseTrip: false,
     direction: null,
     bookingNumber: "BK-2026-0042",
     containerNumber: null,
@@ -514,6 +516,125 @@ describe("TripService", () => {
       expect(repository.update).toHaveBeenCalled();
     });
 
+    /**
+     * ── WHO OWNS THE DESTINATION ────────────────────────────────────────────
+     * It was excluded from every update as "parser-controlled", which is only
+     * true where a parser exists. A Trip created by hand has no document, so
+     * nothing could ever correct a city typed wrongly: it was write-once, and a
+     * Trip planned to the wrong place stayed planned to the wrong place.
+     *
+     * The Trip decides, not the field. An imported Trip is still refused —
+     * a later UPDATE re-reads the destination from the document, so a manual
+     * change there would be silently overwritten.
+     * ────────────────────────────────────────────────────────────────────────
+     */
+    describe("the destination", () => {
+      /** No PDF, so the operator is the only possible author. */
+      const manualTrip = () =>
+        repository.findById.mockResolvedValue(buildTrip({ pdfDocumentId: null }));
+
+      it("is accepted on a Trip created by hand", async () => {
+        manualTrip();
+
+        await service.update(TRIP_ID, { destinationCity: "Rotterdam" });
+
+        expect(repository.update).toHaveBeenCalledWith(
+          TRIP_ID,
+          expect.objectContaining({ destinationCity: "Rotterdam" }),
+        );
+      });
+
+      it("accepts the country with it", async () => {
+        manualTrip();
+
+        await service.update(TRIP_ID, {
+          destinationCity: "Venlo",
+          destinationCountry: "Netherlands",
+        });
+
+        expect(repository.update).toHaveBeenCalledWith(
+          TRIP_ID,
+          expect.objectContaining({
+            destinationCity: "Venlo",
+            destinationCountry: "Netherlands",
+          }),
+        );
+      });
+
+      it("can be cleared", async () => {
+        manualTrip();
+
+        await service.update(TRIP_ID, { destinationCity: null });
+
+        expect(repository.update).toHaveBeenCalledWith(
+          TRIP_ID,
+          expect.objectContaining({ destinationCity: null }),
+        );
+      });
+
+      it("is refused on an imported Trip", async () => {
+        await expect(
+          service.update(TRIP_ID, { destinationCity: "Rotterdam" }),
+        ).rejects.toBeInstanceOf(DestinationNotEditableException);
+      });
+
+      it("is refused before anything is written", async () => {
+        await expect(
+          service.update(TRIP_ID, {
+            destinationCity: "Rotterdam",
+            internalNotes: "moved",
+          }),
+        ).rejects.toBeInstanceOf(DestinationNotEditableException);
+
+        expect(repository.update).not.toHaveBeenCalled();
+      });
+
+      /** An update that says nothing about the destination is not one. */
+      it("leaves an imported Trip updatable in every other field", async () => {
+        await service.update(TRIP_ID, { internalNotes: "call the customer" });
+
+        expect(repository.update).toHaveBeenCalled();
+      });
+    });
+
+    /**
+     * LOSRIT is the operator's own classification, so no document owns it and
+     * a box ticked by mistake has to be untickable — on any Trip, imported or
+     * not.
+     */
+    describe("the LOSRIT indicator", () => {
+      it("can be set", async () => {
+        await service.update(TRIP_ID, { isLooseTrip: true });
+
+        expect(repository.update).toHaveBeenCalledWith(
+          TRIP_ID,
+          expect.objectContaining({ isLooseTrip: true }),
+        );
+      });
+
+      it("can be taken back off", async () => {
+        repository.findById.mockResolvedValue(buildTrip({ isLooseTrip: true }));
+
+        await service.update(TRIP_ID, { isLooseTrip: false });
+
+        expect(repository.update).toHaveBeenCalledWith(
+          TRIP_ID,
+          expect.objectContaining({ isLooseTrip: false }),
+        );
+      });
+
+      it("is left alone by an update that does not mention it", async () => {
+        repository.findById.mockResolvedValue(buildTrip({ isLooseTrip: true }));
+
+        await service.update(TRIP_ID, { internalNotes: "x" });
+
+        expect(repository.update).toHaveBeenCalledWith(
+          TRIP_ID,
+          expect.objectContaining({ isLooseTrip: undefined }),
+        );
+      });
+    });
+
     it("logs the changed field names but never their values", async () => {
       await service.update(TRIP_ID, {
         containerNumber: "MSKU1234567",
@@ -540,6 +661,43 @@ describe("TripService", () => {
 
       expect(repository.setStatus).toHaveBeenCalledWith(TRIP_ID, to);
       expect(result.status).toBe(to);
+    });
+
+    /**
+     * ── LOSRIT IS NOT A STATE ───────────────────────────────────────────────
+     * It travels beside the lifecycle rather than inside it, so every
+     * combination is representable and none of them changes what the Trip may
+     * do next. A LOSRIT closes exactly as an ordinary Trip closes.
+     * ────────────────────────────────────────────────────────────────────────
+     */
+    it.each([
+      [TripStatus.OPEN, TripStatus.CLOSED],
+      [TripStatus.OPEN, TripStatus.CANCELLED],
+      [TripStatus.CANCELLED, TripStatus.OPEN],
+    ])("moves a LOSRIT from %s to %s like any other Trip", async (from, to) => {
+      repository.findById.mockResolvedValue(
+        buildTrip({ status: from, isLooseTrip: true }),
+      );
+      repository.setStatus.mockResolvedValue(
+        buildTrip({ status: to, isLooseTrip: true }),
+      );
+
+      const result = await service.changeStatus(TRIP_ID, { status: to });
+
+      expect(result.status).toBe(to);
+      // Still a LOSRIT afterwards: a transition writes the status column and
+      // nothing else.
+      expect(result.isLooseTrip).toBe(true);
+    });
+
+    it("refuses a LOSRIT the same transitions it refuses any Trip", async () => {
+      repository.findById.mockResolvedValue(
+        buildTrip({ status: TripStatus.CLOSED, isLooseTrip: true }),
+      );
+
+      await expect(
+        service.changeStatus(TRIP_ID, { status: TripStatus.OPEN }),
+      ).rejects.toBeInstanceOf(InvalidTripStatusTransitionException);
     });
 
     it("rejects reopening a CLOSED Trip", async () => {

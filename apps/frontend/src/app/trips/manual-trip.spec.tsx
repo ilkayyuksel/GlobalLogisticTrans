@@ -103,6 +103,9 @@ describe("Manual Trip creation", () => {
         waitingTimeMinutes: null,
         distanceKm: null,
         internalNotes: null,
+        // The one field that is not "unknown": the operator did not tick it,
+        // which is a statement that this is an ordinary Trip.
+        isLooseTrip: false,
       });
       expect(JSON.stringify(options.body)).not.toMatch(
         /MANUAL|UNKNOWN|N\/A|TBD/i,

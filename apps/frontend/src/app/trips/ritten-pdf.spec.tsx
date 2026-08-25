@@ -71,17 +71,15 @@ describe("Ritten PDF", () => {
     jest.restoreAllMocks();
   });
 
-  /** `menuLabel` differs per language, so the caller supplies it. */
-  async function chooseAction(
-    name: string,
-    menuLabel = "Acties",
-  ): Promise<void> {
+  /**
+   * Both PDF actions are icon buttons in the row's PDF column — one click, no
+   * menu. Their accessible name carries the booking number, which is what
+   * keeps one row's document apart from the next one's.
+   */
+  async function chooseAction(name: string): Promise<void> {
     await userEvent.click(
-      await screen.findByRole("button", {
-        name: new RegExp(`${menuLabel} ANRDUB2602247`),
-      }),
+      await screen.findByRole("button", { name: `${name} ANRDUB2602247` }),
     );
-    await userEvent.click(screen.getByRole("menuitem", { name }));
   }
 
   describe("viewing", () => {
@@ -288,7 +286,7 @@ describe("Ritten PDF", () => {
       window.localStorage.setItem("tms.language", "tr");
 
       renderRitten();
-      await chooseAction("PDF'i görüntüle", "İşlemler");
+      await chooseAction("PDF'i görüntüle");
 
       const dialog = await screen.findByRole("dialog");
 

@@ -1,6 +1,7 @@
 import { ApiPropertyOptional } from "@nestjs/swagger";
 import { Transform } from "class-transformer";
 import {
+  IsBoolean,
   IsDateString,
   IsInt,
   IsNumber,
@@ -13,7 +14,11 @@ import {
   MinLength,
 } from "class-validator";
 
-import { rawValueOf, trimToNull } from "../../common/dto/transforms";
+import {
+  rawValueOf,
+  toOptionalBoolean,
+  trimToNull,
+} from "../../common/dto/transforms";
 import { IsCalendarDateString } from "../../common/validators/is-calendar-date-string.validator";
 import { IsClockTimeString } from "../../common/validators/is-clock-time-string.validator";
 
@@ -252,4 +257,21 @@ export class CreateTripDto {
   @IsString()
   @MaxLength(INTERNAL_NOTES_MAX_LENGTH)
   internalNotes?: string | null;
+
+  @ApiPropertyOptional({
+    description:
+      "LOSRIT: a loose trip. An operator's classification, INDEPENDENT of the lifecycle — a LOSRIT is still OPEN, CLOSED or CANCELLED like any other Trip, and this changes no rule about pricing, planning or documents. Defaults to false.",
+    default: false,
+    example: false,
+  })
+  /*
+   * The RAW value, because the pipe's implicit conversion would otherwise turn
+   * any non-empty string into `true` — a typo would silently classify a Trip as
+   * LOSRIT. `toOptionalBoolean` passes anything it does not recognise straight
+   * through so @IsBoolean can reject it.
+   */
+  @Transform(toOptionalBoolean)
+  @IsOptional()
+  @IsBoolean()
+  isLooseTrip?: boolean;
 }

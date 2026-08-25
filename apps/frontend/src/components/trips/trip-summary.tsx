@@ -6,6 +6,7 @@ import {
   changedByLatestUpdate,
   isRevised,
 } from "@/lib/trips/latest-update";
+import { LosritBadge } from "./losrit-badge";
 import { TripStatusBadge } from "./trip-status-badge";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import type { Trip, Vehicle } from "@/lib/api/types";
@@ -46,6 +47,8 @@ export function TripSummary({
         action={
           <span className="flex items-center gap-2">
             <TripStatusBadge status={trip.status} />
+            {/* A classification, beside the state — never instead of it. */}
+            <LosritBadge trip={trip} />
             {/* Derived, and beside the status: the lifecycle is still OPEN. */}
             {isRevised(trip) ? (
               <Badge tone="warning">{t("ritten.status.revised")}</Badge>

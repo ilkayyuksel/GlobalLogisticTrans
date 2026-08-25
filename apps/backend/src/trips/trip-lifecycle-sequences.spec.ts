@@ -61,6 +61,7 @@ function buildTrip(overrides: Partial<Trip> = {}): Trip {
     tripGroupId: null,
     pdfDocumentId: "pdf-new",
     parserMetadata: null,
+    isLooseTrip: false,
     ...overrides,
   } as unknown as Trip;
 }
@@ -447,6 +448,28 @@ describe("sequences of transport documents", () => {
       expect(trip().waitingTimeMinutes).toBe(45);
       expect(trip().internalNotes).toBe("Bel de klant");
       expect(trip().status).toBe(TripStatus.OPEN);
+    });
+
+    /**
+     * LOSRIT is the OPERATOR's classification of a Trip, so no document may
+     * write it and none may clear it. A transport order says what the transport
+     * is; it does not say how the planner files it.
+     */
+    it("never sets or clears the LOSRIT indicator", async () => {
+      stored[0] = buildTrip({ isLooseTrip: true });
+
+      await update({ containerType: "45RH" });
+      await cancel();
+      await newOrder({ containerType: "45OS" });
+
+      expect(trip().isLooseTrip).toBe(true);
+    });
+
+    it("does not make an ordinary Trip a LOSRIT either", async () => {
+      await update({ containerType: "45RH" });
+      await newOrder();
+
+      expect(trip().isLooseTrip).toBe(false);
     });
   });
 

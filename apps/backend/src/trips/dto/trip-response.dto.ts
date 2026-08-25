@@ -202,6 +202,13 @@ export class TripResponseDto {
   @ApiProperty({ enum: TripStatus })
   status!: TripStatus;
 
+  @ApiProperty({
+    description:
+      "LOSRIT: a loose trip, as classified by the operator. INDEPENDENT of status — a LOSRIT is OPEN, CLOSED or CANCELLED like any other Trip — and informational only: it changes no lifecycle rule, no pricing and no document handling.",
+    example: false,
+  })
+  isLooseTrip!: boolean;
+
   @ApiPropertyOptional({
     enum: TripDirection,
     nullable: true,
@@ -335,6 +342,7 @@ export function toTripResponse(
     vehicleId: trip.vehicleId,
     driverId: trip.driverId,
     status: trip.status,
+    isLooseTrip: trip.isLooseTrip,
     direction: trip.direction,
     bookingNumber: trip.bookingNumber,
     containerNumber: trip.containerNumber,

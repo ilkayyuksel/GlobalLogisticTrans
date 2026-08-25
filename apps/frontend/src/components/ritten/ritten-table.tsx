@@ -3,6 +3,7 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
 
+import { LosritBadge } from "@/components/trips/losrit-badge";
 import { TripStatusBadge } from "@/components/trips/trip-status-badge";
 import { ApiError } from "@/lib/api/client";
 import type { UpdateTripPayload } from "@/lib/api/trips";
@@ -23,12 +24,13 @@ import {
 } from "@/lib/trips/latest-update";
 import {
   canEdit,
+  canEditDestination,
   canViewPdf,
   type RittenActions,
 } from "@/lib/ritten/row-actions";
 import { InlineCell, type InlineOption } from "./inline-cell";
 import { WaitingTimeCell } from "./waiting-time-cell";
-import { RowActionMenu } from "./row-action-menu";
+import { RowLifecycleActions } from "./row-lifecycle-actions";
 
 /**
  * The Ritten table, with its editable cells.
@@ -52,6 +54,8 @@ import { RowActionMenu } from "./row-action-menu";
 
 /** From the backend's create-trip.dto.ts, to catch a mistake before a round trip. */
 const CONTAINER_NUMBER_MAX_LENGTH = 100;
+/** City and country are 200 each there; this field carries both with a comma. */
+const DESTINATION_FIELD_MAX_LENGTH = 401;
 
 const COLUMN_KEYS = [
   "ritten.select.row",
@@ -282,7 +286,18 @@ function RittenRow({
       </td>
 
       <td className="px-3 py-2">
-        <TripStatusBadge status={trip.status} label={t(`status.${trip.status}`)} />
+        <span className="flex flex-wrap items-center gap-1">
+          <TripStatusBadge
+            status={trip.status}
+            label={t(`status.${trip.status}`)}
+          />
+          {/*
+            LOSRIT sits BESIDE the status, never instead of it: it says what
+            kind of transport this is, not what has happened to it. A LOSRIT is
+            OPEN, CLOSED or CANCELLED like any other Trip.
+          */}
+          <LosritBadge trip={trip} />
+        </span>
         {/*
           "Bijgewerkt" is DERIVED, and beside the status rather than instead of
           it: the lifecycle is still OPEN. It says a document changed this Trip
@@ -374,7 +389,7 @@ function RittenRow({
       </td>
       <td className="px-3 py-2 text-secondary">
         <UpdatedValue trip={trip} field="destinationCity">
-          {trip.destinationCity}, {trip.destinationCountry}
+          <DestinationCell trip={trip} isBusy={isBusy} onSave={save} />
         </UpdatedValue>
       </td>
 
@@ -399,12 +414,7 @@ function RittenRow({
       </td>
 
       <td className="px-3 py-2">
-        {/*
-          The booking number in this row is already a link to the Trip, so a
-          second "open" control here was the same navigation twice. The menu is
-          what this column is for.
-        */}
-        <RowActionMenu trip={trip} actions={actions} isBusy={isBusy} />
+        <RowLifecycleActions trip={trip} actions={actions} isBusy={isBusy} />
       </td>
 
       <CostConfirmationCell trip={trip} />
@@ -414,6 +424,89 @@ function RittenRow({
       ) : null}
     </tr>
   );
+}
+
+/**
+ * Where this Trip is going.
+ *
+ * ── EDITABLE ONLY ON A TRIP CREATED BY HAND ─────────────────────────────────
+ * The destination used to be read-only everywhere, described as
+ * parser-controlled — which is only true where a parser exists. A Trip entered
+ * by hand has no document, so a city typed wrongly at creation could never be
+ * corrected: the transport stayed planned to the wrong place for the rest of
+ * its life.
+ *
+ * An imported Trip still belongs to its document. A later UPDATE re-reads the
+ * destination from the PDF, so anything typed here would be silently
+ * overwritten — and the backend refuses it outright. The cell is therefore
+ * read-only exactly where a save could not succeed, rather than offering an
+ * edit that ends in a 409.
+ * ────────────────────────────────────────────────────────────────────────────
+ *
+ * City and country are one address and are edited as one field: moving a Trip
+ * from Bousbecque to Venlo without its country would leave the two disagreeing.
+ * "City, Country" is the same text the column already showed.
+ */
+function DestinationCell({
+  trip,
+  isBusy,
+  onSave,
+}: {
+  trip: Trip;
+  isBusy: boolean;
+  onSave: (payload: UpdateTripPayload) => Promise<void>;
+}) {
+  const t = useTranslation();
+  const empty = t("ritten.value.empty");
+  const parts = [trip.destinationCity, trip.destinationCountry].filter(
+    (part): part is string => Boolean(part),
+  );
+  const display = parts.length > 0 ? parts.join(", ") : empty;
+
+  if (!canEditDestination(trip)) {
+    return <>{display}</>;
+  }
+
+  return (
+    <InlineCell
+      label={t("ritten.edit.destination")}
+      displayValue={display}
+      editValue={parts.join(", ")}
+      maxLength={DESTINATION_FIELD_MAX_LENGTH}
+      isDisabled={isBusy}
+      onSave={(value) => onSave(toDestination(value))}
+    />
+  );
+}
+
+/**
+ * Splits "Venlo, Netherlands" into the two columns the backend stores.
+ *
+ * Only the FIRST comma separates them: a city may contain one — "Saint Laurent
+ * Blangy, Pas-de-Calais, France" is a city and a country, not three fields —
+ * so everything after the first comma is the country. Text with no comma is a
+ * city alone, and the country is cleared rather than left behind pointing at a
+ * place the Trip no longer goes to.
+ */
+export function toDestination(value: string): UpdateTripPayload {
+  const separator = value.indexOf(",");
+
+  if (separator === -1) {
+    const city = value.trim();
+
+    return {
+      destinationCity: city === "" ? null : city,
+      destinationCountry: null,
+    };
+  }
+
+  const city = value.slice(0, separator).trim();
+  const country = value.slice(separator + 1).trim();
+
+  return {
+    destinationCity: city === "" ? null : city,
+    destinationCountry: country === "" ? null : country,
+  };
 }
 
 /**

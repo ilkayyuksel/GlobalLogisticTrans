@@ -66,6 +66,56 @@ export function statusActionsFor(trip: Trip): StatusAction[] {
   );
 }
 
+/**
+ * The ONE lifecycle action a Ritten row offers.
+ *
+ * ── WHY ONE, AND WHY THESE ──────────────────────────────────────────────────
+ * The row used to hide every transition behind an "Acties" dropdown, which cost
+ * two clicks and a read to do the thing an operator does all day. A row now
+ * carries the action that follows from its status, visibly:
+ *
+ *   OPEN       → Afwerken   (CLOSED)
+ *   CANCELLED  → Openen     (OPEN)
+ *   CLOSED     → nothing. CLOSED is terminal in the backend's state machine;
+ *                see `allowedTransitionsFrom` there. Offering "Heropenen" would
+ *                be a button that can only ever fail.
+ *   DELETED    → nothing. A deleted Trip leaves only through restore.
+ *
+ * Cancelling is deliberately NOT here. It is the one transition an operator
+ * would regret, it is not routine, and it keeps its confirmation on the Trip
+ * detail page rather than sitting one stray click away in every row.
+ *
+ * LOSRIT changes none of this: it is a classification, not a state.
+ * ────────────────────────────────────────────────────────────────────────────
+ */
+const PRIMARY_ROW_ACTION: Readonly<
+  Record<TripStatus, ChangeableTripStatus | null>
+> = {
+  OPEN: "CLOSED",
+  CLOSED: null,
+  CANCELLED: "OPEN",
+  DELETED: null,
+};
+
+/**
+ * Returns the row's action, or null when the status has none.
+ *
+ * Cross-checked against the offered transitions rather than trusted on its own:
+ * if the two ever disagree, the row shows nothing instead of a button the
+ * backend will refuse.
+ */
+export function primaryRowAction(trip: Trip): StatusAction | null {
+  const target = PRIMARY_ROW_ACTION[trip.status];
+
+  if (target === null) {
+    return null;
+  }
+
+  return (
+    statusActionsFor(trip).find((action) => action.target === target) ?? null
+  );
+}
+
 /** Soft delete is offered only where the backend accepts it. */
 export function canDelete(trip: Trip): boolean {
   return trip.status === DELETABLE_FROM;

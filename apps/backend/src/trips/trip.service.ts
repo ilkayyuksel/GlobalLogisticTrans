@@ -23,6 +23,7 @@ import { TripClosedEvent } from "./events/trip-closed.event";
 import { ImportTripsCommand } from "./import-trips.command";
 import {
   AssignmentSubject,
+  DestinationNotEditableException,
   DuplicateBookingNumberException,
   InactiveAssignmentException,
   InvalidTripStatusTransitionException,
@@ -278,6 +279,9 @@ export class TripService {
           waitingTimeMinutes: dto.waitingTimeMinutes ?? null,
           distanceKm: dto.distanceKm ?? null,
           internalNotes: dto.internalNotes ?? null,
+          // The operator's own classification. Absent means an ordinary Trip;
+          // nothing infers it from a missing PDF or an empty booking number.
+          isLooseTrip: dto.isLooseTrip ?? false,
         });
 
         /*
@@ -311,9 +315,14 @@ export class TripService {
    * Assignment eligibility is re-checked only when the Vehicle or Driver
    * actually changes: the rule applies to new assignments, and a Trip that
    * already carries a since-deactivated Vehicle must stay editable.
+   *
+   * The destination is checked separately, because whether it is manual depends
+   * on the Trip rather than on the field — see `assertDestinationEditable`.
    */
   async update(id: string, dto: UpdateTripDto): Promise<TripResponseDto> {
     const existing = await this.requireTrip(id);
+
+    this.assertDestinationEditable(existing, dto);
 
     if (dto.vehicleId !== undefined && dto.vehicleId !== existing.vehicleId) {
       await this.assertAssignable("vehicle", dto.vehicleId);
@@ -896,6 +905,31 @@ export class TripService {
     );
   }
 
+  /**
+   * Who owns this Trip's destination.
+   *
+   * A Trip created by hand has no source document, so the operator is the only
+   * possible author of its destination — and until now there was no way to
+   * change one entered wrongly, because the destination was excluded from every
+   * update as "parser-controlled". That description is only true where a parser
+   * exists.
+   *
+   * On an IMPORTED Trip it still is: a later UPDATE document re-reads the
+   * destination and would overwrite anything typed here, so the request is
+   * refused rather than accepted and silently reverted.
+   *
+   * Only a destination actually being SENT is checked. An update that leaves
+   * both fields alone is not a destination change, whatever the Trip's origin.
+   */
+  private assertDestinationEditable(trip: Trip, dto: UpdateTripDto): void {
+    const changesDestination =
+      dto.destinationCity !== undefined || dto.destinationCountry !== undefined;
+
+    if (changesDestination && trip.pdfDocumentId !== null) {
+      throw new DestinationNotEditableException(trip.id, trip.pdfDocumentId);
+    }
+  }
+
   private assertTransitionAllowed(from: TripStatus, to: TripStatus): void {
     if (!canTransition(from, to)) {
       this.logger.warn("Rejected invalid Trip status transition", {
@@ -933,6 +967,9 @@ export class TripService {
           ? undefined
           : toNullableDateTime(dto.executionDatetime),
       internalNotes: dto.internalNotes,
+      destinationCity: dto.destinationCity,
+      destinationCountry: dto.destinationCountry,
+      isLooseTrip: dto.isLooseTrip,
     };
   }
 }

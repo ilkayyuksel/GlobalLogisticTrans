@@ -729,6 +729,43 @@ OPEN
 
 is not allowed.
 
+The supported transitions are exactly:
+
+OPEN → CLOSED
+
+OPEN → CANCELLED
+
+CANCELLED → OPEN
+
+CLOSED and DELETED have no outgoing transition through the status endpoint.
+A DELETED Trip returns through restoration, which is its own operation.
+
+---
+
+# LOSRIT
+
+A Trip may be marked LOSRIT: a loose trip, as the operator classifies it.
+
+LOSRIT is NOT a status.
+
+It is a separate boolean column, is_loose_trip, defaulting to false.
+
+The two are independent. A Trip is LOSRIT and OPEN, or LOSRIT and CLOSED, or
+LOSRIT and CANCELLED. Folding it into TripStatus would have made those
+combinations unrepresentable and would have dragged an informational label into
+every transition rule.
+
+LOSRIT is informational. It changes no lifecycle rule, no pricing, no planning
+and no document handling. The action a Trip is offered follows from its STATUS
+alone.
+
+It is operator-controlled. No parser writes it and no document clears it: a
+transport order states what the transport is, not how the planner files it. A
+manually created LOSRIT that later receives a matching PDF stays a LOSRIT.
+
+It is never inferred. An absent PDF or an empty booking number describes a
+manual Trip, which is a different fact.
+
 ---
 
 # Combination Trips
@@ -752,6 +789,27 @@ receive different waiting times
 receive different pricing
 
 Both Trips simply share a common group.
+
+---
+
+# The Destination of a Manual Trip
+
+The destination is parser-controlled exactly where a parser exists.
+
+On an IMPORTED Trip the document is the authority. A later UPDATE re-reads the
+destination from it, so a manually entered destination would be silently
+overwritten. The backend refuses one.
+
+On a Trip created BY HAND there is no document, and therefore no other possible
+author. Its destination city and country are manual fields and remain editable
+for the life of the Trip.
+
+Without this, a city typed wrongly at creation could never be corrected: the
+transport stayed planned to the wrong place permanently.
+
+The rule keys on the ABSENCE OF A SOURCE DOCUMENT, not on LOSRIT. LOSRIT is
+informational and must not decide what may be edited; a manual Trip that is not
+a LOSRIT has exactly the same problem and gets exactly the same answer.
 
 ---
 

@@ -36,6 +36,7 @@ function buildTrip(overrides: Partial<Trip> = {}): Trip {
     vehicleId: null,
     driverId: null,
     status: TripStatus.OPEN,
+    isLooseTrip: false,
     direction: null,
     bookingNumber: "BK-2026-0042",
     containerNumber: null,
@@ -442,7 +443,6 @@ describe("TripController (integration)", () => {
       ["tripGroupId", PDF_ID],
       ["parserMetadata", {}],
       ["containerType", "20TK"],
-      ["destinationCity", "Rotterdam"],
       ["terminal", "Other"],
       ["startTime", "09:00"],
       ["endTime", "13:00"],
@@ -451,6 +451,23 @@ describe("TripController (integration)", () => {
         .patch(`${BASE}/${TRIP_ID}`)
         .send({ [field]: value })
         .expect(400);
+    });
+
+    /**
+     * The destination is the one field whose owner depends on the TRIP.
+     *
+     * This fixture came from a PDF, so the document is still the authority and
+     * the request is refused — but as a 409, not a 400: the field exists and is
+     * well-formed, and it is this Trip that cannot take it. A Trip created by
+     * hand accepts the same body; see `manual-trip.spec.ts`.
+     */
+    it("refuses a destination on an imported Trip", async () => {
+      await request(app.getHttpServer())
+        .patch(`${BASE}/${TRIP_ID}`)
+        .send({ destinationCity: "Rotterdam" })
+        .expect(409);
+
+      expect(repository.update).not.toHaveBeenCalled();
     });
 
     it("returns 404 for an unknown Trip", async () => {

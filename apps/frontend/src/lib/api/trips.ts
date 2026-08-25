@@ -134,6 +134,8 @@ export interface CreateTripPayload {
   waitingTimeMinutes?: number | null;
   distanceKm?: number | null;
   internalNotes?: string | null;
+  /** LOSRIT. Omitted means an ordinary Trip; the backend defaults it to false. */
+  isLooseTrip?: boolean;
 }
 
 export function createTrip(
@@ -166,6 +168,15 @@ export interface UpdateTripPayload {
   distanceKm?: number | null;
   executionDatetime?: string | null;
   internalNotes?: string | null;
+  /**
+   * Accepted only on a Trip created by hand. On an imported Trip the document
+   * is the authority for the destination and the backend refuses it with a 409
+   * — see `canEditDestination`, which is why the field is not offered there.
+   */
+  destinationCity?: string | null;
+  destinationCountry?: string | null;
+  /** The operator's own classification; no document ever writes it. */
+  isLooseTrip?: boolean;
 }
 
 export function updateTrip(

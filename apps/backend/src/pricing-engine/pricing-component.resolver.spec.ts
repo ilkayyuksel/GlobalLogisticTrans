@@ -31,6 +31,7 @@ function buildTrip(overrides: Partial<TripResponseDto> = {}): TripResponseDto {
     driverId: null,
   customProperties: [],
     status: TripStatus.CLOSED,
+    isLooseTrip: false,
     direction: null,
     bookingNumber: "BK-2026-0042",
     containerNumber: null,

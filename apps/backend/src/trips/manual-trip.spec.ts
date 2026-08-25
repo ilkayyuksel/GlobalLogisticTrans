@@ -431,6 +431,72 @@ describe("Manual Trip creation", () => {
    * an operator who has to remember to tick it will eventually not. So the rule
    * runs on this path too, inside the same transaction as the insert.
    */
+  /**
+   * LOSRIT — a loose trip, as the operator classifies it.
+   *
+   * A COLUMN OF ITS OWN, not a status. The two are independent: a LOSRIT is
+   * OPEN, CLOSED or CANCELLED like any other Trip, so folding it into
+   * TripStatus would have made those combinations unrepresentable and would
+   * have dragged an informational label into every transition rule.
+   *
+   * It is stated or it is not true. Nothing infers it from an absent PDF or an
+   * empty booking number — those describe a manual Trip, which is a different
+   * fact.
+   */
+  describe("LOSRIT", () => {
+    it("is not a Trip's default", async () => {
+      await request(app.getHttpServer()).post(BASE).send({}).expect(201);
+
+      expect(created?.isLooseTrip).toBe(false);
+    });
+
+    it("is stored when the operator ticks it", async () => {
+      await request(app.getHttpServer())
+        .post(BASE)
+        .send({ isLooseTrip: true })
+        .expect(201);
+
+      expect(created?.isLooseTrip).toBe(true);
+    });
+
+    it("is reported back by the response", async () => {
+      const response = await request(app.getHttpServer())
+        .post(BASE)
+        .send({ isLooseTrip: true })
+        .expect(201);
+
+      expect(response.body.data.isLooseTrip).toBe(true);
+    });
+
+    it("is reported as false on an ordinary Trip", async () => {
+      const response = await request(app.getHttpServer())
+        .post(BASE)
+        .send({})
+        .expect(201);
+
+      expect(response.body.data.isLooseTrip).toBe(false);
+    });
+
+    /** Informational: it decides nothing else about the Trip. */
+    it("changes nothing else about the Trip", async () => {
+      await request(app.getHttpServer())
+        .post(BASE)
+        .send({ isLooseTrip: true, planningDate: "2026-08-25" })
+        .expect(201);
+
+      expect(created?.status).toBeUndefined();
+      expect(created?.planningDate).toEqual(new Date("2026-08-25T00:00:00.000Z"));
+      expect(eventBus.publish).not.toHaveBeenCalled();
+    });
+
+    it("refuses anything that is not a boolean", async () => {
+      await request(app.getHttpServer())
+        .post(BASE)
+        .send({ isLooseTrip: "losrit" })
+        .expect(400);
+    });
+  });
+
   describe("the automatic Flat property", () => {
     async function createWith(containerType: string | null) {
       return request(app.getHttpServer())

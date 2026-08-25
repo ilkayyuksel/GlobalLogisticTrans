@@ -9,14 +9,17 @@ import type { TranslationKey } from "@/lib/i18n/translations";
  * — a backend call followed by a refetch of the authoritative data — and the
  * page owns that sequence. A row never mutates anything itself, and never
  * decides that something succeeded.
+ *
+ * Deleting, restoring and reprocessing pricing are deliberately NOT here. They
+ * left with the "Acties" dropdown, and all three live on the Trip detail page —
+ * one click away through the booking number in every row. Restoring in
+ * particular was unreachable from this list in any case: a DELETED Trip is
+ * hidden from it and cannot be filtered back into view.
  */
 export interface RittenActions {
   /** Resolves when the backend accepted the change AND the list was refetched. */
   saveTrip: (tripId: string, payload: UpdateTripPayload) => Promise<void>;
   changeStatus: (trip: Trip, status: ChangeableTripStatus) => Promise<void>;
-  deleteTrip: (trip: Trip) => Promise<void>;
-  restoreTrip: (trip: Trip) => Promise<void>;
-  reprocessPricing: (trip: Trip) => Promise<void>;
   openCombination: (tripGroupId: string) => void;
   /** Clears this Trip's group; the group and its other members survive. */
   unlinkFromGroup: (trip: Trip) => Promise<void>;
@@ -57,12 +60,20 @@ export const STATUS_CONFIRM_KEYS: Partial<
 };
 
 /**
- * Reprocessing exists to recover a CLOSED Trip whose pricing is missing or
- * stale. It is meaningless before a Trip is closed, because pricing only runs
- * at closing.
+ * Whether this Trip's destination may be typed.
+ *
+ * A Trip created by hand has no source document, so the operator is the only
+ * possible author of its destination — and until the backend accepted one, a
+ * city entered wrongly at creation could never be corrected. An IMPORTED Trip
+ * still belongs to its document: a later UPDATE re-reads the destination from
+ * the PDF, so anything typed here would be silently overwritten, and the
+ * backend refuses it.
+ *
+ * The same condition the backend applies, so the cell is read-only exactly
+ * where a save would be refused rather than offering an edit that cannot work.
  */
-export function canReprocess(trip: Trip): boolean {
-  return trip.status === "CLOSED";
+export function canEditDestination(trip: Trip): boolean {
+  return canEdit(trip) && trip.pdfDocumentId === null;
 }
 
 /** A DELETED Trip is read-only until it is restored. */

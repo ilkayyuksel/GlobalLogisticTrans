@@ -161,3 +161,23 @@ export class MissingRequiredCustomPropertyException extends UnprocessableEntityE
     );
   }
 }
+
+/**
+ * The destination of an IMPORTED Trip cannot be edited by hand.
+ *
+ * The destination is parser-controlled exactly where a parser exists. On a Trip
+ * that came from a transport order the document is the authority: a later
+ * UPDATE re-reads the destination from it, so a manual change would be silently
+ * overwritten and the two sources would disagree in the meantime.
+ *
+ * A Trip created by hand has no document and therefore no other way to correct
+ * a destination, so it accepts one. This exception is the refusal for the other
+ * case, and it names the document so the reason is actionable.
+ */
+export class DestinationNotEditableException extends ConflictException {
+  constructor(tripId: string, pdfDocumentId: string) {
+    super(
+      `Trip "${tripId}" was imported from PDF document "${pdfDocumentId}", which is the authority for its destination. Only a Trip created by hand accepts a manually entered destination.`,
+    );
+  }
+}

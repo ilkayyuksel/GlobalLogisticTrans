@@ -40,6 +40,7 @@ export function buildTrip(overrides: Partial<Trip> = {}): Trip {
     latestUpdate: null,
     costConfirmation: null,
     status: "OPEN",
+    isLooseTrip: false,
     bookingNumber: "ANRDUB2602247",
     containerNumber: "MSKU1234567",
     containerType: "45PH",

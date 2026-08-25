@@ -38,6 +38,7 @@ function trip(overrides: Partial<Trip> = {}): Trip {
     vehicleId: null,
     driverId: null,
     status: TripStatus.OPEN,
+    isLooseTrip: false,
     direction: null,
     bookingNumber: "BK-2026-0042",
     containerNumber: null,
@@ -175,6 +176,7 @@ describe("TripService grouping", () => {
         trip({
           id: TRIP_B,
           status: TripStatus.CANCELLED,
+          isLooseTrip: false,
           direction: null,
           planningDate: new Date("2026-09-01T00:00:00.000Z"),
         }),

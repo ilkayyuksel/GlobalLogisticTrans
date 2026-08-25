@@ -134,6 +134,7 @@ function buildTrip(overrides: Partial<Trip> = {}): Trip {
     latestUpdate: null,
     costConfirmation: null,
     status: "OPEN",
+    isLooseTrip: false,
     bookingNumber: "ANRDUB2602247",
     containerNumber: "PVDU 301326/0",
     containerType: "45PH",
@@ -249,7 +250,7 @@ describe("Trip management", () => {
       render(<TripDetailPage />);
 
       expect(
-        await screen.findByRole("button", { name: "Heropenen" }),
+        await screen.findByRole("button", { name: "Openen" }),
       ).toBeInTheDocument();
     });
 

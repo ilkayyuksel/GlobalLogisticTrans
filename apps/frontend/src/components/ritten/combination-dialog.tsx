@@ -29,12 +29,20 @@ import { RittenDialog } from "./ritten-dialog";
  *
  * Direction is not shown: the backend does not expose it on a Trip. It lives in
  * `parserMetadata`, which is diagnostics and deliberately not part of the API.
+ *
+ * UNLINKING LIVES HERE. It used to sit in the row's "Acties" dropdown, which is
+ * gone; this is its proper home anyway — a link is dissolved from the thing that
+ * shows the link, beside the leg it removes, rather than from a menu on a row
+ * that says nothing about the other half.
  */
 export function CombinationDialog({
   tripGroupId,
+  onUnlink,
   onClose,
 }: {
   tripGroupId: string;
+  /** Resolves once the backend accepted it AND the list was refetched. */
+  onUnlink: (trip: Trip) => Promise<void>;
   onClose: () => void;
 }) {
   const t = useTranslation();
@@ -77,7 +85,14 @@ export function CombinationDialog({
 
           {(members.data?.items ?? []).map((trip) => (
             <li key={trip.id} className="px-4 py-3">
-              <Member trip={trip} onNavigate={onClose} />
+              <Member
+                trip={trip}
+                onNavigate={onClose}
+                onUnlink={async () => {
+                  await onUnlink(trip);
+                  members.reload();
+                }}
+              />
             </li>
           ))}
         </ul>
@@ -89,9 +104,11 @@ export function CombinationDialog({
 function Member({
   trip,
   onNavigate,
+  onUnlink,
 }: {
   trip: Trip;
   onNavigate: () => void;
+  onUnlink: () => Promise<void>;
 }) {
   const t = useTranslation();
   const empty = t("ritten.value.empty");
@@ -106,10 +123,32 @@ function Member({
         >
           {trip.bookingNumber}
         </Link>
-        <TripStatusBadge
-          status={trip.status}
-          label={t(`status.${trip.status}`)}
-        />
+        <span className="flex items-center gap-2">
+          <TripStatusBadge
+            status={trip.status}
+            label={t(`status.${trip.status}`)}
+          />
+          {/*
+            Removing a leg is not routine and it changes what the other legs
+            mean, so it still asks — unlike completing, which is routine and
+            asks nothing.
+          */}
+          <button
+            type="button"
+            onClick={() => {
+              if (!window.confirm(t("ritten.group.confirmUnlink"))) {
+                return;
+              }
+
+              // The page reports every failure in its own feedback line, so the
+              // rejection ends here rather than becoming an unhandled promise.
+              void onUnlink().catch(() => undefined);
+            }}
+            className="rounded-md border border-border px-2 py-1 text-xs font-medium text-secondary hover:bg-hover hover:text-foreground"
+          >
+            {t("ritten.menu.unlink")}
+          </button>
+        </span>
       </div>
 
       <dl className="mt-1 grid grid-cols-2 gap-x-4 gap-y-0.5 text-xs sm:grid-cols-3">

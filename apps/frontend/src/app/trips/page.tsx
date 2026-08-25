@@ -37,7 +37,6 @@ import { listActiveVehicles } from "@/lib/api/fleet";
 import { fetchPdfDocument } from "@/lib/api/pdf-documents";
 import {
   fetchPricingSnapshots,
-  reprocessTripPricing,
 } from "@/lib/api/pricing";
 import { getRittenCounts } from "@/lib/api/ritten";
 import { canComplete } from "@/lib/trip-actions";
@@ -46,11 +45,9 @@ import {
   completeTrips,
   createTrip,
   createTripGroup,
-  deleteTrip,
   listTripTerminals,
   listTrips,
   removeTripFromGroup,
-  restoreTrip,
   updateTrip,
   MAX_PAGE_SIZE,
   type CreateTripPayload,
@@ -497,16 +494,6 @@ export default function RittenPage() {
       );
 
     },
-    deleteTrip: (trip) =>
-      runMutation(trip, () => deleteTrip(trip.id), "ritten.feedback.deleted"),
-    restoreTrip: (trip) =>
-      runMutation(trip, () => restoreTrip(trip.id), "ritten.feedback.restored"),
-    reprocessPricing: (trip) =>
-      runMutation(
-        trip,
-        () => reprocessTripPricing(trip.id),
-        "ritten.feedback.reprocessed",
-      ),
     unlinkFromGroup: (trip) =>
       runMutation(
         trip,
@@ -756,6 +743,7 @@ export default function RittenPage() {
       {openCombinationId ? (
         <CombinationDialog
           tripGroupId={openCombinationId}
+          onUnlink={actions.unlinkFromGroup}
           onClose={() => setOpenCombinationId(null)}
         />
       ) : null}

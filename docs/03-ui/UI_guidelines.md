@@ -289,6 +289,39 @@ Avoid excessive shadows.
 
 ---
 
+# Row Actions
+
+A row's actions are DIRECT controls, never a dropdown.
+
+An action an operator performs many times a day must not cost an open, a read
+and a click.
+
+The lifecycle action follows from the status and there is at most one:
+
+Open → Afwerken
+
+Geannuleerd → Openen
+
+Afgewerkt → none. It is terminal.
+
+Verwijderd → none. It returns only through restoration.
+
+A row never offers an action the backend would refuse.
+
+An action that is not routine — cancelling, unlinking, deleting — does not
+belong in a row. It keeps its confirmation and lives on the detail page, or
+beside the thing it affects.
+
+A routine action asks NOTHING. No browser confirmation, no dialog, no warning.
+A dialog in front of a routine action is one people learn to dismiss without
+reading, which then dismisses the dialogs that matter.
+
+Where several rows carry the same action, the accessible name distinguishes
+them: the visible label stays short, and the identifier of the row is added to
+it.
+
+---
+
 # Tables
 
 Tables are one of the most important components.
@@ -380,6 +413,19 @@ Content
 Actions
 
 Avoid confirmation dialogs unless necessary.
+
+---
+
+# Markers That Are Not States
+
+A label that classifies a record is shown BESIDE its status, never instead of
+it, and never in a lifecycle colour.
+
+Every filled badge tone already means something in the lifecycle. A
+classification that borrowed one would read as a status the record does not
+have.
+
+Use the outline tone for these.
 
 ---
 

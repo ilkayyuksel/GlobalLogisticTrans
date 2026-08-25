@@ -195,6 +195,14 @@ export interface Trip {
    */
   customProperties: TripCustomPropertySummary[];
   status: TripStatus;
+  /**
+   * LOSRIT: a loose trip, as the operator classified it.
+   *
+   * INDEPENDENT of `status` — a LOSRIT is OPEN, CLOSED or CANCELLED like any
+   * other Trip — and informational only. It changes no action, no pricing and
+   * no document handling; it is shown, and that is all.
+   */
+  isLooseTrip: boolean;
   /** What the document said this Trip is. Null when nothing said. */
   direction: TripDirection | null;
   /** Null on a manual Trip whose booking number is not known yet. */

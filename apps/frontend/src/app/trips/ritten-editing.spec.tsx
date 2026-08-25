@@ -524,12 +524,12 @@ describe("Ritten editing", () => {
   });
 
   describe("fields without a column", () => {
+    /** A direct button in the row now; there is no menu to open first. */
     async function openDetails(): Promise<void> {
       await userEvent.click(
-        await screen.findByRole("button", { name: /Acties ANRDUB2602247/ }),
-      );
-      await userEvent.click(
-        screen.getByRole("menuitem", { name: "Details bewerken" }),
+        await screen.findByRole("button", {
+          name: "Details bewerken ANRDUB2602247",
+        }),
       );
     }
 
