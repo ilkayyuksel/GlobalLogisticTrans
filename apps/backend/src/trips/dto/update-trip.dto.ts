@@ -10,10 +10,6 @@ import {
   Max,
   MaxLength,
   Min,
-  Validate,
-  ValidatorConstraint,
-  type ValidationArguments,
-  type ValidatorConstraintInterface,
 } from "class-validator";
 
 import { toOptionalBoolean, trimToNull } from "../../common/dto/transforms";
@@ -65,6 +61,11 @@ import {
  * classification, no parser ever writes it, and a box ticked by mistake has to
  * be untickable.
  *
+ * A waiting-time window is BOTH times or neither, which the service enforces —
+ * see `assertWaitingWindowIsComplete`. It cannot be a decorator here:
+ * `@IsOptional()` skips every validator on a property that was not sent, which
+ * is exactly the case the rule exists to catch.
+ *
  * `waitingTimeMinutes` is deliberately ABSENT even though the column is a
  * manual field. It is DERIVED from `waitingTimeStart` and `waitingTimeEnd`, and
  * accepting it as well would let the money and the evidence for it disagree —
@@ -73,38 +74,6 @@ import {
  * The global ValidationPipe runs with forbidNonWhitelisted, so sending any of
  * them is rejected with 400 rather than ignored.
  */
-/**
- * A waiting-time window is both times or neither.
- *
- * An end with no beginning is not a duration of zero and not a duration from
- * midnight; it is an incomplete entry, and guessing which it meant would bill
- * something nobody measured. Refused here rather than silently half-stored.
- */
-@ValidatorConstraint({ name: "waitingWindowIsComplete", async: false })
-class WaitingWindowIsComplete implements ValidatorConstraintInterface {
-  validate(_value: unknown, args: ValidationArguments): boolean {
-    const dto = args.object as UpdateTripDto;
-    const sent = [dto.waitingTimeStart, dto.waitingTimeEnd].filter(
-      (value) => value !== undefined,
-    );
-
-    if (sent.length === 0) {
-      return true;
-    }
-
-    // Both present, and either both cleared or both given.
-    return (
-      sent.length === 2 &&
-      (sent.every((value) => value === null) ||
-        sent.every((value) => value !== null))
-    );
-  }
-
-  defaultMessage(): string {
-    return "waitingTimeStart and waitingTimeEnd must be sent together, both as times or both as null.";
-  }
-}
-
 export class UpdateTripDto {
   @ApiPropertyOptional({
     description:
@@ -167,7 +136,6 @@ export class UpdateTripDto {
   })
   @IsOptional()
   @IsClockTimeString()
-  @Validate(WaitingWindowIsComplete)
   waitingTimeEnd?: string | null;
 
   @ApiPropertyOptional({

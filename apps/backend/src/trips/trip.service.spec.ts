@@ -7,6 +7,7 @@ import { VehicleService } from "../vehicles/vehicle.service";
 import { CreateTripDto } from "./dto/create-trip.dto";
 import {
   DocumentControlledFieldException,
+  IncompleteWaitingWindowException,
   DuplicateBookingNumberException,
   InactiveAssignmentException,
   InvalidTripStatusTransitionException,
@@ -607,6 +608,91 @@ describe("TripService", () => {
         await service.update(TRIP_ID, { internalNotes: "call the customer" });
 
         expect(repository.update).toHaveBeenCalled();
+      });
+    });
+
+    /**
+     * ── A WAITING WINDOW IS BOTH TIMES OR NEITHER ───────────────────────────
+     * An end with no beginning is not zero and not a duration from midnight; it
+     * is an incomplete entry, and guessing would bill something nobody
+     * measured.
+     *
+     * This cannot be a DTO decorator: `@IsOptional()` skips every validator on
+     * a property that was not sent, which is exactly this case. Before the rule
+     * moved into the service, a start sent alone reached the calculator with an
+     * undefined end and answered 500.
+     * ────────────────────────────────────────────────────────────────────────
+     */
+    describe("a half-filled waiting window", () => {
+      it("is refused when only the start is sent", async () => {
+        await expect(
+          service.update(TRIP_ID, { waitingTimeStart: "10:00" }),
+        ).rejects.toBeInstanceOf(IncompleteWaitingWindowException);
+      });
+
+      it("is refused when only the end is sent", async () => {
+        await expect(
+          service.update(TRIP_ID, { waitingTimeEnd: "12:15" }),
+        ).rejects.toBeInstanceOf(IncompleteWaitingWindowException);
+      });
+
+      it("is refused when one is cleared and the other given", async () => {
+        await expect(
+          service.update(TRIP_ID, {
+            waitingTimeStart: null,
+            waitingTimeEnd: "12:15",
+          }),
+        ).rejects.toBeInstanceOf(IncompleteWaitingWindowException);
+      });
+
+      it("writes nothing when it is refused", async () => {
+        await expect(
+          service.update(TRIP_ID, {
+            waitingTimeStart: "10:00",
+            internalNotes: "x",
+          }),
+        ).rejects.toBeInstanceOf(IncompleteWaitingWindowException);
+
+        expect(repository.update).not.toHaveBeenCalled();
+      });
+
+      it("accepts both together", async () => {
+        await service.update(TRIP_ID, {
+          waitingTimeStart: "10:00",
+          waitingTimeEnd: "12:15",
+        });
+
+        expect(repository.update).toHaveBeenCalledWith(
+          TRIP_ID,
+          expect.objectContaining({ waitingTimeMinutes: 135 }),
+        );
+      });
+
+      it("accepts both cleared, which removes the entry", async () => {
+        await service.update(TRIP_ID, {
+          waitingTimeStart: null,
+          waitingTimeEnd: null,
+        });
+
+        expect(repository.update).toHaveBeenCalledWith(
+          TRIP_ID,
+          expect.objectContaining({
+            waitingTimeStart: null,
+            waitingTimeEnd: null,
+            waitingTimeMinutes: null,
+          }),
+        );
+      });
+
+      it("says nothing about waiting time when neither was sent", async () => {
+        await service.update(TRIP_ID, { internalNotes: "x" });
+
+        const [, written] = (repository.update as jest.Mock).mock.calls[0] as [
+          string,
+          Record<string, unknown>,
+        ];
+
+        expect(written).not.toHaveProperty("waitingTimeStart");
       });
     });
 

@@ -26,6 +26,7 @@ import {
   AssignmentSubject,
   DeletedTripCannotBeLooseException,
   DocumentControlledFieldException,
+  IncompleteWaitingWindowException,
   DuplicateBookingNumberException,
   GroupedTripCannotBeLooseException,
   InactiveAssignmentException,
@@ -333,6 +334,7 @@ export class TripService {
   async update(id: string, dto: UpdateTripDto): Promise<TripResponseDto> {
     const existing = await this.requireTrip(id);
 
+    this.assertWaitingWindowIsComplete(dto);
     this.assertDocumentFieldsEditable(existing, dto);
 
     if (dto.vehicleId !== undefined && dto.vehicleId !== existing.vehicleId) {
@@ -985,6 +987,32 @@ export class TripService {
       },
       trip.id,
     );
+  }
+
+  /**
+   * A waiting-time window is both times or neither.
+   *
+   * It cannot be a DTO decorator: `@IsOptional()` skips every validator on a
+   * property that was not sent, which is precisely the case here — a start on
+   * its own, with the end absent. So the rule lives where it can see both.
+   */
+  private assertWaitingWindowIsComplete(dto: UpdateTripDto): void {
+    const sent = [dto.waitingTimeStart, dto.waitingTimeEnd].filter(
+      (value) => value !== undefined,
+    );
+
+    if (sent.length === 0) {
+      return;
+    }
+
+    const isComplete =
+      sent.length === 2 &&
+      (sent.every((value) => value === null) ||
+        sent.every((value) => value !== null));
+
+    if (!isComplete) {
+      throw new IncompleteWaitingWindowException();
+    }
   }
 
   /**

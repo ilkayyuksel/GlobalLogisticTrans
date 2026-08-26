@@ -834,6 +834,21 @@ The rule keys on the ABSENCE OF A SOURCE DOCUMENT, not on LOSRIT. LOSRIT is
 informational and must not decide what may be edited; a manual Trip that is not
 a LOSRIT has exactly the same problem and gets exactly the same answer.
 
+## Who may edit the transport times
+
+Anyone. start_time and end_time are planning an operator adjusts as a day
+unfolds, exactly like the planning date beside them, on an imported Trip as much
+as on a manual one.
+
+A later UPDATE document may still revise them — that is what a revision is for —
+and until one does, the operator's value stands.
+
+An operator's edit writes NO revision history. Only a document's revision does
+that, through TripRevisionService.
+
+The DESTINATION is not like this. It stays the document's on an imported Trip;
+see above.
+
 ## The transport times have no ordering rule
 
 The end is not required to follow the start.
@@ -909,14 +924,30 @@ label.
 
 # Waiting Time
 
-The stored value is and remains waitingTimeMinutes, a single integer.
+A waiting time is THREE columns describing one fact:
 
-It is ENTERED as the two clock times it was read from — a begin and an end —
-and the duration is calculated from them.
+waiting_time_start
 
-The two times are input only. They are not stored, and no begin/end is ever
-reconstructed from a stored duration: a Trip edited before this existed shows
-its duration and opens with empty time fields.
+waiting_time_end
+
+waiting_time_minutes
+
+The DURATION is what pricing bills from and stays authoritative for money. The
+two times say where that figure came from, which was not recoverable when only
+the total was kept.
+
+The Backend DERIVES the minutes from the two times whenever both are given.
+waitingTimeMinutes is not accepted on an update at all, so the money and the
+evidence for it cannot disagree.
+
+A window is BOTH times or NEITHER. Both null removes the entry, clearing all
+three columns. A start with no end is refused: it is an incomplete entry, and
+guessing would bill something nobody measured.
+
+Historical Trips keep their duration and have NO times. Nothing is backfilled
+and no begin/end is ever reconstructed from a stored duration — 135 minutes has
+unlimited begin/end pairs, and inventing one would put hours on screen that
+nobody ever read off a clock.
 
 The calculation:
 

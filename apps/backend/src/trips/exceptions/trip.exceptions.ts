@@ -205,6 +205,24 @@ export class GroupedTripCannotBeLooseException extends ConflictException {
   }
 }
 
+/**
+ * A waiting time was sent as half a window.
+ *
+ * An end with no beginning is not a duration of zero and not a duration from
+ * midnight — it is an incomplete entry, and guessing which it meant would bill
+ * something nobody measured. Both times, or both null to remove the entry.
+ *
+ * 400 rather than 409: the request itself is malformed, and the same body is
+ * wrong for every Trip.
+ */
+export class IncompleteWaitingWindowException extends BadRequestException {
+  constructor() {
+    super(
+      "waitingTimeStart and waitingTimeEnd must be sent together: both as times, or both as null to remove the waiting time.",
+    );
+  }
+}
+
 /** A DELETED Trip is read-only until it is restored. */
 export class DeletedTripCannotBeLooseException extends ConflictException {
   constructor(tripId: string) {
