@@ -367,6 +367,25 @@ model Trip {
   /// When the transport was actually carried out; may differ from planning.
   executionDatetime    DateTime? @map("execution_datetime") @db.Timestamptz(6)
 
+  /// The two clock times the waiting was read off, and the duration between
+  /// them.
+  ///
+  /// The DURATION is what pricing bills from and it stays authoritative for
+  /// money; the two times say where it came from, which nobody could see once
+  /// only the total was kept. The Backend derives the minutes from the times
+  /// whenever both are given, so the three can never disagree.
+  ///
+  /// Null on every Trip whose waiting time was entered before this existed:
+  /// 135 minutes has unlimited begin/end pairs and inventing one would put
+  /// times on screen that nobody ever read off a clock.
+  ///
+  /// These are TIME, not timestamps, and the window they describe is always
+  /// less than a day: an end before a begin is the next morning, and equal
+  /// times are zero rather than twenty-four hours.
+  ///
+  /// NOT start_time/end_time, which are the transport's own planned window.
+  waitingTimeStart   DateTime? @map("waiting_time_start") @db.Time(6)
+  waitingTimeEnd     DateTime? @map("waiting_time_end") @db.Time(6)
   waitingTimeMinutes Int?     @map("waiting_time_minutes")
   /// Manually entered. Used only by the Distance-Based pricing strategy.
   distanceKm         Decimal? @map("distance_km") @db.Decimal(8, 2)

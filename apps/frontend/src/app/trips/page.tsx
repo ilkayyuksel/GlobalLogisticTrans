@@ -7,7 +7,10 @@ import { CustomPropertiesDialog } from "@/components/ritten/custom-properties-di
 import { DateSection } from "@/components/ritten/date-section";
 import { ExportButton } from "@/components/ritten/export-button";
 import { GroupConfirmDialog } from "@/components/ritten/group-confirm-dialog";
-import { DeleteConfirmDialog } from "@/components/ritten/delete-confirm-dialog";
+import {
+  ConfirmDialog,
+  ConfirmedTrip,
+} from "@/components/ritten/confirm-dialog";
 import { NewTripDialog } from "@/components/ritten/new-trip-dialog";
 import { PdfViewerDialog } from "@/components/ritten/pdf-viewer-dialog";
 import { SelectionToolbar } from "@/components/ritten/selection-toolbar";
@@ -168,6 +171,8 @@ export default function RittenPage() {
   const [isGroupDialogOpen, setIsGroupDialogOpen] = useState(false);
   /** The Trip whose deletion is being confirmed, or null. */
   const [deletingTrip, setDeletingTrip] = useState<Trip | null>(null);
+  /** The CANCELLED Trip whose reopening is being confirmed, or null. */
+  const [reopeningTrip, setReopeningTrip] = useState<Trip | null>(null);
   /*
    * What the PDF viewer was asked to show.
    *
@@ -630,6 +635,17 @@ export default function RittenPage() {
       }
     },
     deleteTrip: deleteOneTrip,
+    /*
+     * The LABEL comes off; the Trip stays. One field, through the ordinary
+     * update endpoint — no status change, no planning change, no identity
+     * change, no pricing and no document touched.
+     */
+    removeLosrit: (trip) =>
+      runMutation(
+        trip,
+        () => updateTrip(trip.id, { isLooseTrip: false }),
+        "ritten.feedback.losritRemoved",
+      ),
     openCombination: setOpenCombinationId,
     openCustomProperties: setCustomPropertiesTrip,
   };
@@ -825,6 +841,7 @@ export default function RittenPage() {
                   showPricing={showPricing}
                   pricingByTripId={pricingByTripId}
               onDeleteTrip={setDeletingTrip}
+              onReopenTrip={setReopeningTrip}
                 />
               ))}
             </div>
@@ -836,8 +853,9 @@ export default function RittenPage() {
 
       {isGroupDialogOpen ? (
         <GroupConfirmDialog
-          trips={selectedVisibleTrips}
-          hiddenCount={selectedTripIds.size - selectedVisibleTrips.length}
+          // THE SELECTION, by id. The dialog fetches the Trips itself, so one
+          // chosen on a day that is not on screen is shown rather than counted.
+          tripIds={selectedIds}
           onConfirm={groupSelected}
           onClose={() => setIsGroupDialogOpen(false)}
         />
@@ -853,11 +871,34 @@ export default function RittenPage() {
       ) : null}
 
       {deletingTrip ? (
-        <DeleteConfirmDialog
-          trip={deletingTrip}
+        <ConfirmDialog
+          titleKey="ritten.delete.title"
+          descriptionKey="ritten.delete.description"
+          consequenceKey="ritten.delete.consequence"
+          confirmKey="ritten.delete.confirm"
+          tone="danger"
           onConfirm={() => deleteOneTrip(deletingTrip)}
           onClose={() => setDeletingTrip(null)}
-        />
+        >
+          <ConfirmedTrip trip={deletingTrip} />
+        </ConfirmDialog>
+      ) : null}
+
+      {/*
+        Reopening a cancellation says a called-off transport is happening after
+        all. Not destructive, so the primary tone — but still asked, unlike
+        completing, which is routine.
+      */}
+      {reopeningTrip ? (
+        <ConfirmDialog
+          titleKey="ritten.reopen.title"
+          descriptionKey="ritten.reopen.description"
+          confirmKey="ritten.menu.reopen"
+          onConfirm={() => actions.changeStatus(reopeningTrip, "OPEN")}
+          onClose={() => setReopeningTrip(null)}
+        >
+          <ConfirmedTrip trip={reopeningTrip} />
+        </ConfirmDialog>
       ) : null}
 
       {openCombinationId ? (

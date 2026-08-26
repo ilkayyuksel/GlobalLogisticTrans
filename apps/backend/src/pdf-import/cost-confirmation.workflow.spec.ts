@@ -94,6 +94,8 @@ describe("every real Cost Confirmation, through the real workflow", () => {
       originalPlanningDate: new Date("2026-08-14T00:00:00.000Z"),
       vehicleId: "vehicle-1",
       driverId: null,
+      waitingTimeStart: null,
+      waitingTimeEnd: null,
       waitingTimeMinutes: 150,
       internalNotes: "Bel de klant",
       tripGroupId: null,

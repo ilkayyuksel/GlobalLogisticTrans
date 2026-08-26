@@ -138,6 +138,8 @@ function buildTrip(overrides: Partial<Trip> = {}): Trip {
     startTime: "10:00",
     endTime: "16:00",
     executionDatetime: null,
+    waitingTimeStart: null,
+    waitingTimeEnd: null,
     waitingTimeMinutes: 45,
     distanceKm: "198.00",
     internalNotes: null,

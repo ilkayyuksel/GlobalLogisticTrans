@@ -83,9 +83,12 @@ describe("deleting a Trip from the Ritten list", () => {
   });
 
   /**
-   * The backend deletes from OPEN and from nowhere else — restore returns a
-   * Trip to OPEN, and the status it held before deletion is recorded nowhere.
-   * A button on any other status could only ever return a 409.
+   * The backend deletes from OPEN and from CANCELLED. A button on any other
+   * status could only ever return a 409.
+   *
+   * Restore still returns every Trip to OPEN, so a Trip deleted while cancelled
+   * comes back open — an administrator recovering a record, not an undo of the
+   * cancellation.
    */
   describe("where it is offered", () => {
     it("appears on an OPEN Trip, beside Afwerken", async () => {
@@ -97,13 +100,17 @@ describe("deleting a Trip from the Ritten list", () => {
       expect(deleteButton()).toBeEnabled();
     });
 
-    it("is not offered on a CANCELLED Trip", async () => {
+    /**
+     * Directly, without reopening first: CANCELLED → OPEN → DELETED moved the
+     * Trip through a state it was never in on the way past.
+     */
+    it("is offered on a CANCELLED Trip, beside Openen", async () => {
       await showTrip({ status: "CANCELLED" });
 
       expect(
         screen.getByRole("button", { name: "Openen ANRDUB2602247" }),
       ).toBeInTheDocument();
-      expect(deleteButton()).toBeNull();
+      expect(deleteButton()).toBeEnabled();
     });
 
     it("is not offered on a CLOSED Trip", async () => {

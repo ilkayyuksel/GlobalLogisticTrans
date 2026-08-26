@@ -52,6 +52,8 @@ function buildTrip(overrides: Partial<Trip> = {}): Trip {
     direction: "COLLECTION",
     vehicleId: "vehicle-1",
     driverId: null,
+    waitingTimeStart: null,
+    waitingTimeEnd: null,
     waitingTimeMinutes: 45,
     distanceKm: null,
     executionDatetime: null,

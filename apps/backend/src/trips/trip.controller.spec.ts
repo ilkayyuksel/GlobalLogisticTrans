@@ -49,6 +49,8 @@ function buildTrip(overrides: Partial<Trip> = {}): Trip {
     startTime: null,
     endTime: null,
     executionDatetime: null,
+    waitingTimeStart: null,
+    waitingTimeEnd: null,
     waitingTimeMinutes: null,
     distanceKm: null,
     internalNotes: null,
@@ -464,8 +466,6 @@ describe("TripController (integration)", () => {
     it.each([
       ["destinationCity", "Rotterdam"],
       ["destinationCountry", "Netherlands"],
-      ["startTime", "09:00"],
-      ["endTime", "13:00"],
     ])("refuses %s on an imported Trip", async (field, value) => {
       await request(app.getHttpServer())
         .patch(`${BASE}/${TRIP_ID}`)
@@ -473,6 +473,17 @@ describe("TripController (integration)", () => {
         .expect(409);
 
       expect(repository.update).not.toHaveBeenCalled();
+    });
+
+    /** The transport times are an operator field on any Trip. */
+    it.each([
+      ["startTime", "09:00"],
+      ["endTime", "13:00"],
+    ])("accepts %s on an imported Trip", async (field, value) => {
+      await request(app.getHttpServer())
+        .patch(`${BASE}/${TRIP_ID}`)
+        .send({ [field]: value })
+        .expect(200);
     });
 
     /** Well-formed but wrong shape is still a 400, not a 409. */

@@ -334,6 +334,9 @@ const nl = {
   "ritten.new.dateHint": "Zonder datum verschijnt de rit onder “Zonder datum”.",
   "ritten.losrit.badge": "LOSRIT",
   "ritten.feedback.markedLoose": "Als losrit gemarkeerd",
+  "ritten.reopen.title": "Geannuleerde rit openen?",
+  "ritten.reopen.description":
+    "Deze rit wordt opnieuw geopend en verschijnt weer als open in de planning.",
   "ritten.delete.title": "Rit verwijderen?",
   "ritten.delete.description":
     "Deze rit wordt verwijderd uit de planning.",
@@ -341,6 +344,10 @@ const nl = {
     "De rit en zijn documenten blijven bewaard, maar de rit verdwijnt uit de lijst en kan alleen door een beheerder worden hersteld.",
   "ritten.delete.confirm": "Verwijderen",
   "ritten.losrit.label": "Losrit",
+  "ritten.losrit.remove": "Losrit verwijderen",
+  "direction.COLLECTION": "Ophalen",
+  "direction.DELIVERY": "Leveren",
+  "ritten.feedback.losritRemoved": "Losrit-markering verwijderd",
   "ritten.losrit.hint":
     "Een losrit is een aparte rit. De status blijft gewoon Open, Afgewerkt of Geannuleerd.",
   "ritten.new.submit": "Rit aanmaken",
@@ -601,6 +608,7 @@ const nl = {
    */
   "ritten.waiting.beginField": "Wachttijd begin",
   "ritten.waiting.endField": "Wachttijd eind",
+  "ritten.waiting.remove": "Wachttijd verwijderen",
   "ritten.waiting.calculated": "Berekend",
   "ritten.waiting.beginRequired": "Vul een begintijd in, bijvoorbeeld 10:00.",
   "ritten.waiting.endRequired": "Vul een eindtijd in, bijvoorbeeld 12:30.",
@@ -1080,12 +1088,19 @@ const tr: Translations = {
   "ritten.new.dateHint": "Tarihsiz sefer “Tarihsiz” başlığı altında görünür.",
   "ritten.losrit.badge": "LOSRIT",
   "ritten.feedback.markedLoose": "Tekil sefer olarak işaretlendi",
+  "ritten.reopen.title": "İptal edilen sefer açılsın mı?",
+  "ritten.reopen.description":
+    "Bu sefer yeniden açılır ve planlamada tekrar açık olarak görünür.",
   "ritten.delete.title": "Sefer silinsin mi?",
   "ritten.delete.description": "Bu sefer planlamadan kaldırılır.",
   "ritten.delete.consequence":
     "Sefer ve belgeleri saklanır, ancak sefer listeden kaybolur ve yalnızca bir yönetici tarafından geri alınabilir.",
   "ritten.delete.confirm": "Sil",
   "ritten.losrit.label": "Tekil sefer",
+  "ritten.losrit.remove": "Tekil sefer işaretini kaldır",
+  "direction.COLLECTION": "Alım",
+  "direction.DELIVERY": "Teslim",
+  "ritten.feedback.losritRemoved": "Tekil sefer işareti kaldırıldı",
   "ritten.losrit.hint":
     "Tekil sefer ayrı bir seferdir. Durumu yine Açık, Tamamlandı veya İptal olur.",
   "ritten.new.submit": "Sefer oluştur",
@@ -1339,6 +1354,7 @@ const tr: Translations = {
   "ritten.waiting.end": "Bitiş",
   "ritten.waiting.beginField": "Bekleme başlangıcı",
   "ritten.waiting.endField": "Bekleme bitişi",
+  "ritten.waiting.remove": "Bekleme süresini sil",
   "ritten.waiting.calculated": "Hesaplanan",
   "ritten.waiting.beginRequired": "Bir başlangıç saati girin, örneğin 10:00.",
   "ritten.waiting.endRequired": "Bir bitiş saati girin, örneğin 12:30.",

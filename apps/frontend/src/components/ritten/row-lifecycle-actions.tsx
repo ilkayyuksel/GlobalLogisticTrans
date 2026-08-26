@@ -29,8 +29,13 @@ import { canDelete, primaryRowAction } from "@/lib/trip-actions";
  * the planning, and an operator who did it by accident will not see it in the
  * list to put it back — so it opens the application's own confirmation rather
  * than acting, and it is styled as destructive so it is never mistaken for the
- * routine button beside it. It appears only where the backend accepts it, which
- * today is an OPEN Trip; see `canDelete`.
+ * routine button beside it. It appears where the backend accepts it: an OPEN
+ * Trip, and a CANCELLED one — which no longer has to be reopened first, a
+ * detour that moved it through a state it was never in.
+ *
+ * REOPENING A CANCELLATION ASKS TOO. Completing does not: it is routine and the
+ * row says so a moment later. Putting a called-off transport back in the
+ * planning says it is happening after all, which is worth a sentence.
  *
  * AND NOTHING ELSE BELONGS HERE. No edit button, no "more", no second menu by
  * another name. Editing a Trip's less common fields is the Trip detail page's
@@ -42,12 +47,19 @@ export function RowLifecycleActions({
   actions,
   isBusy,
   onDelete,
+  onReopen,
 }: {
   trip: Trip;
   actions: RittenActions;
   isBusy: boolean;
   /** Opens the confirmation. The row never deletes anything itself. */
   onDelete: (trip: Trip) => void;
+  /**
+   * Opens the reopen confirmation. Only CANCELLED reaches it — a cancelled
+   * transport was called off, and putting it back says it is happening after
+   * all, which is worth a sentence before it takes effect.
+   */
+  onReopen: (trip: Trip) => void;
 }) {
   const t = useTranslation();
   const action = primaryRowAction(trip);
@@ -69,6 +81,13 @@ export function RowLifecycleActions({
           type="button"
           disabled={isBusy}
           onClick={() => {
+            // Reopening a cancellation asks first; completing does not.
+            if (action.target === "OPEN") {
+              onReopen(trip);
+
+              return;
+            }
+
             /*
              * The page reports every failure in its own feedback line and
              * rethrows so an inline editor can keep its cell open. A button has

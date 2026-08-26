@@ -41,6 +41,8 @@ function buildTrip(overrides: Partial<Trip> = {}): Trip {
     direction: "COLLECTION",
     vehicleId: null,
     driverId: null,
+    waitingTimeStart: null,
+    waitingTimeEnd: null,
     waitingTimeMinutes: null,
     distanceKm: null,
     executionDatetime: null,
@@ -269,6 +271,8 @@ describe("TripRevisionService", () => {
         buildTrip({
           vehicleId: "vehicle-1",
           driverId: "driver-1",
+          waitingTimeStart: null,
+          waitingTimeEnd: null,
           waitingTimeMinutes: 45,
           distanceKm: new Decimal(320),
           executionDatetime: new Date("2025-05-23T09:00:00.000Z"),
@@ -282,6 +286,8 @@ describe("TripRevisionService", () => {
       expect(stored[0]).toMatchObject({
         vehicleId: "vehicle-1",
         driverId: "driver-1",
+        waitingTimeStart: null,
+        waitingTimeEnd: null,
         waitingTimeMinutes: 45,
         distanceKm: new Decimal(320),
         internalNotes: "Call the warehouse before arriving",

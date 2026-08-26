@@ -56,6 +56,8 @@ function buildTrip(overrides: Partial<Trip> = {}): Trip {
     updatedAt: new Date("2026-08-01T00:00:00.000Z"),
     vehicleId: "vehicle-1",
     driverId: null,
+    waitingTimeStart: null,
+    waitingTimeEnd: null,
     waitingTimeMinutes: 45,
     internalNotes: "Bel de klant",
     ...overrides,
@@ -192,6 +194,8 @@ describe("grouping Trips from different days", () => {
 
     expect(stored[0]).toMatchObject({
       vehicleId: "vehicle-1",
+      waitingTimeStart: null,
+      waitingTimeEnd: null,
       waitingTimeMinutes: 45,
       internalNotes: "Bel de klant",
     });

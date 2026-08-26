@@ -20,6 +20,7 @@ import {
 } from "./dto/trip-response.dto";
 import { UpdateTripDto } from "./dto/update-trip.dto";
 import { TripClosedEvent } from "./events/trip-closed.event";
+import { toWaitingTimeWrite } from "./waiting-window";
 import { ImportTripsCommand } from "./import-trips.command";
 import {
   AssignmentSubject,
@@ -39,7 +40,7 @@ import {
 } from "./exceptions/trip.exceptions";
 import {
   BOOKING_NUMBER_HOLDING_STATUSES,
-  DELETABLE_FROM_STATUS,
+  DELETABLE_FROM_STATUSES,
   RESTORED_STATUS,
   allowedTransitionsFrom,
   canTransition,
@@ -144,6 +145,7 @@ export class TripService {
       driverId: query.driverId,
       vehicleId: query.vehicleId,
       tripGroupId: query.tripGroupId,
+      tripIds: query.tripIds,
       customPropertyId: query.customPropertyId,
       // Absent means the default reading order; the repository owns what that
       // is, so an unsorted request and a sorted one take the same path.
@@ -278,7 +280,13 @@ export class TripService {
           executionDatetime: toNullableDateTime(dto.executionDatetime),
           vehicleId: dto.vehicleId ?? null,
           driverId: dto.driverId ?? null,
-          waitingTimeMinutes: dto.waitingTimeMinutes ?? null,
+          /*
+           * The two times win when they are given: the duration is derived
+           * from them so the three columns cannot disagree. A Trip created
+           * with only a duration keeps it, and keeps no times — which is
+           * exactly what an entry made before the window existed looks like.
+           */
+          ...toWaitingTimeOnCreate(dto),
           distanceKm: dto.distanceKm ?? null,
           internalNotes: dto.internalNotes ?? null,
           // The operator's own classification. Absent means an ordinary Trip;
@@ -799,11 +807,11 @@ export class TripService {
       return this.toResponse(trip);
     }
 
-    if (trip.status !== DELETABLE_FROM_STATUS) {
+    if (!DELETABLE_FROM_STATUSES.includes(trip.status)) {
       throw new TripNotDeletableException(
         id,
         trip.status,
-        DELETABLE_FROM_STATUS,
+        DELETABLE_FROM_STATUSES,
       );
     }
 
@@ -983,15 +991,21 @@ export class TripService {
    * Who owns the fields a transport order states.
    *
    * A Trip created by hand has no source document, so the operator is the only
-   * possible author of its destination and of its transport times — and until
-   * now there was no way to change either after creation, because both were
-   * excluded from every update as "parser-controlled". That description is only
-   * true where a parser exists.
+   * possible author of its destination — and until now there was no way to
+   * change one entered wrongly, because it was excluded from every update as
+   * "parser-controlled". That description is only true where a parser exists.
    *
-   * On an IMPORTED Trip it still is: a later UPDATE document re-reads them and
-   * would overwrite anything typed here, so the request is refused rather than
-   * accepted and silently reverted. Both are in `COMPARED_FIELDS`, which is
-   * what makes a document's change to them visible in the first place.
+   * On an IMPORTED Trip it still is: a later UPDATE document re-reads the
+   * destination and would overwrite anything typed here, so the request is
+   * refused rather than accepted and silently reverted.
+   *
+   * ── THE TRANSPORT TIMES ARE NOT ON THIS LIST ─────────────────────────────
+   * They used to be, and the owner decided otherwise: Begin and Eind are
+   * planning an operator adjusts as a day unfolds, on any Trip, exactly like
+   * the planning date beside them. A document may still revise them — that is
+   * what a later UPDATE is for — and until one does, the operator's value
+   * stands. An edit made here is an operator edit and writes no history: only
+   * a document's revision does that, through TripRevisionService.
    *
    * Only a field actually being SENT is checked. An update that leaves them
    * alone is not a change to them, whatever the Trip's origin.
@@ -1009,8 +1023,6 @@ export class TripService {
     const owned: ReadonlyArray<[keyof UpdateTripDto, string]> = [
       ["destinationCity", "destination"],
       ["destinationCountry", "destination"],
-      ["startTime", "transport times"],
-      ["endTime", "transport times"],
     ];
 
     for (const [field, description] of owned) {
@@ -1054,13 +1066,25 @@ export class TripService {
           : toUtcDate(dto.planningDate),
       vehicleId: dto.vehicleId,
       driverId: dto.driverId,
-      waitingTimeMinutes: dto.waitingTimeMinutes,
       distanceKm: dto.distanceKm,
       executionDatetime:
         dto.executionDatetime === undefined
           ? undefined
           : toNullableDateTime(dto.executionDatetime),
       internalNotes: dto.internalNotes,
+      /*
+       * Both times, or both cleared, or neither mentioned — and the duration
+       * follows from them. `waitingTimeMinutes` is not accepted from a caller
+       * at all, which is what keeps the money and its evidence in step.
+       */
+      ...toWaitingTimeWrite(
+        dto.waitingTimeStart === undefined
+          ? undefined
+          : toNullableTime(dto.waitingTimeStart),
+        dto.waitingTimeEnd === undefined
+          ? undefined
+          : toNullableTime(dto.waitingTimeEnd),
+      ),
       destinationCity: dto.destinationCity,
       destinationCountry: dto.destinationCountry,
       startTime:
@@ -1070,6 +1094,36 @@ export class TripService {
       isLooseTrip: dto.isLooseTrip,
     };
   }
+}
+
+/**
+ * The waiting-time columns for a Trip being created.
+ *
+ * The window wins when both times are given, because the duration then follows
+ * from them. With no window the supplied duration is stored on its own — which
+ * is how a Trip imported from a document, or entered before the two times were
+ * recorded, legitimately looks.
+ */
+function toWaitingTimeOnCreate(dto: CreateTripDto): {
+  waitingTimeStart: Date | null;
+  waitingTimeEnd: Date | null;
+  waitingTimeMinutes: number | null;
+} {
+  const window = toWaitingTimeWrite(
+    dto.waitingTimeStart === undefined
+      ? undefined
+      : toNullableTime(dto.waitingTimeStart),
+    dto.waitingTimeEnd === undefined
+      ? undefined
+      : toNullableTime(dto.waitingTimeEnd),
+  );
+
+  return {
+    waitingTimeStart: window.waitingTimeStart ?? null,
+    waitingTimeEnd: window.waitingTimeEnd ?? null,
+    waitingTimeMinutes:
+      window.waitingTimeMinutes ?? dto.waitingTimeMinutes ?? null,
+  };
 }
 
 function toNullableDate(value: string | null | undefined): Date | null {

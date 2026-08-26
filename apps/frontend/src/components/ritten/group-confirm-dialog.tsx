@@ -1,11 +1,15 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useState } from "react";
 
+import { ErrorState, LoadingState } from "@/components/ui/states";
+import { useAsync } from "@/hooks/use-async";
 import { userFacingMessage } from "@/lib/api/client";
+import { listTrips } from "@/lib/api/trips";
 import type { Trip } from "@/lib/api/types";
 import { formatCalendarDate } from "@/lib/calendar/calendar-dates";
 import { useTranslation } from "@/lib/i18n/language-provider";
+import { toGroupDisplayOrder } from "@/lib/ritten/group-order";
 import { RittenDialog } from "./ritten-dialog";
 
 /**
@@ -22,6 +26,18 @@ import { RittenDialog } from "./ritten-dialog";
  * and those belong in one group. Nothing is moved onto a shared day: each Trip
  * keeps its own planning date, its own truck and its own driver.
  *
+ * ── EVERY SELECTED TRIP IS SHOWN, INCLUDING THE ONES OFF SCREEN ─────────────
+ * It used to list only the rows that happened to be visible and say "1 of the
+ * selected Trips is on a day that is not shown". That is precisely the Trip an
+ * operator needs to check: they cannot confirm a group whose other half they
+ * have never seen. The dialog therefore FETCHES the selection by id — one
+ * request for all of them, whatever days they fall on — and lists them.
+ *
+ * ── READ IN THE DIRECTION THE CONTAINERS TRAVEL ─────────────────────────────
+ * DUB first, ANR second, the same display-only rule the Combination view uses.
+ * Where neither prefix applies the planning date decides, ascending, so a list
+ * the rule says nothing about still reads in the order the work happens.
+ *
  * The group id is never guessed: nothing appears in the table until the backend
  * has answered and the list has been refetched.
  */
@@ -31,26 +47,38 @@ function spansSeveralDays(trips: readonly Trip[]): boolean {
 }
 
 export function GroupConfirmDialog({
-  trips,
-  hiddenCount,
+  tripIds,
   onConfirm,
   onClose,
 }: {
-  /** The selected Trips that are on screen, so their details can be shown. */
-  trips: readonly Trip[];
   /**
-   * How many more are selected on days that are not on screen.
+   * THE SELECTION, by id — not the rows on screen.
    *
-   * They are grouped too — the selection is what is sent — so the count is
-   * stated rather than left as a surprise.
+   * The Trips themselves are fetched from these, so a selection spanning
+   * several days is shown in full rather than summarised as a count.
    */
-  hiddenCount: number;
+  tripIds: readonly string[];
   onConfirm: () => Promise<void>;
   onClose: () => void;
 }) {
   const t = useTranslation();
   const [isGrouping, setIsGrouping] = useState(false);
   const [error, setError] = useState<unknown>(null);
+
+  /*
+   * ONE request for the whole selection, not one per Trip. `pageSize` matches
+   * the number asked for so nothing can be paged away.
+   */
+  const selected = useAsync(
+    useCallback(
+      (signal: AbortSignal) =>
+        listTrips({ tripIds: [...tripIds], pageSize: tripIds.length }, signal),
+      [tripIds],
+    ),
+    [tripIds],
+  );
+
+  const trips = toGroupDisplayOrder(selected.data?.items ?? []);
 
   async function confirm(): Promise<void> {
     setIsGrouping(true);
@@ -75,13 +103,15 @@ export function GroupConfirmDialog({
         </p>
 
         <p className="mt-2 text-sm font-medium text-foreground">
-          {trips.length + hiddenCount} {t("ritten.group.tripCount")}
+          {tripIds.length} {t("ritten.group.tripCount")}
         </p>
 
-        {hiddenCount > 0 ? (
-          <p className="mt-2 rounded-md border border-border bg-hover px-3 py-2 text-xs text-secondary">
-            {hiddenCount} {t("ritten.group.hiddenSelected")}
-          </p>
+        {selected.isLoading ? (
+          <LoadingState label={t("ritten.group.loading")} />
+        ) : null}
+
+        {selected.error ? (
+          <ErrorState error={selected.error} onRetry={selected.reload} />
         ) : null}
 
         {/* Said only when it applies, so it reads as information, not noise. */}
@@ -91,17 +121,30 @@ export function GroupConfirmDialog({
           </p>
         ) : null}
 
+        {/*
+          Enough to tell one selected Trip from another and no more: the
+          booking, the day it runs, the container when there is one, and the
+          direction the document stated.
+        */}
         <ul className="mt-2 divide-y divide-border rounded-md border border-border">
           {trips.map((trip) => (
-            <li
-              key={trip.id}
-              className="flex items-center justify-between gap-3 px-3 py-2 text-sm"
-            >
-              <span className="font-medium text-foreground">
-                {trip.bookingNumber}
+            <li key={trip.id} className="px-3 py-2 text-sm">
+              <span className="flex items-center justify-between gap-3">
+                <span className="font-medium text-foreground">
+                  {trip.bookingNumber ?? t("ritten.value.empty")}
+                </span>
+                <span className="whitespace-nowrap tabular-nums text-secondary">
+                  {formatCalendarDate(trip.planningDate)}
+                </span>
               </span>
-              <span className="tabular-nums text-secondary">
-                {formatCalendarDate(trip.planningDate)}
+              <span className="mt-0.5 block text-xs text-secondary">
+                {[
+                  trip.containerNumber,
+                  trip.direction ? t(`direction.${trip.direction}`) : null,
+                  trip.destinationCity,
+                ]
+                  .filter(Boolean)
+                  .join(" · ")}
               </span>
             </li>
           ))}
@@ -120,7 +163,7 @@ export function GroupConfirmDialog({
           <button
             type="button"
             onClick={() => void confirm()}
-            disabled={isGrouping}
+            disabled={isGrouping || selected.isLoading}
             className="rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-white hover:bg-primary-hover disabled:opacity-50"
           >
             {t("ritten.group.confirmAction")}

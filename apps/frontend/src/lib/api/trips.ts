@@ -45,6 +45,13 @@ export interface ListTripsParams {
    */
   sortBy?: TripSortField;
   sortDirection?: TripSortDirection;
+  /**
+   * Exactly these Trips, whatever day they fall on.
+   *
+   * For a screen that already knows which Trips it means — a selection spanning
+   * several days — and needs them all in one request rather than one each.
+   */
+  tripIds?: string[];
   /** Every leg of one Combination. */
   tripGroupId?: string;
 }
@@ -83,6 +90,7 @@ export function listTrips(
       sortBy: params.sortBy,
       sortDirection: params.sortDirection,
       tripGroupId: params.tripGroupId,
+      tripIds: params.tripIds,
     },
     signal,
   });
@@ -132,6 +140,9 @@ export interface CreateTripPayload {
   destinationCity?: string | null;
   destinationCountry?: string | null;
   waitingTimeMinutes?: number | null;
+  /** The window the duration comes from; the backend derives the minutes. */
+  waitingTimeStart?: string | null;
+  waitingTimeEnd?: string | null;
   distanceKm?: number | null;
   internalNotes?: string | null;
   /** LOSRIT. Omitted means an ordinary Trip; the backend defaults it to false. */
@@ -164,7 +175,17 @@ export interface UpdateTripPayload {
   planningDate?: string;
   vehicleId?: string | null;
   driverId?: string | null;
-  waitingTimeMinutes?: number | null;
+  /**
+   * The waiting-time window. BOTH or NEITHER: an end with no beginning is an
+   * incomplete entry rather than a duration of zero, and the backend refuses
+   * it. Both null removes the waiting time entirely.
+   *
+   * `waitingTimeMinutes` is deliberately absent: the backend DERIVES it from
+   * these two, so the money and the evidence for it cannot disagree. Sending it
+   * is a 400.
+   */
+  waitingTimeStart?: string | null;
+  waitingTimeEnd?: string | null;
   distanceKm?: number | null;
   executionDatetime?: string | null;
   internalNotes?: string | null;

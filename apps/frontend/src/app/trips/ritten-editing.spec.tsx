@@ -273,7 +273,12 @@ describe("Ritten editing", () => {
       await userEvent.click(screen.getByRole("button", { name: "Opslaan" }));
 
       await waitFor(() => {
-        expect(patchCalls()[0][1]?.body).toEqual({ waitingTimeMinutes: 150 });
+        // The WINDOW is what is sent; the backend derives 150 from it, so
+        // the money and the evidence for it cannot disagree.
+        expect(patchCalls()[0][1]?.body).toEqual({
+          waitingTimeStart: "10:00",
+          waitingTimeEnd: "12:30",
+        });
       });
     });
 
@@ -291,7 +296,10 @@ describe("Ritten editing", () => {
       await userEvent.click(screen.getByRole("button", { name: "Opslaan" }));
 
       await waitFor(() => {
-        expect(patchCalls()[0][1]?.body).toEqual({ waitingTimeMinutes: 240 });
+        expect(patchCalls()[0][1]?.body).toEqual({
+          waitingTimeStart: "22:00",
+          waitingTimeEnd: "02:00",
+        });
       });
     });
 
@@ -309,7 +317,10 @@ describe("Ritten editing", () => {
       await userEvent.click(screen.getByRole("button", { name: "Opslaan" }));
 
       await waitFor(() => {
-        expect(patchCalls()[0][1]?.body).toEqual({ waitingTimeMinutes: 0 });
+        expect(patchCalls()[0][1]?.body).toEqual({
+          waitingTimeStart: "10:00",
+          waitingTimeEnd: "10:00",
+        });
       });
     });
 
@@ -334,7 +345,10 @@ describe("Ritten editing", () => {
       await userEvent.click(screen.getByRole("button", { name: "Opslaan" }));
 
       await waitFor(() => {
-        expect(patchCalls()[0][1]?.body).toEqual({ waitingTimeMinutes: null });
+        expect(patchCalls()[0][1]?.body).toEqual({
+          waitingTimeStart: null,
+          waitingTimeEnd: null,
+        });
       });
     });
 

@@ -78,7 +78,10 @@ export interface RequestOptions {
    */
   body?: unknown;
   /** Appended as a query string; undefined and null values are dropped. */
-  query?: Record<string, string | number | boolean | undefined | null>;
+  query?: Record<
+    string,
+    string | number | boolean | readonly string[] | undefined | null
+  >;
   signal?: AbortSignal;
 }
 
@@ -212,6 +215,23 @@ function buildUrl(
   const url = new URL(`${apiBaseUrl()}${path}`);
 
   for (const [key, value] of Object.entries(query ?? {})) {
+    /*
+     * An array becomes one parameter PER ENTRY — `?tripIds=a&tripIds=b` — which
+     * is what a Nest DTO reads back as an array. `String([a, b])` would send
+     * "a,b" as a single value, and the backend would reject the whole thing as
+     * one malformed id.
+     *
+     * An EMPTY array is skipped: it names nothing, and a bare `?tripIds=`
+     * would be a filter for the empty string.
+     */
+    if (Array.isArray(value)) {
+      for (const entry of value) {
+        url.searchParams.append(key, String(entry));
+      }
+
+      continue;
+    }
+
     if (value !== undefined && value !== null && value !== "") {
       url.searchParams.set(key, String(value));
     }

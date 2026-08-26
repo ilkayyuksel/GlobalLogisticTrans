@@ -228,6 +228,8 @@ describe("IMAP import, end to end with a real transport order", () => {
           startTime: null,
           endTime: null,
           executionDatetime: null,
+          waitingTimeStart: null,
+          waitingTimeEnd: null,
           waitingTimeMinutes: null,
           distanceKm: null,
           internalNotes: null,
@@ -872,6 +874,8 @@ describe("IMAP import, end to end with a real transport order", () => {
           id: "trip-existing",
           bookingNumber: BOOKING,
           status: TripStatus.OPEN,
+          waitingTimeStart: null,
+          waitingTimeEnd: null,
           waitingTimeMinutes: 150,
           vehicleId: "vehicle-1",
         } as unknown as Record<string, unknown>);
@@ -1027,6 +1031,8 @@ describe("IMAP import, end to end with a real transport order", () => {
           id: "trip-existing",
           bookingNumber: "ANRDUB2789089",
           status: TripStatus.OPEN,
+          waitingTimeStart: null,
+          waitingTimeEnd: null,
           waitingTimeMinutes: 150,
         } as unknown as Record<string, unknown>);
 

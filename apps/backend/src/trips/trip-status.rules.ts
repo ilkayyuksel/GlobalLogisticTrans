@@ -44,16 +44,34 @@ const ALLOWED_TRANSITIONS: Readonly<Record<TripStatus, readonly TripStatus[]>> =
   };
 
 /**
- * The single status a Trip may be soft-deleted from.
+ * The statuses a Trip may be soft-deleted from.
  *
- * Restore has to return the Trip to the status it held before deletion, and
- * that previous status is only recorded in trip_history, which does not exist
- * yet. Restricting deletion to OPEN keeps restore unambiguous without storing a
- * second copy of the status.
+ * ── WHY CANCELLED IS HERE ───────────────────────────────────────────────────
+ * A cancelled transport is exactly the kind an operator wants out of the way,
+ * and requiring them to reopen it first — CANCELLED → OPEN → DELETED — moved
+ * the Trip through a state it was never in, announcing that it was live again
+ * on the way past.
+ *
+ * ── AND WHAT THAT COSTS ─────────────────────────────────────────────────────
+ * Restore returns a Trip to OPEN, and the status it held before deletion is
+ * recorded nowhere. So a Trip deleted FROM CANCELLED comes back OPEN rather
+ * than cancelled. That is a real loss of information, stated here rather than
+ * hidden: restoring is an administrator recovering a record, not an undo of the
+ * cancellation, and the Trip can be cancelled again in one step.
+ *
+ * CLOSED is still absent. A closed Trip has been carried out and priced;
+ * making it disappear from the planning is not an operational tidy-up.
  */
-export const DELETABLE_FROM_STATUS = TripStatus.OPEN;
+export const DELETABLE_FROM_STATUSES: readonly TripStatus[] = [
+  TripStatus.OPEN,
+  TripStatus.CANCELLED,
+];
 
-/** The status a restored Trip returns to. Exact, because only OPEN is deletable. */
+/**
+ * The status a restored Trip returns to.
+ *
+ * OPEN, whatever it was deleted from — see the note above on what that costs.
+ */
 export const RESTORED_STATUS = TripStatus.OPEN;
 
 export function canTransition(from: TripStatus, to: TripStatus): boolean {

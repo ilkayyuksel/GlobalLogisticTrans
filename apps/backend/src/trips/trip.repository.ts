@@ -33,6 +33,8 @@ export interface FindTripsFilter {
   driverId?: string;
   vehicleId?: string;
   tripGroupId?: string;
+  /** Exactly these Trips, whatever day they fall on. */
+  tripIds?: readonly string[];
   /** Trips carrying this Custom Property. */
   customPropertyId?: string;
   terminal?: string;
@@ -484,6 +486,10 @@ export class TripRepository {
       ...(filter.driverId ? { driverId: filter.driverId } : {}),
       ...(filter.vehicleId ? { vehicleId: filter.vehicleId } : {}),
       ...(filter.tripGroupId ? { tripGroupId: filter.tripGroupId } : {}),
+      // An explicit set of Trips, whatever day they fall on. An EMPTY array is
+      // deliberately not "no filter": it means no Trip was named, and matching
+      // everything would be the opposite of what the caller asked for.
+      ...(filter.tripIds ? { id: { in: [...filter.tripIds] } } : {}),
       // A relation filter rather than a join in the service: the database
       // narrows the whole result set, so paging and counts stay correct.
       ...(filter.customPropertyId

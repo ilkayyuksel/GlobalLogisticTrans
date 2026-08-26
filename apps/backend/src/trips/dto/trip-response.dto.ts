@@ -269,7 +269,28 @@ export class TripResponseDto {
   @ApiPropertyOptional({ format: "date-time", nullable: true })
   executionDatetime!: Date | null;
 
-  @ApiPropertyOptional({ nullable: true, example: 45 })
+  @ApiPropertyOptional({
+    type: String,
+    nullable: true,
+    example: "08:00:00",
+    description:
+      "When the waiting started. Null on a Trip whose waiting time was entered before the two times were recorded — the duration is then all there is, and no times are invented for it.",
+  })
+  waitingTimeStart!: string | null;
+
+  @ApiPropertyOptional({
+    type: String,
+    nullable: true,
+    example: "10:15:00",
+  })
+  waitingTimeEnd!: string | null;
+
+  @ApiPropertyOptional({
+    nullable: true,
+    example: 135,
+    description:
+      "The duration pricing bills from. Derived from the two times whenever they are present, so the three can never disagree.",
+  })
   waitingTimeMinutes!: number | null;
 
   @ApiPropertyOptional({
@@ -359,6 +380,10 @@ export function toTripResponse(
     startTime: trip.startTime === null ? null : toClockTime(trip.startTime),
     endTime: trip.endTime === null ? null : toClockTime(trip.endTime),
     executionDatetime: trip.executionDatetime,
+    waitingTimeStart:
+      trip.waitingTimeStart === null ? null : toClockTime(trip.waitingTimeStart),
+    waitingTimeEnd:
+      trip.waitingTimeEnd === null ? null : toClockTime(trip.waitingTimeEnd),
     waitingTimeMinutes: trip.waitingTimeMinutes,
     // Explicit null check, not truthiness: a distance of exactly 0 is a value,
     // not an absent one.

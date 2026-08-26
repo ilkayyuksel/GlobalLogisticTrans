@@ -10,6 +10,7 @@ import { listActiveVehicles } from "@/lib/api/fleet";
 import type { UpdateTripPayload } from "@/lib/api/trips";
 import type { Trip, Vehicle } from "@/lib/api/types";
 import { toFleetOptions, type FleetOption } from "@/lib/fleet-options";
+import { toClockLabel } from "@/lib/calendar/clock";
 import { useTranslation } from "@/lib/i18n/language-provider";
 import {
   formatWaitingTime,
@@ -73,8 +74,8 @@ function toFormValues(trip: Trip): FormValues {
      * inventing "10:00 → 12:15" out of 135 minutes would show times nobody
      * ever read. The existing duration is shown beside the fields instead.
      */
-    waitingBegin: "",
-    waitingEnd: "",
+    waitingBegin: toClockLabel(trip.waitingTimeStart) ?? "",
+    waitingEnd: toClockLabel(trip.waitingTimeEnd) ?? "",
     distanceKm: trip.distanceKm ?? "",
     // The input needs `YYYY-MM-DDTHH:mm`; the backend sends a full ISO string.
     executionDatetime: trip.executionDatetime
@@ -329,14 +330,13 @@ function toPayload(values: FormValues): UpdateTripPayload {
     // silently cleared by an unrelated edit.
     vehicleId: values.vehicleId === NONE ? null : values.vehicleId,
     /*
-     * The window becomes the minutes the column stores. Blank on both sides
-     * means "not entered here", and the Trip keeps whatever it already had —
-     * see `toUpdatePayload`, which leaves the field out entirely then.
+     * The WINDOW is what is sent; the backend derives the duration from it, so
+     * the money and the evidence for it cannot disagree. Blank on both sides
+     * means "not entered here" and the Trip keeps what it had — see
+     * `toUpdatePayload`, which leaves the fields out entirely then.
      */
-    waitingTimeMinutes: waitingWindowMinutes(
-      values.waitingBegin,
-      values.waitingEnd,
-    ).totalMinutes,
+    waitingTimeStart: emptyToNull(values.waitingBegin),
+    waitingTimeEnd: emptyToNull(values.waitingEnd),
     distanceKm: emptyToNullNumber(values.distanceKm),
     executionDatetime: values.executionDatetime
       ? new Date(values.executionDatetime).toISOString()

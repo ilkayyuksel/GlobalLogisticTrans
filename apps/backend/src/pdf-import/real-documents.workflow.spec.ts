@@ -228,6 +228,8 @@ describe("every real UPDATE and CANCEL document, through the real workflow", () 
       for (const booking of bookings) {
         Object.assign(tripFor(booking) as Record<string, unknown>, {
           vehicleId: "vehicle-1",
+          waitingTimeStart: null,
+          waitingTimeEnd: null,
           waitingTimeMinutes: 45,
           internalNotes: "Bel de klant",
         });
@@ -238,6 +240,8 @@ describe("every real UPDATE and CANCEL document, through the real workflow", () 
       for (const booking of bookings) {
         expect(tripFor(booking)).toMatchObject({
           vehicleId: "vehicle-1",
+          waitingTimeStart: null,
+          waitingTimeEnd: null,
           waitingTimeMinutes: 45,
           internalNotes: "Bel de klant",
           status: TripStatus.OPEN,
@@ -289,6 +293,8 @@ describe("every real UPDATE and CANCEL document, through the real workflow", () 
         endTime: null,
         direction: "COLLECTION",
         vehicleId: "vehicle-1",
+        waitingTimeStart: null,
+        waitingTimeEnd: null,
         waitingTimeMinutes: 30,
         internalNotes: "Operator note",
         pdfDocumentId: "pdf-original",

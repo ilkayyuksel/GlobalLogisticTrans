@@ -106,9 +106,13 @@ export class InvalidTripStatusTransitionException extends ConflictException {
 }
 
 export class TripNotDeletableException extends ConflictException {
-  constructor(tripId: string, status: TripStatus, deletableFrom: TripStatus) {
+  constructor(
+    tripId: string,
+    status: TripStatus,
+    deletableFrom: readonly TripStatus[],
+  ) {
     super(
-      `Trip "${tripId}" is ${status} and can only be deleted while ${deletableFrom}.`,
+      `Trip "${tripId}" is ${status} and can only be deleted while ${deletableFrom.join(" or ")}.`,
     );
   }
 }

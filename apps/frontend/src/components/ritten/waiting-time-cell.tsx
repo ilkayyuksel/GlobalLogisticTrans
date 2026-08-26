@@ -3,6 +3,8 @@
 import { useEffect, useRef, useState } from "react";
 
 import { ApiError, userFacingMessage } from "@/lib/api/client";
+import type { UpdateTripPayload } from "@/lib/api/trips";
+import { toClockLabel } from "@/lib/calendar/clock";
 import { useTranslation } from "@/lib/i18n/language-provider";
 import type { TranslationKey } from "@/lib/i18n/translations";
 import {
@@ -12,17 +14,23 @@ import {
 } from "@/lib/waiting-time";
 
 /**
- * Waiting time, entered as the two clock times it was read from.
+ * Waiting time: the two clock times it was read off, and the duration between.
  *
  * ── WHY BEGIN AND EIND, NOT A DURATION ──────────────────────────────────────
  * Nobody measures a duration. A driver notes the time the truck arrived and the
  * time it left, and subtracting them in your head at the end of a shift is
  * exactly the step that produces "1 uur 90 min" and mistyped hours. So the
- * editor asks for the two moments and the duration is computed.
+ * editor asks for the two moments.
  *
- * The database is unchanged: one integer, `waiting_time_minutes`, which is what
- * is sent and what pricing bills from. The two times are input, not storage —
- * the Trip does not keep them, and nothing here pretends otherwise.
+ * ── ALL THREE ARE STORED NOW ────────────────────────────────────────────────
+ * The two times persist beside the duration, so the column can show where the
+ * figure came from and the editor can open on what was actually entered. The
+ * BACKEND derives the minutes from the window — they are not sent — which is
+ * what keeps the money and the evidence for it from disagreeing.
+ *
+ * A Trip whose waiting time predates the two columns has a duration and no
+ * times. It shows the duration alone: 135 minutes has unlimited begin/end
+ * pairs, and inventing one would put hours on screen nobody ever read.
  *
  * A window that crosses midnight is ordinary and is handled: 22:00 → 02:00 is
  * four hours. Equal times are zero, never a full day — see `waiting-time.ts`.
@@ -35,20 +43,28 @@ const ERROR_KEYS: Record<WaitingWindowError, TranslationKey> = {
 };
 
 export function WaitingTimeCell({
-  totalMinutes,
+  trip,
   isDisabled,
   onSave,
 }: {
-  totalMinutes: number | null;
+  trip: {
+    bookingNumber: string | null;
+    waitingTimeStart: string | null;
+    waitingTimeEnd: string | null;
+    waitingTimeMinutes: number | null;
+  };
   isDisabled?: boolean;
-  /** Receives the value for `waitingTimeMinutes`; null clears it. */
-  onSave: (totalMinutes: number | null) => Promise<void>;
+  /** Sends the window; the backend derives the duration from it. */
+  onSave: (payload: UpdateTripPayload) => Promise<void>;
 }) {
   const t = useTranslation();
 
+  const storedBegin = toClockLabel(trip.waitingTimeStart) ?? "";
+  const storedEnd = toClockLabel(trip.waitingTimeEnd) ?? "";
+
   const [isEditing, setIsEditing] = useState(false);
-  const [begin, setBegin] = useState("");
-  const [end, setEnd] = useState("");
+  const [begin, setBegin] = useState(storedBegin);
+  const [end, setEnd] = useState(storedEnd);
   const [isSaving, setIsSaving] = useState(false);
   const [localError, setLocalError] = useState<WaitingWindowError | null>(null);
   const [saveError, setSaveError] = useState<unknown>(null);
@@ -62,24 +78,34 @@ export function WaitingTimeCell({
 
   /*
    * The duration as it stands while typing, so the operator sees what will be
-   * stored before storing it. Errors are not shown here — they belong to the
-   * save, where they can be acted on.
+   * stored before storing it. The stored value is always the backend's own
+   * calculation of the same window; this is a preview, not the source.
    */
   const preview = waitingWindowMinutes(begin, end);
 
   function open(): void {
-    /*
-     * Deliberately EMPTY, even for a Trip that already has a waiting time.
-     * The Trip stores a duration and never stored the two times it came from,
-     * so there is nothing to reconstruct — and inventing "10:00 → 12:15" from
-     * 135 minutes would put times on screen that nobody ever read off a clock.
-     * The existing duration stays visible behind this editor.
-     */
-    setBegin("");
-    setEnd("");
+    // On what was actually entered, which is now recoverable. A Trip with only
+    // a legacy duration opens empty, because there is nothing to reconstruct.
+    setBegin(storedBegin);
+    setEnd(storedEnd);
     setLocalError(null);
     setSaveError(null);
     setIsEditing(true);
+  }
+
+  async function send(payload: UpdateTripPayload): Promise<void> {
+    setLocalError(null);
+    setSaveError(null);
+    setIsSaving(true);
+
+    try {
+      await onSave(payload);
+      setIsEditing(false);
+    } catch (error: unknown) {
+      setSaveError(error);
+    } finally {
+      setIsSaving(false);
+    }
   }
 
   async function save(): Promise<void> {
@@ -87,21 +113,23 @@ export function WaitingTimeCell({
 
     if (result.error) {
       setLocalError(result.error);
+
       return;
     }
 
-    setLocalError(null);
-    setSaveError(null);
-    setIsSaving(true);
+    /*
+     * Both times or neither: the backend refuses a half-filled window, and an
+     * emptied pair is how a waiting time is removed.
+     */
+    await send({
+      waitingTimeStart: begin.trim() === "" ? null : begin.trim(),
+      waitingTimeEnd: end.trim() === "" ? null : end.trim(),
+    });
+  }
 
-    try {
-      await onSave(result.totalMinutes);
-      setIsEditing(false);
-    } catch (error: unknown) {
-      setSaveError(error);
-    } finally {
-      setIsSaving(false);
-    }
+  /** Removes the entry: both times and the duration with them. */
+  async function remove(): Promise<void> {
+    await send({ waitingTimeStart: null, waitingTimeEnd: null });
   }
 
   if (!isEditing) {
@@ -113,7 +141,7 @@ export function WaitingTimeCell({
         aria-label={t("ritten.edit.waitingTime")}
         className="w-full rounded px-1 py-0.5 text-left hover:bg-primary/10 disabled:cursor-not-allowed disabled:hover:bg-transparent"
       >
-        {formatWaitingTime(totalMinutes) ?? t("ritten.value.empty")}
+        <WaitingTimeValue trip={trip} />
       </button>
     );
   }
@@ -152,7 +180,7 @@ export function WaitingTimeCell({
         </span>
       </p>
 
-      <div className="mt-1 flex items-center gap-1">
+      <div className="mt-1 flex flex-wrap items-center gap-1">
         <button
           type="button"
           onClick={() => void save()}
@@ -169,6 +197,22 @@ export function WaitingTimeCell({
         >
           {t("ritten.edit.cancel")}
         </button>
+
+        {/*
+          Removing the ENTRY, not the Trip — which is why it is worded as the
+          waiting time and is offered only when there is one to remove. It
+          clears all three values together, so nothing is left half-stated.
+        */}
+        {trip.waitingTimeMinutes === null ? null : (
+          <button
+            type="button"
+            onClick={() => void remove()}
+            disabled={isSaving}
+            className="ml-auto rounded border border-danger/40 px-2 py-0.5 text-xs font-medium text-danger hover:bg-danger/10 disabled:opacity-50"
+          >
+            {t("ritten.waiting.remove")}
+          </button>
+        )}
       </div>
 
       {localError ? (
@@ -179,6 +223,51 @@ export function WaitingTimeCell({
 
       {saveError ? <SaveError error={saveError} /> : null}
     </div>
+  );
+}
+
+/**
+ * What the column shows: the window, and the duration under it.
+ *
+ * The times are the operational fact an operator scans for; the duration is
+ * derived from them, so it reads as subordinate — smaller and muted — rather
+ * than as a second, competing number.
+ *
+ * With no window there is only the duration, which then carries the line on its
+ * own. With nothing at all, the ordinary empty marker.
+ */
+function WaitingTimeValue({
+  trip,
+}: {
+  trip: {
+    waitingTimeStart: string | null;
+    waitingTimeEnd: string | null;
+    waitingTimeMinutes: number | null;
+  };
+}) {
+  const t = useTranslation();
+  const duration = formatWaitingTime(trip.waitingTimeMinutes);
+
+  if (duration === null) {
+    return <>{t("ritten.value.empty")}</>;
+  }
+
+  const begin = toClockLabel(trip.waitingTimeStart);
+  const end = toClockLabel(trip.waitingTimeEnd);
+
+  if (begin === null || end === null) {
+    return <span className="tabular-nums text-secondary">{duration}</span>;
+  }
+
+  return (
+    <span className="block leading-tight">
+      <span className="block whitespace-nowrap tabular-nums text-foreground">
+        {begin} – {end}
+      </span>
+      <span className="block text-[11px] tabular-nums text-muted">
+        {duration}
+      </span>
+    </span>
   );
 }
 

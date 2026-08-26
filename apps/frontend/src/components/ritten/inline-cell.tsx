@@ -63,6 +63,7 @@ export function InlineCell({
   kind = "text",
   options,
   savesOnSelect = false,
+  savesOnBlur = false,
   maxLength,
   min,
   max,
@@ -84,6 +85,16 @@ export function InlineCell({
    * is made, where typed text is not.
    */
   savesOnSelect?: boolean;
+  /**
+   * Persist when the field is left, with no Save button.
+   *
+   * For a clock: the browser's own time control fires a change on every
+   * component an operator moves through, so saving on change would send a
+   * request per keystroke. Leaving the field is the moment the value is
+   * finished, and it saves ONLY when the value actually differs — tabbing
+   * through a cell without touching it sends nothing.
+   */
+  savesOnBlur?: boolean;
   maxLength?: number;
   min?: number;
   max?: number;
@@ -191,6 +202,11 @@ export function InlineCell({
           min={min}
           max={max}
           onChange={(event) => setValue(event.target.value)}
+          onBlur={() => {
+            if (savesOnBlur && value !== editValue) {
+              void save();
+            }
+          }}
           onKeyDown={(event) => {
             if (event.key === "Escape") {
               cancel();
@@ -209,7 +225,7 @@ export function InlineCell({
           No Save where choosing already saved. The saving state still shows,
           because the row does not change until the backend has answered.
         */}
-        {savesOnSelect ? (
+        {savesOnSelect || savesOnBlur ? (
           isSaving ? (
             <span className="px-2 py-0.5 text-xs font-medium text-muted">
               {t("ritten.edit.saving")}

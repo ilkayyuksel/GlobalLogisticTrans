@@ -437,6 +437,8 @@ describe("every real transport order, through the real import pipeline", () => {
       await harness.importer.import(readFixture(FILE), FILE);
       Object.assign(harness.trips[0], {
         vehicleId: "vehicle-1",
+        waitingTimeStart: null,
+        waitingTimeEnd: null,
         waitingTimeMinutes: 30,
         internalNotes: "Ring the bell at gate 4",
       });
@@ -445,6 +447,8 @@ describe("every real transport order, through the real import pipeline", () => {
 
       expect(harness.trips[0]).toMatchObject({
         vehicleId: "vehicle-1",
+        waitingTimeStart: null,
+        waitingTimeEnd: null,
         waitingTimeMinutes: 30,
         internalNotes: "Ring the bell at gate 4",
       });

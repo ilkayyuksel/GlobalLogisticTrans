@@ -2,6 +2,8 @@ import { ApiPropertyOptional } from "@nestjs/swagger";
 import { TripStatus } from "@prisma/client";
 import { Transform } from "class-transformer";
 import {
+  ArrayMaxSize,
+  IsArray,
   IsEnum,
   IsIn,
   IsOptional,
@@ -10,8 +12,11 @@ import {
   MaxLength,
 } from "class-validator";
 
-import { PaginationQueryDto } from "../../common/dto/pagination-query.dto";
-import { trimToUndefined } from "../../common/dto/transforms";
+import {
+  MAX_PAGE_SIZE,
+  PaginationQueryDto,
+} from "../../common/dto/pagination-query.dto";
+import { rawValueOf, trimToUndefined } from "../../common/dto/transforms";
 import { IsCalendarDateString } from "../../common/validators/is-calendar-date-string.validator";
 import {
   BOOKING_NUMBER_MAX_LENGTH,
@@ -47,6 +52,21 @@ export const SortDirectionValues: readonly SortDirection[] = ["asc", "desc"];
  * terminal and its destination, so those are exposed as separate filters rather
  * than inventing a combined field.
  */
+/**
+ * `?tripIds=a&tripIds=b` arrives as an array; one value arrives as a bare
+ * string. Normalised here so the validator sees the same shape either way, and
+ * anything else passes straight through for @IsArray to reject.
+ */
+function toStringArray(params: Parameters<typeof rawValueOf>[0]): unknown {
+  const value = rawValueOf(params);
+
+  if (value === undefined) {
+    return undefined;
+  }
+
+  return Array.isArray(value) ? value : [value];
+}
+
 export class ListTripsQueryDto extends PaginationQueryDto {
   @ApiPropertyOptional({
     enum: TripStatus,
@@ -131,6 +151,19 @@ export class ListTripsQueryDto extends PaginationQueryDto {
   @IsOptional()
   @IsUUID()
   tripGroupId?: string;
+
+  @ApiPropertyOptional({
+    type: [String],
+    format: "uuid",
+    description:
+      "Return exactly these Trips. For a screen that already knows which Trips it means and needs them whatever day they fall on — a selection spanning several days, for instance — without asking for one Trip per request.",
+  })
+  @Transform(toStringArray)
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(MAX_PAGE_SIZE)
+  @IsUUID(undefined, { each: true })
+  tripIds?: string[];
 
   @ApiPropertyOptional({
     format: "uuid",

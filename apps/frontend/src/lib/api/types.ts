@@ -220,6 +220,20 @@ export interface Trip {
   startTime: string | null;
   endTime: string | null;
   executionDatetime: string | null;
+  /**
+   * The two clock times the waiting was read off, and the duration between
+   * them.
+   *
+   * The DURATION is what pricing bills from. The two times say where it came
+   * from, and are NULL on every Trip whose waiting time was entered before they
+   * were recorded — such a Trip shows its duration alone, because 135 minutes
+   * has unlimited begin/end pairs and inventing one would put hours on screen
+   * that nobody ever read off a clock.
+   *
+   * NOT startTime/endTime, which are the transport's own planned window.
+   */
+  waitingTimeStart: string | null;
+  waitingTimeEnd: string | null;
   waitingTimeMinutes: number | null;
   /** Kilometres, two decimals, as a string. */
   distanceKm: string | null;

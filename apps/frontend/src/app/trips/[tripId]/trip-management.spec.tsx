@@ -146,6 +146,8 @@ function buildTrip(overrides: Partial<Trip> = {}): Trip {
     startTime: "10:00",
     endTime: "16:00",
     executionDatetime: null,
+    waitingTimeStart: null,
+    waitingTimeEnd: null,
     waitingTimeMinutes: 45,
     distanceKm: "198.00",
     internalNotes: "Customer confirmed by phone.",
@@ -609,8 +611,9 @@ describe("Trip management", () => {
 
       const [, payload] = updateTripMock.mock.calls[0];
 
-      // Exactly the fields UpdateTripDto accepts — no booking number, status,
-      // terminal, destination or times, all of which the backend rejects.
+      // Exactly the fields UpdateTripDto accepts — no booking number, status
+      // or terminal, all of which the backend rejects. The waiting time is sent
+      // as the WINDOW it was read off; the backend derives the duration.
       expect(Object.keys(payload).sort()).toEqual([
         "containerNumber",
         "distanceKm",
@@ -618,7 +621,8 @@ describe("Trip management", () => {
         "internalNotes",
         "planningDate",
         "vehicleId",
-        "waitingTimeMinutes",
+        "waitingTimeEnd",
+        "waitingTimeStart",
       ]);
     });
 

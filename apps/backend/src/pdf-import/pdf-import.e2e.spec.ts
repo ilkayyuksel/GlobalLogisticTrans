@@ -174,6 +174,8 @@ describe("Manual PDF upload, end to end over HTTP", () => {
           startTime: null,
           endTime: null,
           executionDatetime: null,
+          waitingTimeStart: null,
+          waitingTimeEnd: null,
           waitingTimeMinutes: null,
           distanceKm: null,
           internalNotes: null,

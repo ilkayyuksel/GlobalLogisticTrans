@@ -25,6 +25,11 @@ export interface RittenActions {
    * Confirmed first — see `DeleteConfirmDialog` — unlike every other row action.
    */
   deleteTrip: (trip: Trip) => Promise<void>;
+  /**
+   * Takes the LOSRIT classification off. The Trip itself is untouched: same
+   * status, same planning, same identity, same documents, same pricing.
+   */
+  removeLosrit: (trip: Trip) => Promise<void>;
   openCombination: (tripGroupId: string) => void;
   /** Clears this Trip's group; the group and its other members survive. */
   unlinkFromGroup: (trip: Trip) => Promise<void>;
@@ -62,8 +67,13 @@ export const STATUS_LABEL_KEYS: Record<ChangeableTripStatus, TranslationKey> = {
  * which is worse protection than none, because it trains the habit that then
  * dismisses the cancellation dialog too.
  *
- * Cancelling still asks. It is not routine, and it is the one an operator would
+ * Cancelling asks. It is not routine, and it is the one an operator would
  * regret.
+ *
+ * REOPENING A CANCELLATION ASKS TOO, but through the application's own dialog
+ * rather than this map — see `RowLifecycleActions`. A cancelled transport was
+ * called off, and putting it back in the planning says it is happening after
+ * all: a statement about the day's work rather than a correction.
  */
 export const STATUS_CONFIRM_KEYS: Partial<
   Record<ChangeableTripStatus, TranslationKey>

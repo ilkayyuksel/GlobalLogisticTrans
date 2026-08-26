@@ -218,7 +218,8 @@ export class CreateTripDto {
   executionDatetime?: string | null;
 
   @ApiPropertyOptional({
-    description: "Waiting time in minutes. Contributes to pricing.",
+    description:
+      "Waiting time in minutes. Contributes to pricing. Ignored when waitingTimeStart and waitingTimeEnd are given, because the duration is then derived from them.",
     minimum: 0,
     maximum: WAITING_TIME_MAX_MINUTES,
     nullable: true,
@@ -230,6 +231,25 @@ export class CreateTripDto {
   @Min(0)
   @Max(WAITING_TIME_MAX_MINUTES)
   waitingTimeMinutes?: number | null;
+
+  @ApiPropertyOptional({
+    description:
+      "When the waiting started. Given together with waitingTimeEnd, the duration is derived from the two and waitingTimeMinutes is ignored.",
+    nullable: true,
+    example: "08:00",
+  })
+  @IsOptional()
+  @IsClockTimeString()
+  waitingTimeStart?: string | null;
+
+  @ApiPropertyOptional({
+    description: "When the waiting ended.",
+    nullable: true,
+    example: "10:15",
+  })
+  @IsOptional()
+  @IsClockTimeString()
+  waitingTimeEnd?: string | null;
 
   @ApiPropertyOptional({
     description:

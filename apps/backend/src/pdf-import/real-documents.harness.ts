@@ -294,6 +294,8 @@ export function buildHarness(storageDirectory: string) {
         startTime: null,
         endTime: null,
         executionDatetime: null,
+        waitingTimeStart: null,
+        waitingTimeEnd: null,
         waitingTimeMinutes: null,
         distanceKm: null,
         internalNotes: null,

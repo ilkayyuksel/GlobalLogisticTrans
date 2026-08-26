@@ -48,6 +48,8 @@ function buildTrip(overrides: Partial<Trip> = {}): Trip {
     startTime: null,
     endTime: null,
     executionDatetime: null,
+    waitingTimeStart: null,
+    waitingTimeEnd: null,
     waitingTimeMinutes: null,
     distanceKm: null,
     internalNotes: null,
@@ -260,6 +262,8 @@ describe("TripService", () => {
           startTime: null,
           endTime: null,
           executionDatetime: null,
+          waitingTimeStart: null,
+          waitingTimeEnd: null,
           waitingTimeMinutes: null,
           distanceKm: null,
           internalNotes: null,
@@ -422,6 +426,8 @@ describe("TripService", () => {
         planningDate: undefined,
         vehicleId: undefined,
         driverId: undefined,
+        waitingTimeStart: undefined,
+        waitingTimeEnd: undefined,
         waitingTimeMinutes: undefined,
         distanceKm: undefined,
         executionDatetime: undefined,
@@ -432,7 +438,8 @@ describe("TripService", () => {
     it("passes an explicit null through so the column is cleared", async () => {
       await service.update(TRIP_ID, {
         containerNumber: null,
-        waitingTimeMinutes: null,
+        waitingTimeStart: null,
+        waitingTimeEnd: null,
         distanceKm: null,
         internalNotes: null,
         executionDatetime: null,
@@ -444,6 +451,8 @@ describe("TripService", () => {
         TRIP_ID,
         expect.objectContaining({
           containerNumber: null,
+          waitingTimeStart: null,
+          waitingTimeEnd: null,
           waitingTimeMinutes: null,
           distanceKm: null,
           internalNotes: null,
@@ -717,30 +726,64 @@ describe("TripService", () => {
         );
       });
 
-      it("is refused on an imported Trip", async () => {
+      /**
+       * ── AN OPERATOR FIELD ON ANY TRIP ────────────────────────────────────
+       * The times were briefly refused on an imported Trip, like the
+       * destination. The owner decided otherwise: Begin and Eind are planning
+       * an operator adjusts as a day unfolds, exactly like the planning date
+       * beside them. A document may still revise them; until one does, the
+       * operator's value stands.
+       * ──────────────────────────────────────────────────────────────────────
+       */
+      it("is accepted on an imported Trip too", async () => {
+        repository.findById.mockResolvedValue(buildTrip({ pdfDocumentId: PDF_ID }));
+
+        await service.update(TRIP_ID, { startTime: "08:00" });
+
+        expect(repository.update).toHaveBeenCalledWith(
+          TRIP_ID,
+          expect.objectContaining({
+            startTime: new Date("1970-01-01T08:00:00.000Z"),
+          }),
+        );
+      });
+
+      /** The destination is still the document's on an imported Trip. */
+      it("does not make the destination editable with it", async () => {
+        repository.findById.mockResolvedValue(buildTrip({ pdfDocumentId: PDF_ID }));
+
         await expect(
-          service.update(TRIP_ID, { startTime: "08:00" }),
+          service.update(TRIP_ID, { destinationCity: "Rotterdam" }),
         ).rejects.toBeInstanceOf(DocumentControlledFieldException);
       });
 
-      it("is refused before anything is written", async () => {
-        await expect(
-          service.update(TRIP_ID, { endTime: "12:30", internalNotes: "x" }),
-        ).rejects.toBeInstanceOf(DocumentControlledFieldException);
+      /** An operator edit is not a revision: no history row is written. */
+      it("writes no history", async () => {
+        manualTrip();
 
-        expect(repository.update).not.toHaveBeenCalled();
+        await service.update(TRIP_ID, { startTime: "08:00" });
+
+        expect(repository.recordHistory).not.toHaveBeenCalled();
       });
 
-      /** Changing a time is not a waiting time. */
+      /**
+       * Changing a transport time is not a waiting time. The write does not
+       * mention any of the three waiting columns at ALL — not even as
+       * undefined — because nothing about waiting was sent.
+       */
       it("never touches the waiting time", async () => {
         manualTrip();
 
         await service.update(TRIP_ID, { startTime: "08:00", endTime: "12:30" });
 
-        expect(repository.update).toHaveBeenCalledWith(
-          TRIP_ID,
-          expect.objectContaining({ waitingTimeMinutes: undefined }),
-        );
+        const [, written] = (repository.update as jest.Mock).mock.calls[0] as [
+          string,
+          Record<string, unknown>,
+        ];
+
+        expect(written).not.toHaveProperty("waitingTimeMinutes");
+        expect(written).not.toHaveProperty("waitingTimeStart");
+        expect(written).not.toHaveProperty("waitingTimeEnd");
       });
     });
 
@@ -954,17 +997,57 @@ describe("TripService", () => {
       expect(result.status).toBe(TripStatus.DELETED);
     });
 
-    it.each([TripStatus.CLOSED, TripStatus.CANCELLED])(
-      "refuses to delete a %s Trip, because restore could not target a status",
-      async (status) => {
-        repository.findById.mockResolvedValue(buildTrip({ status }));
+    /**
+     * A cancelled transport is exactly the kind an operator wants out of the
+     * way, and CANCELLED → OPEN → DELETED moved it through a state it was
+     * never in on the way past.
+     */
+    it("moves a CANCELLED Trip to DELETED directly", async () => {
+      repository.findById.mockResolvedValue(
+        buildTrip({ status: TripStatus.CANCELLED }),
+      );
+      repository.setStatus.mockResolvedValue(
+        buildTrip({ status: TripStatus.DELETED }),
+      );
 
-        await expect(service.softDelete(TRIP_ID)).rejects.toBeInstanceOf(
-          TripNotDeletableException,
-        );
-        expect(repository.setStatus).not.toHaveBeenCalled();
-      },
-    );
+      const result = await service.softDelete(TRIP_ID);
+
+      expect(repository.setStatus).toHaveBeenCalledWith(
+        TRIP_ID,
+        TripStatus.DELETED,
+      );
+      expect(result.status).toBe(TripStatus.DELETED);
+    });
+
+    /** It never passes through OPEN to get there. */
+    it("does not reopen a CANCELLED Trip on the way", async () => {
+      repository.findById.mockResolvedValue(
+        buildTrip({ status: TripStatus.CANCELLED }),
+      );
+      repository.setStatus.mockResolvedValue(
+        buildTrip({ status: TripStatus.DELETED }),
+      );
+
+      await service.softDelete(TRIP_ID);
+
+      expect(repository.setStatus).toHaveBeenCalledTimes(1);
+      expect(repository.setStatus).not.toHaveBeenCalledWith(
+        TRIP_ID,
+        TripStatus.OPEN,
+      );
+    });
+
+    /** A closed Trip has been carried out and priced; it is not tidied away. */
+    it("refuses to delete a CLOSED Trip", async () => {
+      repository.findById.mockResolvedValue(
+        buildTrip({ status: TripStatus.CLOSED }),
+      );
+
+      await expect(service.softDelete(TRIP_ID)).rejects.toBeInstanceOf(
+        TripNotDeletableException,
+      );
+      expect(repository.setStatus).not.toHaveBeenCalled();
+    });
 
     it("is idempotent", async () => {
       repository.findById.mockResolvedValue(

@@ -50,5 +50,36 @@ function rankOf(trip: Trip): number {
  * backend gave them.
  */
 export function toGroupDisplayOrder(trips: readonly Trip[]): Trip[] {
-  return [...trips].sort((left, right) => rankOf(left) - rankOf(right));
+  return [...trips].sort((left, right) => {
+    const byPrefix = rankOf(left) - rankOf(right);
+
+    if (byPrefix !== 0) {
+      return byPrefix;
+    }
+
+    /*
+     * Same rank, so the prefix rule has nothing to say. Two DUB legs or two ANR
+     * legs keep the order the backend gave them — the sort is stable and this
+     * returns 0 for them. Bookings the rule does not recognise fall back to the
+     * DAY they run, ascending, which is the order the work happens in.
+     */
+    return rankOf(left) === UNRANKED ? byPlanningDate(left, right) : 0;
+  });
+}
+
+/** Earliest first. A Trip with no date sorts last: it is not planned yet. */
+function byPlanningDate(left: Trip, right: Trip): number {
+  if (left.planningDate === right.planningDate) {
+    return 0;
+  }
+
+  if (left.planningDate === null) {
+    return 1;
+  }
+
+  if (right.planningDate === null) {
+    return -1;
+  }
+
+  return left.planningDate < right.planningDate ? -1 : 1;
 }

@@ -289,11 +289,65 @@ describe("Ritten row actions", () => {
     });
   });
 
+  /**
+   * ── REOPENING A CANCELLATION ASKS ─────────────────────────────────────────
+   * Unlike completing, which is routine and visible in the row a moment later.
+   * A cancelled transport was called off, and putting it back in the planning
+   * says it is happening after all — a statement about the day's work rather
+   * than a correction.
+   *
+   * The application's own dialog, never window.confirm: that cannot name the
+   * Trip and looks like every dialog a browser has ever shown.
+   * ──────────────────────────────────────────────────────────────────────────
+   */
   describe("Openen", () => {
-    it("reopens a CANCELLED Trip", async () => {
+    async function confirmReopen(): Promise<void> {
+      await userEvent.click(actionButton("Openen") as HTMLElement);
+
+      const dialog = await screen.findByRole("dialog");
+      await userEvent.click(
+        within(dialog).getByRole("button", { name: "Openen" }),
+      );
+    }
+
+    it("asks before it reopens", async () => {
       await showTrip({ status: "CANCELLED" });
 
       await userEvent.click(actionButton("Openen") as HTMLElement);
+
+      const dialog = await screen.findByRole("dialog");
+
+      expect(
+        within(dialog).getByText(/wordt opnieuw geopend/),
+      ).toBeInTheDocument();
+      expect(mutations()).toHaveLength(0);
+    });
+
+    it("uses the application's dialog, not the browser's", async () => {
+      await showTrip({ status: "CANCELLED" });
+
+      await userEvent.click(actionButton("Openen") as HTMLElement);
+      await screen.findByRole("dialog");
+
+      expect(confirmSpy).not.toHaveBeenCalled();
+    });
+
+    it("sends nothing when the confirmation is cancelled", async () => {
+      await showTrip({ status: "CANCELLED" });
+
+      await userEvent.click(actionButton("Openen") as HTMLElement);
+      const dialog = await screen.findByRole("dialog");
+      await userEvent.click(
+        within(dialog).getByRole("button", { name: "Annuleren" }),
+      );
+
+      expect(mutations()).toHaveLength(0);
+    });
+
+    it("reopens a CANCELLED Trip once confirmed", async () => {
+      await showTrip({ status: "CANCELLED" });
+
+      await confirmReopen();
 
       await waitFor(() => {
         expect(requestMock).toHaveBeenCalledWith(
@@ -307,22 +361,11 @@ describe("Ritten row actions", () => {
       expect(await screen.findByText("Status gewijzigd")).toBeInTheDocument();
     });
 
-    /** The undo of a cancellation needs no ceremony either. */
-    it("asks nothing", async () => {
-      await showTrip({ status: "CANCELLED" });
-
-      await userEvent.click(actionButton("Openen") as HTMLElement);
-
-      await waitFor(() => expect(mutations()).toHaveLength(1));
-      expect(confirmSpy).not.toHaveBeenCalled();
-      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-    });
-
     /** Reopening prices nothing: pricing runs at closing, and only there. */
     it("triggers no pricing", async () => {
       await showTrip({ status: "CANCELLED" });
 
-      await userEvent.click(actionButton("Openen") as HTMLElement);
+      await confirmReopen();
 
       await waitFor(() => expect(mutations()).toHaveLength(1));
       expect(
@@ -339,11 +382,12 @@ describe("Ritten row actions", () => {
         new ApiError("CONFLICT", "Booking number is already used.", 409),
       );
 
-      await userEvent.click(actionButton("Openen") as HTMLElement);
+      await confirmReopen();
 
+      // Twice: in the dialog, which stays open, and in the page's feedback.
       expect(
-        await screen.findByText(/Booking number is already used/),
-      ).toBeInTheDocument();
+        await screen.findAllByText(/Booking number is already used/),
+      ).not.toHaveLength(0);
     });
   });
 

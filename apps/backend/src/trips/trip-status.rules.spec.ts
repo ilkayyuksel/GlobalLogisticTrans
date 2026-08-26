@@ -3,7 +3,7 @@ import { TripStatus } from "@prisma/client";
 import {
   BOOKING_NUMBER_HOLDING_STATUSES,
   CHANGEABLE_TRIP_STATUSES,
-  DELETABLE_FROM_STATUS,
+  DELETABLE_FROM_STATUSES,
   RESTORED_STATUS,
   VEHICLE_OCCUPYING_STATUSES,
   allowedTransitionsFrom,
@@ -61,10 +61,32 @@ describe("Trip status rules", () => {
     );
   });
 
-  it("only allows deletion from the status restore returns to", () => {
-    // Restore has no trip_history to read a previous status from, so these two
-    // must stay the same value or restore becomes a guess.
-    expect(DELETABLE_FROM_STATUS).toBe(RESTORED_STATUS);
+  /**
+   * ── DELETION AND RESTORE NO LONGER MIRROR EACH OTHER ─────────────────────
+   * A cancelled Trip can be deleted directly, because forcing an operator
+   * through CANCELLED → OPEN → DELETED moved it through a state it was never
+   * in. Restore still has no trip_history to read a previous status from, so
+   * it returns every Trip to OPEN.
+   *
+   * The consequence is deliberate and asserted rather than left implicit: a
+   * Trip deleted while CANCELLED comes back OPEN. Restoring is an
+   * administrator recovering a record, not an undo of the cancellation.
+   * ──────────────────────────────────────────────────────────────────────────
+   */
+  it("allows deletion from OPEN and from CANCELLED", () => {
+    expect([...DELETABLE_FROM_STATUSES].sort()).toEqual(
+      [TripStatus.OPEN, TripStatus.CANCELLED].sort(),
+    );
+  });
+
+  it("never allows deletion of a CLOSED or an already DELETED Trip", () => {
+    expect(DELETABLE_FROM_STATUSES).not.toContain(TripStatus.CLOSED);
+    expect(DELETABLE_FROM_STATUSES).not.toContain(TripStatus.DELETED);
+  });
+
+  it("restores to OPEN, which is one of the statuses it can be deleted from", () => {
+    expect(RESTORED_STATUS).toBe(TripStatus.OPEN);
+    expect(DELETABLE_FROM_STATUSES).toContain(RESTORED_STATUS);
   });
 
   it("counts only OPEN and CLOSED Trips as occupying a Vehicle", () => {

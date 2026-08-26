@@ -72,11 +72,17 @@ async function openTime(label: string): Promise<HTMLElement> {
   return screen.getByLabelText(label);
 }
 
+/**
+ * Types a time and leaves the field, which is what saves it.
+ *
+ * There is no Save button: leaving the field is the moment the value is
+ * finished. `userEvent.tab()` is the honest way to say "the operator moved on".
+ */
 async function setTime(label: string, value: string): Promise<void> {
   const input = await openTime(label);
   await userEvent.clear(input);
   await userEvent.type(input, value);
-  await userEvent.click(screen.getByRole("button", { name: "Opslaan" }));
+  await userEvent.tab();
 }
 
 const BEGIN = "Begin transport";
@@ -165,7 +171,7 @@ describe("the transport times in the Ritten list", () => {
 
       const input = await openTime(BEGIN);
       await userEvent.clear(input);
-      await userEvent.click(screen.getByRole("button", { name: "Opslaan" }));
+      await userEvent.tab();
 
       await waitFor(() => {
         expect(patchBody()).toEqual({ startTime: null });
@@ -188,13 +194,25 @@ describe("the transport times in the Ritten list", () => {
       expect(patchCalls()).toHaveLength(0);
     });
 
-    /** The same pattern the planning date uses, so both behave alike. */
-    it("uses the same Save the date cell uses", async () => {
+    /** Immediate: there is nothing further to press. */
+    it("offers no Save button", async () => {
       await show();
 
       await openTime(BEGIN);
 
-      expect(screen.getByRole("button", { name: "Opslaan" })).toBeEnabled();
+      expect(
+        screen.queryByRole("button", { name: "Opslaan" }),
+      ).not.toBeInTheDocument();
+    });
+
+    /** Leaving a field nobody touched is not a change. */
+    it("sends nothing when the field is left untouched", async () => {
+      await show({ startTime: "10:00:00" });
+
+      await openTime(BEGIN);
+      await userEvent.tab();
+
+      expect(patchCalls()).toHaveLength(0);
     });
 
     /** Never painted locally: the row shows what the refetched Trip says. */
@@ -207,7 +225,7 @@ describe("the transport times in the Ritten list", () => {
       });
       await userEvent.clear(input);
       await userEvent.type(input, "08:00");
-      await userEvent.click(screen.getByRole("button", { name: "Opslaan" }));
+      await userEvent.tab();
 
       expect(await screen.findByText("08:00")).toBeInTheDocument();
     });
@@ -287,7 +305,7 @@ describe("the transport times in the Ritten list", () => {
       );
       await userEvent.clear(input);
       await userEvent.type(input, "08:00");
-      await userEvent.click(screen.getByRole("button", { name: "Opslaan" }));
+      await userEvent.tab();
     }
 
     /**
@@ -318,20 +336,21 @@ describe("the transport times in the Ritten list", () => {
   });
 
   /**
-   * An imported Trip belongs to its document. A later UPDATE re-reads both
-   * times from the PDF, so the cell is read-only exactly where a save would be
-   * refused.
+   * An imported Trip takes them like any other. A later UPDATE document may
+   * still revise them — that is what a revision is for — and until one does the
+   * operator's value stands.
    */
   describe("an imported Trip", () => {
-    it("shows the times but does not offer them", async () => {
+    /**
+     * They were briefly refused here, like the destination. The owner decided
+     * otherwise: Begin and Eind are planning an operator adjusts as a day
+     * unfolds, exactly like the planning date beside them.
+     */
+    it("offers them for editing too", async () => {
       await show({ pdfDocumentId: "pdf-1" });
 
-      expect(
-        screen.queryByRole("button", { name: BEGIN }),
-      ).not.toBeInTheDocument();
-      expect(
-        screen.queryByRole("button", { name: END }),
-      ).not.toBeInTheDocument();
+      expect(await screen.findByRole("button", { name: BEGIN })).toBeEnabled();
+      expect(screen.getByRole("button", { name: END })).toBeEnabled();
     });
 
     it("still displays them", async () => {

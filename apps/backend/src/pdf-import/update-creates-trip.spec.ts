@@ -180,6 +180,8 @@ describe("an UPDATE document with no Trip to revise", () => {
         expect(tripFor(booking)).toMatchObject({
           vehicleId: null,
           driverId: null,
+          waitingTimeStart: null,
+          waitingTimeEnd: null,
           waitingTimeMinutes: null,
           distanceKm: null,
           executionDatetime: null,

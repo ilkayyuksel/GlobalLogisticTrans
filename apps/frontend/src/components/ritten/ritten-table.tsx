@@ -131,6 +131,8 @@ export interface RittenTableProps {
   pricingByTripId: ReadonlyMap<string, PricingSnapshot>;
   /** Opens the delete confirmation. A row never deletes anything itself. */
   onDeleteTrip: (trip: Trip) => void;
+  /** Opens the reopen confirmation, for a CANCELLED Trip. */
+  onReopenTrip: (trip: Trip) => void;
 }
 
 export function RittenTable(props: RittenTableProps) {
@@ -226,6 +228,7 @@ function RittenRow({
   showPricing,
   pricingByTripId,
   onDeleteTrip,
+  onReopenTrip,
 }: RittenTableProps & { trip: Trip }) {
   const t = useTranslation();
   const empty = t("ritten.value.empty");
@@ -304,7 +307,7 @@ function RittenRow({
             kind of transport this is, not what has happened to it. A LOSRIT is
             OPEN, CLOSED or CANCELLED like any other Trip.
           */}
-          <LosritBadge trip={trip} />
+          <LosritBadge trip={trip} onRemove={actions.removeLosrit} />
         </span>
         {/*
           "Bijgewerkt" is DERIVED, and beside the status rather than instead of
@@ -431,14 +434,14 @@ function RittenRow({
       </td>
 
       {/*
-        Hours and minutes on screen, one integer in the database. The
-        conversion is `waiting-time.ts`, shared with the Trip detail page.
+        The window it was read off, with the duration under it. All three are
+        stored now; the backend derives the duration from the two times.
       */}
       <td className="px-3 py-2 tabular-nums text-secondary">
         <WaitingTimeCell
-          totalMinutes={trip.waitingTimeMinutes}
+          trip={trip}
           isDisabled={!isEditable || isBusy}
-          onSave={(totalMinutes) => save({ waitingTimeMinutes: totalMinutes })}
+          onSave={save}
         />
       </td>
 
@@ -452,6 +455,7 @@ function RittenRow({
           actions={actions}
           isBusy={isBusy}
           onDelete={onDeleteTrip}
+          onReopen={onReopenTrip}
         />
       </td>
 
@@ -526,11 +530,12 @@ function DestinationCell({
  * clock times in its own column and stored as `waitingTimeMinutes` — and
  * nothing here reads or writes it.
  *
- * ── EDITABLE ONLY ON A TRIP CREATED BY HAND ─────────────────────────────────
- * The same rule as the destination, for the same reason: an imported Trip
- * belongs to its document, which a later UPDATE re-reads, so anything typed
- * here would be silently overwritten and the backend refuses it. A manual Trip
- * has no document, so its times were write-once until now.
+ * ── EDITABLE ON ANY TRIP, LIKE THE DATE BESIDE IT ───────────────────────────
+ * These were briefly treated like the destination and refused on an imported
+ * Trip. They are not: Begin and Eind are planning an operator adjusts as a day
+ * unfolds, exactly like the planning date in the next column. A later UPDATE
+ * document may still revise them, and until one does the operator's value
+ * stands — an edit here is an operator edit and writes no revision history.
  *
  * There is deliberately NO check that the end follows the start. A transport
  * running past midnight is ordinary, and a single-time order — "21/08/2026
@@ -556,7 +561,7 @@ function TransportTimeCell({
   const stored = trip[field];
   const display = stored ? (toClockLabel(stored) as string) : empty;
 
-  if (!canEditDocumentFields(trip)) {
+  if (!canEdit(trip)) {
     return <>{display}</>;
   }
 
@@ -568,6 +573,10 @@ function TransportTimeCell({
       // `HH:MM:SS`.
       editValue={stored ? (toClockLabel(stored) as string) : ""}
       kind="time"
+      // Saved the moment the field is left: a time an operator has finished
+      // typing is the decision, and a Save button after it is a second click
+      // for something already said.
+      savesOnBlur
       isDisabled={isBusy}
       // An emptied box means "no time recorded", which the backend spells null.
       onSave={(value) =>

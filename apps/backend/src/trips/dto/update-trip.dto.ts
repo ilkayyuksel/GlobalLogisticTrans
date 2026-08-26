@@ -3,7 +3,6 @@ import { Transform } from "class-transformer";
 import {
   IsBoolean,
   IsDateString,
-  IsInt,
   IsNumber,
   IsOptional,
   IsString,
@@ -11,6 +10,10 @@ import {
   Max,
   MaxLength,
   Min,
+  Validate,
+  ValidatorConstraint,
+  type ValidationArguments,
+  type ValidatorConstraintInterface,
 } from "class-validator";
 
 import { toOptionalBoolean, trimToNull } from "../../common/dto/transforms";
@@ -22,7 +25,6 @@ import {
   DISTANCE_DECIMAL_PLACES,
   DISTANCE_KM_MAX,
   INTERNAL_NOTES_MAX_LENGTH,
-  WAITING_TIME_MAX_MINUTES,
   toRawNumber,
 } from "./create-trip.dto";
 
@@ -63,9 +65,46 @@ import {
  * classification, no parser ever writes it, and a box ticked by mistake has to
  * be untickable.
  *
+ * `waitingTimeMinutes` is deliberately ABSENT even though the column is a
+ * manual field. It is DERIVED from `waitingTimeStart` and `waitingTimeEnd`, and
+ * accepting it as well would let the money and the evidence for it disagree —
+ * see `waiting-window.ts`. Sending it is a 400, like any unknown field.
+ *
  * The global ValidationPipe runs with forbidNonWhitelisted, so sending any of
  * them is rejected with 400 rather than ignored.
  */
+/**
+ * A waiting-time window is both times or neither.
+ *
+ * An end with no beginning is not a duration of zero and not a duration from
+ * midnight; it is an incomplete entry, and guessing which it meant would bill
+ * something nobody measured. Refused here rather than silently half-stored.
+ */
+@ValidatorConstraint({ name: "waitingWindowIsComplete", async: false })
+class WaitingWindowIsComplete implements ValidatorConstraintInterface {
+  validate(_value: unknown, args: ValidationArguments): boolean {
+    const dto = args.object as UpdateTripDto;
+    const sent = [dto.waitingTimeStart, dto.waitingTimeEnd].filter(
+      (value) => value !== undefined,
+    );
+
+    if (sent.length === 0) {
+      return true;
+    }
+
+    // Both present, and either both cleared or both given.
+    return (
+      sent.length === 2 &&
+      (sent.every((value) => value === null) ||
+        sent.every((value) => value !== null))
+    );
+  }
+
+  defaultMessage(): string {
+    return "waitingTimeStart and waitingTimeEnd must be sent together, both as times or both as null.";
+  }
+}
+
 export class UpdateTripDto {
   @ApiPropertyOptional({
     description:
@@ -111,18 +150,25 @@ export class UpdateTripDto {
   driverId?: string | null;
 
   @ApiPropertyOptional({
-    description: "Waiting time in minutes. Send null to clear.",
-    minimum: 0,
-    maximum: WAITING_TIME_MAX_MINUTES,
+    description:
+      "When the waiting started. Send both times together; the duration is DERIVED from them and cannot be sent. Send null for both to remove the waiting time entirely.",
     nullable: true,
-    example: 45,
+    example: "08:00",
   })
-  @Transform(toRawNumber)
   @IsOptional()
-  @IsInt()
-  @Min(0)
-  @Max(WAITING_TIME_MAX_MINUTES)
-  waitingTimeMinutes?: number | null;
+  @IsClockTimeString()
+  waitingTimeStart?: string | null;
+
+  @ApiPropertyOptional({
+    description:
+      "When the waiting ended. An end before the start is the next morning; an end equal to the start is zero, never a day.",
+    nullable: true,
+    example: "10:15",
+  })
+  @IsOptional()
+  @IsClockTimeString()
+  @Validate(WaitingWindowIsComplete)
+  waitingTimeEnd?: string | null;
 
   @ApiPropertyOptional({
     description: "Distance in kilometres. Send null to clear.",
