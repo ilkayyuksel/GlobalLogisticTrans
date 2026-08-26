@@ -1,4 +1,5 @@
 import type { CustomProperty, PricingSnapshot, Trip } from "@/lib/api/types";
+import { toClockLabel } from "@/lib/calendar/clock";
 import { formatWaitingTime } from "@/lib/waiting-time";
 import { toRouteLabels } from "./export-route-labels";
 import { toPricedTripLines, type PricedTripLines } from "./pricing-lines";
@@ -146,6 +147,44 @@ export function toCostsLabel(lines: PricedTripLines): string {
 }
 
 /**
+ * A loose trip, in the one word the office uses for it.
+ *
+ * LOSRIT belongs in INFO and nowhere else. It is an operational note about the
+ * work — this Trip carries no container of its own — and NOT a lifecycle state,
+ * so it never becomes a status or a column of its own in a workbook.
+ */
+export const LOOSE_TRIP_MARK = "LOSRIT";
+
+/**
+ * The waiting time as the printed sheet says it: `Wachttijd 07:00-10:00`.
+ *
+ * ── THE WINDOW, NOT A NEW CALCULATION ───────────────────────────────────────
+ * These are the two clock times an operator actually read and the system
+ * actually stored. Nothing here works out a duration and nothing here bills:
+ * `waitingTimeMinutes` remains the stored value pricing charges from, and this
+ * only says where it came from.
+ *
+ * A Trip whose waiting time was entered before the window was recorded has no
+ * two times to show, so it falls back to the duration it does have. Inventing a
+ * window for it would put hours on a page that nobody ever read off a clock.
+ */
+export function toWaitingLabel(
+  trip: Trip,
+  waitingWord: string,
+): string | null {
+  const begin = toClockLabel(trip.waitingTimeStart);
+  const end = toClockLabel(trip.waitingTimeEnd);
+
+  if (begin && end) {
+    return `${waitingWord} ${begin}-${end}`;
+  }
+
+  const duration = formatWaitingTime(trip.waitingTimeMinutes);
+
+  return duration ? `${waitingWord} ${duration}` : null;
+}
+
+/**
  * The words behind those numbers, in the same order.
  *
  * Only the FIXED Custom Properties are named: a route-priced one is not part of
@@ -157,9 +196,18 @@ export function toInfoLabel(
   fixedPropertyIds: ReadonlySet<string>,
   waitingLabel: string | null,
 ): string {
-  const names = trip.customProperties
-    .filter((property) => fixedPropertyIds.has(property.id))
-    .map((property) => property.name);
+  const names: string[] = [];
+
+  // First, because it changes what the driver is being sent to do.
+  if (trip.isLooseTrip) {
+    names.push(LOOSE_TRIP_MARK);
+  }
+
+  names.push(
+    ...trip.customProperties
+      .filter((property) => fixedPropertyIds.has(property.id))
+      .map((property) => property.name),
+  );
 
   if (lines.waitingTime !== null && waitingLabel) {
     names.push(waitingLabel);
@@ -186,7 +234,6 @@ export function toBasicRow(
   waitingWord: string,
 ): BasicExportRow {
   const lines = toPricedTripLines(snapshot);
-  const waiting = formatWaitingTime(trip.waitingTimeMinutes);
 
   return {
     // The Trip's own status, read not written: an export never changes one.
@@ -203,7 +250,7 @@ export function toBasicRow(
       trip,
       lines,
       fixedPropertyIds,
-      waiting ? `${waitingWord} ${waiting}` : null,
+      toWaitingLabel(trip, waitingWord),
     ),
   };
 }

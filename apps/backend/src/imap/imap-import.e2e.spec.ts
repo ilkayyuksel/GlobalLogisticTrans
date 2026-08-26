@@ -342,6 +342,15 @@ describe("IMAP import, end to end with a real transport order", () => {
         };
         return Promise.resolve({});
       }),
+      // A cancellation that applied nothing is set aside, not processed.
+      markSetAside: jest.fn((id: string) => {
+        importedEmailStatus = {
+          id,
+          status: "IGNORED",
+          processedAt: new Date(),
+        };
+        return Promise.resolve({});
+      }),
       markFailed: jest.fn((id: string) => {
         importedEmailStatus = { id, status: "FAILED", processedAt: null };
         return Promise.resolve({});
@@ -656,7 +665,17 @@ describe("IMAP import, end to end with a real transport order", () => {
 
       expect(createdTrips).toEqual([]);
       expect(result).toMatchObject({ imported: 1, failed: 0 });
-      expect(importedEmailStatus.status).toBe("PROCESSED");
+      /*
+       * IGNORED, not PROCESSED. A cancellation that matched nothing did not
+       * process anything, and reporting it like one that cancelled a transport
+       * is how a real cancellation used to arrive, do nothing, and leave no
+       * trace an operator would look at. IGNORED is this product's existing
+       * word for "read, understood, deliberately did nothing".
+       *
+       * Not FAILED: nothing went wrong, and the next scan retrying it would
+       * change nothing.
+       */
+      expect(importedEmailStatus.status).toBe("IGNORED");
       /*
        * The document is still kept. It arrived and was accepted; that it named
        * a booking we do not have is a fact about our records, not a reason to

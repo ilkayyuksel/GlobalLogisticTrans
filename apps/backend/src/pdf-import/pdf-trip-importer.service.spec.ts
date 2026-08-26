@@ -43,6 +43,7 @@ function buildParsedTrip(overrides: Partial<ParsedTrip> = {}): ParsedTrip {
       rawTerminal: "Test Quay 1",
       rawDate: "22/05/2025",
       rawBooking: "ANRDUB2602247",
+      rawContainerNumber: null,
       matchedLabels: ["Terminal:", "Booking no:"],
       sections: { page: 1, addressSection: "LOADING 1", detected: ["LOADING"] },
     },

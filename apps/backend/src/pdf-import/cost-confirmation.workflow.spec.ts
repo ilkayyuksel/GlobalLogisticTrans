@@ -272,7 +272,7 @@ describe("every real Cost Confirmation, through the real workflow", () => {
    * A Trip is identified by its booking number AND its container number, so one
    * booking may hold several Trips. A confirmation names only the booking: its
    * own container reference is printed in another format than a transport
-   * order's — `EUCU4530818` against `EUCU 453232/2` — and one of the four real
+   * order's — `EUCU4530818` against `EUCU4532322` — and one of the four real
    * confirmations prints none at all.
    *
    * It therefore REFUSES rather than choosing. The document carries money, and
@@ -288,13 +288,13 @@ describe("every real Cost Confirmation, through the real workflow", () => {
         {
           id: "trip-container-1",
           bookingNumber,
-          containerNumber: "EUCU 453232/2",
+          containerNumber: "EUCU4532322",
           status: TripStatus.OPEN,
         },
         {
           id: "trip-container-2",
           bookingNumber,
-          containerNumber: "PVDU 301326/0",
+          containerNumber: "PVDU3013260",
           status: TripStatus.OPEN,
         },
       );

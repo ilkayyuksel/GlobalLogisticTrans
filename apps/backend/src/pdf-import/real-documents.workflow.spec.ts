@@ -65,7 +65,7 @@ const CANCEL_DOCUMENTS: readonly {
   {
     file: "CANCEL/cancelled_transportorder1353889.pdf",
     booking: "ANRBEL2772352",
-    container: "EUCU 200024/9",
+    container: "EUCU2000249",
   },
   {
     file: "CANCEL/cancelled_transportorder1354204.pdf",
@@ -75,7 +75,7 @@ const CANCEL_DOCUMENTS: readonly {
   {
     file: "CANCEL/cancelled_transportorder1365387.pdf",
     booking: "DUBANR2776470",
-    container: "EUCU 455132/2",
+    container: "EUCU4551322",
   },
   {
     file: "CANCEL/cancelled_transportorder1367320.pdf",

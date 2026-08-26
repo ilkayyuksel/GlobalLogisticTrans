@@ -38,6 +38,12 @@ export interface ParsedTripRaw {
   readonly rawTerminal: string | null;
   readonly rawDate: string | null;
   readonly rawBooking: string | null;
+  /**
+   * The container number exactly as the document printed it —
+   * `EUCU 145129/5` — beside the normalised value the trip carries.
+   * Diagnostics only: no business decision reads it.
+   */
+  readonly rawContainerNumber: string | null;
   /** Labels this trip was actually built from, in the order they were used. */
   readonly matchedLabels: string[];
   readonly sections: ParsedTripSections;

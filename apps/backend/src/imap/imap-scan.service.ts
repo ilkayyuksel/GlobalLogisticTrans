@@ -1,6 +1,6 @@
 import { Injectable } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
-import { ImportSource, ImportType } from "@prisma/client";
+import { ImportSource, ImportType, ImportedEmail } from "@prisma/client";
 
 import { AppLoggerService } from "../logger/app-logger.service";
 import { DuplicateBookingNumberException } from "../trips/exceptions/trip.exceptions";
@@ -22,6 +22,7 @@ import {
 } from "./imap-mailbox.client";
 import { ImportedEmailService } from "./imported-email.service";
 import { MessageAction, selectMessage } from "./message-selection";
+import { RescanDecision, decideRescan } from "./rescan-decision";
 import { domainOf } from "./trusted-sender";
 
 /** A supported email carries exactly one, per `businessrules.md` §1. */
@@ -136,20 +137,39 @@ export class ImapScanService {
   ): Promise<void> {
     counters.scanned += 1;
 
-    // Asked before anything is downloaded: an email seen by an earlier scan
-    // must not cost a second attachment fetch.
+    /*
+     * Asked before anything is downloaded: an email an earlier scan finished
+     * must not cost a second attachment fetch.
+     *
+     * But "already seen" is not "already done". A FAILED row used to end the
+     * message's life — it was skipped by every later scan, forever, because
+     * dedup looked only at whether a row existed. See `decideRescan`.
+     */
     const known = await this.importedEmailService.findByMessageId(
       message.messageId,
     );
+    const decision = decideRescan(known, new Date());
 
-    if (known) {
+    if (
+      decision === RescanDecision.SKIP_PROCESSED ||
+      decision === RescanDecision.SKIP_IGNORED ||
+      decision === RescanDecision.SKIP_IN_FLIGHT
+    ) {
       counters.alreadyProcessed += 1;
       this.logger.log("Email already known, skipped", {
         messageId: message.messageId,
-        previousStatus: known.processingStatus,
+        previousStatus: known?.processingStatus,
+        decision,
       });
 
       return;
+    }
+
+    if (decision === RescanDecision.RETRY) {
+      this.logger.log("Retrying an email that did not complete", {
+        messageId: message.messageId,
+        previousStatus: known?.processingStatus,
+      });
     }
 
     const selection = selectMessage(message, {
@@ -188,6 +208,9 @@ export class ImapScanService {
       message,
       selection.action ?? MessageAction.NEW,
       counters,
+      // A retry continues the row this email already has; a new arrival opens
+      // one. Either way there is exactly one row per Message-ID.
+      decision === RescanDecision.RETRY ? known : null,
     );
   }
 
@@ -199,20 +222,27 @@ export class ImapScanService {
    * in PROCESSING rather than no trace at all.
    *
    * All three actions share this lifecycle exactly: PROCESSING, then PROCESSED
-   * and read on success, then FAILED and left UNREAD on any failure. A message
-   * that failed must stay unread — an unread message is the only thing that
-   * will offer the instruction again.
+   * and read on success, then FAILED and left UNREAD on any failure.
+   *
+   * A failed message stays unread, and what offers it again is TODAY'S SEARCH
+   * rather than the flag: scanning is `SINCE today`, so the message comes back
+   * every five minutes for the rest of the day and `decideRescan` says to try
+   * it again. Tomorrow it falls out of the window and stops being retried,
+   * which is deliberate — a normal scan never reaches back into history.
    */
   private async importMessage(
     session: ImapMailboxSession,
     message: MailboxMessage,
     action: MessageAction,
     counters: ImapScanResultDto,
+    retrying: ImportedEmail | null,
   ): Promise<void> {
-    const importedEmail = await this.importedEmailService.startProcessing(
-      message,
-      importTypeFor(action),
-    );
+    const importedEmail = retrying
+      ? await this.importedEmailService.reopenForRetry(retrying.id)
+      : await this.importedEmailService.startProcessing(
+          message,
+          importTypeFor(action),
+        );
 
     try {
       const attachment = this.requireSinglePdf(message);
@@ -225,7 +255,27 @@ export class ImapScanService {
         message.subject,
       );
 
-      await this.importedEmailService.markProcessed(importedEmail.id);
+      /*
+       * ── A CANCELLATION THAT CHANGED NOTHING IS NOT "PROCESSED" ──────────
+       * It used to be. A CANCEL whose booking matched no Trip, or whose
+       * booking is held by several, was reported exactly like one that
+       * cancelled a transport — so a real cancellation could arrive, do
+       * nothing, and leave no trace an operator would ever look at.
+       *
+       * IGNORED is the status this product already uses for "we looked and
+       * deliberately did nothing, and nothing went wrong" — an untrusted
+       * sender, an already-imported PDF. It shows on the imports page as set
+       * aside rather than as work completed, which is the honest reading.
+       *
+       * FAILED would be wrong: the next scan retries a FAILED email, and
+       * retrying changes nothing here. The document is kept either way.
+       * ────────────────────────────────────────────────────────────────────
+       */
+      if (appliedNothing(outcome)) {
+        await this.importedEmailService.markSetAside(importedEmail.id);
+      } else {
+        await this.importedEmailService.markProcessed(importedEmail.id);
+      }
       // Only now: a message marked read before the Trips exist would never be
       // offered again, and the order would be silently lost.
       await session.markSeen(message);
@@ -367,6 +417,31 @@ export class ImapScanService {
 
     return message.attachments[0];
   }
+}
+
+/**
+ * Whether an import moved nothing at all.
+ *
+ * True only for a document that named cancellations and applied none of them:
+ * every outcome was NO_MATCHING_TRIP or AMBIGUOUS_BOOKING_MATCH. A document
+ * that created Trips, revised one, recorded a confirmation, or cancelled even
+ * one transport did something, whatever else it also failed to do.
+ */
+function appliedNothing(outcome: PdfImportResult): boolean {
+  const didSomethingElse =
+    outcome.trips.length > 0 ||
+    outcome.revisions.length > 0 ||
+    outcome.costConfirmations.length > 0;
+
+  if (didSomethingElse || outcome.cancellations.length === 0) {
+    return false;
+  }
+
+  return outcome.cancellations.every(
+    (entry) =>
+      entry.outcome === "NO_MATCHING_TRIP" ||
+      entry.outcome === "AMBIGUOUS_BOOKING_MATCH",
+  );
 }
 
 /**

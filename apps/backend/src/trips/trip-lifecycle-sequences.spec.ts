@@ -96,6 +96,7 @@ describe("sequences of transport documents", () => {
     stored = [buildTrip()];
 
     const repository: {
+      findManyByBookingNumber: jest.Mock;
       findByIdentity: jest.Mock;
       findByBookingNumber: jest.Mock;
       setStatus: jest.Mock;
@@ -104,6 +105,22 @@ describe("sequences of transport documents", () => {
       runInTransaction: jest.Mock;
       runTripWriteTransaction: jest.Mock;
     } = {
+      findManyByBookingNumber: jest.fn(
+        ({
+          bookingNumber,
+          statuses,
+        }: {
+          bookingNumber: string;
+          statuses: readonly TripStatus[];
+        }) =>
+          Promise.resolve(
+            stored.filter(
+              (trip) =>
+                trip.bookingNumber === bookingNumber &&
+                statuses.includes(trip.status),
+            ),
+          ),
+      ),
       findByIdentity: jest.fn(
         ({
           identity,
@@ -362,7 +379,7 @@ describe("sequences of transport documents", () => {
   describe("a document naming a different container", () => {
     it("matches no Trip, so the revision changes nothing here", async () => {
       const result = await service.applyDocumentRevision(
-        buildDocument({ containerNumber: "EUCU 453232/2" }),
+        buildDocument({ containerNumber: "EUCU4532322" }),
       );
 
       expect(result.outcome).toBe("NO_MATCHING_TRIP");
@@ -373,7 +390,7 @@ describe("sequences of transport documents", () => {
     it("does not cancel the Trip that has no container", async () => {
       const outcome = await service.cancelByIdentity({
         bookingNumber: BOOKING,
-        containerNumber: "EUCU 453232/2",
+        containerNumber: "EUCU4532322",
       });
 
       expect(outcome).toBe("NO_MATCHING_TRIP");
@@ -381,11 +398,11 @@ describe("sequences of transport documents", () => {
     });
 
     it("leaves the other container's Trip alone", async () => {
-      stored.push(buildTrip({ id: "trip-2", containerNumber: "EUCU 453232/2" }));
+      stored.push(buildTrip({ id: "trip-2", containerNumber: "EUCU4532322" }));
 
       await service.cancelByIdentity({
         bookingNumber: BOOKING,
-        containerNumber: "EUCU 453232/2",
+        containerNumber: "EUCU4532322",
       });
 
       expect(stored[0].status).toBe(TripStatus.OPEN);
@@ -393,11 +410,11 @@ describe("sequences of transport documents", () => {
     });
 
     it("revises only the Trip whose container it names", async () => {
-      stored.push(buildTrip({ id: "trip-2", containerNumber: "EUCU 453232/2" }));
+      stored.push(buildTrip({ id: "trip-2", containerNumber: "EUCU4532322" }));
 
       await service.applyDocumentRevision(
         buildDocument({
-          containerNumber: "EUCU 453232/2",
+          containerNumber: "EUCU4532322",
           terminal: "Quay 869",
         }),
       );
@@ -472,6 +489,114 @@ describe("sequences of transport documents", () => {
       await newOrder();
 
       expect(trip().isLooseTrip).toBe(false);
+    });
+  });
+
+  /**
+   * ── CONDITIONAL MATCHING, ACROSS A WHOLE SEQUENCE ───────────────────────────
+   * The fixture Trip carries NO container, which is what a COLLECTION order
+   * produces, and the documents that follow print none either. What these pin
+   * down is that the conditional rule does not quietly change any of the
+   * sequences above — and that the one case it exists for now works.
+   * ────────────────────────────────────────────────────────────────────────────
+   */
+  describe("matching a document with no container", () => {
+    /**
+     * THE CASE THIS RULE EXISTS FOR.
+     *
+     * The order arrived with no container, an operator typed one in later, and
+     * the cancellation still prints none. Under strict identity this found
+     * nothing and vanished without a trace.
+     */
+    it("cancels a Trip whose container was entered by hand afterwards", async () => {
+      stored[0] = buildTrip({ containerNumber: "EUCU4532322" });
+
+      expect(await cancel()).toBe("CANCELLED");
+      expect(trip().status).toBe(TripStatus.CANCELLED);
+    });
+
+    /** And it leaves that container exactly as the operator typed it. */
+    it("leaves the manually entered container untouched", async () => {
+      stored[0] = buildTrip({ containerNumber: "EUCU4532322" });
+
+      await cancel();
+
+      expect(trip().containerNumber).toBe("EUCU4532322");
+    });
+
+    it("updates a Trip whose container was entered by hand afterwards", async () => {
+      stored[0] = buildTrip({ containerNumber: "EUCU4532322" });
+
+      const result = await update({ containerType: "45RH" });
+
+      expect(result.outcome).toBe("UPDATED");
+      expect(trip().containerType).toBe("45RH");
+    });
+
+    it("still creates nothing when the booking is not held at all", async () => {
+      stored.length = 0;
+
+      expect(await cancel()).toBe("NO_MATCHING_TRIP");
+      expect(stored).toEqual([]);
+    });
+  });
+
+  /**
+   * A booking legitimately carries one Trip per container. A document naming no
+   * container cannot say which, so nothing is chosen — not the newest, not the
+   * oldest, not the one planned first.
+   */
+  describe("a booking held by two Trips", () => {
+    function givenTwoContainers(): void {
+      stored.length = 0;
+      stored.push(
+        buildTrip({ id: "trip-a", containerNumber: "EUCU1111111" }),
+        buildTrip({ id: "trip-b", containerNumber: "PVDU2222222" }),
+      );
+    }
+
+    it("cancels only the one a CANCEL names by container", async () => {
+      givenTwoContainers();
+
+      const outcome = await service.cancelByIdentity({
+        bookingNumber: BOOKING,
+        containerNumber: "EUCU1111111",
+      });
+
+      expect(outcome).toBe("CANCELLED");
+      expect(stored[0].status).toBe(TripStatus.CANCELLED);
+      expect(stored[1].status).toBe(TripStatus.OPEN);
+    });
+
+    it("refuses a CANCEL that names no container", async () => {
+      givenTwoContainers();
+
+      expect(await cancel()).toBe("AMBIGUOUS_BOOKING_MATCH");
+      expect(stored.every((entry) => entry.status === TripStatus.OPEN)).toBe(
+        true,
+      );
+    });
+
+    it("refuses an UPDATE that names no container", async () => {
+      givenTwoContainers();
+
+      const result = await update({ containerType: "45RH" });
+
+      expect(result.outcome).toBe("AMBIGUOUS_BOOKING_MATCH");
+      expect(result.trip).toBeNull();
+    });
+
+    /** And refusing must not add a third Trip to an already ambiguous booking. */
+    it("creates no Trip when an UPDATE is ambiguous", async () => {
+      givenTwoContainers();
+
+      await update({ containerType: "45RH" });
+
+      expect(stored).toHaveLength(2);
+      expect(stored.map((entry) => entry.containerType)).toEqual([
+        "45PH",
+        "45PH",
+      ]);
     });
   });
 

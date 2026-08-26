@@ -6,6 +6,7 @@ import {
 import { extractBookingAndDirection } from "../fields/booking";
 import {
   extractContainerNumber,
+  extractRawContainerNumber,
   extractContainerType,
 } from "../fields/container";
 import { ExtractedDateTime, extractDateTime } from "../fields/date-time";
@@ -40,6 +41,7 @@ export function extractTripFromPage(
   const booking = extractBookingAndDirection(pageFragments);
   const containerType = extractContainerType(pageFragments);
   const containerNumber = extractContainerNumber(pageFragments);
+  const rawContainerNumber = extractRawContainerNumber(pageFragments);
 
   const { address, dateTime, sectionLabel } = readDestination(
     fragments,
@@ -75,6 +77,9 @@ export function extractTripFromPage(
       rawTerminal: terminal ? terminal.rawTerminal : null,
       rawDate: dateTime.rawDate,
       rawBooking: booking.rawBooking,
+      // As the document printed it — `EUCU 145129/5` — beside the normalised
+      // value the Trip stores. Diagnostics only; no business decision reads it.
+      rawContainerNumber,
       matchedLabels,
       sections: {
         page,

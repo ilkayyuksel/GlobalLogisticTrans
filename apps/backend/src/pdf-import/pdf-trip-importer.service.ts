@@ -1040,13 +1040,19 @@ export class PdfTripImporter {
  * Why a revision was refused, phrased for the operator who has to act on it.
  *
  * Each of these is a decision for a person: the system deliberately does not
- * resolve any of them on its own.
+ * resolve any of them on its own. AMBIGUOUS_BOOKING_MATCH is the newest, and
+ * the sharpest example — the document is perfectly valid and names a booking
+ * this system holds twice, so only a person knows which transport it means.
  */
 function describeRevisionRefusal(
   outcome: Exclude<RevisionOutcome, "UPDATED" | "REOPENED">,
 ): string {
   if (outcome === "NO_MATCHING_TRIP") {
     return "no Trip holds that booking number and container, and a revision never creates one here";
+  }
+
+  if (outcome === "AMBIGUOUS_BOOKING_MATCH") {
+    return "this document names no container and its booking number is held by more than one Trip, so which transport it revises cannot be determined";
   }
 
   return "the Trip is CLOSED, and finished work is not rewritten automatically";

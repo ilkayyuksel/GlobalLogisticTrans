@@ -73,8 +73,10 @@ describe("ImapScanService", () => {
     startProcessing: jest.Mock;
     recordIgnored: jest.Mock;
     markProcessed: jest.Mock;
+    markSetAside: jest.Mock;
     markFailed: jest.Mock;
     markAlreadyImported: jest.Mock;
+    reopenForRetry: jest.Mock;
   };
   let pdfTripImporter: {
     import: jest.Mock;
@@ -110,8 +112,10 @@ describe("ImapScanService", () => {
       startProcessing: jest.fn().mockResolvedValue({ id: IMPORTED_EMAIL_ID }),
       recordIgnored: jest.fn().mockResolvedValue({ id: IMPORTED_EMAIL_ID }),
       markProcessed: jest.fn().mockResolvedValue({}),
+      markSetAside: jest.fn().mockResolvedValue({}),
       markFailed: jest.fn().mockResolvedValue({}),
       markAlreadyImported: jest.fn().mockResolvedValue({}),
+      reopenForRetry: jest.fn().mockResolvedValue({ id: IMPORTED_EMAIL_ID }),
     };
 
     pdfTripImporter = {
@@ -201,7 +205,14 @@ describe("ImapScanService", () => {
 
       pdfTripImporter.import.mockImplementation(() => {
         order.push("import");
-        return Promise.resolve({ trips: [], combination: false });
+
+        return Promise.resolve({
+          trips: [],
+          combination: false,
+          cancellations: [],
+          revisions: [],
+          costConfirmations: [],
+        });
       });
       session.markSeen.mockImplementation(() => {
         order.push("markSeen");
@@ -330,12 +341,24 @@ describe("ImapScanService", () => {
     });
   });
 
+  /** The row this Message-ID already has, in whatever state a test needs. */
+  function known(
+    processingStatus: EmailProcessingStatus,
+    updatedAt = new Date(),
+  ) {
+    importedEmailService.findByMessageId.mockResolvedValue({
+      id: IMPORTED_EMAIL_ID,
+      processingStatus,
+      updatedAt,
+    });
+  }
+
   describe("an email an earlier scan already handled", () => {
-    it("is skipped without downloading or importing", async () => {
-      importedEmailService.findByMessageId.mockResolvedValue({
-        id: IMPORTED_EMAIL_ID,
-        processingStatus: EmailProcessingStatus.PROCESSED,
-      });
+    it.each([
+      EmailProcessingStatus.PROCESSED,
+      EmailProcessingStatus.IGNORED,
+    ])("skips a %s email without downloading or importing", async (status) => {
+      known(status);
 
       const result = await service.scan();
 
@@ -343,16 +366,103 @@ describe("ImapScanService", () => {
       expect(pdfTripImporter.import).not.toHaveBeenCalled();
       expect(result).toMatchObject({ scanned: 1, alreadyProcessed: 1 });
     });
+  });
 
-    it("does not write a second ImportedEmail row", async () => {
-      importedEmailService.findByMessageId.mockResolvedValue({
-        id: IMPORTED_EMAIL_ID,
-        processingStatus: EmailProcessingStatus.FAILED,
-      });
+  /**
+   * ── THE BUG THIS REPLACES ─────────────────────────────────────────────────
+   * Dedup skipped every Message-ID that already had a row, whatever its status.
+   * That was right while scanning filtered on UNREAD — a failed message stayed
+   * unread and came back on its own. Once scanning became `SINCE today` a
+   * FAILED row became a permanent refusal, and a transport order that failed
+   * once could never be imported.
+   * ──────────────────────────────────────────────────────────────────────────
+   */
+  describe("an email that failed earlier today", () => {
+    it("is retried rather than skipped", async () => {
+      known(EmailProcessingStatus.FAILED);
+
+      const result = await service.scan();
+
+      expect(session.downloadAttachment).toHaveBeenCalled();
+      expect(pdfTripImporter.import).toHaveBeenCalled();
+      expect(result).toMatchObject({ scanned: 1, imported: 1 });
+    });
+
+    /** One row per message: the retry continues the record it already has. */
+    it("reuses the existing row instead of writing a second", async () => {
+      known(EmailProcessingStatus.FAILED);
+
+      await service.scan();
+
+      expect(importedEmailService.reopenForRetry).toHaveBeenCalledWith(
+        IMPORTED_EMAIL_ID,
+      );
+      expect(importedEmailService.startProcessing).not.toHaveBeenCalled();
+    });
+
+    it("becomes PROCESSED and read when the retry succeeds", async () => {
+      known(EmailProcessingStatus.FAILED);
+
+      await service.scan();
+
+      expect(importedEmailService.markProcessed).toHaveBeenCalledWith(
+        IMPORTED_EMAIL_ID,
+      );
+      expect(session.markSeen).toHaveBeenCalled();
+    });
+
+    /** Still FAILED, still unread, and still offered by today's search. */
+    it("stays FAILED and unread when the retry fails again", async () => {
+      known(EmailProcessingStatus.FAILED);
+      pdfTripImporter.import.mockRejectedValue(new Error("still broken"));
+
+      const result = await service.scan();
+
+      expect(importedEmailService.markFailed).toHaveBeenCalledWith(
+        IMPORTED_EMAIL_ID,
+      );
+      expect(session.markSeen).not.toHaveBeenCalled();
+      expect(result).toMatchObject({ failed: 1 });
+    });
+
+    it("writes no extra row when the retry fails again", async () => {
+      known(EmailProcessingStatus.FAILED);
+      pdfTripImporter.import.mockRejectedValue(new Error("still broken"));
 
       await service.scan();
 
       expect(importedEmailService.startProcessing).not.toHaveBeenCalled();
+      expect(importedEmailService.reopenForRetry).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  /**
+   * PROCESSING means a scan started this and did not finish. Retrying a live
+   * one would import the same PDF twice; never retrying an abandoned one
+   * strands the message exactly as the FAILED bug did.
+   */
+  describe("an email another scan may still hold", () => {
+    it("is left alone while the attempt is recent", async () => {
+      known(EmailProcessingStatus.PROCESSING, new Date());
+
+      const result = await service.scan();
+
+      expect(pdfTripImporter.import).not.toHaveBeenCalled();
+      expect(result).toMatchObject({ alreadyProcessed: 1 });
+    });
+
+    it("is reclaimed once the attempt is stale", async () => {
+      known(
+        EmailProcessingStatus.PROCESSING,
+        new Date(Date.now() - 60 * 60 * 1000),
+      );
+
+      await service.scan();
+
+      expect(importedEmailService.reopenForRetry).toHaveBeenCalledWith(
+        IMPORTED_EMAIL_ID,
+      );
+      expect(pdfTripImporter.import).toHaveBeenCalled();
     });
   });
 

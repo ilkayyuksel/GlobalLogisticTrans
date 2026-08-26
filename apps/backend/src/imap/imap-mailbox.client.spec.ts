@@ -73,6 +73,32 @@ describe("ImapMailboxSession.findCandidates", () => {
     expect(calls[0].query.seen).toBeUndefined();
   });
 
+  /**
+   * ── RETRYING NEVER REACHES INTO HISTORY ──────────────────────────────────
+   * A failed message is retried because today's search keeps offering it, not
+   * because anything looks for failures. So the window is the limit: a message
+   * that failed yesterday is simply not returned any more, and the 38 rows
+   * that failed in December 2023 can never be offered by a normal scan.
+   *
+   * Asserted as the ABSENCE of any widening criterion, because that is how a
+   * recovery mode would arrive — an extra `before`, a `seen`, a date range.
+   * ──────────────────────────────────────────────────────────────────────────
+   */
+  it("asks for no message older than today, whatever failed before", async () => {
+    await sessionRecording(calls).findCandidates();
+
+    const { query } = calls[0];
+    const midnight = new Date();
+    midnight.setHours(0, 0, 0, 0);
+
+    expect(Object.keys(query)).toEqual(["since"]);
+    expect(query.since).toEqual(midnight);
+    // Nothing that could reach back: no range, no flag, no status.
+    expect(query.before).toBeUndefined();
+    expect(query.sentSince).toBeUndefined();
+    expect(query.all).toBeUndefined();
+  });
+
   it("describes messages without downloading any attachment", async () => {
     await sessionRecording(calls).findCandidates();
 

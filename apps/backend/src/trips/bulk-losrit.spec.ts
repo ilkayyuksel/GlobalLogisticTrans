@@ -42,7 +42,7 @@ function buildTrip(overrides: Partial<Trip> = {}): Trip {
     status: TripStatus.OPEN,
     isLooseTrip: false,
     bookingNumber: "ANRDUB2602247",
-    containerNumber: "CNEU 452297/0",
+    containerNumber: "CNEU4522970",
     containerType: "45PH",
     terminal: "PSA Quay 869",
     destinationCity: "Dourges",

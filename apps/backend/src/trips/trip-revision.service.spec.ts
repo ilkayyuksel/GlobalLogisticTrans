@@ -20,7 +20,8 @@ const Decimal = Prisma.Decimal;
 
 const BOOKING = "ANRDUB2602247";
 /** The container the documents in this spec name. Half of the Trip's identity. */
-const CONTAINER = "EUCU 455075/3";
+/** The canonical form. A document prints `EUCU 455075/3`; a Trip holds this. */
+const CONTAINER = "EUCU4550753";
 
 function buildTrip(overrides: Partial<Trip> = {}): Trip {
   return {
@@ -78,6 +79,7 @@ describe("TripRevisionService", () => {
   let stored: Trip[];
   let history: unknown[];
   let repository: {
+    findManyByBookingNumber: jest.Mock;
     findByIdentity: jest.Mock;
     findByBookingNumber: jest.Mock;
     setStatus: jest.Mock;
@@ -93,6 +95,22 @@ describe("TripRevisionService", () => {
     history = [];
 
     repository = {
+      findManyByBookingNumber: jest.fn(
+        ({
+          bookingNumber,
+          statuses,
+        }: {
+          bookingNumber: string;
+          statuses: readonly TripStatus[];
+        }) =>
+          Promise.resolve(
+            stored.filter(
+              (trip) =>
+                trip.bookingNumber === bookingNumber &&
+                statuses.includes(trip.status),
+            ),
+          ),
+      ),
       findByIdentity: jest.fn(
         ({
           identity,

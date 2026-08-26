@@ -20,6 +20,7 @@ import {
 } from "./dto/trip-response.dto";
 import { UpdateTripDto } from "./dto/update-trip.dto";
 import { TripClosedEvent } from "./events/trip-closed.event";
+import { toContainerIdentity } from "./document-trip-matching";
 import { toWaitingTimeWrite } from "./waiting-window";
 import { ImportTripsCommand } from "./import-trips.command";
 import {
@@ -262,7 +263,10 @@ export class TripService {
         if (bookingNumber !== null) {
           await this.assertIdentityFree(repository, {
             bookingNumber,
-            containerNumber: dto.containerNumber ?? null,
+            // Canonical before it is stored: an operator types `EUCU 145129/5`
+          // off a document and the Trip holds `EUCU1451295`, which is what
+          // every later document is matched against.
+          containerNumber: toContainerIdentity(dto.containerNumber),
           });
         }
 
@@ -1087,7 +1091,10 @@ export class TripService {
    */
   private toUpdateData(dto: UpdateTripDto): Prisma.TripUncheckedUpdateInput {
     return {
-      containerNumber: dto.containerNumber,
+      containerNumber:
+        dto.containerNumber === undefined
+          ? undefined
+          : toContainerIdentity(dto.containerNumber),
       planningDate:
         dto.planningDate === undefined
           ? undefined

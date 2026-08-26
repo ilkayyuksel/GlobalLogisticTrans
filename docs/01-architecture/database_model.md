@@ -867,6 +867,128 @@ window reads or writes it.
 
 ---
 
+# Matching An Incoming UPDATE Or CANCEL
+
+The stored Trip identity is unchanged: (booking_number, container_number), with
+NULLS NOT DISTINCT, WHERE status <> 'DELETED'.
+
+How an incoming DOCUMENT finds that Trip is a separate rule, and it is
+CONDITIONAL on what the document prints:
+
+If the PDF prints a container:
+
+    match on booking number AND container number, strictly.
+
+    No fallback. A booking whose container names no Trip means that transport
+    is not here; cancelling the booking's other container instead would cancel
+    a transport nobody called off.
+
+If the PDF prints NO container:
+
+    match on the booking number alone.
+
+    A COLLECTION order is written before anyone knows which container will be
+    picked up, so it prints none - and the operator may enter one by hand
+    afterwards. Six of the eight real CANCEL fixtures are exactly this.
+
+If booking-only matching finds more than one Trip:
+
+    AMBIGUOUS_BOOKING_MATCH. Nothing is chosen.
+
+    Not the newest, not the oldest, not the latest document, not by planning
+    date, vehicle, driver or destination. A booking legitimately carries one
+    Trip per container and only a person knows which the document means.
+
+An ambiguous UPDATE creates NOTHING. That is the difference between it and
+NO_MATCHING_TRIP, which does create the Trip the document describes: creating
+one for an ambiguous booking would add a third Trip and make the ambiguity
+permanently worse.
+
+A NEW order is NOT affected. It continues to use the exact stored identity,
+including its NULL semantics.
+
+A Cost Confirmation is NOT affected. It matches on the booking number alone and
+refuses when that booking is held by more than one Trip.
+
+The rule lives in ONE place, `document-trip-matching.ts`. Nothing in a
+controller, a repository or the IMAP path decides identity.
+
+## Container numbers are canonical
+
+A container number is stored and compared as the identifier alone:
+
+EUCU 145129/5 -> EUCU1451295
+
+Spaces, forward slashes and backslashes are formatting a document prints for a
+human. Letters and digits are the identity, and nothing else is altered - not
+case, not length, and no new validation format is imposed.
+
+The rule is ONE function, normalizeContainerNumber, exported from the parser
+package because that is where a container number first appears and because the
+Backend already depends on it. It is applied when the parser reads a document,
+when an operator types a container by hand, and when an incoming document is
+matched. There is deliberately no second copy in an importer, a repository, a
+DTO or the browser.
+
+The value AS PRINTED survives in parser metadata (rawContainerNumber), for
+diagnostics only. No business decision reads it.
+
+Absence stays absence: null, empty and whitespace-only all mean the document
+printed no container.
+
+BOOKING NUMBERS ARE NOT NORMALISED. One prints as ANRDUB2794719 /67036944,
+where the slash separates the booking from the TRIP number; removing it would
+fuse two identifiers into a third that means nothing. Containers and bookings
+are different things that happen to share a punctuation mark.
+
+## An email is retried while today still offers it
+
+The scan asks the mailbox for SINCE today and nothing else. Whether a message it
+returns is worked on is decided from the imported_email row holding its
+Message-ID:
+
+PROCESSED   skip. Importing again would create the Trips twice.
+
+IGNORED     skip. Set aside deliberately - untrusted sender, unrecognised
+            subject.
+
+FAILED      RETRY. A failure describes the state of our records, not a verdict
+            on the sender's document.
+
+PROCESSING  skip while the attempt is recent; retry once it is stale. The row's
+            updatedAt is when the attempt began, and polling runs every five
+            minutes, so a row untouched for fifteen belongs to no live scan.
+
+RECEIVED    retry. Nothing writes it; a row carrying it describes work recorded
+            and never begun.
+
+ONE ROW PER MESSAGE. message_id is unique and a retry reopens the existing row
+rather than creating a second.
+
+There is no attempt counter and no back-off. What limits the retries is the
+SCAN WINDOW: a message is offered while it is in today's search and stops being
+offered tomorrow. A counter would be a second, invisible limit that could
+strand a message the window still offers.
+
+RETRYING NEVER REACHES INTO HISTORY. There is no recovery mode and no widened
+search. A message that failed yesterday is not returned by today's scan, so it
+is not retried - which is why the failures recorded in earlier months stay
+exactly where they are.
+
+---
+
+## A cancellation that applied nothing is not "processed"
+
+A CANCEL whose booking matches no Trip, or whose booking is ambiguous, leaves
+its email IGNORED rather than PROCESSED - this product's existing word for
+"read, understood, deliberately did nothing". Not FAILED: nothing went wrong and
+a retry would change nothing.
+
+The document itself is kept either way, following the existing retention rule
+for refused documents.
+
+---
+
 # PDF Relationship
 
 Every Trip originates from exactly one PDF.

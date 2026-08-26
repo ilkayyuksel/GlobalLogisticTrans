@@ -107,7 +107,12 @@ export function ExportButton({
         );
 
         downloadWorkbook(
-          await buildBasicWorkbook(rows, language),
+          // The period prints above the table, exactly as the office sheet has
+          // it, so a page picked off a printer says which day it covers.
+          await buildBasicWorkbook(rows, language, {
+            start: periodStart,
+            end: periodEnd,
+          }),
           basicFileName(periodStart, periodEnd),
         );
       }

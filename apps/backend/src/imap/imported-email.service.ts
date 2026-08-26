@@ -78,6 +78,26 @@ export class ImportedEmailService {
    * and a cost confirmation indistinguishable in `/imports` once they had been
    * handled — a record of what arrived that could not say what it was.
    */
+  /**
+   * Reopens an existing record for another attempt.
+   *
+   * ONE ROW PER MESSAGE, always. `message_id` is unique, so a retry cannot
+   * create a second row even by accident — and it should not want to: the row
+   * IS the record of this email, and a retry is another attempt at the same
+   * work rather than a new arrival.
+   *
+   * Back to PROCESSING, which also refreshes `updatedAt` — the timestamp a
+   * later scan reads to tell a live attempt from an abandoned one.
+   */
+  reopenForRetry(importedEmailId: string): Promise<ImportedEmail> {
+    return this.repository.updateStatus(
+      importedEmailId,
+      EmailProcessingStatus.PROCESSING,
+      // Not processed: clearing it keeps "when did this succeed" honest.
+      null,
+    );
+  }
+
   startProcessing(
     message: MailboxMessage,
     importType: ImportType,
@@ -154,6 +174,22 @@ export class ImportedEmailService {
    * for a mailbox behaving exactly as expected, and would invite someone to
    * "fix" a duplicate into existence.
    */
+  /**
+   * An email that was read, understood and applied nothing.
+   *
+   * A cancellation whose booking matches no Trip, or whose booking is held by
+   * several. IGNORED rather than PROCESSED because no transport moved, and
+   * rather than FAILED because nothing went wrong and a retry would do exactly
+   * as little — an operator decides what the document meant.
+   */
+  markSetAside(importedEmailId: string): Promise<ImportedEmail> {
+    return this.repository.updateStatus(
+      importedEmailId,
+      EmailProcessingStatus.IGNORED,
+      new Date(),
+    );
+  }
+
   markAlreadyImported(importedEmailId: string): Promise<ImportedEmail> {
     return this.repository.updateStatus(
       importedEmailId,

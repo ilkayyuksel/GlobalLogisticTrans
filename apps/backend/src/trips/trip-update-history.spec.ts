@@ -117,6 +117,22 @@ describe("many updates to one Trip", () => {
     clock = 0;
 
     const fake: Record<string, jest.Mock> = {
+      findManyByBookingNumber: jest.fn(
+        ({
+          bookingNumber,
+          statuses,
+        }: {
+          bookingNumber: string;
+          statuses: readonly TripStatus[];
+        }) =>
+          Promise.resolve(
+            stored.filter(
+              (trip) =>
+                trip.bookingNumber === bookingNumber &&
+                statuses.includes(trip.status),
+            ),
+          ),
+      ),
       findByIdentity: jest.fn(
         ({
           identity,

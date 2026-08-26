@@ -21,6 +21,15 @@ import {
   ParsedTrip,
 } from "./types";
 
+/**
+ * The canonical form of a container number.
+ *
+ * Exported because the Backend needs the SAME rule for a container an
+ * operator types by hand and for matching an incoming document — one
+ * function, shared, rather than two that could drift apart.
+ */
+export { normalizeContainerNumber } from "./fields/container";
+
 export * from "./types";
 export { PARSER_VERSION } from "./version";
 

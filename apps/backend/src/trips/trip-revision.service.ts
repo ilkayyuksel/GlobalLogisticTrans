@@ -5,6 +5,11 @@ import { toUtcDate } from "../common/dates";
 import { toUtcTime } from "../common/time-of-day";
 import { AppLoggerService } from "../logger/app-logger.service";
 import { ImportedTripData } from "./import-trips.command";
+import {
+  resolveTripForDocument,
+  toContainerIdentity,
+  type MatchMethod,
+} from "./document-trip-matching";
 import { BOOKING_NUMBER_HOLDING_STATUSES } from "./trip-status.rules";
 import {
   FieldChange,
@@ -64,6 +69,13 @@ export type CancellationOutcome =
   | "ALREADY_CANCELLED"
   /** The Trip is CLOSED. Finished work is never rewritten. */
   | "REFUSED_CLOSED"
+  | "AMBIGUOUS_BOOKING_MATCH"
+  /**
+   * The document printed no container, and the booking it names carries more
+   * than one Trip. Nothing is chosen: a cancellation applied to the wrong half
+   * of a booking cancels a transport nobody called off.
+   */
+  | "AMBIGUOUS_BOOKING_MATCH"
   /** No Trip holds this booking number. No Trip is created. */
   | "NO_MATCHING_TRIP";
 
@@ -78,6 +90,13 @@ export type RevisionOutcome =
    * document rather than protected from it.
    */
   | "REFUSED_CLOSED"
+  /**
+   * The document printed no container and its booking carries several Trips.
+   * Distinct from NO_MATCHING_TRIP on purpose: that one CREATES the Trip the
+   * document describes, and doing so here would add a third Trip to an already
+   * ambiguous booking.
+   */
+  | "AMBIGUOUS_BOOKING_MATCH"
   | "NO_MATCHING_TRIP";
 
 export interface RevisionResult {
@@ -105,14 +124,20 @@ export interface DocumentReference {
 /**
  * The Trip a parsed document is about.
  *
- * Both halves come from the document itself and neither is normalised: the
+ * Both halves come from the document itself and NEITHER IS NORMALISED: the
  * booking number and the container number are stored exactly as printed, and
- * they are compared exactly as stored.
+ * they are compared exactly as stored. `EUCU 453232/2` keeps its space and its
+ * slash.
+ *
+ * The one thing that is normalised is ABSENCE: a container that is blank or
+ * only whitespace says exactly what a missing one says, and treating `""`,
+ * `" "` and null as three identities would make matching depend on invisible
+ * characters.
  */
 export function identityOf(document: ImportedTripData): TripIdentity {
   return {
     bookingNumber: document.bookingNumber,
-    containerNumber: document.containerNumber,
+    containerNumber: toContainerIdentity(document.containerNumber),
   };
 }
 
@@ -143,9 +168,16 @@ export class TripRevisionService {
    *                not applied.
    *   no Trip    → nothing. Never created.
    *
-   * Matched by IDENTITY: a cancellation for booking A container 1 must not
-   * cancel booking A container 2, which is a different transport that nobody
-   * cancelled.
+   * Matched by `resolveTripForDocument`, which is CONDITIONAL on what the
+   * document prints. A cancellation naming a container is matched strictly on
+   * it — cancelling booking A container 1 must never cancel booking A
+   * container 2, a different transport nobody cancelled. A cancellation with
+   * NO container, which is most of them, is matched on the booking alone,
+   * because a COLLECTION order is written before anyone knows the container.
+   *
+   * A booking carrying several Trips and a document naming no container is
+   * AMBIGUOUS_BOOKING_MATCH: a fifth outcome, and the only one that asks a
+   * person. Nothing is chosen on its behalf.
    *
    * The read and the write share one transaction, so a Trip that closes between
    * them cannot be cancelled on the strength of a stale read.
@@ -154,16 +186,38 @@ export class TripRevisionService {
     identity: TripIdentity,
     document?: DocumentReference,
   ): Promise<CancellationOutcome> {
+    let matchMethod: MatchMethod | null = null;
+
     const outcome = await this.repository.runInTransaction(
       async (repository): Promise<CancellationOutcome> => {
-        const trip = await repository.findByIdentity({
-          identity,
-          statuses: BOOKING_NUMBER_HOLDING_STATUSES,
-        });
+        const match = await resolveTripForDocument(repository, identity);
 
-        if (!trip) {
+        if (match.kind === "AMBIGUOUS_BOOKING_MATCH") {
+          this.logger.warn("Cancellation names an ambiguous booking number", {
+            bookingNumber: identity.bookingNumber,
+            tripCount: match.tripCount,
+          });
+
+          return "AMBIGUOUS_BOOKING_MATCH";
+        }
+
+        if (match.kind === "NO_MATCHING_TRIP") {
+          /*
+           * Warned, not merely logged: a cancellation that found nothing is a
+           * document that arrived and did nothing, which used to be invisible.
+           * The email it came on is set aside rather than reported as
+           * processed — see the importer.
+           */
+          this.logger.warn("Cancellation matched no Trip", {
+            bookingNumber: identity.bookingNumber,
+            hasContainerNumber: identity.containerNumber !== null,
+          });
+
           return "NO_MATCHING_TRIP";
         }
+
+        const trip = match.trip;
+        matchMethod = match.method;
 
         /*
          * Every outcome below is RECORDED, including the two that write nothing
@@ -205,6 +259,7 @@ export class TripRevisionService {
     this.logger.log("Cancellation applied to a transport order", {
       bookingNumber: identity.bookingNumber,
       outcome,
+      matchMethod,
     });
 
     return outcome;
@@ -232,14 +287,35 @@ export class TripRevisionService {
         trips: repository,
         customProperties,
       }): Promise<RevisionResult> => {
-        const trip = await repository.findByIdentity({
-          identity: identityOf(document),
-          statuses: BOOKING_NUMBER_HOLDING_STATUSES,
-        });
+        const match = await resolveTripForDocument(
+          repository,
+          identityOf(document),
+        );
 
-        if (!trip) {
+        /*
+         * Ambiguous is NOT "no matching Trip". The difference matters: no match
+         * creates the Trip the document describes, and creating one here would
+         * add a third Trip to a booking that already has two — making the
+         * ambiguity permanently worse. So it refuses and a person decides.
+         */
+        if (match.kind === "AMBIGUOUS_BOOKING_MATCH") {
+          this.logger.warn("Revision names an ambiguous booking number", {
+            bookingNumber: document.bookingNumber,
+            tripCount: match.tripCount,
+          });
+
+          return {
+            outcome: "AMBIGUOUS_BOOKING_MATCH",
+            trip: null,
+            changedFields: [],
+          };
+        }
+
+        if (match.kind === "NO_MATCHING_TRIP") {
           return { outcome: "NO_MATCHING_TRIP", trip: null, changedFields: [] };
         }
+
+        const trip = match.trip;
 
         /*
          * A cancellation is not the end of this Trip's life. A revision that

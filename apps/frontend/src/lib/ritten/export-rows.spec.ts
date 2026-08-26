@@ -380,6 +380,104 @@ describe("the basic row", () => {
     expect(row.costs).toBe("35.00");
   });
 
+
+  /**
+   * The window an operator actually read off a clock, in the printed sheet's
+   * own compact form. It is a DISPLAY of the stored times — the minutes stay
+   * what pricing bills from, and nothing here recomputes them.
+   */
+  it("shows the stored waiting window rather than a duration", () => {
+    const row = toBasicRow(
+      buildTrip({
+        waitingTimeStart: "07:00:00",
+        waitingTimeEnd: "10:00:00",
+        waitingTimeMinutes: 180,
+      }),
+      snapshotOf(line("WAITING_TIME", "25.00")),
+      FIXED,
+      "Wachttijd",
+    );
+
+    expect(row.info).toBe("Wachttijd 07:00-10:00");
+  });
+
+  /**
+   * A Trip whose waiting time was entered before the two times were recorded
+   * has no window to show, so it shows the duration it does have. Inventing a
+   * window would put hours on the page that nobody ever read.
+   */
+  it("falls back to the duration when no window was stored", () => {
+    const row = toBasicRow(
+      buildTrip({
+        waitingTimeStart: null,
+        waitingTimeEnd: null,
+        waitingTimeMinutes: 90,
+      }),
+      snapshotOf(line("WAITING_TIME", "25.00")),
+      FIXED,
+      "Wachttijd",
+    );
+
+    expect(row.info).toBe("Wachttijd 1 u 30 min");
+  });
+
+  /** A half-filled window is not a window; an end with no beginning is not one. */
+  it("falls back to the duration when only one side was stored", () => {
+    const row = toBasicRow(
+      buildTrip({
+        waitingTimeStart: "07:00:00",
+        waitingTimeEnd: null,
+        waitingTimeMinutes: 45,
+      }),
+      snapshotOf(line("WAITING_TIME", "25.00")),
+      FIXED,
+      "Wachttijd",
+    );
+
+    expect(row.info).toBe("Wachttijd 45 min");
+  });
+
+  /**
+   * LOSRIT is an operational note about the work, so it goes in INFO with the
+   * other notes — never into a status column and never into a column of its own.
+   */
+  it("names a loose trip first in Info", () => {
+    const row = toBasicRow(
+      buildTrip({
+        isLooseTrip: true,
+        customProperties: [{ id: "prop-1", name: "TAR", isActive: true }],
+      }),
+      snapshotOf(line("CUSTOM_PROPERTY", "35.00", "prop-1")),
+      FIXED,
+      "Wachttijd",
+    );
+
+    expect(row.info).toBe("LOSRIT, TAR");
+  });
+
+  it("says nothing about a Trip that is not a loose trip", () => {
+    const row = toBasicRow(
+      buildTrip({ isLooseTrip: false }),
+      snapshotOf(line("CUSTOM_PROPERTY", "35.00", "prop-1")),
+      FIXED,
+      "Wachttijd",
+    );
+
+    expect(row.info).not.toContain("LOSRIT");
+  });
+
+  /** LOSRIT is a note, not a price: it never appears in the Kosten column. */
+  it("keeps a loose trip out of the costs column", () => {
+    const row = toBasicRow(
+      buildTrip({ isLooseTrip: true }),
+      null,
+      FIXED,
+      "Wachttijd",
+    );
+
+    expect(row.costs).toBe("");
+    expect(row.info).toBe("LOSRIT");
+  });
   it("leaves costs and info empty for an unpriced Trip", () => {
     const row = toBasicRow(buildTrip(), null, FIXED, "Wachttijd");
 

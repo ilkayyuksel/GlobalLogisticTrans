@@ -160,7 +160,7 @@ describe("parse — combination.pdf (Layout 3: combination, two pages)", () => {
       bookingNumber: "DUBANR2598395",
       direction: "DELIVERY",
       containerType: "45RH",
-      containerNumber: "PVDU 301326/0",
+      containerNumber: "PVDU3013260",
       terminal: "Quay 869",
       destinationCity: "Kallo",
       destinationCountry: "Belgium",
@@ -205,7 +205,7 @@ describe("parse — combination.pdf (Layout 3: combination, two pages)", () => {
   });
 
   it("carries the container only on the delivery", () => {
-    expect(result.trips[0].containerNumber).toBe("PVDU 301326/0");
+    expect(result.trips[0].containerNumber).toBe("PVDU3013260");
     expect(result.trips[1].containerNumber).toBeNull();
   });
 

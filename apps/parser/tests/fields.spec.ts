@@ -165,7 +165,7 @@ describe("container", () => {
       extractContainerNumber(
         row(500, [31, "Container:"], [134, "PVDU 301326/0"]),
       ),
-    ).toBe("PVDU 301326/0");
+    ).toBe("PVDU3013260");
   });
 
   /** A collection has no container yet; that is normal, not an error. */

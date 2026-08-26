@@ -1,6 +1,17 @@
+import type { Worksheet } from "exceljs";
+
 import type { Language } from "@/lib/i18n/translations";
 import { TRANSLATIONS } from "@/lib/i18n/translations";
 import type { BasicExportRow, PricingExportRow } from "./export-rows";
+import {
+  GRID_BORDER,
+  HEADER_FILL_COLOR,
+  INK,
+  REFERENCE_TIME_FORMAT,
+  type StyledColumn,
+  applyReferenceLook,
+  writeDateHeading,
+} from "./export-style";
 
 /**
  * The two operational workbooks, as real `.xlsx` files.
@@ -27,9 +38,15 @@ const TIME_FORMAT = "hh:mm";
 const MONEY_FORMAT = '#,##0.00 "€"';
 const PERCENT_FORMAT = "0\\%";
 
-const HEADER_FILL = "FF0B1220";
-const HEADER_TEXT = "FFF8FAFC";
-const BORDER_COLOR = "FFCBD5E1";
+/**
+ * The basic export's look is not chosen here.
+ *
+ * It reproduces `docs/07-excels/29-06-2026.xlsx`, the sheet the office has
+ * printed for years; every colour, width and height comes from
+ * `export-style.ts`, which read that workbook cell by cell. TRANO's own
+ * interface palette deliberately does not appear in any workbook — a navy
+ * header band is a web design, and on paper it is a black bar.
+ */
 
 /**
  * Excel keeps a date as days since 1899-12-30, in no timezone at all.
@@ -102,18 +119,52 @@ const PRICING_COLUMNS: readonly ColumnSpec[] = [
   { header: "Remarks", width: 32, wrap: true },
 ];
 
-const BASIC_COLUMNS: readonly ColumnSpec[] = [
-  { header: "Afgewerkt", width: 11 },
-  { header: "Nummerplaat", width: 14 },
-  { header: "Begin", width: 8, format: TIME_FORMAT },
-  { header: "Eind", width: 8, format: TIME_FORMAT },
-  { header: "Boekingsnummer", width: 18 },
-  { header: "Type", width: 10 },
-  { header: "Container nummer", width: 18 },
-  { header: "Trip", width: 30 },
-  { header: "Kosten", width: 22 },
-  { header: "Info", width: 34, wrap: true },
+/**
+ * The daily operational sheet, column for column as the office knows it.
+ *
+ * ── THIS LAYOUT IS COPIED, NOT DESIGNED ─────────────────────────────────────
+ * The first nine columns are the reference workbook's: the same names, the same
+ * order, the same widths and the same ink. Dispatchers read this sheet on paper
+ * at arm's length and find a value by its POSITION and its COLOUR long before
+ * they read a header, so moving a column or recolouring one costs real time at
+ * a real desk. `CONT NR` in particular is 11.54 wide because a container number
+ * such as `EUCU1451295` has to sit on one line.
+ *
+ * ── THE TENTH COLUMN ────────────────────────────────────────────────────────
+ * `AFGEWERKT` is TRANO's, not the reference's. It carries the Trip's completed
+ * state, which the old workbook had no way to record, and it is appended rather
+ * than inserted so the nine familiar columns keep their familiar places. It is
+ * written in black: the colour convention belongs to the reference's fields and
+ * inventing a sixth ink for a new column would weaken it.
+ */
+const BASIC_COLUMNS: readonly StyledColumn[] = [
+  { header: "NR PLAAT", width: 8.7265625, fontColor: INK.red },
+  {
+    header: "TIJD",
+    width: 8.7265625,
+    fontColor: INK.green,
+    format: REFERENCE_TIME_FORMAT,
+  },
+  {
+    header: "TIJD",
+    width: 8.7265625,
+    fontColor: INK.green,
+    format: REFERENCE_TIME_FORMAT,
+  },
+  { header: "BOEKING", width: 9.6328125, fontColor: INK.blue },
+  { header: "TYPE", width: 8.7265625, fontColor: INK.red },
+  { header: "CONT NR", width: 11.54296875, fontColor: INK.green },
+  { header: "PLAATS", width: 19.6328125, fontColor: INK.blue },
+  { header: "COMBI EN KOST", width: 25.90625, fontColor: INK.green },
+  { header: "INFO", width: 41, fontColor: INK.red },
+  { header: "AFGEWERKT", width: 11, fontColor: INK.black },
 ];
+
+/** Column G, where the reference prints the day. */
+const DATE_HEADING_COLUMN = 7;
+
+/** Row 1 is the date; the table starts under it. */
+const BASIC_HEADER_ROW = 2;
 
 /**
  * The completed indicator.
@@ -125,18 +176,36 @@ const BASIC_COLUMNS: readonly ColumnSpec[] = [
 export const COMPLETED_MARK = "☑";
 export const NOT_COMPLETED_MARK = "☐";
 
-/** Both workbooks share their look, so neither drifts from the other. */
-async function createSheet(
-  title: string,
-  columns: readonly ColumnSpec[],
-  rowCount: number,
-) {
+/** An empty workbook with one sheet, however that sheet is later dressed. */
+async function createWorkbook(title: string) {
   const { Workbook } = await import("exceljs");
   const workbook = new Workbook();
   workbook.creator = "TRAXO";
   workbook.created = new Date();
 
-  const sheet = workbook.addWorksheet(title);
+  return { workbook, sheet: workbook.addWorksheet(title) };
+}
+
+/**
+ * The pricing sheet's own look.
+ *
+ * ── WHY IT IS NOT THE REFERENCE LOOK ────────────────────────────────────────
+ * These are two different documents. The reference workbook is a printed
+ * dispatch sheet with nine fixed columns; the pricing export is a seventeen
+ * column analysis that is read on screen, sorted and filtered. Forcing the
+ * dispatch sheet's 8pt grid and printed-page setup onto it would make a
+ * spreadsheet nobody can work in.
+ *
+ * What the two DO share is that no TRANO interface colour appears in either.
+ * The header band is the same pale grey, and the borders are the same thin
+ * black, so the two files still look like they came from the same system.
+ */
+async function createPricingSheet(
+  title: string,
+  columns: readonly ColumnSpec[],
+  rowCount: number,
+) {
+  const { workbook, sheet } = await createWorkbook(title);
 
   sheet.columns = columns.map((column) => ({
     header: column.header,
@@ -148,17 +217,18 @@ async function createSheet(
   }));
 
   const headerRow = sheet.getRow(1);
-  headerRow.font = { bold: true, color: { argb: HEADER_TEXT } };
+  headerRow.font = { bold: true, color: { argb: INK.black } };
   headerRow.fill = {
     type: "pattern",
     pattern: "solid",
-    fgColor: { argb: HEADER_FILL },
+    fgColor: { argb: HEADER_FILL_COLOR },
   };
   headerRow.alignment = { vertical: "middle" };
   headerRow.height = 20;
 
   // The header stays put while scrolling, and every column can be filtered —
-  // the two things that make a long export usable at all.
+  // the two things that make a long analysis usable at all. The dispatch sheet
+  // has neither, because paper does not scroll.
   sheet.views = [{ state: "frozen", ySplit: 1 }];
   sheet.autoFilter = {
     from: { row: 1, column: 1 },
@@ -168,19 +238,11 @@ async function createSheet(
   return { workbook, sheet };
 }
 
-function applyBorders(sheet: {
-  eachRow: (callback: (row: { eachCell: (cb: (cell: unknown) => void) => void }) => void) => void;
-}): void {
-  const thin = { style: "thin" as const, color: { argb: BORDER_COLOR } };
-
+/** Thin black on every filled cell, as both sheets want. */
+function applyBorders(sheet: Worksheet): void {
   sheet.eachRow((row) => {
     row.eachCell((cell) => {
-      (cell as { border?: unknown }).border = {
-        top: thin,
-        left: thin,
-        bottom: thin,
-        right: thin,
-      };
+      cell.border = GRID_BORDER;
     });
   });
 }
@@ -190,7 +252,7 @@ export async function buildPricingWorkbook(
   language: Language,
 ): Promise<ArrayBuffer> {
   const translations = TRANSLATIONS[language];
-  const { workbook, sheet } = await createSheet(
+  const { workbook, sheet } = await createPricingSheet(
     translations["ritten.export.pricingSheet"],
     PRICING_COLUMNS,
     rows.length,
@@ -218,25 +280,43 @@ export async function buildPricingWorkbook(
     ]);
   }
 
-  applyBorders(sheet as never);
+  applyBorders(sheet);
 
   return workbook.xlsx.writeBuffer();
 }
 
+/** The days an export covers, as the list's period filter had them. */
+export interface ExportPeriod {
+  /** `YYYY-MM-DD`. */
+  readonly start: string;
+  readonly end: string;
+}
+
+/**
+ * The daily operational sheet, in the reference workbook's own layout.
+ *
+ * Row 1 carries the day, row 2 the headers, and the Trips follow. That order is
+ * the reference's and it is also simply how the sheet is read: a printed page
+ * that does not say which day it is cannot be filed.
+ *
+ * One Trip is one row. Trips of the same Combination are NOT merged: each keeps
+ * its own times, booking, container and destination, which is the only way a
+ * combination spanning midnight can show both of its days.
+ */
 export async function buildBasicWorkbook(
   rows: readonly BasicExportRow[],
   language: Language,
+  period: ExportPeriod,
 ): Promise<ArrayBuffer> {
   const translations = TRANSLATIONS[language];
-  const { workbook, sheet } = await createSheet(
+  const { workbook, sheet } = await createWorkbook(
     translations["ritten.export.basicSheet"],
-    BASIC_COLUMNS,
-    rows.length,
   );
+
+  writeHeaderRow(sheet);
 
   for (const row of rows) {
     sheet.addRow([
-      row.isCompleted ? COMPLETED_MARK : NOT_COMPLETED_MARK,
       row.licensePlate,
       toExcelTime(row.startTime),
       toExcelTime(row.endTime),
@@ -246,12 +326,58 @@ export async function buildBasicWorkbook(
       row.trip,
       row.costs,
       row.info,
+      row.isCompleted ? COMPLETED_MARK : NOT_COMPLETED_MARK,
     ]);
   }
 
-  applyBorders(sheet as never);
+  applyReferenceLook(sheet, BASIC_COLUMNS, BASIC_HEADER_ROW);
+  writeDatePeriod(sheet, period);
 
   return workbook.xlsx.writeBuffer();
+}
+
+/** The headers go in row 2, because row 1 belongs to the date. */
+function writeHeaderRow(sheet: Worksheet): void {
+  const header = sheet.getRow(BASIC_HEADER_ROW);
+
+  BASIC_COLUMNS.forEach((column, index) => {
+    header.getCell(index + 1).value = column.header;
+  });
+
+  header.commit();
+}
+
+/**
+ * The day above the table.
+ *
+ * A one-day export gets a REAL DATE, exactly as the reference does: the cell
+ * holds the day rather than a sentence about it, so it formats to the reader's
+ * expectation and can be compared. A week or a month has no single date to be,
+ * so it says the range in words instead — inventing a date for it would put a
+ * day on the page that the sheet does not cover.
+ */
+function writeDatePeriod(sheet: Worksheet, period: ExportPeriod): void {
+  if (period.start === period.end) {
+    const excelDate = toExcelDate(period.start);
+
+    if (excelDate !== null) {
+      writeDateHeading(sheet, DATE_HEADING_COLUMN, excelDate, DATE_FORMAT);
+      return;
+    }
+  }
+
+  writeDateHeading(
+    sheet,
+    DATE_HEADING_COLUMN,
+    `${toDayLabel(period.start)} - ${toDayLabel(period.end)}`,
+  );
+}
+
+/** `2026-06-29` as `29/06/2026`, matching the date cells' own format. */
+function toDayLabel(isoDate: string): string {
+  const [year, month, day] = isoDate.split("-");
+
+  return year && month && day ? `${day}/${month}/${year}` : isoDate;
 }
 
 /**

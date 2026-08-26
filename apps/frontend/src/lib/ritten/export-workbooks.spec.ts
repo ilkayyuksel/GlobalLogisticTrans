@@ -341,93 +341,292 @@ describe("the pricing workbook", () => {
   });
 });
 
-describe("the basic workbook", () => {
-  it("has the ten columns, in the agreed order", async () => {
-    const sheet = await reopen(await buildBasicWorkbook([], "nl"));
+/**
+ * The basic workbook, checked against the sheet it reproduces.
+ *
+ * ── WHAT THESE TESTS DEFEND ─────────────────────────────────────────────────
+ * `docs/07-excels/29-06-2026.xlsx` is the sheet the office prints, and this
+ * export is meant to be indistinguishable from it. So the assertions below are
+ * about APPEARANCE as much as content: which ink a column is written in, how
+ * wide it is, how tall a row is, whether the page prints landscape edge to
+ * edge. Those are business requirements here — a dispatcher finds the plate by
+ * its red before reading a single header — and a restyle that quietly reverted
+ * would otherwise pass every content test.
+ *
+ * Every assertion reads a real property (`font.color.argb`, `width`,
+ * `pageSetup.orientation`) rather than a style index, so it still means
+ * something after ExcelJS renumbers its internal style table.
+ */
+const ONE_DAY = { start: "2026-06-29", end: "2026-06-29" };
 
-    expect(sheet.getRow(1).values).toEqual([
+/** The reference's inks, by name. */
+const RED = "FFFF0000";
+const GREEN = "FF00B050";
+const BLUE = "FF0070C0";
+
+async function openBasic(
+  rows: readonly BasicExportRow[] = [buildBasicRow()],
+  period = ONE_DAY,
+) {
+  return reopen(await buildBasicWorkbook(rows, "nl", period));
+}
+
+describe("the basic workbook's structure", () => {
+  it("puts the headers in row 2, under the date", async () => {
+    const sheet = await openBasic([]);
+
+    expect(sheet.getRow(2).values).toEqual([
       undefined,
-      "Afgewerkt",
-      "Nummerplaat",
-      "Begin",
-      "Eind",
-      "Boekingsnummer",
-      "Type",
-      "Container nummer",
-      "Trip",
-      "Kosten",
-      "Info",
+      "NR PLAAT",
+      "TIJD",
+      "TIJD",
+      "BOEKING",
+      "TYPE",
+      "CONT NR",
+      "PLAATS",
+      "COMBI EN KOST",
+      "INFO",
+      "AFGEWERKT",
     ]);
   });
 
-  it("marks a completed Trip with a ticked box", async () => {
-    const sheet = await reopen(
-      await buildBasicWorkbook([buildBasicRow({ isCompleted: true })], "nl"),
-    );
+  it("writes the operational values in the reference's own columns", async () => {
+    const row = (await openBasic()).getRow(3);
 
-    expect(sheet.getRow(2).getCell(1).value).toBe(COMPLETED_MARK);
+    expect(row.getCell(1).value).toBe("1-ABC-123");
+    expect(row.getCell(4).value).toBe("ANRDUB2602247");
+    expect(row.getCell(5).value).toBe("45PH");
+    expect(row.getCell(6).value).toBe("MSKU1234567");
+    expect(row.getCell(7).value).toBe("Quay 869 -> Gent");
   });
 
-  it("marks anything else with an empty box", async () => {
-    const sheet = await reopen(
-      await buildBasicWorkbook([buildBasicRow({ isCompleted: false })], "nl"),
-    );
+  it("keeps the costs and their explanation as written", async () => {
+    const row = (
+      await openBasic([
+        buildBasicRow({
+          costs: "35.00 + 50.00 + 25.00",
+          info: "LOSRIT, Wachttijd 07:00-10:00",
+        }),
+      ])
+    ).getRow(3);
 
-    expect(sheet.getRow(2).getCell(1).value).toBe(NOT_COMPLETED_MARK);
+    expect(row.getCell(8).value).toBe("35.00 + 50.00 + 25.00");
+    expect(row.getCell(9).value).toBe("LOSRIT, Wachttijd 07:00-10:00");
   });
 
-  it("writes the operational columns", async () => {
-    const sheet = await reopen(
-      await buildBasicWorkbook([buildBasicRow()], "nl"),
-    );
-    const row = sheet.getRow(2);
+  it("marks a completed Trip in the last column", async () => {
+    const ticked = await openBasic([buildBasicRow({ isCompleted: true })]);
+    const empty = await openBasic([buildBasicRow({ isCompleted: false })]);
 
-    expect(row.getCell(2).value).toBe("1-ABC-123");
-    expect(row.getCell(5).value).toBe("ANRDUB2602247");
-    expect(row.getCell(6).value).toBe("45PH");
-    expect(row.getCell(7).value).toBe("MSKU1234567");
-    expect(row.getCell(8).value).toBe("Quay 869 -> Gent");
+    expect(ticked.getRow(3).getCell(10).value).toBe(COMPLETED_MARK);
+    expect(empty.getRow(3).getCell(10).value).toBe(NOT_COMPLETED_MARK);
   });
 
-  it("shows the times as HH:mm", async () => {
-    const sheet = await reopen(
-      await buildBasicWorkbook([buildBasicRow()], "nl"),
-    );
+  /**
+   * Two Trips of one Combination are two rows. Merging them would lose the
+   * second's own times, booking, container and destination — which is exactly
+   * what a combination running past midnight needs to show.
+   */
+  it("writes one row per Trip and never merges them", async () => {
+    const sheet = await openBasic([
+      buildBasicRow({ startTime: "22:00:00", endTime: "23:30:00" }),
+      buildBasicRow({ startTime: "00:15:00", endTime: "04:00:00" }),
+    ]);
 
-    expect(sheet.getRow(2).getCell(3).numFmt).toBe("hh:mm");
-    expect(readTime(sheet.getRow(2).getCell(3))).toBe("07:00");
-  });
-
-  it("writes the costs and their explanation as text", async () => {
-    const sheet = await reopen(
-      await buildBasicWorkbook(
-        [
-          buildBasicRow({
-            costs: "35.00 + 50.00 + 25.00",
-            info: "TAR, Flat, Wachttijd 1 u 30 min",
-          }),
-        ],
-        "nl",
-      ),
-    );
-
-    expect(sheet.getRow(2).getCell(9).value).toBe("35.00 + 50.00 + 25.00");
-    expect(sheet.getRow(2).getCell(10).value).toBe(
-      "TAR, Flat, Wachttijd 1 u 30 min",
-    );
+    expect(sheet.rowCount).toBe(4);
+    expect(readTime(sheet.getRow(3).getCell(2))).toBe("22:00");
+    expect(readTime(sheet.getRow(4).getCell(2))).toBe("00:15");
+    expect(sheet.model.merges ?? []).toEqual([]);
   });
 
   it("leaves a blank plate and blank times empty", async () => {
-    const sheet = await reopen(
-      await buildBasicWorkbook(
-        [buildBasicRow({ licensePlate: "", startTime: null, endTime: null })],
-        "nl",
-      ),
-    );
-    const row = sheet.getRow(2);
+    const row = (
+      await openBasic([
+        buildBasicRow({ licensePlate: "", startTime: null, endTime: null }),
+      ])
+    ).getRow(3);
 
-    expect(row.getCell(2).value ?? "").toBe("");
-    expect(row.getCell(3).value).toBeNull();
+    expect(row.getCell(1).value ?? "").toBe("");
+    expect(row.getCell(2).value).toBeNull();
+  });
+});
+
+describe("the basic workbook's dates and times", () => {
+  /** A clock, not `0.333333333`. The value stays a real Excel time. */
+  it("writes the start and end as real times in separate columns", async () => {
+    const row = (await openBasic()).getRow(3);
+
+    expect(row.getCell(2).numFmt).toBe("h:mm;@");
+    expect(row.getCell(3).numFmt).toBe("h:mm;@");
+    expect(readTime(row.getCell(2))).toBe("07:00");
+    expect(readTime(row.getCell(3))).toBe("15:00");
+  });
+
+  it("prints the day above the table as a real date", async () => {
+    const heading = (await openBasic()).getRow(1).getCell(7);
+
+    expect(readDate(heading)).toBe("29/06/2026");
+    expect(heading.numFmt).toBe("dd/mm/yyyy");
+  });
+
+  it("prints the day in red, bold, underlined and centered", async () => {
+    const heading = (await openBasic()).getRow(1).getCell(7);
+
+    expect(heading.font).toMatchObject({
+      name: "Calibri",
+      size: 12,
+      bold: true,
+      underline: true,
+      color: { argb: RED },
+    });
+    expect(heading.alignment?.horizontal).toBe("center");
+  });
+
+  /**
+   * A week has no single date to be. It says its range in words rather than
+   * naming one of its days, which would be a day the sheet does not cover.
+   */
+  it("says the range in words when the export spans several days", async () => {
+    const heading = (
+      await openBasic([buildBasicRow()], {
+        start: "2026-06-29",
+        end: "2026-07-05",
+      })
+    )
+      .getRow(1)
+      .getCell(7);
+
+    expect(heading.value).toBe("29/06/2026 - 05/07/2026");
+  });
+});
+
+describe("the basic workbook's appearance", () => {
+  /** Red plate, green times, blue booking — the reference's reading aid. */
+  it("writes each column in its own ink", async () => {
+    const sheet = await openBasic();
+    const inks = [RED, GREEN, GREEN, BLUE, RED, GREEN, BLUE, GREEN, RED];
+
+    inks.forEach((argb, index) => {
+      expect(sheet.getRow(2).getCell(index + 1).font?.color).toEqual({ argb });
+      expect(sheet.getRow(3).getCell(index + 1).font?.color).toEqual({ argb });
+    });
+  });
+
+  it("sets the whole table in 8pt Microsoft Sans Serif", async () => {
+    const sheet = await openBasic();
+
+    for (const row of [sheet.getRow(2), sheet.getRow(3)]) {
+      expect(row.getCell(1).font).toMatchObject({
+        name: "Microsoft Sans Serif",
+        size: 8,
+      });
+    }
+  });
+
+  it("fills the header band pale grey and centers it", async () => {
+    const header = (await openBasic()).getRow(2).getCell(1);
+
+    expect(header.fill).toMatchObject({
+      type: "pattern",
+      pattern: "solid",
+      fgColor: { argb: "FFF0F0F0" },
+    });
+    expect(header.alignment).toMatchObject({
+      horizontal: "center",
+      vertical: "middle",
+    });
+  });
+
+  /** The header is centered; the data is not. */
+  it("leaves the body left-aligned and unwrapped", async () => {
+    const body = (await openBasic()).getRow(3).getCell(9);
+
+    expect(body.alignment).toMatchObject({
+      horizontal: "left",
+      vertical: "top",
+    });
+    expect(body.alignment?.wrapText).toBeFalsy();
+  });
+
+  it("draws a thin black border on every cell of the grid", async () => {
+    const sheet = await openBasic();
+    const thin = { style: "thin", color: { argb: "FF000000" } };
+
+    for (const row of [sheet.getRow(2), sheet.getRow(3)]) {
+      for (let column = 1; column <= 10; column += 1) {
+        expect(row.getCell(column).border).toEqual({
+          top: thin,
+          left: thin,
+          bottom: thin,
+          right: thin,
+        });
+      }
+    }
+  });
+
+  /**
+   * The reference's proportions, not nine independently autofitted columns.
+   * `CONT NR` is wide enough for `EUCU1451295` on one line and no wider.
+   */
+  it("keeps the reference's column widths", async () => {
+    const sheet = await openBasic();
+    const widths = [
+      8.7265625, 8.7265625, 8.7265625, 9.6328125, 8.7265625, 11.54296875,
+      19.6328125, 25.90625, 41,
+    ];
+
+    widths.forEach((width, index) => {
+      expect(sheet.getColumn(index + 1).width).toBe(width);
+    });
+  });
+
+  it("keeps the rows compact and uniform", async () => {
+    const sheet = await openBasic([buildBasicRow(), buildBasicRow()]);
+
+    expect(sheet.getRow(1).height).toBe(19);
+    expect(sheet.getRow(2).height).toBe(20);
+    expect(sheet.getRow(3).height).toBe(20);
+    expect(sheet.getRow(4).height).toBe(20);
+  });
+
+  /** Paper does not scroll, so the printed sheet has neither of these. */
+  it("adds no frozen panes and no filter arrows", async () => {
+    const sheet = await openBasic();
+
+    expect(sheet.views?.[0]?.state ?? "normal").toBe("normal");
+    expect(sheet.autoFilter).toBeFalsy();
+  });
+});
+
+describe("the basic workbook's page layout", () => {
+  it("prints landscape on A4, edge to edge and centered", async () => {
+    const { pageSetup } = await openBasic();
+
+    expect(pageSetup.orientation).toBe("landscape");
+    expect(pageSetup.paperSize).toBe(9);
+    expect(pageSetup.horizontalCentered).toBe(true);
+    expect(pageSetup.margins).toMatchObject({
+      left: 0,
+      right: 0,
+      top: 0,
+      bottom: 0,
+    });
+  });
+
+  /** One page WIDE, however many pages long: no column falls off the paper. */
+  it("fits the columns to a single page width", async () => {
+    const { pageSetup } = await openBasic();
+
+    expect(pageSetup.fitToPage).toBe(true);
+    expect(pageSetup.fitToWidth).toBe(1);
+    expect(pageSetup.fitToHeight).toBe(0);
+  });
+
+  it("prints the table alone, without gridlines or row headers", async () => {
+    const { pageSetup } = await openBasic();
+
+    expect(pageSetup.showGridLines).toBe(false);
+    expect(pageSetup.showRowColHeaders).toBe(false);
   });
 });
 
