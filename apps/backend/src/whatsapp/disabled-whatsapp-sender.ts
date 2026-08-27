@@ -4,6 +4,7 @@ import {
   SendFailure,
   WhatsAppStatus,
   type SendResult,
+  type WhatsAppPairing,
   type WhatsAppSender,
 } from "./whatsapp-sender";
 
@@ -34,5 +35,10 @@ export class DisabledWhatsAppSender implements WhatsAppSender {
 
   async status(): Promise<WhatsAppStatus> {
     return WhatsAppStatus.DISABLED;
+  }
+
+  /** Nothing to pair with: there is no service running to pair against. */
+  async pairing(): Promise<WhatsAppPairing> {
+    return { status: WhatsAppStatus.DISABLED, qr: null };
   }
 }

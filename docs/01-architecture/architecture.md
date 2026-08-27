@@ -285,6 +285,36 @@ start finds credentials it cannot load.
 A QR code is offered only while the status is PAIRING_REQUIRED. A transient
 disconnect reports DISCONNECTED and returns no QR at all.
 
+## Reachable out, not reachable in
+
+The service needs to open an OUTBOUND websocket to WhatsApp, and it must remain
+unreachable from the internet. Those are two different properties, and
+conflating them broke it: placed on the `internal: true` network alone it had no
+route out at all, and reported
+
+    DISCONNECTED — the connection dropped (408); retrying in 30s
+
+forever, with an empty session directory and no QR ever produced. The account
+could not be paired at all.
+
+It now sits on two networks. `internal` is how the backend reaches it; `egress`
+is how it reaches WhatsApp. It still publishes no port and carries no Traefik
+label, so nothing outside Docker can address it.
+
+## Pairing
+
+Because the service is unreachable from outside, pairing goes through TRANO:
+
+    Browser → /admin/whatsapp
+            → backend GET /api/v1/whatsapp/pairing   (authenticated session)
+            → whatsapp:3200 /pairing                 (internal network)
+
+The backend relays the status and the code and nothing else — the response is
+rebuilt field by field rather than forwarded, so session keys, the storage path
+and the account's own number cannot leak through a field added later. The
+alternative, publishing port 3200, would put a code that links a phone to the
+company's WhatsApp account on the open internet behind nothing at all.
+
 ---
 
 # Authentication

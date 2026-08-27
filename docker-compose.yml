@@ -267,10 +267,12 @@ services:
       # again. See the deployment section of the README.
       - whatsapp_session:/app/session
 
-    # No `ports:` on purpose. Nothing outside the internal network may reach
-    # the send endpoint or the pairing QR.
+    # No `ports:` on purpose. Nothing outside Docker may reach the send endpoint
+    # or the pairing QR — see the `egress` network below for why being able to
+    # reach OUT is a different thing from being reachable IN.
     networks:
       - internal
+      - egress
 
     healthcheck:
       # Reports that the PROCESS is alive, deliberately not that WhatsApp is
@@ -357,6 +359,24 @@ networks:
   internal:
     name: traxo-internal
     internal: true
+  # ── Outbound only, for the WhatsApp service ───────────────────────────────
+  # WhatsApp Web is an OUTBOUND websocket to WhatsApp's servers, and a service
+  # that cannot open one is not a service that fails loudly — it retries. On
+  # `internal` alone the container reported
+  #
+  #   DISCONNECTED — the connection dropped (408); retrying in 30s
+  #
+  # forever, with an empty session directory and no QR code ever produced, so
+  # the account could never be paired. Measured, not assumed: the same image on
+  # the same empty volume reached PAIRING_REQUIRED with a live QR within one
+  # retry the moment egress existed.
+  #
+  # This grants the container a route OUT. It publishes no port and carries no
+  # Traefik label, so nothing on the internet can reach it — reachability
+  # inbound and outbound are separate properties, and only the outbound one is
+  # granted here.
+  egress:
+    name: traxo-egress
 
 # ── Volumes ─────────────────────────────────────────────────────────────────
 # `docker compose down` leaves all three intact. `docker compose down -v`

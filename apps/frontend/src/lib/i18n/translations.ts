@@ -313,6 +313,31 @@ const nl = {
   // De verbindingstoestand, per toestand verwoord. Een verbinding die zichzelf
   // herstelt vraagt niets van de operator; alleen bij een koppeling moet er
   // iemand met een telefoon langskomen.
+  // ── Admin → WhatsApp ────────────────────────────────────────────────────
+  // Het koppelscherm. De QR-code verschijnt uitsluitend bij PAIRING_REQUIRED:
+  // een kort verbroken verbinding herstelt zichzelf en vraagt niets.
+  "admin.whatsapp.title": "WhatsApp",
+  "admin.whatsapp.description":
+    "Koppel het WhatsApp-account waarmee TRANO transportopdrachten naar chauffeurs verstuurt.",
+  "admin.whatsapp.loading": "Status ophalen",
+  "admin.whatsapp.statusLabel": "Status",
+  "admin.whatsapp.state.CONNECTED": "Verbonden",
+  "admin.whatsapp.state.CONNECTING": "Verbinden…",
+  "admin.whatsapp.state.DISCONNECTED":
+    "Verbinding verbroken — opnieuw verbinden…",
+  "admin.whatsapp.state.PAIRING_REQUIRED": "Koppeling vereist — scan QR-code",
+  "admin.whatsapp.state.ERROR": "WhatsApp is niet beschikbaar",
+  "admin.whatsapp.state.DISABLED": "WhatsApp staat uit in deze omgeving",
+  "admin.whatsapp.connectedHint":
+    "WhatsApp is verbonden en klaar om PDF’s te versturen.",
+  "admin.whatsapp.step.openWhatsApp": "Open WhatsApp op je telefoon",
+  "admin.whatsapp.step.settings": "Ga naar Instellingen",
+  "admin.whatsapp.step.linkedDevices": "Gekoppelde apparaten",
+  "admin.whatsapp.step.linkDevice": "Apparaat koppelen",
+  "admin.whatsapp.step.scan": "Scan deze QR-code",
+  "admin.whatsapp.qrLabel": "QR-code om WhatsApp te koppelen",
+  "admin.whatsapp.qrHint":
+    "De QR-code vernieuwt vanzelf zolang de koppeling nog niet gelukt is.",
   "ritten.whatsapp.status.connected": "Verbonden",
   "ritten.whatsapp.status.connecting": "Verbinden…",
   "ritten.whatsapp.status.disconnected":
@@ -1088,7 +1113,29 @@ const tr: Translations = {
     "Bu şoför için telefon numarası yok",
   "ritten.whatsapp.unavailable.noDocument": "Gönderilecek taşıma emri yok",
   "ritten.whatsapp.unavailable.disconnected": "WhatsApp bağlı değil",
-  "ritten.whatsapp.status.connected": "Bağlı",
+  "admin.whatsapp.title": "WhatsApp",
+  "admin.whatsapp.description":
+    "TRANO’nun taşıma emirlerini şoförlere gönderdiği WhatsApp hesabını eşleştirin.",
+  "admin.whatsapp.loading": "Durum alınıyor",
+  "admin.whatsapp.statusLabel": "Durum",
+  "admin.whatsapp.state.CONNECTED": "Bağlı",
+  "admin.whatsapp.state.CONNECTING": "Verbinden…",
+  "admin.whatsapp.state.DISCONNECTED":
+    "Bağlantı koptu — yeniden bağlanılıyor…",
+  "admin.whatsapp.state.PAIRING_REQUIRED":
+    "Eşleştirme gerekli — QR kodu okutun",
+  "admin.whatsapp.state.ERROR": "WhatsApp kullanılamıyor",
+  "admin.whatsapp.state.DISABLED": "WhatsApp bu ortamda kapalı",
+  "admin.whatsapp.connectedHint": "WhatsApp bağlı ve PDF göndermeye hazır.",
+  "admin.whatsapp.step.openWhatsApp": "Telefonunuzda WhatsApp’ı açın",
+  "admin.whatsapp.step.settings": "Ayarlar’a gidin",
+  "admin.whatsapp.step.linkedDevices": "Bağlı cihazlar",
+  "admin.whatsapp.step.linkDevice": "Cihaz bağla",
+  "admin.whatsapp.step.scan": "Bu QR kodu okutun",
+  "admin.whatsapp.qrLabel": "WhatsApp eşleştirme QR kodu",
+  "admin.whatsapp.qrHint":
+    "Eşleştirme tamamlanana kadar QR kodu kendiliğinden yenilenir.",
+  "ritten.whatsapp.status.connected": "BaÄlÄ±",
   "ritten.whatsapp.status.connecting": "Bağlanılıyor…",
   "ritten.whatsapp.status.disconnected":
     "Bağlantı koptu — yeniden bağlanılıyor…",

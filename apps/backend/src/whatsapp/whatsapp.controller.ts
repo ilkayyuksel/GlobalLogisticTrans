@@ -11,7 +11,11 @@ import {
 } from "@nestjs/swagger";
 
 import { TripIdParamDto } from "../trips/dto/trip-id-param.dto";
-import { SendPdfResponseDto, WhatsAppStatusResponseDto } from "./dto/whatsapp-response.dto";
+import {
+  SendPdfResponseDto,
+  WhatsAppPairingResponseDto,
+  WhatsAppStatusResponseDto,
+} from "./dto/whatsapp-response.dto";
 import { TripWhatsAppService } from "./trip-whatsapp.service";
 
 /**
@@ -86,5 +90,31 @@ export class WhatsAppStatusController {
   @ApiOkResponse({ type: WhatsAppStatusResponseDto })
   async status(): Promise<WhatsAppStatusResponseDto> {
     return { status: await this.tripWhatsAppService.status() };
+  }
+
+  /**
+   * The pairing code, for the administration screen.
+   *
+   * ── WHY THIS ENDPOINT EXISTS AT ALL ─────────────────────────────────────
+   * The delivery service publishes no port and sits on an internal Docker
+   * network, which is what keeps this code off the internet. A browser cannot
+   * reach `whatsapp:3200` and must not be able to. This is the bridge: the
+   * authenticated session is checked here, and the internal call is made from
+   * inside the network.
+   *
+   * Publishing port 3200 instead would put a code that links a phone to this
+   * company's WhatsApp account on the open internet, behind nothing.
+   */
+  @Get("pairing")
+  @ApiOperation({
+    summary: "The WhatsApp pairing code, when one is waiting",
+    description:
+      "Returns the status and, while it is PAIRING_REQUIRED, the code to render as a QR. No session data, credentials, keys, storage path or phone number is ever returned. During an ordinary reconnect the code is null: scanning is not what is needed then.",
+  })
+  @ApiOkResponse({ type: WhatsAppPairingResponseDto })
+  async pairing(): Promise<WhatsAppPairingResponseDto> {
+    const { status, qr } = await this.tripWhatsAppService.pairing();
+
+    return { status, qr };
   }
 }

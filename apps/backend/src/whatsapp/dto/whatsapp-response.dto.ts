@@ -34,3 +34,30 @@ export class WhatsAppStatusResponseDto {
   })
   status!: WhatsAppStatus;
 }
+
+/**
+ * The pairing state, for the administration screen.
+ *
+ * ── WHAT IS DELIBERATELY ABSENT ─────────────────────────────────────────────
+ * The session keys, the credentials, the private keys, the storage path and the
+ * account's own phone number. None of them is needed to scan a code, and all of
+ * them would be a far worse thing to expose than the code itself.
+ *
+ * The QR is a short-lived pairing CHALLENGE — it expires within seconds and
+ * WhatsApp reissues it. It is still returned only to an authenticated TRANO
+ * user: whoever scans it links a phone to this company's WhatsApp account.
+ */
+export class WhatsAppPairingResponseDto {
+  @ApiProperty({
+    enum: Object.values(WhatsAppStatus),
+    example: WhatsAppStatus.PAIRING_REQUIRED,
+  })
+  status!: WhatsAppStatus;
+
+  @ApiProperty({
+    nullable: true,
+    description:
+      "The code to render as a QR, or null. Present only while the status is PAIRING_REQUIRED — never during an ordinary reconnect, where scanning is not what is needed.",
+  })
+  qr!: string | null;
+}

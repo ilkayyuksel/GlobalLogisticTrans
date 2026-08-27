@@ -27,6 +27,7 @@ import {
   SendFailure,
   WHATSAPP_SENDER,
   WhatsAppStatus,
+  type WhatsAppPairing,
   type WhatsAppSender,
 } from "./whatsapp-sender";
 
@@ -95,6 +96,17 @@ export class TripWhatsAppService {
 
   status(): Promise<WhatsAppStatus> {
     return this.sender.status();
+  }
+
+  /**
+   * The pairing state, for the administration screen.
+   *
+   * A pass-through by design: the decision about whether a QR exists belongs to
+   * the connection that issued it, and re-deciding it here would be a second
+   * opinion that could disagree.
+   */
+  pairing(): Promise<WhatsAppPairing> {
+    return this.sender.pairing();
   }
 
   /**

@@ -78,6 +78,21 @@ export interface SendResult {
   readonly status: WhatsAppStatus;
 }
 
+/**
+ * What the pairing screen needs, and nothing else.
+ *
+ * The QR is a short-lived pairing CHALLENGE, not a credential of the account:
+ * it expires within seconds and WhatsApp reissues it. The session keys it
+ * produces are the secret, and those never leave the delivery service's volume.
+ * Even so it is returned only to an authenticated TRANO user, because anyone
+ * who scans it links THEIR phone to this company's account.
+ */
+export interface WhatsAppPairing {
+  readonly status: WhatsAppStatus;
+  /** Null unless pairing is genuinely required. Never a stale code. */
+  readonly qr: string | null;
+}
+
 export interface WhatsAppSender {
   /**
    * Sends the document, or reports why it could not.
@@ -89,4 +104,13 @@ export interface WhatsAppSender {
 
   /** What the transport can currently do, for the UI to enable or explain. */
   status(): Promise<WhatsAppStatus>;
+
+  /**
+   * The status together with the pairing code, when one is waiting.
+   *
+   * Separate from `status()` because the two have different audiences and
+   * different costs: every Ritten page asks for the status, and only the
+   * pairing screen asks for a QR.
+   */
+  pairing(): Promise<WhatsAppPairing>;
 }

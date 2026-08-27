@@ -51,3 +51,30 @@ export function sendTripPdfOverWhatsApp(
     method: "POST",
   });
 }
+
+/**
+ * The pairing state, for the administration screen.
+ *
+ * The QR is a short-lived challenge that WhatsApp reissues; it is never stored,
+ * neither in the database nor in this browser. It arrives, it is drawn, and it
+ * is replaced by the next one — or by nothing, once the account is linked.
+ */
+export interface WhatsAppPairing {
+  status: WhatsAppStatus;
+  /** Null unless the status is PAIRING_REQUIRED. */
+  qr: string | null;
+}
+
+/**
+ * Asks the backend for the pairing code.
+ *
+ * The browser can never reach the WhatsApp service itself: it publishes no port
+ * and lives on an internal Docker network, which is exactly what keeps a code
+ * that links a phone to the company account off the internet. The backend is
+ * the bridge, and it checks the session on the way through.
+ */
+export function fetchWhatsAppPairing(
+  signal?: AbortSignal,
+): Promise<WhatsAppPairing> {
+  return request<WhatsAppPairing>(`${WHATSAPP_PATH}/pairing`, { signal });
+}

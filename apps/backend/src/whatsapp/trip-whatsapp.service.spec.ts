@@ -19,6 +19,7 @@ import {
   WhatsAppStatus,
   type SendDocumentCommand,
   type SendResult,
+  type WhatsAppPairing,
   type WhatsAppSender,
 } from "./whatsapp-sender";
 
@@ -42,6 +43,7 @@ const PDF_BYTES = Buffer.from("%PDF-1.7 transport order");
 
 class FakeSender implements WhatsAppSender {
   commands: SendDocumentCommand[] = [];
+  qr: string | null = null;
   result: SendResult = {
     delivered: true,
     failure: null,
@@ -56,6 +58,10 @@ class FakeSender implements WhatsAppSender {
 
   async status(): Promise<WhatsAppStatus> {
     return this.result.status;
+  }
+
+  async pairing(): Promise<WhatsAppPairing> {
+    return { status: this.result.status, qr: this.qr };
   }
 }
 

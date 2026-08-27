@@ -7,6 +7,7 @@ import {
   WhatsAppStatus,
   type SendDocumentCommand,
   type SendResult,
+  type WhatsAppPairing,
   type WhatsAppSender,
 } from "./whatsapp-sender";
 
@@ -102,6 +103,58 @@ export class HttpWhatsAppSender implements WhatsAppSender {
       // A service that cannot be reached is, from here, indistinguishable from
       // one that is down. Both mean the button must not promise a delivery.
       return WhatsAppStatus.ERROR;
+    }
+  }
+
+  /**
+   * The pairing code, relayed from the internal service.
+   *
+   * ── WHY THE BACKEND STANDS IN THE MIDDLE ────────────────────────────────
+   * The delivery service publishes no port and lives on an internal Docker
+   * network, which is what keeps a link-my-phone-to-your-company QR off the
+   * internet. A browser cannot resolve `whatsapp:3200` and must not be able
+   * to. So the browser asks the backend, the backend asks the service over the
+   * internal network, and the authenticated session is checked on the way in.
+   *
+   * Only `status` and `qr` cross this boundary. The response is rebuilt field
+   * by field rather than forwarded, so a future field added to the service's
+   * own answer cannot leak through by default.
+   */
+  async pairing(): Promise<WhatsAppPairing> {
+    try {
+      const response = await this.call("/pairing", {}, STATUS_TIMEOUT_MS);
+
+      if (!response.ok) {
+        return { status: WhatsAppStatus.ERROR, qr: null };
+      }
+
+      const body = (await response.json()) as {
+        status?: unknown;
+        qr?: unknown;
+      };
+      const status = toStatus(body.status);
+
+      return {
+        status,
+        /*
+         * A QR is offered ONLY while pairing is genuinely required. The service
+         * already guards this, and it is checked again here: a stale code shown
+         * during an ordinary reconnect would tell an operator to scan when
+         * waiting a few seconds is all that is needed.
+         */
+        qr:
+          status === WhatsAppStatus.PAIRING_REQUIRED &&
+          typeof body.qr === "string" &&
+          body.qr.length > 0
+            ? body.qr
+            : null,
+      };
+    } catch (error: unknown) {
+      this.logger.error("The WhatsApp service could not be reached for pairing", {
+        failure: nameOf(error),
+      });
+
+      return { status: WhatsAppStatus.ERROR, qr: null };
     }
   }
 
