@@ -1,10 +1,11 @@
 import { Injectable } from "@nestjs/common";
-import { Driver, Prisma, VehicleAssignment } from "@prisma/client";
+import { Driver, Prisma, Vehicle, VehicleAssignment } from "@prisma/client";
 
 import { PrismaService } from "../prisma/prisma.service";
 
 /** An assignment with the Driver it points at, loaded in the same query. */
 export type AssignmentWithDriver = VehicleAssignment & { driver: Driver };
+export type AssignmentWithVehicle = VehicleAssignment & { vehicle: Vehicle };
 
 export interface FindAssignmentsFilter {
   vehicleId?: string;
@@ -179,6 +180,38 @@ export class VehicleAssignmentRepository {
         OR: [{ validTo: null }, { validTo: { gte: from } }],
       },
       include: { driver: true },
+      orderBy: { validFrom: "desc" },
+    });
+  }
+
+  /**
+   * Every assignment of these drivers that could touch the given date span.
+   *
+   * The exact mirror of `findCoveringVehicles`, and it exists for the same
+   * reason: a page of drivers must cost ONE query, not one per row. The vehicle
+   * is included because the caller always needs the plate, and fetching
+   * vehicles by id afterwards would reintroduce the round trip this avoids.
+   *
+   * The date bounds are a FETCH BOUND, not the rule. Which assignment actually
+   * governs a driver on a day is decided by `assignmentInEffect`, so the rule
+   * itself stays in one place.
+   */
+  findCoveringDrivers(
+    driverIds: readonly string[],
+    from: Date,
+    to: Date,
+  ): Promise<AssignmentWithVehicle[]> {
+    if (driverIds.length === 0) {
+      return Promise.resolve([]);
+    }
+
+    return this.prisma.vehicleAssignment.findMany({
+      where: {
+        driverId: { in: [...driverIds] },
+        validFrom: { lte: to },
+        OR: [{ validTo: null }, { validTo: { gte: from } }],
+      },
+      include: { vehicle: true },
       orderBy: { validFrom: "desc" },
     });
   }

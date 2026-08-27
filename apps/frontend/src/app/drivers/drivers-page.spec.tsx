@@ -36,6 +36,7 @@ function buildDriver(overrides: Partial<Driver> = {}): Driver {
     emergencyContact: null,
     notes: null,
     isActive: true,
+    currentVehicle: null,
     ...overrides,
   };
 }
@@ -372,6 +373,160 @@ describe("DriversPage", () => {
       // No literal colour anywhere: both themes come from the same tokens.
       expect(table.innerHTML).not.toMatch(/#[0-9a-f]{3,8}\b/i);
       expect(screen.getByText("Piet Janssens")).toBeInTheDocument();
+    });
+  });
+
+  /**
+   * ── THE VOERTUIG COLUMN ───────────────────────────────────────────────────
+   * The mirror of the Chauffeur column on Voertuigen, and the same source:
+   * `currentVehicle`, which the backend resolves from VehicleAssignment. The
+   * driver's last Trip is never consulted — a Trip says what somebody drove on
+   * a day, not what they are assigned to now.
+   */
+  describe("the current vehicle", () => {
+    const TRUCK = {
+      id: "vehicle-1",
+      licensePlate: "1-ABC-123",
+      displayColor: "#2563eb",
+      isActive: true,
+    };
+
+    function vehicleCell(name: string): HTMLElement {
+      const row = screen.getByText(name).closest("tr") as HTMLElement;
+
+      // Second column: name, then vehicle.
+      return row.querySelectorAll("td")[1] as HTMLElement;
+    }
+
+    it("names the vehicle the driver is assigned to today", async () => {
+      respondWith(buildPage([buildDriver({ currentVehicle: TRUCK })]));
+      renderDrivers();
+
+      await screen.findByText("Piet Janssens");
+
+      expect(vehicleCell("Piet Janssens")).toHaveTextContent("1-ABC-123");
+    });
+
+    it("shows the empty marker for a driver with no vehicle", async () => {
+      respondWith(buildPage([buildDriver({ currentVehicle: null })]));
+      renderDrivers();
+
+      await screen.findByText("Piet Janssens");
+
+      expect(vehicleCell("Piet Janssens")).toHaveTextContent("—");
+    });
+
+    it("gives each driver their own vehicle", async () => {
+      respondWith(
+        buildPage([
+          buildDriver({ id: "d1", name: "Piet Janssens", currentVehicle: TRUCK }),
+          buildDriver({
+            id: "d2",
+            name: "Mehmet Yilmaz",
+            currentVehicle: { ...TRUCK, id: "v2", licensePlate: "1-XYZ-456" },
+          }),
+          buildDriver({ id: "d3", name: "Ali Demir", currentVehicle: null }),
+        ]),
+      );
+      renderDrivers();
+
+      await screen.findByText("Ali Demir");
+
+      expect(vehicleCell("Piet Janssens")).toHaveTextContent("1-ABC-123");
+      expect(vehicleCell("Mehmet Yilmaz")).toHaveTextContent("1-XYZ-456");
+      expect(vehicleCell("Ali Demir")).toHaveTextContent("—");
+    });
+
+    /** A reassignment changes the backend's answer, not a browser computation. */
+    it("follows the backend when the assignment changes", async () => {
+      respondWith(buildPage([buildDriver({ currentVehicle: TRUCK })]));
+      const view = renderDrivers();
+
+      await screen.findByText("Piet Janssens");
+      expect(vehicleCell("Piet Janssens")).toHaveTextContent("1-ABC-123");
+
+      view.unmount();
+      respondWith(
+        buildPage([
+          buildDriver({
+            currentVehicle: { ...TRUCK, id: "v2", licensePlate: "1-XYZ-456" },
+          }),
+        ]),
+      );
+      renderDrivers();
+
+      await screen.findByText("Piet Janssens");
+      expect(vehicleCell("Piet Janssens")).toHaveTextContent("1-XYZ-456");
+      expect(vehicleCell("Piet Janssens")).not.toHaveTextContent("1-ABC-123");
+    });
+
+    it("links the plate to the vehicle it names", async () => {
+      respondWith(buildPage([buildDriver({ currentVehicle: TRUCK })]));
+      renderDrivers();
+
+      await screen.findByText("Piet Janssens");
+
+      expect(screen.getByRole("link", { name: "1-ABC-123" })).toHaveAttribute(
+        "href",
+        "/vehicles/vehicle-1",
+      );
+    });
+
+    /** The column must not cost a request per row. */
+    it("loads the whole page in one request", async () => {
+      respondWith(
+        buildPage([
+          buildDriver({ id: "d1", name: "Piet Janssens", currentVehicle: TRUCK }),
+          buildDriver({ id: "d2", name: "Mehmet Yilmaz", currentVehicle: TRUCK }),
+          buildDriver({ id: "d3", name: "Ali Demir", currentVehicle: TRUCK }),
+        ]),
+      );
+      renderDrivers();
+
+      await screen.findByText("Ali Demir");
+
+      expect(listCalls()).toHaveLength(1);
+    });
+
+    describe("presentation", () => {
+      it("heads the column in Dutch", async () => {
+        respondWith(buildPage([buildDriver({ currentVehicle: TRUCK })]));
+        renderDrivers();
+
+        await screen.findByText("Piet Janssens");
+
+        expect(
+          screen.getByRole("columnheader", { name: "Voertuig" }),
+        ).toBeInTheDocument();
+      });
+
+      it("heads the column in Turkish", async () => {
+        window.localStorage.setItem("tms.language", "tr");
+        respondWith(buildPage([buildDriver({ currentVehicle: TRUCK })]));
+        renderDrivers();
+
+        await screen.findByText("Piet Janssens");
+
+        expect(
+          screen.getByRole("columnheader", { name: "Araç" }),
+        ).toBeInTheDocument();
+      });
+
+      it.each(["light", "dark"] as const)(
+        "uses theme tokens in %s mode",
+        async (theme) => {
+          document.documentElement.classList.toggle("dark", theme === "dark");
+          respondWith(buildPage([buildDriver({ currentVehicle: TRUCK })]));
+          renderDrivers();
+
+          await screen.findByText("Piet Janssens");
+
+          const link = screen.getByRole("link", { name: "1-ABC-123" });
+
+          expect(link.className).toMatch(/text-(primary|muted)/);
+          expect(link.className).not.toMatch(/#[0-9a-f]{3,6}/i);
+        },
+      );
     });
   });
 });

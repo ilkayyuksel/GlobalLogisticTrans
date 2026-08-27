@@ -37,6 +37,10 @@ function uniqueViolation(): Prisma.PrismaClientKnownRequestError {
 
 describe("DriverService", () => {
   let repository: jest.Mocked<DriverRepository>;
+  let currentAssignments: {
+    findCurrentDriversForVehicles: jest.Mock;
+    findCurrentVehiclesForDrivers: jest.Mock;
+  };
   let logger: jest.Mocked<AppLoggerService>;
   let service: DriverService;
 
@@ -59,7 +63,12 @@ describe("DriverService", () => {
       verbose: jest.fn(),
     } as unknown as jest.Mocked<AppLoggerService>;
 
-    service = new DriverService(repository, logger);
+    currentAssignments = {
+      findCurrentDriversForVehicles: jest.fn().mockResolvedValue(new Map()),
+      findCurrentVehiclesForDrivers: jest.fn().mockResolvedValue(new Map()),
+    };
+
+    service = new DriverService(repository, currentAssignments as never, logger);
   });
 
   function query(overrides: Partial<ListDriversQueryDto> = {}) {
@@ -106,6 +115,8 @@ describe("DriverService", () => {
 
       expect(Object.keys(item).sort()).toEqual([
         "createdAt",
+        // Today's vehicle, from VehicleAssignment.
+        "currentVehicle",
         "email",
         "emergencyContact",
         "id",

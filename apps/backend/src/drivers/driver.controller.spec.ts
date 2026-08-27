@@ -1,4 +1,5 @@
 import { INestApplication, ValidationPipe, VersioningType } from "@nestjs/common";
+import { CurrentAssignmentService } from "../vehicle-assignments/current-assignment.service";
 import { APP_FILTER, APP_INTERCEPTOR } from "@nestjs/core";
 import { Test } from "@nestjs/testing";
 import { Driver } from "@prisma/client";
@@ -64,6 +65,15 @@ describe("DriverController (integration)", () => {
       providers: [
         DriverService,
         { provide: DriverRepository, useValue: repository },
+        // Nobody assigned: these specs are about the controller's HTTP shape,
+        // not about who is driving today.
+        {
+          provide: CurrentAssignmentService,
+          useValue: {
+            findCurrentDriversForVehicles: async () => new Map(),
+            findCurrentVehiclesForDrivers: async () => new Map(),
+          },
+        },
         { provide: AppLoggerService, useValue: logger },
         { provide: APP_FILTER, useClass: AllExceptionsFilter },
         { provide: APP_INTERCEPTOR, useClass: ResponseInterceptor },

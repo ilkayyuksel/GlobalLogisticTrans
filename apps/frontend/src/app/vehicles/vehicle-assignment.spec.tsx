@@ -33,6 +33,7 @@ const VEHICLE: Vehicle = {
   year: 2021,
   notes: null,
   isActive: true,
+  currentDriver: null,
 };
 
 const ASSIGNMENT = {
@@ -55,6 +56,7 @@ const DRIVERS = [
     phoneNumber: null,
     email: null,
     isActive: true,
+    currentVehicle: null,
   },
   {
     id: "driver-2",
@@ -65,6 +67,7 @@ const DRIVERS = [
     phoneNumber: null,
     email: null,
     isActive: true,
+    currentVehicle: null,
   },
 ];
 

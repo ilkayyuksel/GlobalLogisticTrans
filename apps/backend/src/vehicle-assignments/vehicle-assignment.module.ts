@@ -2,8 +2,8 @@ import { Module } from "@nestjs/common";
 
 import { DriverModule } from "../drivers/driver.module";
 import { VehicleModule } from "../vehicles/vehicle.module";
+import { CurrentAssignmentModule } from "./current-assignment.module";
 import { VehicleAssignmentController } from "./vehicle-assignment.controller";
-import { VehicleAssignmentRepository } from "./vehicle-assignment.repository";
 import { VehicleAssignmentService } from "./vehicle-assignment.service";
 
 /**
@@ -19,9 +19,11 @@ import { VehicleAssignmentService } from "./vehicle-assignment.service";
  * driver of a vehicle on a planning date.
  */
 @Module({
-  imports: [VehicleModule, DriverModule],
+  // CurrentAssignmentModule supplies the repository. It imports neither Vehicle
+  // nor Driver, so nothing here becomes circular.
+  imports: [VehicleModule, DriverModule, CurrentAssignmentModule],
   controllers: [VehicleAssignmentController],
-  providers: [VehicleAssignmentService, VehicleAssignmentRepository],
+  providers: [VehicleAssignmentService],
   exports: [VehicleAssignmentService],
 })
 export class VehicleAssignmentModule {}

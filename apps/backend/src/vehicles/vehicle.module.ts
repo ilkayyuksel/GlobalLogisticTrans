@@ -1,5 +1,6 @@
 import { Module } from "@nestjs/common";
 
+import { CurrentAssignmentModule } from "../vehicle-assignments/current-assignment.module";
 import { VehicleController } from "./vehicle.controller";
 import { VehicleRepository } from "./vehicle.repository";
 import { VehicleService } from "./vehicle.service";
@@ -13,6 +14,10 @@ import { VehicleService } from "./vehicle.service";
  * the repository, so database access stays behind a single door.
  */
 @Module({
+  // The read side of vehicle ↔ driver, so the list can name today's driver.
+  // It imports nothing, which is what keeps this from closing a cycle with
+  // VehicleAssignmentModule — that one imports THIS module.
+  imports: [CurrentAssignmentModule],
   controllers: [VehicleController],
   providers: [VehicleService, VehicleRepository],
   exports: [VehicleService],

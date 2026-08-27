@@ -15,6 +15,7 @@ import {
   DriverLicenceNumberConflictException,
   DriverNotFoundException,
 } from "./exceptions/driver.exceptions";
+import { CurrentAssignmentService } from "../vehicle-assignments/current-assignment.service";
 import { DriverRepository } from "./driver.repository";
 
 /** Prisma's unique-constraint violation code. */
@@ -24,6 +25,7 @@ const PRISMA_UNIQUE_VIOLATION = "P2002";
 export class DriverService {
   constructor(
     private readonly repository: DriverRepository,
+    private readonly currentAssignments: CurrentAssignmentService,
     private readonly logger: AppLoggerService,
   ) {
     this.logger.setContext(DriverService.name);
@@ -37,14 +39,27 @@ export class DriverService {
       take: query.pageSize,
     });
 
+    // ONE query for the whole page — the mirror of the Voertuigen list, and
+    // the same resolver, so the two cannot disagree about who drives what.
+    const vehicles = await this.currentAssignments.findCurrentVehiclesForDrivers(
+      items.map((driver) => driver.id),
+    );
+
     return {
-      items: items.map(toDriverResponse),
+      items: items.map((driver) =>
+        toDriverResponse(driver, vehicles.get(driver.id) ?? null),
+      ),
       meta: buildPaginationMeta(totalItems, query.page, query.pageSize),
     };
   }
 
   async findById(id: string): Promise<DriverResponseDto> {
-    return toDriverResponse(await this.requireDriver(id));
+    const driver = await this.requireDriver(id);
+    const vehicles = await this.currentAssignments.findCurrentVehiclesForDrivers(
+      [driver.id],
+    );
+
+    return toDriverResponse(driver, vehicles.get(driver.id) ?? null);
   }
 
   /**

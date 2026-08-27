@@ -16,6 +16,7 @@ import {
   VehicleLicensePlateConflictException,
   VehicleNotFoundException,
 } from "./exceptions/vehicle.exceptions";
+import { CurrentAssignmentService } from "../vehicle-assignments/current-assignment.service";
 import { VehicleRepository } from "./vehicle.repository";
 
 /** Prisma's unique-constraint violation code. */
@@ -25,6 +26,7 @@ const PRISMA_UNIQUE_VIOLATION = "P2002";
 export class VehicleService {
   constructor(
     private readonly repository: VehicleRepository,
+    private readonly currentAssignments: CurrentAssignmentService,
     private readonly logger: AppLoggerService,
   ) {
     this.logger.setContext(VehicleService.name);
@@ -38,14 +40,32 @@ export class VehicleService {
       take: query.pageSize,
     });
 
+    /*
+     * ONE query for the whole page, not one per row. Search and pagination are
+     * untouched: the page is selected by the database exactly as before, and
+     * only the drivers of the rows that came back are looked up.
+     */
+    const drivers = await this.currentAssignments.findCurrentDriversForVehicles(
+      items.map((vehicle) => vehicle.id),
+    );
+
     return {
-      items: items.map(toVehicleResponse),
+      items: items.map((vehicle) =>
+        toVehicleResponse(vehicle, drivers.get(vehicle.id) ?? null),
+      ),
       meta: buildPaginationMeta(totalItems, query.page, query.pageSize),
     };
   }
 
   async findById(id: string): Promise<VehicleResponseDto> {
-    return toVehicleResponse(await this.requireVehicle(id));
+    const vehicle = await this.requireVehicle(id);
+    // One row, one lookup — the same resolver, asked about a page of one, so a
+    // single vehicle cannot answer this question differently from the list.
+    const drivers = await this.currentAssignments.findCurrentDriversForVehicles([
+      vehicle.id,
+    ]);
+
+    return toVehicleResponse(vehicle, drivers.get(vehicle.id) ?? null);
   }
 
   /**

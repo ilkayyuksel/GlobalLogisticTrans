@@ -33,6 +33,7 @@ function buildVehicle(overrides: Partial<Vehicle> = {}): Vehicle {
     year: 2021,
     notes: null,
     isActive: true,
+    currentDriver: null,
     ...overrides,
   };
 }
@@ -129,6 +130,9 @@ describe("Vehicles page", () => {
         screen.getAllByRole("columnheader").map((header) => header.textContent),
       ).toEqual([
         "Nummerplaat",
+        // Today's driver, from VehicleAssignment — beside the plate, which is
+        // the pairing an operator opens this list to find.
+        "Chauffeur",
         "Omschrijving",
         "Merk",
         "Model",
@@ -150,7 +154,9 @@ describe("Vehicles page", () => {
         "tr",
       ) as HTMLElement;
 
-      expect(within(row).getAllByText("—")).toHaveLength(4);
+      // Five, not four: the Chauffeur column is empty too when nobody is
+      // assigned to the truck today.
+      expect(within(row).getAllByText("—")).toHaveLength(5);
     });
 
     it("links each plate to its detail page", async () => {
@@ -731,4 +737,179 @@ describe("Vehicles page", () => {
       expect(screen.getByText("1-ABC-123")).toBeInTheDocument();
     });
   });
+
+  describe("the current driver", () => {
+    const JAN = { id: "driver-1", name: "Jan Janssens", isActive: true };
+
+    function driverCell(plate: string): HTMLElement {
+      const row = screen.getByText(plate).closest("tr") as HTMLElement;
+
+      // Second column: plate, then driver.
+      return row.querySelectorAll("td")[1] as HTMLElement;
+    }
+
+    it("names the driver assigned to the vehicle today", async () => {
+      respondWith(buildPage([buildVehicle({ currentDriver: JAN })]));
+      renderVehicles();
+
+      await screen.findByText("1-ABC-123");
+
+      expect(driverCell("1-ABC-123")).toHaveTextContent("Jan Janssens");
+    });
+
+    it("shows the empty marker for a vehicle with no driver", async () => {
+      respondWith(buildPage([buildVehicle({ currentDriver: null })]));
+      renderVehicles();
+
+      await screen.findByText("1-ABC-123");
+
+      expect(driverCell("1-ABC-123")).toHaveTextContent("—");
+    });
+
+    it("gives each vehicle its own driver", async () => {
+      respondWith(
+        buildPage([
+          buildVehicle({ id: "v1", licensePlate: "1-ABC-123", currentDriver: JAN }),
+          buildVehicle({
+            id: "v2",
+            licensePlate: "1-XYZ-456",
+            currentDriver: { id: "driver-2", name: "Mehmet Yilmaz", isActive: true },
+          }),
+          buildVehicle({ id: "v3", licensePlate: "1-DEF-789", currentDriver: null }),
+        ]),
+      );
+      renderVehicles();
+
+      await screen.findByText("1-ABC-123");
+
+      expect(driverCell("1-ABC-123")).toHaveTextContent("Jan Janssens");
+      expect(driverCell("1-XYZ-456")).toHaveTextContent("Mehmet Yilmaz");
+      expect(driverCell("1-DEF-789")).toHaveTextContent("—");
+    });
+
+    /**
+     * A reassignment is a change to the backend's answer, not to anything this
+     * page computes. Re-rendering with the new answer is the whole mechanism.
+     */
+    it("follows the backend when the assignment changes", async () => {
+      respondWith(buildPage([buildVehicle({ currentDriver: JAN })]));
+      const view = renderVehicles();
+
+      await screen.findByText("1-ABC-123");
+      expect(driverCell("1-ABC-123")).toHaveTextContent("Jan Janssens");
+
+      view.unmount();
+      respondWith(
+        buildPage([
+          buildVehicle({
+            currentDriver: { id: "driver-2", name: "Mehmet Yilmaz", isActive: true },
+          }),
+        ]),
+      );
+      renderVehicles();
+
+      await screen.findByText("1-ABC-123");
+      expect(driverCell("1-ABC-123")).toHaveTextContent("Mehmet Yilmaz");
+      expect(driverCell("1-ABC-123")).not.toHaveTextContent("Jan Janssens");
+    });
+
+    /** Still on the truck, so still named — dimmed rather than hidden. */
+    it("still names a driver who has since been deactivated", async () => {
+      respondWith(
+        buildPage([
+          buildVehicle({
+            currentDriver: { id: "driver-1", name: "Piet Janssens", isActive: false },
+          }),
+        ]),
+      );
+      renderVehicles();
+
+      await screen.findByText("1-ABC-123");
+
+      expect(driverCell("1-ABC-123")).toHaveTextContent("Piet Janssens");
+    });
+
+    /** The column must not cost a request per row. */
+    it("loads the whole page in one request", async () => {
+      respondWith(
+        buildPage([
+          buildVehicle({ id: "v1", licensePlate: "1-ABC-123", currentDriver: JAN }),
+          buildVehicle({ id: "v2", licensePlate: "1-XYZ-456", currentDriver: JAN }),
+          buildVehicle({ id: "v3", licensePlate: "1-DEF-789", currentDriver: JAN }),
+        ]),
+      );
+      renderVehicles();
+
+      await screen.findByText("1-DEF-789");
+
+      expect(listCalls()).toHaveLength(1);
+    });
+
+    it("keeps search on the server", async () => {
+      respondWith(buildPage([buildVehicle({ currentDriver: JAN })]));
+      renderVehicles();
+
+      await screen.findByText("1-ABC-123");
+      await userEvent.type(
+        screen.getByRole("searchbox", { name: /zoek/i }),
+        "ABC",
+      );
+
+      await waitFor(() =>
+        expect(listCalls()[listCalls().length - 1].search).toBe("ABC"),
+      );
+    });
+
+    describe("presentation", () => {
+      it("heads the column in Dutch", async () => {
+        respondWith(buildPage([buildVehicle({ currentDriver: JAN })]));
+        renderVehicles();
+
+        await screen.findByText("1-ABC-123");
+
+        expect(
+          screen.getByRole("columnheader", { name: "Chauffeur" }),
+        ).toBeInTheDocument();
+      });
+
+      it("heads the column in Turkish", async () => {
+        window.localStorage.setItem("tms.language", "tr");
+        respondWith(buildPage([buildVehicle({ currentDriver: JAN })]));
+        renderVehicles();
+
+        await screen.findByText("1-ABC-123");
+
+        expect(
+          screen.getByRole("columnheader", { name: "Şoför" }),
+        ).toBeInTheDocument();
+      });
+
+      it.each(["light", "dark"] as const)(
+        "uses theme tokens in %s mode",
+        async (theme) => {
+          document.documentElement.classList.toggle("dark", theme === "dark");
+          respondWith(buildPage([buildVehicle({ currentDriver: JAN })]));
+          renderVehicles();
+
+          await screen.findByText("1-ABC-123");
+
+          const link = screen.getByRole("link", { name: "Jan Janssens" });
+
+          expect(link.className).toMatch(/text-(foreground|muted)/);
+          expect(link.className).not.toMatch(/#[0-9a-f]{3,6}/i);
+        },
+      );
+    });
+  });
 });
+
+/**
+ * ── THE CHAUFFEUR COLUMN ────────────────────────────────────────────────────
+ * Who is on this truck TODAY, from VehicleAssignment. The backend resolves it
+ * and hands it to the page; nothing here compares dates, and nothing reads a
+ * Trip — a Trip records who drove on a day, which is a different question.
+ *
+ * Search and pagination are asserted through the REQUEST, because that is
+ * where they happen: the column must not have quietly moved either into the
+ * browser.
+ */

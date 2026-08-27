@@ -1,5 +1,7 @@
 "use client";
 
+import Link from "next/link";
+
 import { Badge } from "@/components/ui/badge";
 import type { Driver } from "@/lib/api/types";
 import { useTranslation } from "@/lib/i18n/language-provider";
@@ -17,6 +19,9 @@ import { cn } from "@/lib/cn";
 
 const COLUMN_KEYS: readonly TranslationKey[] = [
   "drivers.column.name",
+  // The mirror of the Chauffeur column on Voertuigen, resolved from the same
+  // VehicleAssignment rows so the two lists cannot disagree.
+  "drivers.column.currentVehicle",
   "drivers.column.licenceNumber",
   "drivers.column.phoneNumber",
   "drivers.column.email",
@@ -88,6 +93,34 @@ function DriverRow({
   return (
     <tr className="border-b border-border last:border-0 hover:bg-hover">
       <td className="px-3 py-2 font-medium text-foreground">{driver.name}</td>
+      {/*
+        The CURRENT vehicle, from VehicleAssignment — never inferred from the
+        driver's last Trip. The truck's own colour travels with the plate, the
+        same identifier the planning uses everywhere else.
+      */}
+      <td className="px-3 py-2">
+        {driver.currentVehicle ? (
+          <span className="flex items-center gap-2">
+            <span
+              aria-hidden="true"
+              style={{ backgroundColor: driver.currentVehicle.displayColor }}
+              className="inline-block h-2.5 w-2.5 shrink-0 rounded-sm"
+            />
+            <Link
+              href={`/vehicles/${driver.currentVehicle.id}`}
+              className={
+                driver.currentVehicle.isActive
+                  ? "text-primary hover:underline"
+                  : "text-muted hover:underline"
+              }
+            >
+              {driver.currentVehicle.licensePlate}
+            </Link>
+          </span>
+        ) : (
+          <span className="text-secondary">{empty}</span>
+        )}
+      </td>
       <td className="px-3 py-2 text-secondary">
         {driver.licenceNumber ?? empty}
       </td>

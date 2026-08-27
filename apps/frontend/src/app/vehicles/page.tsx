@@ -336,6 +336,9 @@ export default function VehiclesPage() {
                   <tr>
                     {[
                       "vehicles.column.licensePlate",
+                      // Today's driver, next to the plate — the pairing an
+                      // operator reads the fleet list to find.
+                      "vehicles.column.currentDriver",
                       "vehicles.column.description",
                       "vehicles.column.brand",
                       "vehicles.column.model",
@@ -421,6 +424,29 @@ function VehicleRow({
             {vehicle.licensePlate}
           </Link>
         </span>
+      </td>
+      {/*
+        The CURRENT driver, from VehicleAssignment — never the driver of the
+        last Trip, which is a fact about a day rather than about now. A driver
+        deactivated while still assigned is still shown, because the truck is
+        still down to them; the name is dimmed rather than hidden so the state
+        is visible instead of silently missing.
+      */}
+      <td className="px-3 py-2">
+        {vehicle.currentDriver ? (
+          <Link
+            href={`/drivers`}
+            className={
+              vehicle.currentDriver.isActive
+                ? "text-foreground hover:underline"
+                : "text-muted hover:underline"
+            }
+          >
+            {vehicle.currentDriver.name}
+          </Link>
+        ) : (
+          <span className="text-secondary">{empty}</span>
+        )}
       </td>
       <td className="px-3 py-2 text-secondary">{vehicle.description ?? empty}</td>
       <td className="px-3 py-2 text-secondary">{vehicle.brand ?? empty}</td>

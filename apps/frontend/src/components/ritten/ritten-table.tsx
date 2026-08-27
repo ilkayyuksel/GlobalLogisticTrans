@@ -12,6 +12,7 @@ import { toPricingCells } from "@/lib/ritten/pricing-cells";
 import { toClockLabel } from "@/lib/calendar/clock";
 import { formatCalendarDate } from "@/lib/calendar/calendar-dates";
 import { toFleetOptions, type FleetOption } from "@/lib/fleet-options";
+import { toVehicleLabel } from "@/lib/fleet/vehicle-label";
 import { useTranslation } from "@/lib/i18n/language-provider";
 import { combinationClasses, combinationLabel } from "@/lib/ritten/combination";
 import { toVehicleGroups } from "@/lib/ritten/vehicle-groups";
@@ -974,7 +975,9 @@ function VehicleCell({
   const vehicleOptions = toInlineOptions(
     toFleetOptions(
       vehicles,
-      (vehicle) => vehicle.licensePlate,
+      // The plate AND today's driver — the same `currentDriver` the Voertuigen
+      // list shows, so the two can never name different people.
+      toVehicleLabel,
       trip.vehicleId,
       trip.vehicle?.licensePlate,
     ),

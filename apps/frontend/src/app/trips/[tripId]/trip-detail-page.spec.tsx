@@ -65,6 +65,7 @@ const ACTIVE_VEHICLES = {
       year: 2022,
       notes: null,
       isActive: true,
+      currentDriver: null,
     },
     {
       id: "vehicle-2",
@@ -76,6 +77,7 @@ const ACTIVE_VEHICLES = {
       year: null,
       notes: null,
       isActive: true,
+      currentDriver: null,
     },
   ],
   meta: { page: 1, pageSize: 200, totalItems: 2, totalPages: 1 },
@@ -92,6 +94,7 @@ const ACTIVE_DRIVERS = {
       phoneNumber: null,
       email: null,
       isActive: true,
+      currentVehicle: null,
     },
     {
       id: "driver-2",
@@ -102,6 +105,7 @@ const ACTIVE_DRIVERS = {
       phoneNumber: null,
       email: null,
       isActive: true,
+      currentVehicle: null,
     },
   ],
   meta: { page: 1, pageSize: 200, totalItems: 2, totalPages: 1 },
@@ -321,6 +325,7 @@ describe("TripDetailPage", () => {
         year: 2022,
         notes: null,
         isActive: true,
+        currentDriver: null,
       });
 
       render(<TripDetailPage />);

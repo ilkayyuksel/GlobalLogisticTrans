@@ -27,6 +27,7 @@ const VEHICLE: Vehicle = {
   year: 2021,
   notes: "Winter tyres fitted",
   isActive: true,
+  currentDriver: null,
 };
 
 const ASSIGNMENT = {
@@ -48,6 +49,7 @@ const DRIVER = {
   phoneNumber: null,
   email: null,
   isActive: true,
+  currentVehicle: null,
 };
 
 const SUMMARY = {

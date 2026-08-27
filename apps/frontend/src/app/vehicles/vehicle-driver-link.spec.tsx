@@ -40,6 +40,7 @@ function buildVehicle(overrides: Partial<Vehicle> = {}): Vehicle {
     year: null,
     notes: null,
     isActive: true,
+    currentDriver: null,
     ...overrides,
   };
 }
@@ -54,6 +55,7 @@ function buildDriver(): Driver {
     emergencyContact: null,
     notes: null,
     isActive: true,
+    currentVehicle: null,
   };
 }
 

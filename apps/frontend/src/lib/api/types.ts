@@ -375,6 +375,32 @@ export interface TripCustomProperty {
   isRequired: boolean;
 }
 
+/**
+ * The Driver a Vehicle is assigned to TODAY, or the Vehicle a Driver is on.
+ *
+ * Resolved by the backend from VehicleAssignment — the single source of truth
+ * for this relationship. There is no `driverId` on a Vehicle and no
+ * `vehicleId` on a Driver, and this is not derived from any Trip: a Trip says
+ * who drove on a DAY, which is a different question from who is assigned now.
+ *
+ * Two or three fields, deliberately. A fleet list needs a name and a way to
+ * link; it has no use for a phone number, and putting one in every row would
+ * spread contact details far beyond the screen that asks for them.
+ */
+export interface CurrentDriver {
+  id: string;
+  name: string;
+  /** False when the Driver was deactivated while still assigned. */
+  isActive: boolean;
+}
+
+export interface CurrentVehicle {
+  id: string;
+  licensePlate: string;
+  displayColor: string;
+  isActive: boolean;
+}
+
 export interface Vehicle {
   id: string;
   licensePlate: string;
@@ -385,6 +411,8 @@ export interface Vehicle {
   year: number | null;
   notes: string | null;
   isActive: boolean;
+  /** Today's driver, from VehicleAssignment. Null when nobody is assigned. */
+  currentDriver: CurrentDriver | null;
 }
 
 /**
@@ -415,6 +443,8 @@ export interface Driver {
   emergencyContact: string | null;
   notes: string | null;
   isActive: boolean;
+  /** Today's vehicle, from VehicleAssignment. Null when they have none. */
+  currentVehicle: CurrentVehicle | null;
 }
 
 /**

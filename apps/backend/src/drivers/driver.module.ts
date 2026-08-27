@@ -1,5 +1,6 @@
 import { Module } from "@nestjs/common";
 
+import { CurrentAssignmentModule } from "../vehicle-assignments/current-assignment.module";
 import { DriverController } from "./driver.controller";
 import { DriverRepository } from "./driver.repository";
 import { DriverService } from "./driver.service";
@@ -13,6 +14,8 @@ import { DriverService } from "./driver.service";
  * access stays behind a single door.
  */
 @Module({
+  // The same read side the Voertuigen list uses, asked in the other direction.
+  imports: [CurrentAssignmentModule],
   controllers: [DriverController],
   providers: [DriverService, DriverRepository],
   exports: [DriverService],

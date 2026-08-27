@@ -39,6 +39,10 @@ function uniqueViolation(): Prisma.PrismaClientKnownRequestError {
 
 describe("VehicleService", () => {
   let repository: jest.Mocked<VehicleRepository>;
+  let currentAssignments: {
+    findCurrentDriversForVehicles: jest.Mock;
+    findCurrentVehiclesForDrivers: jest.Mock;
+  };
   let logger: jest.Mocked<AppLoggerService>;
   let service: VehicleService;
 
@@ -62,7 +66,18 @@ describe("VehicleService", () => {
       verbose: jest.fn(),
     } as unknown as jest.Mocked<AppLoggerService>;
 
-    service = new VehicleService(repository, logger);
+    // No assignments unless a test says otherwise: these specs are about the
+    // Vehicle domain, and today's driver is resolved elsewhere.
+    currentAssignments = {
+      findCurrentDriversForVehicles: jest.fn().mockResolvedValue(new Map()),
+      findCurrentVehiclesForDrivers: jest.fn().mockResolvedValue(new Map()),
+    };
+
+    service = new VehicleService(
+      repository,
+      currentAssignments as never,
+      logger,
+    );
   });
 
   function query(overrides: Partial<ListVehiclesQueryDto> = {}) {
@@ -110,6 +125,9 @@ describe("VehicleService", () => {
       expect(Object.keys(item).sort()).toEqual([
         "brand",
         "createdAt",
+        // Today's driver, from VehicleAssignment. Null here because these
+        // specs assign nobody.
+        "currentDriver",
         "description",
         "displayColor",
         "id",

@@ -36,6 +36,7 @@ const VEHICLE: Vehicle = {
   year: 2021,
   notes: null,
   isActive: true,
+  currentDriver: null,
 };
 
 /** Piet has had this truck since the first of August, open-ended. */
@@ -59,6 +60,7 @@ function buildDriver(id: string, name: string) {
     phoneNumber: null,
     email: null,
     isActive: true,
+    currentVehicle: null,
   };
 }
 
