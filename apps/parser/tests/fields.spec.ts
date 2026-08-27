@@ -248,6 +248,120 @@ describe("address", () => {
     expect(result.rawAddress).not.toContain("Loading Ref");
   });
 
+  /**
+   * ── THE LOWER-CASE PREFIX ────────────────────────────────────────────────
+   * A real order (transportorder1372937.pdf) prints its address exactly like
+   * this, in lower case:
+   *
+   *     [8580]
+   *     IVC bvba
+   *     Nijverheidslaan 29
+   *     be-8580 Avelgem
+   *
+   * The postcode rule required `[A-Z]{1,2}` and declined it. So did every
+   * other rule — the bare-postcode form needs the line to start with digits,
+   * and the bracketed last resort refuses a final line containing a digit,
+   * which this one does. All four declined and the parser reported that a
+   * document naming its destination unmistakably had no readable city.
+   *
+   * Letter case is a typographical choice by whoever filled in the form. It
+   * says nothing about what the line means.
+   */
+  describe("a postcode prefix printed in lower case", () => {
+    const AVELGEM = [
+      "[8580]",
+      "IVC bvba",
+      "Nijverheidslaan 29",
+      "be-8580 Avelgem",
+    ];
+
+    it("reads the city", () => {
+      const result = extractAddress(addressBlock(AVELGEM), header);
+
+      expect(result.destinationCity).toBe("Avelgem");
+    });
+
+    /** The prefix is upper-cased before the country table is consulted. */
+    it("resolves the country from the lower-case prefix", () => {
+      const result = extractAddress(addressBlock(AVELGEM), header);
+
+      expect(result.destinationCountry).toBe("Belgium");
+    });
+
+    /** Each of these was a plausible wrong answer while the rule declined. */
+    it.each([
+      "IVC bvba",
+      "Nijverheidslaan 29",
+      "8580",
+      "be-8580",
+      "be-8580 Avelgem",
+      "[8580]",
+    ])("never reads %s as the city", (wrong) => {
+      expect(extractAddress(addressBlock(AVELGEM), header).destinationCity).not.toBe(
+        wrong,
+      );
+    });
+
+    /** The whole block survives as evidence, the reference line included. */
+    it("keeps the address block as raw evidence", () => {
+      const result = extractAddress(addressBlock(AVELGEM), header);
+
+      expect(result.rawAddress).toBe(
+        "[8580] IVC bvba Nijverheidslaan 29 be-8580 Avelgem",
+      );
+      expect(result.section).toBe("LOADING 1");
+    });
+
+    /** No remark may reach the address, whatever the prefix looks like. */
+    it("still stops at a loading reference", () => {
+      const result = extractAddress(
+        addressBlock([...AVELGEM, "Loading Ref: NUT35/149911"]),
+        header,
+      );
+
+      expect(result.destinationCity).toBe("Avelgem");
+      expect(result.rawAddress).not.toContain("Loading Ref");
+    });
+
+    it.each([
+      ["be-8580 Avelgem", "Avelgem", "Belgium"],
+      ["Be-8580 Avelgem", "Avelgem", "Belgium"],
+      ["BE-8580 Avelgem", "Avelgem", "Belgium"],
+      ["f-62119 DOURGES", "Dourges", "France"],
+      ["nl-1234 Bergen op Zoom", "Bergen Op Zoom", "Netherlands"],
+    ])("reads %s whatever its case", (line, city, country) => {
+      const result = extractAddress(
+        addressBlock(["[1234]", "Somewhere BV", "Some Street 1", line]),
+        header,
+      );
+
+      expect(result.destinationCity).toBe(city);
+      expect(result.destinationCountry).toBe(country);
+    });
+  });
+
+  /**
+   * The PREVIOUS city fix, which split one printed line into two fragments.
+   * That mechanism is untouched by the case change and must stay working.
+   */
+  it("still reads a city that the form split across two fragments", () => {
+    const fragments: Fragment[] = [
+      { page: 1, x: 26, y: 400, text: "LOADING 1:" },
+      { page: 1, x: 30, y: 380, text: "Address:" },
+      { page: 1, x: 98, y: 380, text: "[62223]" },
+      { page: 1, x: 98, y: 368, text: "SOME COMPANY" },
+      { page: 1, x: 98, y: 356, text: "RUE DU CHEMIN 4" },
+      // One printed line, two positioned runs — the earlier regression.
+      { page: 1, x: 97.5, y: 344, text: "62223" },
+      { page: 1, x: 125.4, y: 344, text: "SAINT LAURENT BLANGY" },
+      { page: 1, x: 32, y: 320, text: "Date/time:" },
+    ];
+
+    const result = extractAddress(fragments, header);
+
+    expect(result.destinationCity).toBe("Saint Laurent Blangy");
+  });
+
   it("handles a city of several words", () => {
     const result = extractAddress(
       addressBlock(["[1234]", "Somewhere BV", "NL-1234 Bergen op Zoom"]),

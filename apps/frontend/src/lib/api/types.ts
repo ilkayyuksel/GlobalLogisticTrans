@@ -92,6 +92,15 @@ export interface EffectiveDriver {
   /** False when the Driver was deactivated after this Trip was planned. */
   isActive: boolean;
   source: EffectiveDriverSource;
+  /**
+   * Whether a phone number is recorded, NOT the number itself.
+   *
+   * It exists so the Ritten list can explain a disabled WhatsApp button —
+   * "geen telefoonnummer voor deze chauffeur" reads very differently from
+   * "geen chauffeur gekoppeld". The number stays on the Driver screen, where
+   * somebody asked to see it.
+   */
+  hasPhoneNumber: boolean;
 }
 
 /**

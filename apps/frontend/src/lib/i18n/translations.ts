@@ -294,6 +294,33 @@ const nl = {
   "ritten.menu.viewGroup": "Groep bekijken",
   "ritten.menu.unlink": "Loskoppelen van groep",
   "ritten.menu.delete": "Verwijderen",
+  // Het versturen van de transportopdracht naar de chauffeur via WhatsApp. De
+  // toegankelijke naam zegt voluit wat er gebeurt en aan wie; het zichtbare
+  // label is kort omdat de kolom smal is.
+  "ritten.whatsapp.send": "Versturen",
+  "ritten.whatsapp.sending": "Versturen…",
+  "ritten.whatsapp.action": "PDF naar chauffeur versturen",
+  "ritten.whatsapp.actionFor": "PDF naar chauffeur versturen: {driver}",
+  "ritten.whatsapp.sent": "PDF verzonden naar {driver}",
+  "ritten.whatsapp.failed": "PDF kon niet worden verzonden",
+  "ritten.whatsapp.unavailable.status":
+    "Deze rit is geannuleerd. Heropen de rit voordat je de transportopdracht verstuurt.",
+  "ritten.whatsapp.unavailable.noDriver": "Geen chauffeur gekoppeld",
+  "ritten.whatsapp.unavailable.noPhone":
+    "Geen telefoonnummer voor deze chauffeur",
+  "ritten.whatsapp.unavailable.noDocument": "Geen transportopdracht beschikbaar",
+  "ritten.whatsapp.unavailable.disconnected": "WhatsApp is niet verbonden",
+  // De verbindingstoestand, per toestand verwoord. Een verbinding die zichzelf
+  // herstelt vraagt niets van de operator; alleen bij een koppeling moet er
+  // iemand met een telefoon langskomen.
+  "ritten.whatsapp.status.connected": "Verbonden",
+  "ritten.whatsapp.status.connecting": "Verbinden…",
+  "ritten.whatsapp.status.disconnected":
+    "Verbinding verbroken — opnieuw verbinden…",
+  "ritten.whatsapp.status.pairingRequired":
+    "Koppeling vereist — scan QR-code",
+  "ritten.whatsapp.status.error": "WhatsApp is niet beschikbaar",
+  "ritten.whatsapp.status.disabled": "WhatsApp staat uit in deze omgeving",
   "ritten.menu.restore": "Herstellen",
   "ritten.menu.editDetails": "Details bewerken",
   "ritten.menu.customValues": "Custom waarden",
@@ -1048,6 +1075,27 @@ const tr: Translations = {
   "ritten.menu.viewGroup": "Grubu göster",
   "ritten.menu.unlink": "Gruptan çıkar",
   "ritten.menu.delete": "Sil",
+  "ritten.whatsapp.send": "Gönder",
+  "ritten.whatsapp.sending": "Gönderiliyor…",
+  "ritten.whatsapp.action": "PDF’yi şoföre gönder",
+  "ritten.whatsapp.actionFor": "PDF’yi şoföre gönder: {driver}",
+  "ritten.whatsapp.sent": "PDF {driver} adlı sürücüye gönderildi",
+  "ritten.whatsapp.failed": "PDF gönderilemedi",
+  "ritten.whatsapp.unavailable.status":
+    "Bu sefer iptal edildi. Taşıma emrini göndermeden önce seferi yeniden açın.",
+  "ritten.whatsapp.unavailable.noDriver": "Bağlı şoför yok",
+  "ritten.whatsapp.unavailable.noPhone":
+    "Bu şoför için telefon numarası yok",
+  "ritten.whatsapp.unavailable.noDocument": "Gönderilecek taşıma emri yok",
+  "ritten.whatsapp.unavailable.disconnected": "WhatsApp bağlı değil",
+  "ritten.whatsapp.status.connected": "Bağlı",
+  "ritten.whatsapp.status.connecting": "Bağlanılıyor…",
+  "ritten.whatsapp.status.disconnected":
+    "Bağlantı koptu — yeniden bağlanılıyor…",
+  "ritten.whatsapp.status.pairingRequired":
+    "Eşleştirme gerekli — QR kodu okutun",
+  "ritten.whatsapp.status.error": "WhatsApp kullanılamıyor",
+  "ritten.whatsapp.status.disabled": "WhatsApp bu ortamda kapalı",
   "ritten.menu.restore": "Geri al",
   "ritten.menu.editDetails": "Ayrıntıları düzenle",
   "ritten.menu.customValues": "Özel değerler",

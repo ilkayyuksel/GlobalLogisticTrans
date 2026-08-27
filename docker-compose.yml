@@ -195,6 +195,12 @@ services:
       MAIL_SUBJECT_NEW: ${MAIL_SUBJECT_NEW:-NEW:}
       IMAP_POLL_CRON: ${IMAP_POLL_CRON:-0 */5 * * * *}
 
+      WHATSAPP_ENABLED: ${WHATSAPP_ENABLED:-false}
+      # The compose service name on the internal network. The delivery service
+      # publishes no port and is unreachable from anywhere else.
+      WHATSAPP_SERVICE_URL: http://whatsapp:3200
+      WHATSAPP_SERVICE_TOKEN: ${WHATSAPP_SERVICE_TOKEN:-}
+
     volumes:
       # Transport orders, uploaded and emailed. On a named volume because
       # replacing this container must not delete them.
@@ -224,6 +230,62 @@ services:
       - "traefik.http.routers.backend.entrypoints=websecure"
       - "traefik.http.routers.backend.tls.certresolver=letsencrypt"
       - "traefik.http.services.backend.loadbalancer.server.port=3000"
+
+  # ── WhatsApp delivery ─────────────────────────────────────────────────────
+  # Sends transport orders to drivers. Its own container because it holds a
+  # long-lived WhatsApp Web connection and a logged-in session, neither of which
+  # belongs in an API process that is restarted on every deploy.
+  #
+  # ── UNOFFICIAL, AND ISOLATED FOR THAT REASON ─────────────────────────────
+  # It drives WhatsApp Web through Baileys, which WhatsApp does not support and
+  # which can get a number blocked. Keeping it in one replaceable container is
+  # what makes moving to the official Cloud API a change to this service alone.
+  whatsapp:
+    image: traxo-whatsapp:${TRAXO_VERSION:-latest}
+    build:
+      context: .
+      dockerfile: apps/whatsapp/Dockerfile
+      target: runtime
+
+    restart: unless-stopped
+
+    environment:
+      NODE_ENV: production
+      WHATSAPP_PORT: 3200
+      # Inside the image, always — and the mount point of the session volume.
+      WHATSAPP_SESSION_DIR: /app/session
+      # The shared secret the backend presents. The service refuses to start
+      # without it rather than run an unauthenticated send endpoint.
+      WHATSAPP_SERVICE_TOKEN: ${WHATSAPP_SERVICE_TOKEN:?WHATSAPP_SERVICE_TOKEN is required — the shared secret shared with the backend, at least 24 characters}
+
+    volumes:
+      # THE LOGGED-IN ACCOUNT. Without this volume every restart would land on
+      # an empty directory, WhatsApp would treat the service as a new device,
+      # and somebody would have to scan a QR code after every deploy.
+      #
+      # `docker compose down -v` DELETES it, and pairing then has to be done
+      # again. See the deployment section of the README.
+      - whatsapp_session:/app/session
+
+    # No `ports:` on purpose. Nothing outside the internal network may reach
+    # the send endpoint or the pairing QR.
+    networks:
+      - internal
+
+    healthcheck:
+      # Reports that the PROCESS is alive, deliberately not that WhatsApp is
+      # connected: a service that is up but waiting to be paired is healthy,
+      # because restarting it would not help. The connection state is read
+      # through the backend's /whatsapp/status instead.
+      test:
+        - "CMD"
+        - "node"
+        - "-e"
+        - "fetch('http://127.0.0.1:3200/health').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))"
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
 
   # ── The web application ───────────────────────────────────────────────────
   frontend:
@@ -305,5 +367,7 @@ volumes:
     name: traxo-postgres-data
   pdf_storage:
     name: traxo-pdf-storage
+  whatsapp_session:
+    name: traxo-whatsapp-session
   letsencrypt:
     name: traxo-letsencrypt

@@ -589,6 +589,54 @@ const PARSED_DOCUMENTS: readonly ExpectedDocument[] = [
   },
   {
     /*
+     * BUG-CITY — the country prefix printed in LOWER CASE.
+     *
+     * The address block is four separate fragments in the value column at
+     * x=97.5, one per printed row:
+     *
+     *     y=221  [8580]
+     *     y=209  IVC bvba
+     *     y=197  Nijverheidslaan 29
+     *     y=185  be-8580 Avelgem
+     *
+     * Nothing is fragmented and nothing is mis-grouped — the row-continuation
+     * mechanism added for `62223 SAINT LAURENT BLANGY` is not involved here.
+     * The postcode rule simply required `[A-Z]{1,2}` and this document prints
+     * `be`, so it declined; the bare-postcode rule needs the line to start with
+     * digits; and the bracketed last resort refuses a final line containing a
+     * digit, which this one does. All four rules declined and the order was
+     * refused with "No readable city line was found".
+     *
+     * The `Remarks:` column on the same row carries `loadref 2662001546 …` at
+     * x=350.3, well past the x=295.4 boundary, so it stays out of the address —
+     * which is what the row-continuation boundary was built to guarantee.
+     */
+    file: "BUG-CITY/transportorder1372937.pdf",
+    pageCount: 1,
+    layout: "SINGLE_ONE_PAGE",
+    documentStatus: "PLANNED",
+    trips: [
+      {
+        bookingNumber: "ANRDUB2796313",
+        direction: "COLLECTION",
+        containerType: "45PH",
+        containerNumber: null,
+        terminal: "PSA Quay 869",
+        destinationCity: "Avelgem",
+        // From the document's own `be-` prefix through the existing table —
+        // no postcode-to-country mapping was invented for this fix.
+        destinationCountry: "Belgium",
+        date: "2026-08-28",
+        startTime: "08:00",
+        endTime: "16:00",
+        groupKey: null,
+        page: 1,
+        addressSection: "LOADING 1",
+      },
+    ],
+  },
+  {
+    /*
      * The same bytes as 1368224, filed under a second name. Kept as its own
      * fixture because the duplicate rules are about CONTENT, not filenames:
      * a document re-sent under another name must parse identically.
@@ -1180,6 +1228,7 @@ describe("the addresses that had no readable city line", () => {
     "BUG-CITY/transportorder1370337.pdf",
     "BUG-CITY/transportorder1370345.pdf",
     "BUG-CITY/transportorder1371231.pdf",
+    "BUG-CITY/transportorder1372937.pdf",
   ])("keeps %s's city free of postcodes and punctuation", async (file) => {
     const result = await parseFixture(file);
 
@@ -1190,6 +1239,91 @@ describe("the addresses that had no readable city line", () => {
     expect(destinationCity).not.toMatch(/\d/);
     expect(destinationCity).not.toMatch(/[,;]/);
     expect(destinationCity.trim()).toBe(destinationCity);
+  });
+
+  /**
+   * ── THE COUNTRY PREFIX IN LOWER CASE ──────────────────────────────────────
+   * This order prints its address as
+   *
+   *     [8580]
+   *     IVC bvba
+   *     Nijverheidslaan 29
+   *     be-8580 Avelgem
+   *
+   * Four fragments, four printed rows, nothing split and nothing mis-grouped —
+   * the row-continuation mechanism below is not involved. The postcode rule
+   * required an UPPER-CASE prefix and this document prints `be`, so it
+   * declined; the bare-postcode rule needs the line to begin with digits; and
+   * the bracketed last resort refuses a final line containing a digit. All four
+   * declined, and an order naming its destination unmistakably was refused.
+   *
+   * Every assertion below names something the parser must NOT have taken
+   * instead — each was physically closer to the answer than the city.
+   * ──────────────────────────────────────────────────────────────────────────
+   */
+  describe("a country prefix printed in lower case", () => {
+    const FILE = "BUG-CITY/transportorder1372937.pdf";
+
+    async function trip() {
+      const result = await parseFixture(FILE);
+
+      if (!result.ok) {
+        throw new Error(`expected a parse: ${result.reason} — ${result.message}`);
+      }
+
+      return result.trips[0];
+    }
+
+    it("reads the city from the lower-case postcode line", async () => {
+      expect((await trip()).destinationCity).toBe("Avelgem");
+    });
+
+    /** The document's own prefix, through the existing table. Nothing new. */
+    it("resolves the country the document states", async () => {
+      expect((await trip()).destinationCountry).toBe("Belgium");
+    });
+
+    it.each([
+      ["the company name", "IVC bvba"],
+      ["the street", "Nijverheidslaan 29"],
+      ["the bare postcode", "8580"],
+      ["the prefixed postcode", "be-8580"],
+      ["the whole postcode line", "be-8580 Avelgem"],
+      ["the bracketed reference", "[8580]"],
+    ])("never reads %s as the city", async (_name, wrong) => {
+      expect((await trip()).destinationCity).not.toBe(wrong);
+    });
+
+    /**
+     * The sender's note sits in the Remarks column on the SAME row as the
+     * bracketed reference, at x=350.3 against the address column's x=97.5. The
+     * row-continuation boundary is what keeps it out, and it must keep working
+     * for an address the city rule can now read.
+     */
+    it("keeps the loading reference out of the address", async () => {
+      const parsed = await trip();
+
+      expect(parsed.raw.rawAddress).not.toMatch(/loadref/i);
+      expect(parsed.raw.rawAddress).not.toContain("2662001546");
+      expect(parsed.raw.rawAddress).not.toMatch(/Roay|ashbourne/i);
+    });
+
+    /** The block survives whole as evidence, in printed order. */
+    it("keeps the address block as raw evidence", async () => {
+      expect((await trip()).raw.rawAddress).toBe(
+        "[8580] IVC bvba Nijverheidslaan 29 be-8580 Avelgem",
+      );
+    });
+
+    it("reads the rest of the order unchanged", async () => {
+      const parsed = await trip();
+
+      expect(parsed.bookingNumber).toBe("ANRDUB2796313");
+      expect(parsed.containerType).toBe("45PH");
+      expect(parsed.date).toBe("2026-08-28");
+      expect(parsed.startTime).toBe("08:00");
+      expect(parsed.endTime).toBe("16:00");
+    });
   });
 
   /**

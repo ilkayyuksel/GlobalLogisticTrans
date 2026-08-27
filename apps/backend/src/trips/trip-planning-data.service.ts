@@ -313,6 +313,15 @@ function toEffectiveDriver(
     name: driver.name,
     isActive: driver.isActive,
     source,
+    /*
+     * WHETHER there is a number, never the number itself. The Ritten list needs
+     * to explain a disabled WhatsApp button — "this driver has no phone number"
+     * reads very differently from "no driver is linked" — and a boolean answers
+     * that without putting every driver's contact details into every page of
+     * every Trip list. The number stays on the Driver screen, where somebody
+     * asked to see it.
+     */
+    hasPhoneNumber: (driver.phoneNumber ?? "").trim() !== "",
   };
 }
 

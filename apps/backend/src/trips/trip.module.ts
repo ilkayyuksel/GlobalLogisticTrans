@@ -67,6 +67,9 @@ import { TripService } from "./trip.service";
   // TripRevisionService is exported for the import boundary: a cancellation or
   // a revision arrives as a document, and the rules for both live in the Trip
   // domain rather than in whichever transport carried the document.
-  exports: [TripService, TripRevisionService],
+  // TripDocumentsService is exported for the WhatsApp module: deciding WHICH
+  // transport order to send a driver is a question about a Trip's document
+  // history, and that history has exactly one owner.
+  exports: [TripService, TripRevisionService, TripDocumentsService],
 })
 export class TripModule {}

@@ -44,6 +44,16 @@ export interface RittenActions {
    * an operator a transport order where they asked for the money.
    */
   openCostConfirmationPdf: (trip: Trip) => void;
+  /**
+   * Sends the Trip's transport order to its driver over WhatsApp.
+   *
+   * DELIBERATELY NOT A MUTATION. It changes nothing about the Trip — not the
+   * status, not the driver, not the document history — so unlike every other
+   * action here it does not refetch the list afterwards. There would be nothing
+   * new to fetch, and a table that flickered after a send would suggest
+   * otherwise.
+   */
+  sendPdf: (trip: Trip) => Promise<void>;
 }
 
 /** Translations for the transitions `statusActionsFor` offers. */

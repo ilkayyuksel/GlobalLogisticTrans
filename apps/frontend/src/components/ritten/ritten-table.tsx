@@ -30,6 +30,7 @@ import {
 } from "@/lib/ritten/row-actions";
 import { InlineCell, type InlineOption } from "./inline-cell";
 import { WaitingTimeCell } from "./waiting-time-cell";
+import type { WhatsAppStatus } from "@/lib/api/whatsapp";
 import { RowLifecycleActions } from "./row-lifecycle-actions";
 
 /**
@@ -129,6 +130,8 @@ export interface RittenTableProps {
   showPricing: boolean;
   /** The stored snapshots of the Trips on this page, keyed by Trip id. */
   pricingByTripId: ReadonlyMap<string, PricingSnapshot>;
+  /** Whether WhatsApp can deliver, for the send button. One value per page. */
+  whatsAppStatus: WhatsAppStatus;
   /** Opens the delete confirmation. A row never deletes anything itself. */
   onDeleteTrip: (trip: Trip) => void;
   /** Opens the reopen confirmation, for a CANCELLED Trip. */
@@ -227,6 +230,7 @@ function RittenRow({
   onToggleSelection,
   showPricing,
   pricingByTripId,
+  whatsAppStatus,
   onDeleteTrip,
   onReopenTrip,
 }: RittenTableProps & { trip: Trip }) {
@@ -454,6 +458,7 @@ function RittenRow({
           trip={trip}
           actions={actions}
           isBusy={isBusy}
+          whatsAppStatus={whatsAppStatus}
           onDelete={onDeleteTrip}
           onReopen={onReopenTrip}
         />

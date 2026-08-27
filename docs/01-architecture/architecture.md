@@ -28,17 +28,21 @@ The objective is to keep the application maintainable, testable and scalable as 
                     │   Backend    │
                     └──────┬───────┘
                            │
-          ┌────────────────┼────────────────┐
-          │                │                │
-          ▼                ▼                ▼
-    PostgreSQL      Pricing Engine     Auth0
-          ▲                │
-          └────────────────┘
-                           │
+          ┌────────────────┼────────────────┬────────────────┐
+          │                │                │                │
+          ▼                ▼                ▼                ▼
+    PostgreSQL      Pricing Engine     Auth0          WhatsApp Service
+          ▲                │                                 │
+          └────────────────┘                                 ▼
+                           │                            WhatsApp
                            ▼
                     ┌──────────────┐
                     │  Frontend    │
                     └──────────────┘
+
+Documents flow INWARD from the mailbox and OUTWARD to drivers. The WhatsApp
+service is the only outbound leg, and the only one talking to a system this
+business does not control.
 
 ---
 
@@ -181,6 +185,105 @@ The email service never:
 - modifies business data
 
 Its only responsibility is orchestration.
+
+---
+
+# WhatsApp Service
+
+## Purpose
+
+The WhatsApp service delivers a Trip's transport order to its driver.
+
+It is the mirror image of the email service: that one carries documents in, this
+one carries them out. It runs as its own container because it holds a long-lived
+WhatsApp Web connection and a logged-in session, neither of which belongs in an
+API process that is replaced on every deploy.
+
+Responsibilities:
+
+- hold the WhatsApp connection
+- persist the session across restarts
+- expose the pairing QR to an authenticated caller
+- report whether it can currently deliver
+- relay one PDF to one phone number
+
+The WhatsApp service never:
+
+- reads the database
+- reads the filesystem
+- decides which driver or which document
+- modifies business data
+
+It receives bytes and a number that the Backend derived from a Trip. Every
+domain decision — the effective driver, the latest applicable transport
+document, whether the Trip may be sent for at all — is made in the Backend,
+against the database, before this service is called.
+
+## The unofficial transport
+
+The connection is driven by Baileys, an open-source WhatsApp Web client. This is
+NOT an integration WhatsApp supports, and it can result in the number being
+blocked. It is a deliberate first step.
+
+The Backend therefore depends on an interface, `WhatsAppSender`, and never on
+Baileys. Baileys is imported in exactly one file of one service. Replacing the
+unofficial transport with the official WhatsApp Cloud API is a new
+implementation of that interface plus a different delivery service — no change
+to Trips, documents, drivers or pricing.
+
+## Sending changes nothing
+
+A send is an outward operational action. It performs no write of any kind: not
+the Trip's status, its driver, its vehicle, its planning date, its document
+history, its pricing or its waiting time. A failed send therefore cannot corrupt
+a Trip, because a successful one does not touch it either.
+
+Nothing sends automatically. An arriving NEW or UPDATE, a Trip being created, a
+driver or vehicle changing — none of these deliver anything. An operator presses
+a button, because a document reaching a driver is a commitment and a person
+should make it.
+
+## Session state
+
+The pairing keys are files on a Docker volume, and those files ARE the
+logged-in account: anyone holding them can send as the company. They are never
+logged, never returned by an endpoint, never committed, and the container that
+holds them publishes no port and sits on the internal network only.
+
+A restart reuses the session. Only `docker compose down -v`, or WhatsApp logging
+the device out, requires scanning a QR code again.
+
+## Staying connected
+
+A WhatsApp Web socket closes often — a dropped network, a server restart, a
+timeout, a stream error — and the stored session stays valid through all of it.
+Treating any of those as a logout is what makes somebody scan a QR code every
+morning, so the service does not:
+
+- every close is classified by ONE decision function against Baileys' own
+  disconnect code, never by the fact that the socket closed;
+- the default for an unrecognised code is to RECONNECT, because guessing
+  "logged out" costs a person a trip to their phone while guessing the other
+  way costs one more attempt;
+- reconnects back off 1s, 2s, 5s, 10s, 30s and reset on success;
+- exactly three codes clear the session — the phone unlinking the device, a
+  session that no longer decrypts, and a multi-device mismatch. Each is WhatsApp
+  stating the credentials are dead;
+- a blocked account is reported as an error rather than as a pairing problem,
+  because re-pairing would not help either.
+
+Only ONE socket is ever live. Each is stamped with a generation number and
+events from a superseded socket are ignored — without that, a closing socket's
+late events start reconnects of their own, two sockets end up fighting over one
+session, and WhatsApp resolves the fight by logging the device out.
+
+Credential writes are serialised onto a single chain and awaited during
+shutdown. A fire-and-forget save can interleave with the next one and leave a
+half-written file, or be lost entirely to process exit — either way the next
+start finds credentials it cannot load.
+
+A QR code is offered only while the status is PAIRING_REQUIRED. A transient
+disconnect reports DISCONNECTED and returns no QR at all.
 
 ---
 

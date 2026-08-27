@@ -27,3 +27,13 @@ allowBuilds:
   # Next.js image optimiser. The frontend serves no images, so the native build
   # is dead weight; Next falls back to its JavaScript path without it.
   sharp: false
+  # WhatsApp Web client. Its install script fetches an optional native bridge.
+  # Denied and MEASURED, not assumed: with the script skipped the library still
+  # loads, opens a real connection to WhatsApp and issues a pairing QR — checked
+  # against the running service before this entry was written. Allowing it would
+  # mean running a downloaded binary inside the one container that holds a
+  # logged-in WhatsApp account.
+  "@whiskeysockets/baileys": false
+  # Pulled in by Baileys. Its install script only regenerates protobuf helpers
+  # that already ship inside the package.
+  protobufjs: false

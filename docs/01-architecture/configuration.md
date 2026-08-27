@@ -250,6 +250,40 @@ Fallback Behaviour
 
 ---
 
+# WhatsApp
+
+Sending a Trip's transport order to its driver. Off unless switched on, so a
+developer with no WhatsApp service running is unaffected: the Ritten list
+reports DISABLED and the send button explains itself rather than failing.
+
+WHATSAPP_ENABLED
+
+Whether sending is available at all. When false the Backend needs neither
+setting below and injects a sender that refuses every send honestly.
+
+WHATSAPP_SERVICE_URL
+
+Where the delivery service listens, on the internal network. A compose service
+name in Docker; never a public URL — the service holds a logged-in WhatsApp
+account and must not be reachable from the internet.
+
+WHATSAPP_SERVICE_TOKEN
+
+The shared secret between the Backend and the delivery service, at least 24
+characters. It is the WHOLE of that service's access control: anything on the
+internal network holding it can send WhatsApp messages as the company. Validated
+at boot on both sides rather than discovered when a send returns 401. Never
+logged, never returned by an endpoint, never stored in a Setting.
+
+The delivery service itself reads WHATSAPP_PORT and WHATSAPP_SESSION_DIR.
+
+There is deliberately NO configured phone number. The account is whichever one
+scanned the pairing QR, and the session on disk is the identity — a number in
+the environment would be a second, unenforced claim about who the service is,
+and the two could disagree.
+
+---
+
 # Pricing
 
 Configuration includes:

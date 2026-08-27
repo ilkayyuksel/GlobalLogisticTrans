@@ -42,6 +42,11 @@ import {
   fetchPricingSnapshots,
 } from "@/lib/api/pricing";
 import { getRittenCounts } from "@/lib/api/ritten";
+import {
+  fetchWhatsAppStatus,
+  sendTripPdfOverWhatsApp,
+  type WhatsAppStatus,
+} from "@/lib/api/whatsapp";
 import { canComplete } from "@/lib/trip-actions";
 import {
   changeTripStatus,
@@ -138,6 +143,22 @@ interface Feedback {
   readonly messageKey: TranslationKey;
   readonly detail?: string;
   readonly isError: boolean;
+  /**
+   * Placeholders to fill into the translated sentence, as `{name}`.
+   *
+   * The first message whose wording depends on data — "PDF verzonden naar Jan
+   * Peeters" — and appending the name after a dash would read like an error
+   * detail rather than part of the sentence.
+   */
+  readonly values?: Readonly<Record<string, string>>;
+}
+
+/** Fills `{placeholders}` in a translated sentence. */
+function fill(text: string, values: Readonly<Record<string, string>> = {}): string {
+  return Object.entries(values).reduce(
+    (filled, [name, value]) => filled.replace(`{${name}}`, value),
+    text,
+  );
 }
 
 /** One shared empty map, so a render with no pricing changes no identity. */
@@ -264,6 +285,24 @@ export default function RittenPage() {
     useCallback((signal: AbortSignal) => listActiveVehicles(signal), []),
     [],
   );
+
+  /*
+   * Whether WhatsApp can deliver anything, fetched ONCE for the whole page
+   * rather than per row: it is a property of the service, not of a Trip, and a
+   * request per row would be a hundred identical questions.
+   *
+   * A page that cannot reach the status endpoint treats WhatsApp as
+   * unavailable. That is the safe direction — the button explains itself and
+   * the backend refuses anyway — where assuming CONNECTED would offer a send
+   * that can only fail.
+   */
+  const whatsApp = useAsync(
+    useCallback(() => fetchWhatsAppStatus(), []),
+    [],
+  );
+  const whatsAppStatus: WhatsAppStatus = whatsApp.data
+    ? whatsApp.data.status
+    : "ERROR";
 
   /**
    * What the terminal and Custom-waarde filters can offer.
@@ -640,6 +679,35 @@ export default function RittenPage() {
      * update endpoint — no status change, no planning change, no identity
      * change, no pricing and no document touched.
      */
+    /*
+     * Sending is an OUTWARD action: it reads a Trip and hands a document to
+     * WhatsApp. Nothing is written, so this deliberately does not go through
+     * `runMutation` — no reload of the list, no reload of the pricing, and no
+     * chance that a failed send is mistaken for a failed change.
+     */
+    sendPdf: async (trip) => {
+      setFeedback(null);
+
+      try {
+        const { driverName } = await sendTripPdfOverWhatsApp(trip.id);
+
+        setFeedback({
+          messageKey: "ritten.whatsapp.sent",
+          values: { driver: driverName },
+          isError: false,
+        });
+      } catch (error: unknown) {
+        // The backend's own sentence — "WhatsApp is niet verbonden", "Jan
+        // Peeters heeft geen telefoonnummer" — never a status code or a stack.
+        setFeedback({
+          messageKey: "ritten.whatsapp.failed",
+          detail: userFacingMessage(error),
+          isError: true,
+        });
+
+        throw error;
+      }
+    },
     removeLosrit: (trip) =>
       runMutation(
         trip,
@@ -772,7 +840,9 @@ export default function RittenPage() {
           ].join(" ")}
         >
           <span>
-            <span className="font-medium">{t(feedback.messageKey)}</span>
+            <span className="font-medium">
+              {fill(t(feedback.messageKey), feedback.values)}
+            </span>
             {feedback.detail ? ` — ${feedback.detail}` : ""}
           </span>
           <button
@@ -840,8 +910,9 @@ export default function RittenPage() {
                   onToggleSelection={toggleSelection}
                   showPricing={showPricing}
                   pricingByTripId={pricingByTripId}
-              onDeleteTrip={setDeletingTrip}
-              onReopenTrip={setReopeningTrip}
+                  whatsAppStatus={whatsAppStatus}
+                  onDeleteTrip={setDeletingTrip}
+                  onReopenTrip={setReopeningTrip}
                 />
               ))}
             </div>

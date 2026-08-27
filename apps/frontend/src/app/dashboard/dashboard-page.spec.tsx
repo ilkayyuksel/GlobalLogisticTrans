@@ -124,6 +124,7 @@ function buildTrip(overrides: Partial<Trip> = {}): Trip {
       name: "Piet Janssens",
       isActive: true,
       source: "VEHICLE_ASSIGNMENT",
+      hasPhoneNumber: true,
     },
     latestUpdate: null,
     costConfirmation: null,

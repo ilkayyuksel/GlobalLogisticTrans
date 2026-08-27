@@ -25,6 +25,7 @@ const PIET = {
   name: "Piet Janssens",
   isActive: true,
   source: "VEHICLE_ASSIGNMENT" as const,
+  hasPhoneNumber: true,
 };
 
 const AHMET = {
@@ -32,6 +33,7 @@ const AHMET = {
   name: "Ahmet Yılmaz",
   isActive: true,
   source: "VEHICLE_ASSIGNMENT" as const,
+  hasPhoneNumber: true,
 };
 
 const STAND_IN = {
@@ -39,6 +41,7 @@ const STAND_IN = {
   name: "Marc Vermeulen",
   isActive: true,
   source: "OVERRIDE" as const,
+  hasPhoneNumber: true,
 };
 
 /**

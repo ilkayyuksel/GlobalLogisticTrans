@@ -256,6 +256,7 @@ describe("Ritten table", () => {
             name: "Ayşe Yılmaz",
             isActive: false,
             source: "VEHICLE_ASSIGNMENT",
+            hasPhoneNumber: true,
           },
           latestUpdate: null,
           costConfirmation: null,

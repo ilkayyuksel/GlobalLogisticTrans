@@ -8,6 +8,7 @@ import {
   IsString,
   Max,
   Min,
+  MinLength,
   Validate,
   ValidateIf,
   ValidationArguments,
@@ -72,6 +73,16 @@ const DEFAULT_MAIL_SUBJECT_NEW = "NEW:";
 
 /** Implicit TLS on 993 is the norm for IMAP and what every hosted mailbox uses. */
 const DEFAULT_IMAP_PORT = 993;
+
+/**
+ * The shortest WhatsApp service token this backend will present.
+ *
+ * It is the only thing standing between anything on the internal network and
+ * the ability to send WhatsApp messages as the company, so a short one is
+ * refused at boot rather than warned about. The delivery service enforces the
+ * same minimum on its own side.
+ */
+const WHATSAPP_SERVICE_TOKEN_MIN_LENGTH = 24;
 
 /** Every five minutes: orders arrive a few times a day, not continuously. */
 const DEFAULT_IMAP_POLL_CRON = "0 */5 * * * *";
@@ -314,6 +325,42 @@ export class EnvironmentVariables {
   @Transform(parseBoolean(false))
   @IsBoolean()
   ENABLE_IMAP: boolean = false;
+
+  /**
+   * Whether transport orders can be sent to drivers over WhatsApp.
+   *
+   * Off by default, and the switch that makes the two settings below
+   * conditional. A developer with no WhatsApp service running must still be
+   * able to start the backend and open the Ritten list: with this off, the
+   * send button reports DISABLED and refuses cleanly rather than failing.
+   */
+  @Transform(parseBoolean(false))
+  @IsBoolean()
+  WHATSAPP_ENABLED: boolean = false;
+
+  /**
+   * Where the WhatsApp delivery service listens, on the internal network.
+   *
+   * A compose service name, never a public URL: the delivery service holds the
+   * WhatsApp session and must not be reachable from the internet at all.
+   */
+  @ValidateIf((environment: EnvironmentVariables) => environment.WHATSAPP_ENABLED)
+  @IsString()
+  @IsNotEmpty()
+  WHATSAPP_SERVICE_URL: string = "";
+
+  /**
+   * The shared secret this backend presents to the delivery service.
+   *
+   * The whole of that service's access control, so it is validated at boot
+   * rather than discovered when a send returns 401. Never logged, never
+   * returned by an endpoint, never stored in a Setting.
+   */
+  @ValidateIf((environment: EnvironmentVariables) => environment.WHATSAPP_ENABLED)
+  @IsString()
+  @IsNotEmpty()
+  @MinLength(WHATSAPP_SERVICE_TOKEN_MIN_LENGTH)
+  WHATSAPP_SERVICE_TOKEN: string = "";
 
   @ValidateIf((environment: EnvironmentVariables) => environment.ENABLE_IMAP)
   @IsString()

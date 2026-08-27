@@ -1,6 +1,8 @@
 "use client";
 
 import type { Trip } from "@/lib/api/types";
+import type { WhatsAppStatus } from "@/lib/api/whatsapp";
+import { SendPdfButton } from "./send-pdf-button";
 import { useTranslation } from "@/lib/i18n/language-provider";
 import { STATUS_LABEL_KEYS, type RittenActions } from "@/lib/ritten/row-actions";
 import { canDelete, primaryRowAction } from "@/lib/trip-actions";
@@ -46,12 +48,14 @@ export function RowLifecycleActions({
   trip,
   actions,
   isBusy,
+  whatsAppStatus,
   onDelete,
   onReopen,
 }: {
   trip: Trip;
   actions: RittenActions;
   isBusy: boolean;
+  whatsAppStatus: WhatsAppStatus;
   /** Opens the confirmation. The row never deletes anything itself. */
   onDelete: (trip: Trip) => void;
   /**
@@ -116,6 +120,18 @@ export function RowLifecycleActions({
           {t("ritten.menu.delete")}
         </button>
       ) : null}
+
+      {/*
+        Last in the strip, after the lifecycle. Sending is not a state change —
+        it hands a driver a document — so it sits beside the transitions rather
+        than among them, and it never confirms.
+      */}
+      <SendPdfButton
+        trip={trip}
+        whatsAppStatus={whatsAppStatus}
+        isBusy={isBusy}
+        onSend={actions.sendPdf}
+      />
     </span>
   );
 }

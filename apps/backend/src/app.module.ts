@@ -28,6 +28,7 @@ import { TripPricingModule } from "./trip-pricing/trip-pricing.module";
 import { TripModule } from "./trips/trip.module";
 import { VehicleAssignmentModule } from "./vehicle-assignments/vehicle-assignment.module";
 import { VehicleModule } from "./vehicles/vehicle.module";
+import { WhatsAppModule } from "./whatsapp/whatsapp.module";
 
 /**
  * Composition root.
@@ -73,6 +74,7 @@ import { VehicleModule } from "./vehicles/vehicle.module";
     PdfDocumentModule,
     PdfImportModule,
     ImapModule,
+    WhatsAppModule,
   ],
   providers: [
     {

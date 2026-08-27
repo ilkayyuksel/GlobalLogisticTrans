@@ -1,5 +1,7 @@
 import { render } from "@testing-library/react";
 
+import { ApiError } from "@/lib/api/client";
+
 import RittenPage from "./page";
 import type { Paginated, Trip } from "@/lib/api/types";
 import { LanguageProvider } from "@/lib/i18n/language-provider";
@@ -36,6 +38,7 @@ export function buildTrip(overrides: Partial<Trip> = {}): Trip {
       name: "Piet Janssens",
       isActive: true,
       source: "VEHICLE_ASSIGNMENT",
+      hasPhoneNumber: true,
     },
     latestUpdate: null,
     costConfirmation: null,
@@ -108,6 +111,24 @@ export interface BackendResponses {
   pricing?: unknown;
   /** The id a manual grouping request answers with. */
   createdGroupId?: string;
+  /**
+   * What the WhatsApp status endpoint reports.
+   *
+   * CONNECTED by default, so the send button is offered in every spec that is
+   * not about WhatsApp. A spec testing an outage says so explicitly.
+   */
+  whatsAppStatus?: string;
+  /** The driver a successful send reports having reached. */
+  sentToDriverName?: string;
+  /**
+   * The refusal a send answers with, as the backend would word it.
+   *
+   * Routed here rather than through `mockRejectedValueOnce`, which queues
+   * against the NEXT request of any kind — and the page makes several. A
+   * refusal that landed on the Trip list instead of the send made one spec fail
+   * and left the queued rejection to break the one after it.
+   */
+  sendFailureMessage?: string;
 }
 
 /**
@@ -166,6 +187,38 @@ export function respondWith(
 
     if (path === "/api/v1/drivers") {
       return Promise.resolve(page(responses.drivers ?? [DRIVER]));
+    }
+
+    if (path === "/api/v1/whatsapp/status") {
+      return Promise.resolve({
+        status: responses.whatsAppStatus ?? "CONNECTED",
+      });
+    }
+
+    // A successful send, answered as the backend answers it. A spec testing a
+    // refusal overrides this call with its own rejection.
+    if (path.endsWith("/whatsapp/send-pdf") && method === "POST") {
+      if (responses.sendFailureMessage) {
+        /*
+         * An ApiError, not a bare Error. `userFacingMessage` shows the
+         * backend's own sentence only for the former and a generic apology for
+         * anything else — so a plain Error here would test the fallback path
+         * while appearing to test the message.
+         */
+        return Promise.reject(
+          new ApiError(
+            "SERVICE_UNAVAILABLE",
+            responses.sendFailureMessage,
+            503,
+          ),
+        );
+      }
+
+      return Promise.resolve({
+        delivered: true,
+        driverName: responses.sentToDriverName ?? DRIVER.name,
+        filename: "transport-order.pdf",
+      });
     }
 
     // The export reads stored pricing in bulk, and the configured fuel
@@ -279,7 +332,31 @@ export function lastListCall(request: RequestMock): Record<string, unknown> {
   return calls[calls.length - 1] ?? {};
 }
 
-export function renderRitten() {
+/**
+ * The Ritten page, in a chosen language and theme.
+ *
+ * Both providers read the real sources — localStorage for the language, the
+ * `dark` class the pre-paint script applies for the theme — so seeding those is
+ * how a spec chooses. Setting provider props instead would test a code path the
+ * application never takes.
+ */
+export function renderRitten({
+  language,
+  theme,
+}: { language?: "nl" | "tr"; theme?: "light" | "dark" } = {}) {
+  /*
+   * Only when the caller ASKS. Older specs set `tms.language` themselves before
+   * rendering, and defaulting either of these would silently overwrite that —
+   * which it did, turning every Turkish assertion in the suite Dutch.
+   */
+  if (language) {
+    window.localStorage.setItem("tms.language", language);
+  }
+
+  if (theme) {
+    document.documentElement.classList.toggle("dark", theme === "dark");
+  }
+
   return render(
     <ThemeProvider>
       <LanguageProvider>

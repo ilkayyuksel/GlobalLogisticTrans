@@ -366,6 +366,7 @@ describe("The vehicle picker", () => {
               name: "Jan Peeters",
               isActive: true,
               source: "VEHICLE_ASSIGNMENT",
+              hasPhoneNumber: true,
             },
             latestUpdate: null,
             costConfirmation: null,

@@ -30,8 +30,32 @@ const STARTPOINT_LABEL = "Startpoint:";
  * diagnostics even though only the city and country are stored.
  */
 
-/** `CC-NNNNN City` — the one line that identifies where a trip actually goes. */
-export const POSTCODE_LINE = /^([A-Z]{1,2})\s*-\s*(\d{4,5})\s+(.+)$/;
+/**
+ * `CC-NNNNN City` — the one line that identifies where a trip actually goes.
+ *
+ * ── THE PREFIX IS CASE-INSENSITIVE, AND HAS TO BE ───────────────────────────
+ * It was `[A-Z]{1,2}` and every fixture agreed, because every fixture printed
+ * `F-62119 DOURGES`, `FR-59166 Bousbecque`, `BE-9130 Kallo`. Then a real order
+ * arrived printing its own address in lower case:
+ *
+ *     [8580]
+ *     IVC bvba
+ *     Nijverheidslaan 29
+ *     be-8580 Avelgem          <- `be`, not `BE`
+ *
+ * and this rule did not match it. Neither did any of the others: the bare-
+ * postcode rule needs the line to START with digits, and the bracketed
+ * last-resort refuses a final line containing a digit — which `be-8580
+ * Avelgem` does. So all four rules declined and a document naming its
+ * destination unmistakably was reported as having no readable city.
+ *
+ * Letter case is a typographical choice by whoever filled in the form. It says
+ * nothing about what the line MEANS, so it must not decide whether the line is
+ * read. The country lookup already upper-cases the prefix before consulting the
+ * table, so `be` and `BE` resolve identically.
+ * ────────────────────────────────────────────────────────────────────────────
+ */
+export const POSTCODE_LINE = /^([A-Za-z]{1,2})\s*-\s*(\d{4,5})\s+(.+)$/;
 
 /**
  * `NNNN City` — the same line without its country prefix.

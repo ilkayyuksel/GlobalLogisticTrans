@@ -28,6 +28,14 @@ coverage/
 traefik/acme.json
 traefik/*.json
 
+# The WhatsApp session. These files ARE the logged-in WhatsApp account: anyone
+# holding them can send messages as the company. They live in a named Docker
+# volume, so nothing should appear here — this entry exists so a session cannot
+# be committed by a developer who ran the service from source.
+apps/whatsapp/session/
+session/
+*.creds.json
+
 # Logs
 *.log
 

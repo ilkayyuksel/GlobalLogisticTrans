@@ -86,6 +86,12 @@ export class EffectiveDriverDto {
 
   @ApiProperty({ enum: EffectiveDriverSource })
   source!: EffectiveDriverSource;
+
+  @ApiProperty({
+    description:
+      "Whether a phone number is recorded for this Driver. The number itself is deliberately absent: this exists so a client can explain why sending a transport order over WhatsApp is unavailable, not so it can dial.",
+  })
+  hasPhoneNumber!: boolean;
 }
 
 /**
