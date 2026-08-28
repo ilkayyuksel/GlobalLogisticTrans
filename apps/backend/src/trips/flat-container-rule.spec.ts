@@ -16,7 +16,7 @@ describe("requiresFlatProperty", () => {
     expect(requiresFlatProperty(containerType)).toBe(true);
   });
 
-  it.each(["45PH", "45OS", "45RH", "40FL", "20TK", "20RF"])(
+  it.each(["45PH", "45OS", "45RH", "20TK", "20RF"])(
     "does not require it for %s",
     (containerType) => {
       expect(requiresFlatProperty(containerType)).toBe(false);

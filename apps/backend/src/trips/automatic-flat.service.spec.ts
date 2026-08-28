@@ -184,7 +184,7 @@ describe("AutomaticFlatPropertyService", () => {
       expect(flatRow()).toBeUndefined();
     });
 
-    it.each(["45OS", "45RH", "40FL"])(
+    it.each(["45OS", "45RH", "45PH"])(
       "removes it when the type becomes %s",
       async (type) => {
         given(FLAT_ID, true);

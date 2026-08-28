@@ -42,6 +42,7 @@ import {
   fetchPricingSnapshots,
 } from "@/lib/api/pricing";
 import { getRittenCounts } from "@/lib/api/ritten";
+import { TooManyTripsError, fetchPeriodTrips } from "@/lib/api/trip-pages";
 import {
   fetchWhatsAppStatus,
   sendTripPdfOverWhatsApp,
@@ -256,13 +257,32 @@ export default function RittenPage() {
 
   const pageSizeForView = PAGE_SIZE_BY_VIEW[view];
 
+  /*
+   * ── A PERIOD IS LOADED WHOLE; A DAY IS PAGED ──────────────────────────────
+   * The Week and Month headings name every day of the period, so the list
+   * behind them has to hold every day of it. Loading one page instead was a
+   * real bug: a week of 142 Trips came back as page one of two, the sections
+   * were built from those 100 rows, and Monday — which sorts LAST, because the
+   * backend orders `planningDate` descending — rendered empty underneath a
+   * counter that said 142.
+   *
+   * `fetchPeriodTrips` collects the pages sequentially and returns them as one,
+   * so nothing downstream has to know: the sections, the pagination control and
+   * the truncation notice all still read a `Paginated<Trip>`. 142 Trips is ONE
+   * request at 200 a page; a busy month of 600 is three.
+   *
+   * The DAY view keeps ordinary pagination. Its screen promises one day and a
+   * page control, not a complete period, and it is already explicit about it.
+   */
   const trips = useAsync(
     useCallback(
       (signal: AbortSignal) =>
-        listTrips({ ...query, page, pageSize: pageSizeForView }, signal),
-      [query, page, pageSizeForView],
+        view === "day"
+          ? listTrips({ ...query, page, pageSize: pageSizeForView }, signal)
+          : fetchPeriodTrips(query, signal),
+      [view, query, page, pageSizeForView],
     ),
-    [query, page, pageSizeForView],
+    [view, query, page, pageSizeForView],
   );
 
   const counts = useAsync(
@@ -377,7 +397,20 @@ export default function RittenPage() {
   );
 
   const isFiltered = hasActiveRittenFilters(filters);
+  /*
+   * Only the DAY view can now show a partial result, and it says so through its
+   * page control rather than through this notice. A period that loaded is
+   * complete by construction — `fetchPeriodTrips` returns everything or throws
+   * — so `totalPages > 1` can no longer happen there.
+   */
   const isTruncated = (trips.data?.meta.totalPages ?? 1) > 1;
+  /*
+   * The one case where a period genuinely cannot be shown: more Trips than the
+   * bounded fetch may collect. It is an ERROR rather than a quiet partial list,
+   * because a partial list that looks complete is what this whole change exists
+   * to remove.
+   */
+  const isPeriodTooLarge = trips.error instanceof TooManyTripsError;
   // The table stays on screen during a refetch: collapsing it after every save
   // would throw the operator out of the row they were working in.
   const isFirstLoad = trips.isLoading && !trips.data;
@@ -857,7 +890,21 @@ export default function RittenPage() {
 
       {isFirstLoad ? <LoadingState label={t("ritten.loading")} /> : null}
 
-      {!isFirstLoad && trips.error ? (
+      {/*
+        A period too large to load is not a failure to explain away: it is shown
+        as its own state, saying what to do about it, and NEVER as a partial
+        list that reads like a complete one.
+      */}
+      {!isFirstLoad && isPeriodTooLarge ? (
+        <p
+          role="status"
+          className="rounded-md border border-warning/30 bg-warning/5 px-4 py-2 text-sm text-foreground"
+        >
+          {t("ritten.truncation.notice")}
+        </p>
+      ) : null}
+
+      {!isFirstLoad && trips.error && !isPeriodTooLarge ? (
         <ErrorState error={trips.error} onRetry={trips.reload} />
       ) : null}
 
@@ -918,7 +965,13 @@ export default function RittenPage() {
             </div>
           )}
 
-          <RittenPagination meta={trips.data.meta} onChange={setPage} />
+          {/*
+            The DAY view pages. A period is loaded whole, so a control offering
+            page 2 of 1 would be furniture that means nothing.
+          */}
+          {view === "day" ? (
+            <RittenPagination meta={trips.data.meta} onChange={setPage} />
+          ) : null}
         </>
       ) : null}
 

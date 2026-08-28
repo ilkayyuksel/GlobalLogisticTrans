@@ -168,7 +168,7 @@ const nl = {
   "ritten.pagination.of": "van",
   "ritten.pagination.page": "Pagina",
   "ritten.truncation.notice":
-    "Deze periode past niet op één pagina. De secties hieronder tonen alleen de ritten van deze pagina.",
+    "Deze periode bevat te veel ritten om in één keer te tonen. Verklein de periode of gebruik een filter.",
   "ritten.status.revised": "Bijgewerkt",
   "ritten.status.revisedField": "Gewijzigd door de laatste UPDATE",
   "ritten.column.direction": "Richting",
@@ -976,7 +976,7 @@ const tr: Translations = {
   "ritten.pagination.of": "/",
   "ritten.pagination.page": "Sayfa",
   "ritten.truncation.notice":
-    "Bu dönem tek sayfaya sığmıyor. Aşağıdaki bölümler yalnızca bu sayfadaki seferleri gösterir.",
+    "Bu dönem tek seferde gösterilemeyecek kadar çok sefer içeriyor. Dönemi daraltın veya bir filtre kullanın.",
   "ritten.status.revised": "Güncellendi",
   "ritten.status.revisedField": "Son GÜNCELLEME ile değişti",
   "ritten.column.direction": "Yön",

@@ -65,8 +65,13 @@ describe("Ritten export", () => {
         ([, options]) =>
           (options as { query?: Record<string, unknown> })?.query ?? {},
       )
-      // The export asks for the largest page the backend allows; the list and
-      // the counters ask for 50 and 1.
+      /*
+       * The export asks for the largest page the backend allows — and so does
+       * the Week/Month list now, since a period is loaded whole through the
+       * same bounded collector. Page size alone therefore no longer identifies
+       * the export; what does is that it is the LAST such request, made when
+       * the button was pressed.
+       */
       .filter((query) => query.pageSize === 200);
   }
 
@@ -127,7 +132,7 @@ describe("Ritten export", () => {
     await waitFor(() => {
       expect(exportCalls()).not.toHaveLength(0);
     });
-    expect(exportCalls()[0]).toMatchObject({
+    expect(exportCalls().at(-1)).toMatchObject({
       planningDateFrom: "2026-08-10",
       planningDateTo: "2026-08-16",
       search: "psa",
@@ -224,7 +229,7 @@ describe("Ritten export", () => {
       await startExport("Excel — Basis");
 
       await waitFor(() => expect(clicked).toHaveLength(1));
-      expect(exportCalls()[0]).toMatchObject({ pageSize: 200 });
+      expect(exportCalls().at(-1)).toMatchObject({ pageSize: 200 });
     });
 
     /**

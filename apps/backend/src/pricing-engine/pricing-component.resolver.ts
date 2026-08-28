@@ -120,7 +120,7 @@ export class PricingComponentResolver {
    *   nobody assigned it            -> it is applied anyway
    *   somebody assigned it          -> it is applied once, not twice
    *   it sits on the wrong leg      -> it moves to the right one
-   *   it sits on both legs          -> one charge, on the collection
+   *   it sits on both legs          -> one charge, on the delivery
    *
    * The operator therefore never has to tick it, and a stale tick left over
    * from before this rule existed cannot produce a second charge.
@@ -131,8 +131,8 @@ export class PricingComponentResolver {
    * ──────────────────────────────────────────────────────────────────────────
    *
    * ── WHICH TRIPS OWE IT ────────────────────────────────────────────────────
-   * Every Trip, except the DELIVERY leg of a genuine Combination: the pair is
-   * one movement and carries the charge once, on the collection. A manual group
+   * Every Trip, except the COLLECTION leg of a genuine Combination: the pair is
+   * one movement and carries the charge once, on the delivery. A manual group
    * is not a Combination, so its Trips each owe it — see `combination-leg.ts`.
    * ──────────────────────────────────────────────────────────────────────────
    */
@@ -161,7 +161,7 @@ export class PricingComponentResolver {
       );
     }
 
-    if (leg === CombinationLeg.DELIVERY) {
+    if (leg === CombinationLeg.COLLECTION) {
       return withoutIt;
     }
 
@@ -191,7 +191,15 @@ export class PricingComponentResolver {
    * The group is read only when the Trip is in one, so an ordinary Trip costs
    * no extra query.
    */
-  private async resolveCombinationLeg(
+  /**
+   * Which leg of a genuine Combination this Trip is, or NONE.
+   *
+   * Public because the Combination Surcharge needs the same answer the TAR rule
+   * needs, and both must come from ONE rule. Eligibility for that surcharge is
+   * NOT "has a group": a manual group carries no claim about pairing. See
+   * `combinationLegOf`.
+   */
+  async resolveCombinationLeg(
     trip: TripResponseDto,
   ): Promise<CombinationLeg> {
     if (trip.tripGroupId === null || trip.pdfDocumentId === null) {

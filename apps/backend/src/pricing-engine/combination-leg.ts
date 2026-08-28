@@ -104,3 +104,16 @@ export function combinationLegOf(
     ? CombinationLeg.DELIVERY
     : CombinationLeg.COLLECTION;
 }
+
+/**
+ * Whether this Trip is a leg of a genuine Combination.
+ *
+ * The eligibility test for every charge that follows from pairing — the
+ * Combination Surcharge among them. Deliberately NOT "has a group": a manual
+ * group is an operator convenience and carries no claim about pairing, so it
+ * must not change what a Trip is charged. INVALID is excluded too; a malformed
+ * pair is reported by the caller rather than priced on a guess.
+ */
+export function isGenuineCombination(leg: CombinationLeg): boolean {
+  return leg === CombinationLeg.DELIVERY || leg === CombinationLeg.COLLECTION;
+}

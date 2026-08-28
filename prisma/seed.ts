@@ -84,6 +84,12 @@ const PRICING_COMPONENTS = [
     description:
       "Adjustment entered manually by the Administrator, stored as its own pricing item.",
   },
+  {
+    code: "COST_CONFIRMATION",
+    name: "Cost Confirmation",
+    description:
+      "The cost Eucon confirmed for this Trip, taken from its Cost Confirmation document. Presented as EK.",
+  },
 ] as const;
 
 /**

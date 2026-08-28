@@ -62,6 +62,7 @@ export const PricingComponentCode = {
   TOLL: "TOLL",
   TUNNEL: "TUNNEL",
   CUSTOM_PROPERTY: "CUSTOM_PROPERTY",
+  COST_CONFIRMATION: "COST_CONFIRMATION",
 } as const;
 
 export type PricingComponentCode =

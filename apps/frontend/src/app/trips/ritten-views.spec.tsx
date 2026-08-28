@@ -276,7 +276,19 @@ describe("Ritten views", () => {
     });
 
     /** A week shown one page at a time must never read as the whole week. */
-    it("states plainly when the week does not fit on one page", async () => {
+    /**
+     * ── THIS USED TO SAY THE OPPOSITE ─────────────────────────────────────
+     * The week was shown one page at a time and the page SAID so, which was
+     * honest but wrong: an operator reading a heading called "maandag" expects
+     * Monday's Trips under it, not the part of Monday that fit. A week whose
+     * Trips exceeded the page size lost whole days — Monday first, because the
+     * backend orders `planningDate` descending and Monday sorts last.
+     *
+     * A period now loads whole. So there is no partial page to announce, no
+     * pager to reconcile with a larger total, and the notice appears only when
+     * the bounded fetch refuses a period outright.
+     */
+    it("loads the whole week rather than announcing a partial page", async () => {
       respondWith(requestMock, {
         trips: buildPage([buildTrip()], {
           totalItems: 120,
@@ -285,19 +297,14 @@ describe("Ritten views", () => {
       });
 
       await showWeek();
+      await screen.findAllByRole("table");
 
+      expect(screen.queryByText(/past niet op één pagina/)).toBeNull();
+      expect(screen.queryByText(/te veel ritten/i)).toBeNull();
+      // No pager either: page 2 of 1 is furniture that means nothing.
       expect(
-        await screen.findByText(/past niet op één pagina/),
-      ).toBeInTheDocument();
-      // The pager states the true total, so "1 of 120" cannot be mistaken for
-      // the whole week.
-      const pagination = await screen.findByRole("navigation", {
-        name: "Pagina",
-      });
-
-      expect(pagination.textContent).toContain("Getoond");
-      expect(pagination.textContent).toContain("120");
-      expect(pagination.textContent).toContain("3");
+        screen.queryByRole("navigation", { name: "Pagina" }),
+      ).toBeNull();
     });
   });
 
@@ -383,16 +390,19 @@ describe("Ritten views", () => {
       ).toBeInTheDocument();
     });
 
-    it("states plainly when the month does not fit on one page", async () => {
+    /** The month makes the same promise as the week, and now keeps it. */
+    it("loads the whole month rather than announcing a partial page", async () => {
       respondWith(requestMock, {
         trips: buildPage([buildTrip()], { totalItems: 400, totalPages: 8 }),
       });
 
       await showMonth();
+      await screen.findAllByRole("table");
 
+      expect(screen.queryByText(/past niet op één pagina/)).toBeNull();
       expect(
-        await screen.findByText(/past niet op één pagina/),
-      ).toBeInTheDocument();
+        screen.queryByRole("navigation", { name: "Pagina" }),
+      ).toBeNull();
     });
   });
 

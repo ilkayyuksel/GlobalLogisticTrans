@@ -222,8 +222,8 @@ model PdfDocument {
 
   importedEmail ImportedEmail? @relation(fields: [importedEmailId], references: [id], onDelete: Restrict)
 
-  parserRuns ParserRun[]
-  trips      Trip[]
+  parserRuns        ParserRun[]
+  trips             Trip[]
   /// The Trip events this document caused — an UPDATE or a CANCEL. A NEW
   /// document is reached through `trips` instead, which is the Trip it created.
   tripHistory       TripHistory[]
@@ -386,9 +386,9 @@ model Trip {
   /// NOT start_time/end_time, which are the transport's own planned window.
   waitingTimeStart   DateTime? @map("waiting_time_start") @db.Time(6)
   waitingTimeEnd     DateTime? @map("waiting_time_end") @db.Time(6)
-  waitingTimeMinutes Int?     @map("waiting_time_minutes")
+  waitingTimeMinutes Int?      @map("waiting_time_minutes")
   /// Manually entered. Used only by the Distance-Based pricing strategy.
-  distanceKm         Decimal? @map("distance_km") @db.Decimal(8, 2)
+  distanceKm         Decimal?  @map("distance_km") @db.Decimal(8, 2)
 
   internalNotes String? @map("internal_notes") @db.Text
 
@@ -408,11 +408,12 @@ model Trip {
   /// Restrict: an imported Trip must not lose the PDF that explains it.
   pdfDocument PdfDocument? @relation(fields: [pdfDocumentId], references: [id], onDelete: Restrict)
   /// SetNull, because dissolving a group must leave both Trips intact.
-  tripGroup   TripGroup?  @relation(fields: [tripGroupId], references: [id], onDelete: SetNull)
-  vehicle     Vehicle?    @relation(fields: [vehicleId], references: [id], onDelete: Restrict)
-  driver      Driver?     @relation(fields: [driverId], references: [id], onDelete: Restrict)
+  tripGroup   TripGroup?   @relation(fields: [tripGroupId], references: [id], onDelete: SetNull)
+  vehicle     Vehicle?     @relation(fields: [vehicleId], references: [id], onDelete: Restrict)
+  driver      Driver?      @relation(fields: [driverId], references: [id], onDelete: Restrict)
 
   pricing           TripPricing?
+  pricingOverrides  TripPricingOverride[]
   history           TripHistory[]
   customProperties  TripCustomProperty[]
   costConfirmations CostConfirmation[]
@@ -452,7 +453,7 @@ model CostConfirmation {
   /// the authoritative one. A second, different confirmation for the same Trip
   /// is refused rather than added, overwritten or summed — and the constraint
   /// is what guarantees it, so no path through the code can produce a second.
-  tripId String @unique @map("trip_id") @db.Uuid
+  tripId        String @unique @map("trip_id") @db.Uuid
   /// The confirmation document itself. Non-null: an amount whose evidence
   /// cannot be produced is not a confirmation.
   pdfDocumentId String @map("pdf_document_id") @db.Uuid
@@ -1004,6 +1005,59 @@ model TripPricing {
 
 /// One component of a pricing calculation.
 /// Every element is its own row so a new pricing rule never requires a schema
+/// An amount an operator set by hand, replacing what the Engine calculated.
+///
+/// ── WHY THIS IS NOT A COLUMN ON trip_pricing_item ──────────────────────────
+/// Recalculation DELETES every item and recreates it from the Engine — see
+/// TripPricingService.replaceSnapshot. An override living on the item would be
+/// destroyed by the next waiting-time edit, which is the one thing an override
+/// must never be. Keyed by Trip and component code, it survives every
+/// recalculation by construction.
+///
+/// ── WHAT IT IS NOT ─────────────────────────────────────────────────────────
+/// Not a second pricing engine and not a history. It records that a person
+/// disagreed with a calculated figure, and by how much they said it should be.
+/// The Engine's own snapshot stays untouched beside it, so what the rules
+/// produced and what the operator decided are both still readable.
+///
+/// Others and Totaal are deliberately NOT storable here: Others is a grouping
+/// of two calculated components and Totaal is a sum, so neither is a thing an
+/// operator can hold an opinion about directly. They are corrected by
+/// overriding what they are made of.
+model TripPricingOverride {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+
+  tripId String @map("trip_id") @db.Uuid
+
+  /// The catalog code this replaces: BASE_PRICE, TOLL, COST_CONFIRMATION, …
+  ///
+  /// Text matching pricing_component.code rather than a foreign key to it: the
+  /// override outlives any single snapshot, and binding it to a catalog row
+  /// would make deactivating a component silently drop an operator's decision.
+  componentCode String @map("component_code") @db.Text
+
+  /// NUMERIC like every other amount here. Never a float.
+  amount   Decimal @db.Decimal(12, 2)
+  currency String  @default("EUR") @db.Char(3)
+
+  /// Auth0 subject (`sub`) — stable even when a display name changes.
+  overriddenBy String @map("overridden_by") @db.VarChar(255)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  /// Restrict, like every other financial reference: a Trip carrying a manual
+  /// correction is not something a delete should take with it.
+  trip Trip @relation(fields: [tripId], references: [id], onDelete: Restrict)
+
+  /// One opinion per component per Trip. A second correction REPLACES the
+  /// first rather than accumulating, which is what an operator means by
+  /// changing a price twice.
+  @@unique([tripId, componentCode])
+  @@index([tripId])
+  @@map("trip_pricing_override")
+}
+
 /// change — it only requires a new PricingComponent record.
 model TripPricingItem {
   id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid

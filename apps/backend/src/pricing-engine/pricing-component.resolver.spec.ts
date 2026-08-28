@@ -497,16 +497,16 @@ describe("PricingComponentResolver", () => {
       );
     }
 
-    it("charges it on the collection leg", async () => {
+    it("charges it on the delivery leg", async () => {
       groupOf(DELIVERY_LEG, COLLECTION_LEG);
 
-      expect(hasAutomatic(await resolve(COLLECTION_LEG))).toBe(true);
+      expect(hasAutomatic(await resolve(DELIVERY_LEG))).toBe(true);
     });
 
-    it("does not charge it on the delivery leg", async () => {
+    it("does not charge it on the collection leg", async () => {
       groupOf(DELIVERY_LEG, COLLECTION_LEG);
 
-      expect(hasAutomatic(await resolve(DELIVERY_LEG))).toBe(false);
+      expect(hasAutomatic(await resolve(COLLECTION_LEG))).toBe(false);
     });
 
     /* Exactly one charge for the pair, whichever leg is priced first. */
@@ -523,13 +523,13 @@ describe("PricingComponentResolver", () => {
       ).toHaveLength(1);
     });
 
-    it("ignores a stale assignment left on the delivery leg", async () => {
+    it("ignores a stale assignment left on the collection leg", async () => {
       groupOf(DELIVERY_LEG, COLLECTION_LEG);
       tripCustomPropertyService.findByTripId.mockResolvedValue({
         items: [assignment(AUTOMATIC_PROPERTY_ID, "TAR", null, "20.00")],
       });
 
-      expect(hasAutomatic(await resolve(DELIVERY_LEG))).toBe(false);
+      expect(hasAutomatic(await resolve(COLLECTION_LEG))).toBe(false);
     });
 
     it("charges once when both legs were assigned it by hand", async () => {
@@ -541,9 +541,9 @@ describe("PricingComponentResolver", () => {
       const delivery = await resolve(DELIVERY_LEG);
       const collection = await resolve(COLLECTION_LEG);
 
-      expect(hasAutomatic(delivery)).toBe(false);
+      expect(hasAutomatic(collection)).toBe(false);
       expect(
-        collection.filter(
+        delivery.filter(
           (property) => property.customPropertyId === AUTOMATIC_PROPERTY_ID,
         ),
       ).toHaveLength(1);
@@ -553,8 +553,8 @@ describe("PricingComponentResolver", () => {
       groupOf(DELIVERY_LEG, COLLECTION_LEG);
       tripCustomPropertyService.findByTripId.mockResolvedValue({ items: [] });
 
-      expect(hasAutomatic(await resolve(DELIVERY_LEG))).toBe(false);
-      expect(hasAutomatic(await resolve(COLLECTION_LEG))).toBe(true);
+      expect(hasAutomatic(await resolve(DELIVERY_LEG))).toBe(true);
+      expect(hasAutomatic(await resolve(COLLECTION_LEG))).toBe(false);
     });
 
     it("uses the configured price on the leg that pays", async () => {
@@ -566,7 +566,7 @@ describe("PricingComponentResolver", () => {
         defaultPrice: "24.50",
       });
 
-      const [property] = await resolve(COLLECTION_LEG);
+      const [property] = await resolve(DELIVERY_LEG);
 
       expect(property.defaultPrice).toBe("24.50");
     });

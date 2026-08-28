@@ -4,6 +4,7 @@ import { PricingCalculationStatus, Prisma, TripStatus } from "@prisma/client";
 import { AppLoggerService } from "../logger/app-logger.service";
 import { TripResponseDto } from "../trips/dto/trip-response.dto";
 import { TripService } from "../trips/trip.service";
+import { CombinationLeg } from "./combination-leg";
 import {
   MissingPricingSettingException,
   MissingRoutePricingException,
@@ -131,6 +132,7 @@ describe("PricingEngineService", () => {
   let componentResolver: {
     resolveBaseSource: jest.Mock;
     resolveAssignedCustomProperties: jest.Mock;
+    resolveCombinationLeg: jest.Mock;
   };
   let routeCostResolver: { resolve: jest.Mock };
   let snapshotWriter: {
@@ -150,6 +152,9 @@ describe("PricingEngineService", () => {
       componentResolver as unknown as PricingComponentResolver,
       routeCostResolver as unknown as RouteCostResolver,
       snapshotWriter as unknown as PricingSnapshotWriter,
+      // No confirmation unless a test says otherwise: these specs are about the
+      // step sequence, not about what a Cost Confirmation contributes.
+      { findForTrips: async () => new Map() } as never,
       steps,
       logger as unknown as AppLoggerService,
     );
@@ -164,6 +169,22 @@ describe("PricingEngineService", () => {
     componentResolver = {
       resolveBaseSource: jest.fn().mockResolvedValue(BASE_SOURCE),
       resolveAssignedCustomProperties: jest.fn().mockResolvedValue([]),
+      /*
+       * A stand-in, not the rule. Which Trips form a genuine Combination is
+       * decided by combinationLegOf() and proved in the resolver spec; here the
+       * double simply reports the leg each test set its Trip up to be, so a
+       * test that says "grouped" still reads as one. The tests directly below
+       * override it to pin the eligibility rule itself.
+       */
+      resolveCombinationLeg: jest
+        .fn()
+        .mockImplementation((trip: TripResponseDto) =>
+          Promise.resolve(
+            trip.tripGroupId === null
+              ? CombinationLeg.NONE
+              : CombinationLeg.DELIVERY,
+          ),
+        ),
     };
     routeCostResolver = { resolve: jest.fn().mockResolvedValue([]) };
     snapshotWriter = {
@@ -534,15 +555,38 @@ describe("PricingEngineService", () => {
       expect(JSON.stringify(logger.warn.mock.calls)).not.toContain("1234.56");
     });
 
-    it("marks a grouped Trip as a Combination", async () => {
-      tripService.findById.mockResolvedValue(
-        buildTrip({ tripGroupId: "group-1" }),
-      );
+    /**
+     * Eligibility follows the Combination rule, not group membership. A manual
+     * group is an operator convenience and carries no claim about pairing, so
+     * it must not attract the Combination Surcharge.
+     */
+    it.each([CombinationLeg.DELIVERY, CombinationLeg.COLLECTION])(
+      "marks the %s leg of a genuine Combination as a Combination",
+      async (leg) => {
+        tripService.findById.mockResolvedValue(
+          buildTrip({ tripGroupId: "group-1" }),
+        );
+        componentResolver.resolveCombinationLeg.mockResolvedValue(leg);
 
-      expect(
-        (await engine.prepareCalculation(TRIP_ID)).context.isCombination,
-      ).toBe(true);
-    });
+        expect(
+          (await engine.prepareCalculation(TRIP_ID)).context.isCombination,
+        ).toBe(true);
+      },
+    );
+
+    it.each([CombinationLeg.NONE, CombinationLeg.INVALID])(
+      "does not treat a Trip whose leg is %s as a Combination",
+      async (leg) => {
+        tripService.findById.mockResolvedValue(
+          buildTrip({ tripGroupId: "group-1" }),
+        );
+        componentResolver.resolveCombinationLeg.mockResolvedValue(leg);
+
+        expect(
+          (await engine.prepareCalculation(TRIP_ID)).context.isCombination,
+        ).toBe(false);
+      },
+    );
 
     it("treats absent waiting time as zero minutes, not as unknown", async () => {
       expect(

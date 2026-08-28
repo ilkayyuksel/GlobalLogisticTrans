@@ -134,6 +134,13 @@ export interface ExistingPricingSnapshot {
   readonly itemCount: number;
 }
 
+/** What a Cost Confirmation contributes: a reference and an agreed amount. */
+export interface PricingCostConfirmationInput {
+  readonly ccNumber: string;
+  /** Fixed-2 string, as the database holds it. */
+  readonly amount: string;
+}
+
 export interface PricingCalculationContext {
   readonly tripId: string;
   /** Null on a manual Trip whose booking number is not known yet. */
@@ -142,7 +149,11 @@ export interface PricingCalculationContext {
   /** Null on a Trip that has not been scheduled. */
   readonly planningDate: string | null;
 
-  /** Only a Trip in a TripGroup is eligible for the Combination Surcharge. */
+  /**
+   * Only a leg of a GENUINE Combination is eligible for the Combination
+   * Surcharge. A manual TripGroup is not one: it carries no claim about
+   * pairing, so it must not change what a Trip is charged.
+   */
   readonly isCombination: boolean;
   /** Absent waiting time is zero waiting time, not an unknown. */
   readonly waitingTimeMinutes: number;
@@ -173,6 +184,15 @@ export interface PricingCalculationContext {
    * terminal to match on. Emptiness is not an error at this stage.
    */
   readonly routeCosts: readonly PricingRouteCostInput[];
+
+  /**
+   * The Cost Confirmation of this Trip, or null when it has none.
+   *
+   * At most one: `cost_confirmation.trip_id` is unique. The amount is the fixed
+   * -2 string the column holds, never a float — it is money, and it is passed
+   * through verbatim rather than recalculated.
+   */
+  readonly costConfirmation: PricingCostConfirmationInput | null;
 
   readonly existingSnapshot: ExistingPricingSnapshot | null;
   readonly preparedAt: Date;

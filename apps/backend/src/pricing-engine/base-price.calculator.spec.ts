@@ -44,6 +44,7 @@ function buildContext(
     },
     assignedCustomProperties: [],
     routeCosts: [],
+    costConfirmation: null,
     existingSnapshot: null,
     preparedAt: new Date("2026-08-17T09:00:00.000Z"),
   };

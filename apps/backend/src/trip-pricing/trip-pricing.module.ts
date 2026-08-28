@@ -2,7 +2,12 @@ import { Module } from "@nestjs/common";
 
 import { TripModule } from "../trips/trip.module";
 import { TripPricingController } from "./trip-pricing.controller";
+import { TripPricingOverrideController } from "./trip-pricing-override.controller";
+import { TripPricingOverrideService } from "./trip-pricing-override.service";
 import { TripPricingRepository } from "./trip-pricing.repository";
+import { TripPricingItemRepository } from "../trip-pricing-items/trip-pricing-item.repository";
+import { EffectivePricingService } from "./effective-pricing.service";
+import { TripPricingOverrideRepository } from "./trip-pricing-override.repository";
 import { TripPricingService } from "./trip-pricing.service";
 
 /**
@@ -19,8 +24,21 @@ import { TripPricingService } from "./trip-pricing.service";
  */
 @Module({
   imports: [TripModule],
-  controllers: [TripPricingController],
-  providers: [TripPricingService, TripPricingRepository],
-  exports: [TripPricingService],
+  controllers: [TripPricingController, TripPricingOverrideController],
+  providers: [
+    TripPricingService,
+    TripPricingRepository,
+    TripPricingOverrideRepository,
+    TripPricingOverrideService,
+    EffectivePricingService,
+    TripPricingItemRepository,
+  ],
+  /*
+   * EffectivePricingService is exported because it is the SHARED source the
+   * Ritten columns, the Trip detail panel and both Excel exports will read.
+   * Exporting the override repository too would invite a caller to write one
+   * without going through the rules; it stays inside.
+   */
+  exports: [TripPricingService, EffectivePricingService],
 })
 export class TripPricingModule {}

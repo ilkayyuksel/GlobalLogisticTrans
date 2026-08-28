@@ -4,6 +4,7 @@ import { PricingCalculationStatus, TripStatus } from "@prisma/client";
 import { AppLoggerService } from "../logger/app-logger.service";
 import { TripResponseDto } from "../trips/dto/trip-response.dto";
 import { TripService } from "../trips/trip.service";
+import { isGenuineCombination } from "./combination-leg";
 import {
   MissingRouteCostException,
   MissingTripPricingInputException,
@@ -30,6 +31,7 @@ import {
 import { PRICING_ENGINE_VERSION } from "./pricing-engine.version";
 import { sumLineAmounts } from "./pricing-money";
 import { PricingRuleResolver } from "./pricing-rule.resolver";
+import { CostConfirmationService } from "../cost-confirmations/cost-confirmation.service";
 import { PricingSnapshotWriter } from "./pricing-snapshot.writer";
 import { RouteCostResolver } from "./route-cost.resolver";
 
@@ -72,6 +74,7 @@ export class PricingEngineService {
     private readonly componentResolver: PricingComponentResolver,
     private readonly routeCostResolver: RouteCostResolver,
     private readonly snapshotWriter: PricingSnapshotWriter,
+    private readonly costConfirmations: CostConfirmationService,
     @Inject(PRICING_CALCULATION_STEPS)
     private readonly calculationSteps: readonly PricingCalculationStep[],
     private readonly logger: AppLoggerService,
@@ -278,6 +281,15 @@ export class PricingEngineService {
     );
     const assignedCustomProperties =
       await this.componentResolver.resolveAssignedCustomProperties(trip, rules);
+
+    /*
+     * Eligibility for the Combination Surcharge, from the SAME rule that
+     * decides where TAR belongs. Group membership alone would charge it to a
+     * manual group, which is an operator convenience and makes no claim about
+     * pairing — see combination-leg.ts.
+     */
+    const combinationLeg =
+      await this.componentResolver.resolveCombinationLeg(trip);
     const routeCosts = await this.routeCostResolver.resolve(trip.id, route);
 
     // Both halves of every route-priced component are now known, so the pairing
@@ -289,6 +301,17 @@ export class PricingEngineService {
       routeCosts,
     );
 
+    /*
+     * At most one per Trip — `cost_confirmation.trip_id` is unique — so this is
+     * a single lookup rather than a set. A Trip without one prices without an
+     * EK line at all, which is different from an EK of zero.
+     */
+    const confirmations = await this.costConfirmations.findForTrips([trip.id]);
+    const found = confirmations.get(trip.id) ?? null;
+    const costConfirmation = found
+      ? { ccNumber: found.ccNumber, amount: found.amount }
+      : null;
+
     const existingSnapshot =
       await this.snapshotWriter.findExistingSnapshot(tripId);
 
@@ -298,13 +321,14 @@ export class PricingEngineService {
       bookingNumber: trip.bookingNumber,
       tripStatus: trip.status,
       planningDate: trip.planningDate,
-      isCombination: trip.tripGroupId !== null,
+      isCombination: isGenuineCombination(combinationLeg),
       waitingTimeMinutes: trip.waitingTimeMinutes ?? NO_WAITING_TIME_MINUTES,
       route,
       baseSource,
       rules,
       assignedCustomProperties,
       routeCosts,
+      costConfirmation,
       existingSnapshot,
       preparedAt,
     };

@@ -10,6 +10,8 @@ import { TripPricingModule } from "../trip-pricing/trip-pricing.module";
 import { TripModule } from "../trips/trip.module";
 import { BasePriceCalculator } from "./base-price.calculator";
 import { CombinationSurchargeCalculator } from "./combination-surcharge.calculator";
+import { CostConfirmationModule } from "../cost-confirmations/cost-confirmation.module";
+import { CostConfirmationCalculator } from "./cost-confirmation.calculator";
 import { CustomPropertyCalculator } from "./custom-property.calculator";
 import { FuelSurchargeCalculator } from "./fuel-surcharge.calculator";
 import { PricingComponentResolver } from "./pricing-component.resolver";
@@ -51,6 +53,9 @@ import { WaitingTimeCalculator } from "./waiting-time.calculator";
  */
 @Module({
   imports: [
+    // The Cost Confirmation is a pricing input now, so the Engine reads it
+    // through the domain that owns it rather than querying the table itself.
+    CostConfirmationModule,
     CustomPropertyModule,
     SettingsModule,
     RoutePricingModule,
@@ -74,6 +79,7 @@ import { WaitingTimeCalculator } from "./waiting-time.calculator";
     TollCalculator,
     TunnelCalculator,
     CustomPropertyCalculator,
+    CostConfirmationCalculator,
     {
       /**
        * The pricing sequence, in the order pricing_rules.md defines.
@@ -92,6 +98,7 @@ import { WaitingTimeCalculator } from "./waiting-time.calculator";
         toll: TollCalculator,
         tunnel: TunnelCalculator,
         customProperty: CustomPropertyCalculator,
+        costConfirmation: CostConfirmationCalculator,
       ) => [
         basePrice,
         combinationSurcharge,
@@ -100,6 +107,8 @@ import { WaitingTimeCalculator } from "./waiting-time.calculator";
         toll,
         tunnel,
         customProperty,
+        // Appended last: it depends on no earlier line, and none depends on it.
+        costConfirmation,
       ],
       inject: [
         BasePriceCalculator,
@@ -109,6 +118,7 @@ import { WaitingTimeCalculator } from "./waiting-time.calculator";
         TollCalculator,
         TunnelCalculator,
         CustomPropertyCalculator,
+        CostConfirmationCalculator,
       ],
     },
   ],

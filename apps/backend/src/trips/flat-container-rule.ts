@@ -38,7 +38,15 @@ export const FLAT_CUSTOM_PROPERTY_NAME = "Flat";
  * a closed list — so anything not named here is simply a container type this
  * rule says nothing about.
  */
-const CONTAINER_TYPES_REQUIRING_FLAT: readonly string[] = ["20FL", "20ST"];
+const CONTAINER_TYPES_REQUIRING_FLAT: readonly string[] = [
+  "20FL",
+  "20ST",
+  // The forty-foot flats, added once the business confirmed they carry Flat
+  // exactly as the twenty-foot ones do. `40OSX` and `40F` are deliberately not
+  // here — the match is exact, so neither is affected by this.
+  "40FL",
+  "40OS",
+];
 
 /**
  * Whether a Trip with this container type must carry the Flat property.

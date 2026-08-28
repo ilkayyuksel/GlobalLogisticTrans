@@ -1,34 +1,37 @@
-import { listTrips, type ListTripsParams } from "./trips";
+import {
+  TRIP_FETCH_MAX_ROWS,
+  TooManyTripsError,
+  collectTrips,
+} from "./trip-pages";
+import type { ListTripsParams } from "./trips";
 import type { Trip } from "./types";
 
 /**
  * Every Trip matching the current filters — not just the page on screen.
  *
- * ── WHY THIS IS A LOOP AND NOT ONE CALL ─────────────────────────────────────
- * There is no export endpoint, and `GET /trips` caps a page at 200 rows. An
- * export that covered only the visible page would be wrong in a way nobody
- * would notice until they used the file, so the whole filtered set is fetched
- * in pages of 200.
+ * ── THE PAGING ITSELF LIVES IN `trip-pages.ts` ──────────────────────────────
+ * It used to live here, and then the Week and Month views turned out to need
+ * exactly the same thing: a whole result set rather than a page. Rather than
+ * grow a second loop that would eventually disagree with this one about a
+ * boundary or a limit, the loop moved to a shared module and this became what
+ * it always was — the export's name for it, with the export's own error.
  *
- * The loop is BOUNDED in three ways, so it can never become the "hundreds of
- * uncontrolled requests" it would otherwise be:
- *   - it asks once, reads the true total, and refuses up front when that total
- *     is larger than one export may carry
- *   - it therefore issues at most EXPORT_MAX_ROWS / MAX_EXPORT_PAGE_SIZE calls
- *   - it stops the moment a page comes back short or the total is reached
- *
- * A server-side export endpoint is the proper solution and is reported as a
- * gap. This is the honest version of what can be built without one.
+ * A server-side export endpoint is still the proper solution and is still
+ * reported as a gap. This is the honest version of what can be built without
+ * one.
  * ────────────────────────────────────────────────────────────────────────────
  */
 
-/** The largest page `GET /trips` accepts. */
-const MAX_EXPORT_PAGE_SIZE = 200;
+/** Kept as the export's own name for the shared limit. */
+export const EXPORT_MAX_ROWS = TRIP_FETCH_MAX_ROWS;
 
-/** 25 requests. Beyond this the export needs a backend endpoint, not a loop. */
-export const EXPORT_MAX_ROWS = 5000;
-
-/** Raised when the filtered period is too large to export from the browser. */
+/**
+ * Raised when the filtered period is too large to export from the browser.
+ *
+ * Its own type because the Ritten page shows a different sentence for an export
+ * that is too large than for a period that is too large to display, and the two
+ * must stay tellable apart.
+ */
 export class ExportTooLargeError extends Error {
   constructor(readonly totalItems: number) {
     super(
@@ -42,26 +45,15 @@ export async function fetchTripsForExport(
   params: ListTripsParams,
   signal?: AbortSignal,
 ): Promise<Trip[]> {
-  const query = { ...params, pageSize: MAX_EXPORT_PAGE_SIZE };
-  const firstPage = await listTrips({ ...query, page: 1 }, signal);
-
-  if (firstPage.meta.totalItems > EXPORT_MAX_ROWS) {
-    throw new ExportTooLargeError(firstPage.meta.totalItems);
-  }
-
-  const trips = [...firstPage.items];
-
-  // Sequential rather than parallel: an export is not urgent, and a burst of
-  // page requests would put load on the database for no perceptible gain.
-  for (let page = 2; page <= firstPage.meta.totalPages; page += 1) {
-    const next = await listTrips({ ...query, page }, signal);
-
-    trips.push(...next.items);
-
-    if (next.items.length === 0) {
-      break;
+  try {
+    return await collectTrips(params, EXPORT_MAX_ROWS, signal);
+  } catch (error: unknown) {
+    // Translated at the boundary, so the export keeps saying "export" while the
+    // shared collector stays neutral about who called it.
+    if (error instanceof TooManyTripsError) {
+      throw new ExportTooLargeError(error.totalItems);
     }
-  }
 
-  return trips;
+    throw error;
+  }
 }
