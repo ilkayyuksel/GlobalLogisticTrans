@@ -163,22 +163,53 @@ describe("RouteCostRepository", () => {
     });
   });
 
+  /**
+   * ── THE DEPARTURE IS MATCHED, NOT COMPARED ────────────────────────────────
+   * Destination and component narrow the search in SQL; the departure is a
+   * TERMINAL and is decided by the shared rule, so the two spellings of one
+   * quay cannot be configured twice and cannot miss each other on lookup.
+   * ──────────────────────────────────────────────────────────────────────────
+   */
   describe("findActiveByRouteAndComponent", () => {
-    it("restricts the search to active records on all three identity fields", async () => {
+    function candidates(...departures: string[]): void {
+      prisma.routeCost.findMany.mockResolvedValue(
+        departures.map((departure, index) => ({
+          id: `cost-${index}`,
+          departure,
+          destination: "Dourges",
+          pricingComponentId: COMPONENT_ID,
+          isActive: true,
+        })),
+      );
+    }
+
+    it("narrows by destination, component and active state in SQL", async () => {
       await repository.findActiveByRouteAndComponent(
         "Antwerp Terminal",
         "Rotterdam",
         COMPONENT_ID,
       );
 
-      expect(prisma.routeCost.findFirst).toHaveBeenCalledWith({
+      expect(prisma.routeCost.findMany).toHaveBeenCalledWith({
         where: {
-          departure: "Antwerp Terminal",
           destination: "Rotterdam",
           pricingComponentId: COMPONENT_ID,
           isActive: true,
         },
+        orderBy: { id: "asc" },
       });
+    });
+
+    it("does not constrain the departure in SQL", async () => {
+      await repository.findActiveByRouteAndComponent(
+        "PSA Quay 869",
+        "Dourges",
+        COMPONENT_ID,
+      );
+
+      const [call] = prisma.routeCost.findMany.mock.calls;
+
+      expect(call[0].where).not.toHaveProperty("departure");
     });
 
     it("excludes the record being edited", async () => {
@@ -189,15 +220,133 @@ describe("RouteCostRepository", () => {
         "self",
       );
 
-      expect(prisma.routeCost.findFirst).toHaveBeenCalledWith({
+      expect(prisma.routeCost.findMany).toHaveBeenCalledWith({
         where: {
-          departure: "Antwerp Terminal",
           destination: "Rotterdam",
           pricingComponentId: COMPONENT_ID,
           isActive: true,
           id: { not: "self" },
         },
+        orderBy: { id: "asc" },
       });
+    });
+
+    it.each([
+      ["PSA Quay 869", "Quay 869"],
+      ["Quay 869", "PSA Quay 869"],
+      ["psa quay 869", "PSA   Quay 869"],
+    ])("finds a cost configured on %j when asked for %j", async (
+      tripTerminal,
+      configured,
+    ) => {
+      candidates(configured);
+
+      expect(
+        (
+          await repository.findActiveByRouteAndComponent(
+            tripTerminal,
+            "Dourges",
+            COMPONENT_ID,
+          )
+        )?.departure,
+      ).toBe(configured);
+    });
+
+    it("does not match a genuinely different terminal", async () => {
+      candidates("Quay 913");
+
+      expect(
+        await repository.findActiveByRouteAndComponent(
+          "PSA Quay 869",
+          "Dourges",
+          COMPONENT_ID,
+        ),
+      ).toBeNull();
+    });
+  });
+
+  /**
+   * ── THE LOOKUP A TOLL DEPENDS ON ──────────────────────────────────────────
+   * Every active cost on one route, whatever component it prices. This is the
+   * call the Toll and Tunnel calculators are fed from, so a departure compared
+   * as text rather than matched as a terminal would mean a Trip on a configured
+   * route quietly not being charged.
+   * ──────────────────────────────────────────────────────────────────────────
+   */
+  describe("findActiveByRoute", () => {
+    function candidates(...departures: string[]): void {
+      prisma.routeCost.findMany.mockResolvedValue(
+        departures.map((departure, index) => ({
+          id: `cost-${index}`,
+          departure,
+          destination: "Dourges",
+          isActive: true,
+          pricingComponent: { code: "TOLL", displayOrder: 5 },
+        })),
+      );
+    }
+
+    it("narrows by destination and active state in SQL", async () => {
+      await repository.findActiveByRoute("PSA Quay 869", "Dourges");
+
+      const [call] = prisma.routeCost.findMany.mock.calls;
+
+      expect(call[0].where).toEqual({ destination: "Dourges", isActive: true });
+      expect(call[0].where).not.toHaveProperty("departure");
+    });
+
+    it.each([
+      ["PSA Quay 869", "Quay 869"],
+      ["Quay 869", "PSA Quay 869"],
+      ["Quay 869", "Quay 869"],
+      ["PSA Quay 869", "PSA Quay 869"],
+      ["psa quay 869", "Quay 869"],
+      ["PSA   Quay 869", "  Quay 869 "],
+    ])(
+      "returns the cost on %j for a Trip on %j",
+      async (tripTerminal, configured) => {
+        candidates(configured);
+
+        const found = await repository.findActiveByRoute(
+          tripTerminal,
+          "Dourges",
+        );
+
+        expect(found).toHaveLength(1);
+        expect(found[0].departure).toBe(configured);
+      },
+    );
+
+    it.each([
+      ["PSA Quay 869", "Quay 913"],
+      ["PSA Quay 869", "PSA Antwerp"],
+      ["Quay 869", "Antwerp PSA Quay 913"],
+    ])("returns nothing for %j against %j", async (tripTerminal, configured) => {
+      candidates(configured);
+
+      expect(
+        await repository.findActiveByRoute(tripTerminal, "Dourges"),
+      ).toEqual([]);
+    });
+
+    /** Both spellings on one route are both returned — neither is discarded. */
+    it("returns every matching spelling", async () => {
+      candidates("Quay 869", "PSA Quay 869");
+
+      expect(
+        await repository.findActiveByRoute("Quay 869", "Dourges"),
+      ).toHaveLength(2);
+    });
+
+    it("keeps the component ordering the query asked for", async () => {
+      await repository.findActiveByRoute("Quay 869", "Dourges");
+
+      const [call] = prisma.routeCost.findMany.mock.calls;
+
+      expect(call[0].orderBy).toEqual([
+        { pricingComponent: { displayOrder: "asc" } },
+        { id: "asc" },
+      ]);
     });
   });
 

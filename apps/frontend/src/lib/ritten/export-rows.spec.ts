@@ -54,8 +54,26 @@ function snapshotOf(...items: TripPricingItem[]): PricingSnapshot {
   };
 }
 
+/**
+ * The canonical route the backend would derive, so this fixture answers the way
+ * the API answers: TERMINAL to CITY on a delivery, CITY to TERMINAL on a
+ * collection, with the PSA prefix off the terminal.
+ */
+function routeFor(trip: Partial<Trip>): Trip["route"] {
+  const terminal = (trip.terminal ?? "").replace(/^PSA\s+(?=Quay\b)/i, "");
+  const city = trip.destinationCity ?? "";
+
+  if (terminal === "" && city === "") {
+    return null;
+  }
+
+  return trip.direction === "COLLECTION"
+    ? { from: city, to: terminal }
+    : { from: terminal, to: city };
+}
+
 function buildTrip(overrides: Partial<Trip> = {}): Trip {
-  return {
+  const trip = {
     id: "trip-1",
     status: "OPEN",
     bookingNumber: "ANRDUB2602247",
@@ -74,25 +92,50 @@ function buildTrip(overrides: Partial<Trip> = {}): Trip {
     customProperties: [],
     ...overrides,
   } as Trip;
+
+  return {
+    ...trip,
+    route: "route" in overrides ? (overrides.route ?? null) : routeFor(trip),
+  };
 }
 
 describe("the Trip column", () => {
-  it("reads as start -> end", () => {
-    expect(toRouteLabel(buildTrip())).toBe("Quay 869 -> Gent");
+  it("reads as start to end", () => {
+    expect(toRouteLabel(buildTrip())).toBe("Quay 869 → Gent");
   });
 
-  it("uses the stored terminal and city, never an id", () => {
+  /**
+   * The CANONICAL terminal, which is the one change this column made: the
+   * documents spell the same quay two ways, and the export must not describe
+   * them as two places.
+   */
+  it("writes the canonical terminal, never an id", () => {
     const label = toRouteLabel(
       buildTrip({ terminal: "PSA Quay 869", destinationCity: "Dourges" }),
     );
 
-    expect(label).toBe("PSA Quay 869 -> Dourges");
+    expect(label).toBe("Quay 869 → Dourges");
     expect(label).not.toMatch(/trip-1|[0-9a-f]{8}-/);
   });
 
+  /** A collection runs the other way: the customer first, the quay second. */
+  it("follows the direction rather than the field order", () => {
+    expect(
+      toRouteLabel(
+        buildTrip({
+          direction: "COLLECTION",
+          terminal: "PSA Quay 869",
+          destinationCity: "Dourges",
+        }),
+      ),
+    ).toBe("Dourges → Quay 869");
+  });
+
   it("shows the one end it has rather than inventing the other", () => {
-    expect(toRouteLabel(buildTrip({ terminal: null }))).toBe("Gent");
-    expect(toRouteLabel(buildTrip({ destinationCity: null }))).toBe("Quay 869");
+    expect(toRouteLabel(buildTrip({ terminal: null }))).toBe(" → Gent");
+    expect(toRouteLabel(buildTrip({ destinationCity: null }))).toBe(
+      "Quay 869 → ",
+    );
   });
 
   it("is empty when the Trip has neither", () => {
@@ -219,7 +262,7 @@ describe("the pricing row", () => {
         planningDate: "2026-06-29",
         bookingNumber: "ANRDUB2602247",
         containerType: "45PH",
-        trip: "Quay 869 -> Gent",
+        trip: "Quay 869 → Gent",
       });
     });
 

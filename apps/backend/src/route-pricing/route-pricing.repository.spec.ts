@@ -129,30 +129,104 @@ describe("RoutePricingRepository", () => {
     });
   });
 
+  /**
+   * ── THE DEPARTURE IS MATCHED, NOT COMPARED ────────────────────────────────
+   * The destination narrows the search in SQL; the DEPARTURE is a terminal and
+   * is decided by the shared terminal rule, because one quay is written two
+   * ways — `PSA Quay 869` on a collection order, `Quay 869` on a delivery — and
+   * both spellings exist in the configuration. Neither side is rewritten.
+   * ──────────────────────────────────────────────────────────────────────────
+   */
   describe("findActiveByRoute", () => {
-    it("restricts the search to active records", async () => {
+    function candidates(...departures: string[]): void {
+      prisma.routePricing.findMany.mockResolvedValue(
+        departures.map((departure, index) => ({
+          id: `route-${index}`,
+          departure,
+          destination: "Dourges",
+          isActive: true,
+        })),
+      );
+    }
+
+    it("narrows by destination and active state in SQL", async () => {
       await repository.findActiveByRoute("Antwerp", "Rotterdam");
 
-      expect(prisma.routePricing.findFirst).toHaveBeenCalledWith({
-        where: {
-          departure: "Antwerp",
-          destination: "Rotterdam",
-          isActive: true,
-        },
+      expect(prisma.routePricing.findMany).toHaveBeenCalledWith({
+        where: { destination: "Rotterdam", isActive: true },
+        orderBy: { id: "asc" },
       });
+    });
+
+    /** The departure must NOT be an SQL equality, or a spelling would miss. */
+    it("does not constrain the departure in SQL", async () => {
+      await repository.findActiveByRoute("PSA Quay 869", "Dourges");
+
+      const [call] = prisma.routePricing.findMany.mock.calls;
+
+      expect(call[0].where).not.toHaveProperty("departure");
     });
 
     it("excludes the record being edited", async () => {
       await repository.findActiveByRoute("Antwerp", "Rotterdam", "self");
 
-      expect(prisma.routePricing.findFirst).toHaveBeenCalledWith({
+      expect(prisma.routePricing.findMany).toHaveBeenCalledWith({
         where: {
-          departure: "Antwerp",
           destination: "Rotterdam",
           isActive: true,
           id: { not: "self" },
         },
+        orderBy: { id: "asc" },
       });
+    });
+
+    it.each([
+      ["PSA Quay 869", "Quay 869"],
+      ["Quay 869", "PSA Quay 869"],
+      ["Quay 869", "Quay 869"],
+      ["PSA Quay 869", "PSA Quay 869"],
+      ["psa quay 869", "Quay 869"],
+      ["PSA   Quay 869", "Quay 869"],
+      ["  Quay 869  ", "PSA Quay 869"],
+    ])("matches a Trip on %j against configuration on %j", async (
+      tripTerminal,
+      configured,
+    ) => {
+      candidates(configured);
+
+      const found = await repository.findActiveByRoute(tripTerminal, "Dourges");
+
+      expect(found?.departure).toBe(configured);
+    });
+
+    it.each([
+      ["Quay 869", "Quay 913"],
+      ["PSA Quay 869", "PSA Antwerp"],
+      ["PSA Quay 869", "Antwerp PSA Quay 913"],
+      ["PSA Antwerp", "Antwerp"],
+    ])("does not match %j against %j", async (tripTerminal, configured) => {
+      candidates(configured);
+
+      expect(
+        await repository.findActiveByRoute(tripTerminal, "Dourges"),
+      ).toBeNull();
+    });
+
+    it("answers null when nothing is configured to that destination", async () => {
+      candidates();
+
+      expect(
+        await repository.findActiveByRoute("Quay 869", "Dourges"),
+      ).toBeNull();
+    });
+
+    /** Deterministic: the same call cannot return two different rows. */
+    it("takes the first matching row in a stable order", async () => {
+      candidates("Quay 869", "PSA Quay 869");
+
+      expect(
+        (await repository.findActiveByRoute("Quay 869", "Dourges"))?.id,
+      ).toBe("route-0");
     });
   });
 

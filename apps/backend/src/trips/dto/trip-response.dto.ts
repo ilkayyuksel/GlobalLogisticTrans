@@ -2,6 +2,7 @@ import { ApiProperty, ApiPropertyOptional } from "@nestjs/swagger";
 
 import { CostConfirmationDto } from "../../cost-confirmations/dto/cost-confirmation-response.dto";
 import { EffectivePricingDto } from "../../trip-pricing/dto/effective-pricing.dto";
+import { toTripRoute } from "../trip-route";
 import { Trip, TripDirection, TripStatus } from "@prisma/client";
 
 import { toIsoDate } from "../../common/dates";
@@ -176,6 +177,22 @@ export class LatestTripUpdateDto {
     description: "The UPDATE document that caused it, for viewing or download.",
   })
   pdfDocumentId!: string | null;
+}
+
+/**
+ * Where a Trip starts and where it ends.
+ *
+ * Structured rather than a formatted string, deliberately: future pricing rules
+ * must be able to ask "what is the origin?" and "what is the destination?"
+ * without parsing an arrow out of a label. The direction that produced this
+ * order is on the Trip itself, as `direction`.
+ */
+export class TripRouteDto {
+  @ApiProperty({ example: "Quay 869" })
+  from!: string;
+
+  @ApiProperty({ example: "Antwerp" })
+  to!: string;
 }
 
 export class TripResponseDto {
@@ -361,6 +378,14 @@ export class TripResponseDto {
   })
   pricing!: EffectivePricingDto | null;
 
+  @ApiPropertyOptional({
+    type: TripRouteDto,
+    nullable: true,
+    description:
+      "The canonical route: TERMINAL to CITY on a DELIVERY, CITY to TERMINAL on a COLLECTION, with the PSA terminal prefix removed. DERIVED from direction, terminal and destinationCity — it is stored nowhere and costs no query — and it is the one representation the list, the detail, the exports and future pricing all read. Null when the Trip has neither a terminal nor a destination city.",
+  })
+  route!: TripRouteDto | null;
+
   @ApiProperty({ format: "date-time" })
   createdAt!: Date;
 
@@ -422,6 +447,12 @@ export function toTripResponse(
     latestUpdate: planning.latestUpdate,
     costConfirmation: planning.costConfirmation,
     pricing: planning.pricing,
+    /*
+     * Derived here rather than resolved with the rest of the planning data:
+     * every fact it needs is already on the Trip, so it costs nothing and
+     * cannot fall out of step with the fields it is made of.
+     */
+    route: toTripRoute(trip),
     customProperties: planning.customProperties,
     createdAt: trip.createdAt,
     updatedAt: trip.updatedAt,

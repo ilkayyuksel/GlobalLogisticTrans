@@ -42,6 +42,8 @@ const COLUMNS = [
   "Booking",
   "Terminal",
   "Adres",
+  // The canonical route, beside the two fields it is derived from.
+  "Route",
   "Custom",
   "Wachttijd",
   "PDF",
@@ -473,6 +475,7 @@ describe("Ritten table", () => {
         "Booking",
         "Terminal",
         "Adres",
+        "Rota",
         "Özel",
         "Bekleme",
         "PDF",

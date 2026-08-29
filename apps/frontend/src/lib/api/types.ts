@@ -211,6 +211,20 @@ export interface Trip {
    */
   pricing: EffectivePricing | null;
   /**
+   * Where this Trip starts and where it ends, as the backend derives it.
+   *
+   * AUTHORITATIVE. Nothing on this side builds a route: the order of the two
+   * ends follows the Trip's direction — TERMINAL to CITY on a delivery, CITY to
+   * TERMINAL on a collection — and the terminal is already canonical, with the
+   * PSA prefix removed. A route assembled in a component would eventually
+   * disagree with the export and with pricing about which end is which.
+   *
+   * Structured rather than a formatted string so a reader can ask for the
+   * origin or the destination without parsing an arrow. Null when the Trip has
+   * neither a terminal nor a destination city.
+   */
+  route: TripRoute | null;
+  /**
    * The Custom Properties assigned to this Trip, in the operator's own display
    * order. Empty means none are assigned.
    */
@@ -305,6 +319,15 @@ export interface TripPricingItem {
   notes: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+/**
+ * The canonical route of a Trip, derived by the backend from its direction,
+ * terminal and destination city.
+ */
+export interface TripRoute {
+  from: string;
+  to: string;
 }
 
 /** Where an effective amount came from. */

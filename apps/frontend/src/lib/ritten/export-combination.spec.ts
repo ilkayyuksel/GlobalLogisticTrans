@@ -13,7 +13,7 @@ import { buildPricingWorkbook } from "./export-workbooks";
 const GROUP_ID = "97777777-7777-4777-8777-777777777777";
 
 function leg(overrides: Partial<Trip>): Trip {
-  return {
+  const trip = {
     id: `trip-${overrides.bookingNumber}`,
     status: "CLOSED",
     tripGroupId: GROUP_ID,
@@ -27,6 +27,29 @@ function leg(overrides: Partial<Trip>): Trip {
     waitingTimeMinutes: null,
     ...overrides,
   } as Trip;
+
+  return {
+    ...trip,
+    route: "route" in overrides ? (overrides.route ?? null) : routeFor(trip),
+  };
+}
+
+/**
+ * The canonical route the backend would derive, so this fixture answers the way
+ * the API answers: TERMINAL to CITY on a delivery, CITY to TERMINAL on a
+ * collection, with the PSA prefix off the terminal.
+ */
+function routeFor(trip: Partial<Trip>): Trip["route"] {
+  const terminal = (trip.terminal ?? "").replace(/^PSA\s+(?=Quay\b)/i, "");
+  const city = trip.destinationCity ?? "";
+
+  if (terminal === "" && city === "") {
+    return null;
+  }
+
+  return trip.direction === "COLLECTION"
+    ? { from: city, to: terminal }
+    : { from: terminal, to: city };
 }
 
 const DELIVERY_LEG = leg({
@@ -115,8 +138,8 @@ describe("a Combination in the pricing workbook", () => {
     );
     const sheet = await reopen(await buildPricingWorkbook(rows, "nl"));
 
-    expect(sheet.getRow(2).getCell(8).value).toBe("Quay 869 -> Kallo");
-    expect(sheet.getRow(3).getCell(8).value).toBe("PSA Quay 869 -> Warneton");
+    expect(sheet.getRow(2).getCell(8).value).toBe("Quay 869 → Kallo");
+    expect(sheet.getRow(3).getCell(8).value).toBe("Warneton → Quay 869");
   });
 });
 
@@ -173,7 +196,7 @@ describe("a normal imported Trip in the workbook", () => {
     ].map((trip) => toPricingRow(trip, null, 15));
     const sheet = await reopen(await buildPricingWorkbook(rows, "nl"));
 
-    expect(sheet.getRow(2).getCell(8).value).toBe("Quay 869 -> Dourges");
+    expect(sheet.getRow(2).getCell(8).value).toBe("Dourges → Quay 869");
   });
 });
 
@@ -201,7 +224,7 @@ describe("the operator's delivery rows in the workbook", () => {
   it("writes the Zeebrugge row", async () => {
     expect(await deliveryRow("ZEEBRUGGE")).toEqual([
       "VOYAGE BEQ869",
-      "Quay 869 -> ZEEBRUGGE",
+      "Quay 869 → ZEEBRUGGE",
       "LOCATION BEQ869",
     ]);
   });
@@ -209,7 +232,7 @@ describe("the operator's delivery rows in the workbook", () => {
   it("writes the Lessines row", async () => {
     expect(await deliveryRow("LESSINES")).toEqual([
       "VOYAGE BEQ869",
-      "Quay 869 -> LESSINES",
+      "Quay 869 → LESSINES",
       "LOCATION BEBAXLES",
     ]);
   });
@@ -217,7 +240,7 @@ describe("the operator's delivery rows in the workbook", () => {
   it("writes the stored city for a destination with no code", async () => {
     expect(await deliveryRow("Grobbendonk")).toEqual([
       "VOYAGE BEQ869",
-      "Quay 869 -> Grobbendonk",
+      "Quay 869 → Grobbendonk",
       "Grobbendonk",
     ]);
   });

@@ -9,6 +9,7 @@ import { ApiError } from "@/lib/api/client";
 import type { UpdateTripPayload } from "@/lib/api/trips";
 import type { EffectivePricing, Trip, Vehicle } from "@/lib/api/types";
 import { PricingCells } from "@/components/ritten/pricing-cells";
+import { toRouteText } from "@/lib/ritten/route-label";
 import { toClockLabel } from "@/lib/calendar/clock";
 import { formatCalendarDate } from "@/lib/calendar/calendar-dates";
 import { toFleetOptions, type FleetOption } from "@/lib/fleet-options";
@@ -72,6 +73,13 @@ const COLUMN_KEYS = [
   "ritten.column.booking",
   "ritten.column.terminal",
   "ritten.column.address",
+  /*
+   * The canonical route, supplied by the backend and only formatted here.
+   * Beside the terminal and the address rather than replacing them: those two
+   * are the raw values an operator edits, while this is the directional reading
+   * of them that pricing will use.
+   */
+  "ritten.column.route",
   "ritten.column.custom",
   "ritten.column.waitingTime",
   "ritten.column.pdf",
@@ -440,6 +448,19 @@ function RittenRow({
         <UpdatedValue trip={trip} field="destinationCity">
           <DestinationCell trip={trip} isBusy={isBusy} onSave={save} />
         </UpdatedValue>
+      </td>
+
+      {/*
+        The canonical route, read-only.
+
+        The backend decided both ends and their order; this only formats them.
+        It is not editable: correcting a route means correcting the terminal,
+        the address or the direction the document stated, which are the fields
+        beside it — a second way to type the same thing would be a competing
+        answer.
+      */}
+      <td className="whitespace-nowrap px-3 py-2 text-secondary">
+        {toRouteText(trip, empty)}
       </td>
 
       <td className="px-3 py-2">

@@ -91,7 +91,12 @@ describe("the fields the latest update changed", () => {
     });
 
     expect(markAround(row, "PSA Quay 869")).not.toBeNull();
-    expect(markAround(row, /Dourges/)).not.toBeNull();
+    /*
+     * The ADDRESS cell specifically. The city also appears in the Route column
+     * beside it, which is derived and carries no update mark of its own, so a
+     * bare /Dourges/ would now match two cells.
+     */
+    expect(markAround(row, /Dourges, France/)).not.toBeNull();
   });
 
   /** An update that moved nothing marks nothing — and is still an update. */

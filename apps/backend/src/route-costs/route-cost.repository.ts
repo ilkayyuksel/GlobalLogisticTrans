@@ -1,6 +1,7 @@
 import { Injectable } from "@nestjs/common";
 import { Prisma, RouteCost } from "@prisma/client";
 
+import { isSameTerminal } from "../common/terminal";
 import { PrismaService } from "../prisma/prisma.service";
 
 export interface FindRouteCostsFilter {
@@ -86,43 +87,67 @@ export class RouteCostRepository {
    * The active cost configured for one route and component.
    *
    * Mirrors the partial unique index on
-   * (departure, destination, pricing_component_id) WHERE is_active.
+   * (departure, destination, pricing_component_id) WHERE is_active — and is
+   * deliberately STRICTER than it. The index compares departures as text, while
+   * this matches them as TERMINALS, so `PSA Quay 869` and `Quay 869` are one
+   * terminal here. That is what stops the same cost being configured twice
+   * under two spellings of one quay, which the index alone would allow.
    *
    * `excludeRouteCostId` lets an update ignore the row being edited, so saving a
    * record without moving it never conflicts with itself.
    */
-  findActiveByRouteAndComponent(
+  async findActiveByRouteAndComponent(
     departure: string,
     destination: string,
     pricingComponentId: string,
     excludeRouteCostId?: string,
   ): Promise<RouteCost | null> {
-    return this.prisma.routeCost.findFirst({
+    const candidates = await this.prisma.routeCost.findMany({
       where: {
-        departure,
         destination,
         pricingComponentId,
         isActive: true,
         ...(excludeRouteCostId ? { id: { not: excludeRouteCostId } } : {}),
       },
+      orderBy: { id: "asc" },
     });
+
+    return (
+      candidates.find((candidate) =>
+        isSameTerminal(candidate.departure, departure),
+      ) ?? null
+    );
   }
 
   /**
    * Every active cost configured for one route, across all components.
    *
+   * The departure is matched with the shared terminal rule rather than by SQL
+   * equality, so a Trip carrying `PSA Quay 869` finds a cost configured against
+   * `Quay 869` and the other way round. This is the lookup a toll depends on,
+   * and leaving it on exact text would have meant a Trip owing a toll on a
+   * configured route simply not being charged it.
+   *
+   * Candidates are narrowed in SQL by destination and active state; the
+   * terminal filters them in memory. Both sets are small — the costs configured
+   * to one destination.
+   *
    * Ordered by the component's display order so a breakdown built from this list
    * comes out in the documented pricing sequence.
    */
-  findActiveByRoute(
+  async findActiveByRoute(
     departure: string,
     destination: string,
   ): Promise<RouteCostWithComponent[]> {
-    return this.prisma.routeCost.findMany({
-      where: { departure, destination, isActive: true },
+    const candidates = await this.prisma.routeCost.findMany({
+      where: { destination, isActive: true },
       include: WITH_COMPONENT,
       orderBy: [{ pricingComponent: { displayOrder: "asc" } }, { id: "asc" }],
     });
+
+    return candidates.filter((candidate) =>
+      isSameTerminal(candidate.departure, departure),
+    );
   }
 
   /**

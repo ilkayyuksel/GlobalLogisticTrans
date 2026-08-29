@@ -23,8 +23,30 @@ export const VEHICLE = {
   isActive: true,
 };
 
+/**
+ * The canonical route the BACKEND would derive for this Trip.
+ *
+ * The fixture stands in for the backend here, so it applies the same rule the
+ * backend applies: TERMINAL to CITY on a delivery, CITY to TERMINAL on a
+ * collection, with the PSA prefix off the terminal. A spec that wants a
+ * particular route passes `route` explicitly and this is skipped.
+ */
+function routeFor(trip: Omit<Trip, "route">): Trip["route"] {
+  const terminal = (trip.terminal ?? "").replace(/^PSA\s+(?=Quay\b)/i, "");
+  const city = trip.destinationCity ?? "";
+
+  if (terminal === "" && city === "") {
+    return null;
+  }
+
+  return trip.direction === "COLLECTION"
+    ? { from: city, to: terminal }
+    : { from: terminal, to: city };
+}
+
 export function buildTrip(overrides: Partial<Trip> = {}): Trip {
-  return {
+  // Annotated, so the string literals keep their union types through the spread.
+  const trip: Trip = {
     id: "trip-1",
     pdfDocumentId: "pdf-1",
     tripGroupId: null,
@@ -43,6 +65,7 @@ export function buildTrip(overrides: Partial<Trip> = {}): Trip {
     latestUpdate: null,
     costConfirmation: null,
     pricing: null,
+    route: null,
     status: "OPEN",
     isLooseTrip: false,
     bookingNumber: "ANRDUB2602247",
@@ -64,6 +87,15 @@ export function buildTrip(overrides: Partial<Trip> = {}): Trip {
     createdAt: "2026-08-01T00:00:00.000Z",
     updatedAt: "2026-08-01T00:00:00.000Z",
     ...overrides,
+  };
+
+  /*
+   * `in` rather than `??`: a spec that passes `route: null` is stating that the
+   * Trip HAS no route, and defaulting over it would silently give it one.
+   */
+  return {
+    ...trip,
+    route: "route" in overrides ? (overrides.route ?? null) : routeFor(trip),
   };
 }
 

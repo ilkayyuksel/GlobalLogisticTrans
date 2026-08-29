@@ -2,6 +2,7 @@ import type { CustomProperty, PricingSnapshot, Trip } from "@/lib/api/types";
 import { toClockLabel } from "@/lib/calendar/clock";
 import { formatWaitingTime } from "@/lib/waiting-time";
 import { toRouteLabels } from "./export-route-labels";
+import { toRouteText } from "./route-label";
 import { toPricedTripLines, type PricedTripLines } from "./pricing-lines";
 
 /**
@@ -58,21 +59,19 @@ export interface BasicExportRow {
 /**
  * The route, as an operator says it: where it starts, where it ends.
  *
- * Built from the Trip's own stored values — the terminal it was collected from
- * or returned to, and the destination city. No identifier appears, and no route
- * is invented: a Trip missing either end simply shows the end it has.
+ * ── THE CANONICAL ROUTE, NOT A LOCAL ONE ────────────────────────────────────
+ * The two ends come from `trip.route`, which the backend derives from the
+ * Trip's DIRECTION, its terminal and its destination city. So a delivery reads
+ * `Quay 869 → Kallo` and a collection reads `Warneton → Quay 869`, the terminal
+ * is already canonical, and the spreadsheet says exactly what the Ritten list
+ * says. It used to be assembled here as terminal-then-city whatever the
+ * direction, which described half the Trips backwards.
+ *
+ * No identifier appears, and no route is invented: a Trip missing either end
+ * simply shows the end it has.
  */
 export function toRouteLabel(trip: Trip): string {
-  const from = trip.terminal ?? EMPTY_CELL;
-  const to = trip.destinationCity ?? EMPTY_CELL;
-
-  if (from === EMPTY_CELL && to === EMPTY_CELL) {
-    return EMPTY_CELL;
-  }
-
-  return from === EMPTY_CELL || to === EMPTY_CELL
-    ? `${from}${to}`
-    : `${from} -> ${to}`;
+  return toRouteText(trip, EMPTY_CELL);
 }
 
 /**

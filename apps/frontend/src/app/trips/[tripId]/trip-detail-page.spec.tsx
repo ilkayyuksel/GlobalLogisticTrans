@@ -131,6 +131,7 @@ function buildTrip(overrides: Partial<Trip> = {}): Trip {
     latestUpdate: null,
     costConfirmation: null,
     pricing: null,
+    route: null,
     status: "CLOSED",
     bookingNumber: "ANRDUB2602247",
     containerNumber: "PVDU 301326/0",

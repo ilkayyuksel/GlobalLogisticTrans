@@ -50,6 +50,7 @@ function buildTrip(overrides: Partial<TripResponseDto> = {}): TripResponseDto {
     driverId: null,
     customProperties: [],
     pricing: null,
+    route: null,
     status: TripStatus.CLOSED,
     isLooseTrip: false,
     direction: null,

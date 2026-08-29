@@ -71,7 +71,7 @@ function buildPricingRow(
     bookingNumber: "ANRDUB2602247",
     containerNumber: "MSKU1234567",
     startPoint: "Quay 869",
-    trip: "Quay 869 -> Gent",
+    trip: "Quay 869 → Gent",
     endPoint: "Gent",
     basePrice: 250,
     fuelPercentage: 15,
@@ -95,7 +95,7 @@ function buildBasicRow(overrides: Partial<BasicExportRow> = {}): BasicExportRow 
     bookingNumber: "ANRDUB2602247",
     containerType: "45PH",
     containerNumber: "MSKU1234567",
-    trip: "Quay 869 -> Gent",
+    trip: "Quay 869 → Gent",
     costs: "",
     info: "",
     ...overrides,
@@ -223,7 +223,7 @@ describe("the pricing workbook", () => {
       expect(row.getCell(5).value).toBe("ANRDUB2602247");
       expect(row.getCell(6).value).toBe("MSKU1234567");
       expect(row.getCell(7).value).toBe("Quay 869");
-      expect(row.getCell(8).value).toBe("Quay 869 -> Gent");
+      expect(row.getCell(8).value).toBe("Quay 869 → Gent");
       expect(row.getCell(9).value).toBe("Gent");
     });
 
@@ -397,7 +397,7 @@ describe("the basic workbook's structure", () => {
     expect(row.getCell(4).value).toBe("ANRDUB2602247");
     expect(row.getCell(5).value).toBe("45PH");
     expect(row.getCell(6).value).toBe("MSKU1234567");
-    expect(row.getCell(7).value).toBe("Quay 869 -> Gent");
+    expect(row.getCell(7).value).toBe("Quay 869 → Gent");
   });
 
   it("keeps the costs and their explanation as written", async () => {

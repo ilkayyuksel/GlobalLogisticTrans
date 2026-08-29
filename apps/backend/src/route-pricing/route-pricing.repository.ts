@@ -1,6 +1,7 @@
 import { Injectable } from "@nestjs/common";
 import { Prisma, RoutePricing } from "@prisma/client";
 
+import { isSameTerminal } from "../common/terminal";
 import { PrismaService } from "../prisma/prisma.service";
 
 export interface FindRoutePricingFilter {
@@ -60,21 +61,49 @@ export class RoutePricingRepository {
    * `excludeRoutePricingId` lets an update ignore the row being edited, so
    * saving a record without changing its route never conflicts with itself.
    */
-  findActiveByRoute(
+  /**
+   * The active route configured between two places.
+   *
+   * ── THE DEPARTURE IS MATCHED, NOT COMPARED ────────────────────────────────
+   * The destination is an exact match, but the departure is a TERMINAL, and one
+   * terminal has more than one spelling: a transport order writes the same quay
+   * as `PSA Quay 869` or `Quay 869` depending on which section a Trip was read
+   * from. Both spellings also exist in this table, because the configuration
+   * was entered from documents that used both.
+   *
+   * So the departure is matched with the shared terminal rule rather than by
+   * SQL equality: a Trip carrying either spelling finds configuration carrying
+   * either spelling. Nothing is rewritten to achieve that — the stored values
+   * stay exactly as the operator entered them.
+   *
+   * The candidates are narrowed in SQL by destination and active state, and the
+   * terminal decides among them in memory. The set is small by construction:
+   * these are the routes configured to one destination.
+   */
+  async findActiveByRoute(
     departure: string,
     destination: string,
     excludeRoutePricingId?: string,
   ): Promise<RoutePricing | null> {
-    return this.prisma.routePricing.findFirst({
+    const candidates = await this.prisma.routePricing.findMany({
       where: {
-        departure,
         destination,
         isActive: true,
         ...(excludeRoutePricingId
           ? { id: { not: excludeRoutePricingId } }
           : {}),
       },
+      // Ordered so a caller gets the same answer every time. The partial unique
+      // index makes more than one active row per exact route impossible, but
+      // two SPELLINGS of one terminal are not excluded by it.
+      orderBy: { id: "asc" },
     });
+
+    return (
+      candidates.find((candidate) =>
+        isSameTerminal(candidate.departure, departure),
+      ) ?? null
+    );
   }
 
   create(data: CreateRoutePricingData): Promise<RoutePricing> {
