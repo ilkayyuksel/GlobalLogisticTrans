@@ -6,6 +6,7 @@ import { TripPlanningDataService } from "./trip-planning-data.service";
 import { VehicleAssignmentService, assignmentKey } from "../vehicle-assignments/vehicle-assignment.service";
 import { VehicleService } from "../vehicles/vehicle.service";
 import { CostConfirmationService } from "../cost-confirmations/cost-confirmation.service";
+import { EffectivePricingService } from "../trip-pricing/effective-pricing.service";
 import { TripRepository } from "./trip.repository";
 
 /**
@@ -85,7 +86,9 @@ describe("TripPlanningDataService", () => {
       {
         findForTrips: () => Promise.resolve(new Map()),
       } as unknown as CostConfirmationService,
-    );
+      {
+        findForTrips: () => Promise.resolve(new Map()),
+      } as unknown as EffectivePricingService,    );
   });
 
   describe("A — an explicit override", () => {

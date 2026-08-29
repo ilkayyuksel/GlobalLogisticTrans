@@ -3,6 +3,7 @@ import { TripStatus } from "@prisma/client";
 
 import { CostConfirmationRepository } from "../cost-confirmations/cost-confirmation.repository";
 import { CostConfirmationService } from "../cost-confirmations/cost-confirmation.service";
+import { EffectivePricingService } from "../trip-pricing/effective-pricing.service";
 import { CustomPropertyService } from "../custom-properties/custom-property.service";
 import { DomainEventBus } from "../common/events/domain-event-bus";
 import { DriverService } from "../drivers/driver.service";
@@ -457,7 +458,9 @@ export function buildHarness(storageDirectory: string) {
         {
           findForTrips: () => Promise.resolve(new Map()),
         } as unknown as CostConfirmationService,
-      );
+        {
+          findForTrips: () => Promise.resolve(new Map()),
+        } as unknown as EffectivePricingService,      );
 
       const trip = trips.find((candidate) => candidate.id === tripId);
       const resolved = await service.resolveMany([trip as never]);

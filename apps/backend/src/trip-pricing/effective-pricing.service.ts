@@ -9,7 +9,6 @@ import {
   type OverrideAmount,
 } from "./effective-pricing";
 import { TripPricingOverrideRepository } from "./trip-pricing-override.repository";
-import { TripPricingService } from "./trip-pricing.service";
 
 /**
  * The effective pricing of a Trip — the shared source every screen reads.
@@ -27,8 +26,18 @@ import { TripPricingService } from "./trip-pricing.service";
  */
 @Injectable()
 export class EffectivePricingService {
+  /*
+   * REPOSITORIES ONLY, and deliberately so.
+   *
+   * This service is read-only and it is now on the Trip list's own path, so it
+   * must not depend on TripPricingService — that service resolves a Trip
+   * through TripService to raise a 404, which would make the Trip module depend
+   * on the pricing module while the pricing module already depends on Trip. The
+   * cycle is avoided by not creating it: existence is the caller's question,
+   * and an unpriced or unknown Trip is the same answer here either way — no
+   * pricing.
+   */
   constructor(
-    private readonly tripPricingService: TripPricingService,
     /*
      * The REPOSITORY rather than the item service: the response DTO carries a
      * component id and a formatted string, and this layer needs the component
@@ -38,9 +47,9 @@ export class EffectivePricingService {
     private readonly tripPricingItems: TripPricingItemRepository,
     private readonly overrides: TripPricingOverrideRepository,
     /*
-     * For the batch read only. The repository already returns snapshots WITH
-     * their lines and component codes in one query, which is what keeps a whole
-     * page of Trips off the N+1 path.
+     * Both reads. The repository returns snapshots WITH their lines and
+     * component codes in one query, which is what keeps a whole page of Trips
+     * off the N+1 path.
      */
     private readonly snapshots: TripPricingRepository,
   ) {}
@@ -53,7 +62,7 @@ export class EffectivePricingService {
    * would state the second.
    */
   async findForTrip(tripId: string): Promise<EffectivePricing | null> {
-    const snapshot = await this.tripPricingService.findByTripId(tripId);
+    const snapshot = await this.snapshots.findByTripId(tripId);
 
     if (!snapshot) {
       return null;

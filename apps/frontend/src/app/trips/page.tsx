@@ -39,8 +39,10 @@ import { listCustomProperties } from "@/lib/api/custom-properties";
 import { listActiveVehicles } from "@/lib/api/fleet";
 import { fetchPdfDocument } from "@/lib/api/pdf-documents";
 import {
-  fetchPricingSnapshots,
-} from "@/lib/api/pricing";
+  resetTripPricingOverride,
+  saveTripPricingOverride,
+  type OverridableComponent,
+} from "@/lib/api/trip-pricing-overrides";
 import { getRittenCounts } from "@/lib/api/ritten";
 import { TooManyTripsError, fetchPeriodTrips } from "@/lib/api/trip-pages";
 import {
@@ -67,7 +69,7 @@ import {
 import type {
   ChangeableTripStatus,
   CostConfirmation,
-  PricingSnapshot,
+  EffectivePricing,
   Trip,
 } from "@/lib/api/types";
 import { downloadBlob } from "@/lib/download";
@@ -162,8 +164,11 @@ function fill(text: string, values: Readonly<Record<string, string>> = {}): stri
   );
 }
 
-/** One shared empty map, so a render with no pricing changes no identity. */
-const EMPTY_PRICING: ReadonlyMap<string, PricingSnapshot> = new Map();
+/**
+ * One shared empty map, so clearing the row-local corrections changes no
+ * identity and costs no render.
+ */
+const NO_UPDATED_PRICING: ReadonlyMap<string, EffectivePricing> = new Map();
 
 export default function RittenPage() {
   const t = useTranslation();
@@ -346,50 +351,53 @@ export default function RittenPage() {
   );
 
   /**
-   * The stored pricing of the Trips on this page — ONE request, never one per
-   * row.
+   * Corrections made since this page of Trips was loaded, keyed by Trip id.
    *
-   * Fetched only while the operator is showing prices, and keyed on the ids
-   * actually on screen, so turning the columns off costs nothing and paging
-   * costs exactly one more call. `fetchPricingSnapshots` batches ids under the
-   * endpoint's own limit, so the request count follows the page size rather
-   * than the row count.
+   * ── WHY THERE IS NO PRICING REQUEST HERE ──────────────────────────────────
+   * The pricing of every row TRAVELS ON THE TRIP: the list endpoint resolves
+   * the whole page in one batched read. So showing prices costs no request at
+   * all, a week of 300 Trips costs exactly the two list requests it already
+   * cost, and there is no second read that could fail on its own or arrive out
+   * of step with the rows it describes.
    *
-   * This is a READ. Nothing here prices a Trip: showing prices must never
-   * cause one.
+   * This map holds only what the override endpoints answered after an operator
+   * corrected an amount. Each of those answers is the complete recalculated
+   * breakdown for ONE Trip, which is what lets that row update without
+   * refetching the list — and why Brandstof and Totaal are right afterwards
+   * without anything on this side computing either.
    */
-  const pricedTripIds = useMemo(
-    () => (trips.data?.items ?? []).map((trip) => trip.id),
-    [trips.data],
+  const [updatedPricingByTripId, setUpdatedPricingByTripId] = useState(
+    NO_UPDATED_PRICING,
   );
-
-  const pricing = useAsync(
-    useCallback(
-      (signal: AbortSignal) =>
-        showPricing && pricedTripIds.length > 0
-          ? fetchPricingSnapshots(pricedTripIds, signal)
-          : Promise.resolve(new Map()),
-      [showPricing, pricedTripIds],
-    ),
-    [showPricing, pricedTripIds],
-  );
-
-  // Already keyed by Trip id by the client, which batches the ids for us.
-  const pricingByTripId = pricing.data ?? EMPTY_PRICING;
 
   /*
-   * A FAILED pricing read must never read as "these Trips have no price".
-   *
-   * Both states put the same dash in all eight columns, and they mean opposite
-   * things: one says the Pricing Engine has nothing stored for this Trip, the
-   * other says we could not find out. Without this notice the operator sees an
-   * empty column and concludes the first, which on an invoicing screen is the
-   * more expensive mistake.
-   *
-   * Only while the columns are on screen: a failure nobody can see the
-   * consequences of is not worth interrupting anyone for.
+   * A freshly loaded list is authoritative, so the row-local answers are
+   * dropped when one arrives. Keeping them would let a correction made before a
+   * refetch shadow the newer figures that same refetch just delivered.
    */
-  const pricingFailed = showPricing && !pricing.isLoading && pricing.error !== null;
+  useEffect(() => {
+    setUpdatedPricingByTripId(NO_UPDATED_PRICING);
+  }, [trips.data]);
+
+  /**
+   * Applies one recalculated breakdown to one row.
+   *
+   * A null answer means the Trip has never been priced — the correction is
+   * stored and will apply once the Engine prices it, but there is nothing to
+   * show yet, so the row is left as it is rather than being blanked.
+   */
+  const applyPricing = useCallback(
+    (tripId: string, pricing: EffectivePricing | null): void => {
+      if (!pricing) {
+        return;
+      }
+
+      setUpdatedPricingByTripId((current) =>
+        new Map(current).set(tripId, pricing),
+      );
+    },
+    [],
+  );
 
   const sections = useMemo(
     () => buildSections(view, anchor, trips.data?.items ?? []),
@@ -441,15 +449,12 @@ export default function RittenPage() {
       trips.reload();
       counts.reload();
       /*
-       * A mutation can change what a Trip costs — waiting time above all — and
-       * the reprocess action replaces the snapshot outright. The displayed
-       * amounts are therefore refetched from the backend rather than adjusted
-       * here: this side never calculates a price, so the only way for it to
-       * show a new one is to ask.
+       * The new prices arrive with the refetched list. A mutation can change
+       * what a Trip costs — waiting time above all — and the amounts travel on
+       * the Trip, so `trips.reload()` above has already asked for them. This
+       * side never calculates a price; the only way for it to show a new one is
+       * to be told, and it just was.
        */
-      if (showPricing) {
-        pricing.reload();
-      }
       setFeedback({ messageKey: successKey, isError: false });
     } catch (error: unknown) {
       setFeedback({
@@ -741,6 +746,42 @@ export default function RittenPage() {
         throw error;
       }
     },
+    /**
+     * A manual price correction on ONE Trip.
+     *
+     * ── WHY THIS IS NOT `runMutation` ─────────────────────────────────────
+     * Every other write here refetches the list, because the backend's answer
+     * describes only the row that changed and the rest of the page may have
+     * moved with it. A pricing correction is different in both halves: it
+     * changes exactly one Trip and nothing else, and the endpoint answers with
+     * that Trip's COMPLETE recalculated breakdown. So the row is updated from
+     * the response, the list is left alone, and the selection, the filters and
+     * the operator's scroll position all survive.
+     *
+     * The error is rethrown rather than reported here: the cell is still open
+     * with the attempted amount in it, and the backend's own wording belongs
+     * beside the field it is about. Nothing was painted, so nothing has to be
+     * put back — the row still shows the persisted amount.
+     */
+    savePricingOverride: async (
+      tripId: string,
+      componentCode: OverridableComponent,
+      amount: number,
+    ) => {
+      applyPricing(
+        tripId,
+        await saveTripPricingOverride(tripId, componentCode, amount),
+      );
+    },
+    resetPricingOverride: async (
+      tripId: string,
+      componentCode: OverridableComponent,
+    ) => {
+      applyPricing(
+        tripId,
+        await resetTripPricingOverride(tripId, componentCode),
+      );
+    },
     removeLosrit: (trip) =>
       runMutation(
         trip,
@@ -800,27 +841,6 @@ export default function RittenPage() {
           {t("ritten.pricing.show")}
         </label>
       </div>
-
-      {pricingFailed ? (
-        <p
-          role="alert"
-          className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-danger/30 bg-danger/5 px-4 py-2 text-sm text-foreground"
-        >
-          <span>
-            {t("ritten.pricing.loadFailed")}{" "}
-            <span className="text-secondary">
-              {userFacingMessage(pricing.error)}
-            </span>
-          </span>
-          <button
-            type="button"
-            onClick={pricing.reload}
-            className="shrink-0 rounded-md border border-border px-3 py-1 text-xs font-medium text-foreground hover:bg-hover"
-          >
-            {t("ritten.pricing.retry")}
-          </button>
-        </p>
-      ) : null}
 
       <div className="rounded-lg border border-border bg-card">
         <RittenFilters
@@ -956,7 +976,7 @@ export default function RittenPage() {
                   selectedTripIds={selectedTripIds}
                   onToggleSelection={toggleSelection}
                   showPricing={showPricing}
-                  pricingByTripId={pricingByTripId}
+                  updatedPricingByTripId={updatedPricingByTripId}
                   whatsAppStatus={whatsAppStatus}
                   onDeleteTrip={setDeletingTrip}
                   onReopenTrip={setReopeningTrip}

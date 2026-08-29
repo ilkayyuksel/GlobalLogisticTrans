@@ -71,7 +71,12 @@ export function apiBaseUrl(): string {
 }
 
 export interface RequestOptions {
-  method?: "GET" | "POST" | "PATCH" | "DELETE";
+  /**
+   * PUT is here for the pricing overrides: correcting the same component twice
+   * is one opinion revised rather than two recorded, so the endpoint is
+   * idempotent and says so with the verb.
+   */
+  method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
   /**
    * Serialised as JSON, unless it is FormData — a file upload is sent as the
    * multipart body it already is. Omitted entirely for GET.

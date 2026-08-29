@@ -288,11 +288,45 @@ describe("TripService — TripClosed event", () => {
       },
     );
 
-    it("the Trip module imports no pricing module at all", () => {
+    /**
+     * The Trip module may READ a stored price. It may not reach anything that
+     * produces, corrects or replaces one.
+     *
+     * The Ritten list carries each Trip's effective pricing, so a Trip response
+     * has to be able to resolve it — the alternative is every client asking a
+     * second endpoint about the rows it has just received, which is the N+1 the
+     * list exists to avoid. That read arrives through EffectivePricingModule,
+     * which is read-only and depends on nothing but Prisma, so the arrow still
+     * points one way and TripPricingModule can go on importing this one.
+     *
+     * What must stay unreachable from here is everything that WRITES a price:
+     * the Engine, the reprocess path, the override service and the override
+     * repository. A Trip that could correct its own price would put pricing
+     * rules back inside planning, which is the dependency this suite exists to
+     * forbid.
+     */
+    it("the Trip module reaches no pricing WRITE path", () => {
       const source = sourceOf("trip.module.ts");
 
-      expect(source).not.toContain("trip-pricing");
       expect(source).not.toContain("pricing-reprocess");
+      expect(source).not.toContain("TripPricingService");
+      expect(source).not.toContain("TripPricingModule");
+      expect(source).not.toContain("TripPricingOverrideService");
+      expect(source).not.toContain("TripPricingOverrideRepository");
+    });
+
+    /** And the one pricing module it does import is the read-only one. */
+    it("imports only the read-only effective-pricing module", () => {
+      const source = sourceOf("trip.module.ts");
+
+      // The quoted module specifiers, which is what an import actually reaches.
+      const pricingSpecifiers = source
+        .split('"')
+        .filter((part) => part.includes("trip-pricing"));
+
+      expect(pricingSpecifiers).toEqual([
+        "../trip-pricing/effective-pricing.module",
+      ]);
     });
 
     it("TripService reaches the outside world only through the event bus", () => {

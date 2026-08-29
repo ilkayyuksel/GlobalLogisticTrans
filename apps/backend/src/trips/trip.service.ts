@@ -124,6 +124,7 @@ export class TripService {
           customProperties: [],
           latestUpdate: null,
           costConfirmation: null,
+          pricing: null,
         },
       ),
     );

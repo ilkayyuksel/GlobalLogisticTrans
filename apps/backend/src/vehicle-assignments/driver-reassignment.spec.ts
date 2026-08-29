@@ -1,6 +1,7 @@
 import { Driver, Trip, VehicleAssignment } from "@prisma/client";
 
 import { CostConfirmationService } from "../cost-confirmations/cost-confirmation.service";
+import { EffectivePricingService } from "../trip-pricing/effective-pricing.service";
 import { DriverService } from "../drivers/driver.service";
 import { DriverStatisticsService } from "../trips/driver-statistics.service";
 import { EffectiveDriverSource } from "../trips/dto/trip-response.dto";
@@ -270,7 +271,9 @@ describe("changing the driver of a vehicle", () => {
       {
         findForTrips: jest.fn().mockResolvedValue(new Map()),
       } as unknown as CostConfirmationService,
-    );
+      {
+        findForTrips: () => Promise.resolve(new Map()),
+      } as unknown as EffectivePricingService,    );
   });
 
   afterEach(() => {

@@ -9,6 +9,7 @@ import { AutomaticFlatPropertyService } from "./automatic-flat.service";
 import { stubTripWriteTransaction } from "./trip-write-transaction.double";
 import { TripRevisionService } from "./trip-revision.service";
 import { CostConfirmationService } from "../cost-confirmations/cost-confirmation.service";
+import { EffectivePricingService } from "../trip-pricing/effective-pricing.service";
 import { TripRepository } from "./trip.repository";
 import { VehicleAssignmentService } from "../vehicle-assignments/vehicle-assignment.service";
 import { VehicleService } from "../vehicles/vehicle.service";
@@ -289,7 +290,9 @@ describe("many updates to one Trip", () => {
       {
         findForTrips: () => Promise.resolve(new Map()),
       } as unknown as CostConfirmationService,
-    );
+      {
+        findForTrips: () => Promise.resolve(new Map()),
+      } as unknown as EffectivePricingService,    );
 
     const resolved = await planning.resolveMany(stored);
 

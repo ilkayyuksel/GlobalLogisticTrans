@@ -137,6 +137,7 @@ function buildTrip(overrides: Partial<Trip> = {}): Trip {
     effectiveDriver: null,
     latestUpdate: null,
     costConfirmation: null,
+    pricing: null,
     status: "OPEN",
     isLooseTrip: false,
     bookingNumber: "ANRDUB2602247",

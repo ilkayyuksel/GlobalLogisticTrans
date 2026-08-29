@@ -228,9 +228,9 @@ const nl = {
   "ritten.pricing.show": "Prijzen tonen",
   "ritten.pricing.hint":
     "Toont de opgeslagen prijzen rechts van de tabel. Scroll naar rechts.",
-  "ritten.pricing.loadFailed":
-    "De prijzen konden niet worden geladen. De lege prijskolommen betekenen hier niet dat deze ritten geen prijs hebben.",
-  "ritten.pricing.retry": "Opnieuw proberen",
+  "ritten.pricing.editLabel": "aanpassen",
+  "ritten.pricing.overridden": "Handmatig aangepast",
+  "ritten.pricing.reset": "Terug naar berekende waarde",
   "ritten.value.empty": "—",
   "ritten.value.noVehicle": "Geen voertuig",
   "ritten.value.noDriver": "Geen chauffeur",
@@ -1036,9 +1036,9 @@ const tr: Translations = {
   "ritten.pricing.show": "Fiyatları göster",
   "ritten.pricing.hint":
     "Kaydedilmiş fiyatları tablonun sağında gösterir. Sağa kaydırın.",
-  "ritten.pricing.loadFailed":
-    "Fiyatlar yüklenemedi. Buradaki boş fiyat sütunları, bu seferlerin fiyatı olmadığı anlamına gelmez.",
-  "ritten.pricing.retry": "Tekrar dene",
+  "ritten.pricing.editLabel": "düzenle",
+  "ritten.pricing.overridden": "Elle düzeltildi",
+  "ritten.pricing.reset": "Hesaplanan değere dön",
   "ritten.value.empty": "—",
   "ritten.value.noVehicle": "Araç yok",
   "ritten.value.noDriver": "Şoför yok",

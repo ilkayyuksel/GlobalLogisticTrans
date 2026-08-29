@@ -4,7 +4,6 @@ import { TripPricingItemRepository } from "../trip-pricing-items/trip-pricing-it
 import { EffectivePricingService } from "./effective-pricing.service";
 import { TripPricingOverrideRepository } from "./trip-pricing-override.repository";
 import { TripPricingRepository } from "./trip-pricing.repository";
-import { TripPricingService } from "./trip-pricing.service";
 
 /**
  * The batch read the Ritten list depends on.
@@ -54,7 +53,6 @@ describe("EffectivePricingService.findForTrips", () => {
     findOverridesForTrips = jest.fn().mockResolvedValue([]);
 
     service = new EffectivePricingService(
-      {} as unknown as TripPricingService,
       {} as unknown as TripPricingItemRepository,
       {
         findForTrips: findOverridesForTrips,

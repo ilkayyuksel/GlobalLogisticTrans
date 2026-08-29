@@ -3,7 +3,7 @@ import { render } from "@testing-library/react";
 import { ApiError } from "@/lib/api/client";
 
 import RittenPage from "./page";
-import type { Paginated, Trip } from "@/lib/api/types";
+import type { EffectivePricing, Paginated, Trip } from "@/lib/api/types";
 import { LanguageProvider } from "@/lib/i18n/language-provider";
 import { ThemeProvider } from "@/lib/theme/theme-provider";
 
@@ -42,6 +42,7 @@ export function buildTrip(overrides: Partial<Trip> = {}): Trip {
     },
     latestUpdate: null,
     costConfirmation: null,
+    pricing: null,
     status: "OPEN",
     isLooseTrip: false,
     bookingNumber: "ANRDUB2602247",
@@ -63,6 +64,55 @@ export function buildTrip(overrides: Partial<Trip> = {}): Trip {
     createdAt: "2026-08-01T00:00:00.000Z",
     updatedAt: "2026-08-01T00:00:00.000Z",
     ...overrides,
+  };
+}
+
+/**
+ * The effective pricing a Trip carries, as the list endpoint sends it.
+ *
+ * Every amount is a preformatted two-decimal string, because that is what the
+ * backend sends and what the screen must show unchanged. `totaal` is stated
+ * explicitly rather than summed here for the same reason the UI never sums it:
+ * a total computed in a test would prove the test's arithmetic, not the
+ * backend's.
+ *
+ * `components` carries only what a cell reads from it — which of the three
+ * editable amounts an operator typed. Pass `overriddenComponents` to mark them.
+ */
+export function buildPricing({
+  overriddenComponents = [],
+  ...amounts
+}: Partial<Omit<EffectivePricing, "components">> & {
+  overriddenComponents?: readonly string[];
+} = {}): EffectivePricing {
+  const resolved = {
+    tarief: "100.00",
+    brandstof: "15.00",
+    backload: "0.00",
+    tol: "10.00",
+    tunnel: "10.00",
+    others: "20.00",
+    ek: "0.00",
+    totaal: "155.00",
+    ...amounts,
+  };
+
+  const amountOf: Record<string, string> = {
+    BASE_PRICE: resolved.tarief,
+    TOLL: resolved.tol,
+    TUNNEL: resolved.tunnel,
+  };
+
+  return {
+    ...resolved,
+    components: ["BASE_PRICE", "TOLL", "TUNNEL"].map((componentCode) => ({
+      componentCode,
+      engineAmount: amountOf[componentCode],
+      effectiveAmount: amountOf[componentCode],
+      source: overriddenComponents.includes(componentCode)
+        ? ("OVERRIDE" as const)
+        : ("ENGINE" as const),
+    })),
   };
 }
 
@@ -109,6 +159,21 @@ export interface BackendResponses {
   availableCustomProperties?: unknown[];
   /** The Trip's pricing snapshot, or null when it has none. */
   pricing?: unknown;
+  /**
+   * What a manual price correction answers with: the WHOLE recalculated
+   * breakdown for that Trip, which is what the row updates from.
+   *
+   * A function rather than a value, so a spec can answer differently per Trip
+   * and per component — which is exactly what "only the edited Trip changed"
+   * needs in order to be provable. `amount` is null for a reset.
+   */
+  onPricingOverride?: (correction: {
+    tripId: string;
+    componentCode: string;
+    amount: number | null;
+  }) => unknown;
+  /** The refusal a price correction answers with, as the backend words it. */
+  pricingOverrideFailureMessage?: string;
   /** The id a manual grouping request answers with. */
   createdGroupId?: string;
   /**
@@ -264,6 +329,38 @@ export function respondWith(
 
     if (path.includes("/reprocess")) {
       return Promise.resolve({});
+    }
+
+    /*
+     * The two override endpoints, matched BEFORE the snapshot read below them:
+     * both live under the same `/trip/{id}/` prefix, and the generic branch
+     * would otherwise answer a correction with a snapshot.
+     */
+    if (path.includes("/overrides") && method !== "GET") {
+      if (responses.pricingOverrideFailureMessage) {
+        return Promise.reject(
+          new ApiError(
+            "BAD_REQUEST",
+            responses.pricingOverrideFailureMessage,
+            400,
+          ),
+        );
+      }
+
+      const [, tripId] = path.match(/\/trip\/([^/]+)\/overrides/) ?? [];
+      const body = options?.body as
+        | { componentCode: string; amount: number }
+        | undefined;
+      const componentCode =
+        body?.componentCode ?? path.split("/overrides/")[1] ?? "";
+
+      return Promise.resolve(
+        responses.onPricingOverride?.({
+          tripId: tripId ?? "",
+          componentCode,
+          amount: body?.amount ?? null,
+        }) ?? null,
+      );
     }
 
     if (path.startsWith("/api/v1/trip-pricing/trip/")) {

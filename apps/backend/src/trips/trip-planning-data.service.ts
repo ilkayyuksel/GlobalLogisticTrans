@@ -4,6 +4,12 @@ import { Driver, Trip, Vehicle } from "@prisma/client";
 import { CostConfirmationService } from "../cost-confirmations/cost-confirmation.service";
 import { DriverService } from "../drivers/driver.service";
 import {
+  EffectivePricingDto,
+  toEffectivePricingDto,
+} from "../trip-pricing/dto/effective-pricing.dto";
+import type { EffectivePricing } from "../trip-pricing/effective-pricing";
+import { EffectivePricingService } from "../trip-pricing/effective-pricing.service";
+import {
   EffectiveDriverDto,
   EffectiveDriverSource,
   LatestTripUpdateDto,
@@ -54,6 +60,13 @@ export class TripPlanningDataService {
     private readonly vehicleAssignmentService: VehicleAssignmentService,
     private readonly tripRepository: TripRepository,
     private readonly costConfirmations: CostConfirmationService,
+    /*
+     * The READ side of pricing only — see EffectivePricingModule. A Trip
+     * response carries what the Trip is worth, so the Ritten list costs no
+     * pricing request of its own; nothing here can price, correct or reprocess
+     * anything.
+     */
+    private readonly effectivePricing: EffectivePricingService,
   ) {}
 
   /**
@@ -149,14 +162,20 @@ export class TripPlanningDataService {
   /**
    * A whole page of Trips, keyed by Trip id.
    *
-   * Four queries at most, whatever the page size: the vehicles, the override
-   * drivers, the assignments covering the page's date span, and the Custom
-   * Properties of every Trip on the page.
+   * A FIXED number of queries, whatever the page size: the vehicles, the
+   * override drivers, the assignments covering the page's date span, the Custom
+   * Properties of every Trip on the page, their latest updates, their cost
+   * confirmations, and their pricing — the last of which is two queries for the
+   * whole page rather than two per row, because it goes through
+   * `findForTrips`. One page of 200 Trips costs exactly what one page of 1
+   * costs.
    */
   async resolveMany(trips: readonly Trip[]): Promise<Map<string, TripPlanningData>> {
     if (trips.length === 0) {
       return new Map();
     }
+
+    const tripIds = trips.map((trip) => trip.id);
 
     const [
       vehicles,
@@ -165,13 +184,15 @@ export class TripPlanningDataService {
       customProperties,
       latestUpdates,
       confirmations,
+      pricing,
     ] = await Promise.all([
       this.loadVehicles(trips),
       this.loadOverrideDrivers(trips),
       this.loadAssignedDrivers(trips),
-      this.resolveCustomProperties(trips.map((trip) => trip.id)),
-      this.resolveLatestUpdates(trips.map((trip) => trip.id)),
-      this.costConfirmations.findForTrips(trips.map((trip) => trip.id)),
+      this.resolveCustomProperties(tripIds),
+      this.resolveLatestUpdates(tripIds),
+      this.costConfirmations.findForTrips(tripIds),
+      this.effectivePricing.findForTrips(tripIds),
     ]);
 
     const resolved = new Map<string, TripPlanningData>();
@@ -185,6 +206,12 @@ export class TripPlanningDataService {
         customProperties: customProperties.get(trip.id) ?? [],
         latestUpdate: latestUpdates.get(trip.id) ?? null,
         costConfirmation: confirmations.get(trip.id) ?? null,
+        /*
+         * Absent from the map means the Trip has never been priced, which is an
+         * ordinary state. It becomes null rather than a zeroed breakdown: zeros
+         * would state that the Trip costs nothing, which is a different claim.
+         */
+        pricing: toPricingDto(pricing.get(trip.id)),
       });
     }
 
@@ -272,7 +299,21 @@ const EMPTY_PLANNING_DATA: TripPlanningData = {
   customProperties: [],
   latestUpdate: null,
   costConfirmation: null,
+  pricing: null,
 };
+
+/**
+ * The stored breakdown as a screen reads it, or null when there is none.
+ *
+ * The formatting rule lives in the pricing module's own DTO mapper, so the
+ * amounts a Trip carries are spelled exactly as the override endpoints spell
+ * them — one vocabulary for money, whichever door it came through.
+ */
+function toPricingDto(
+  pricing: EffectivePricing | undefined,
+): EffectivePricingDto | null {
+  return pricing ? toEffectivePricingDto(pricing) : null;
+}
 
 /**
  * The field a history row is about.

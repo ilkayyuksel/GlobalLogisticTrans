@@ -54,6 +54,7 @@ const NO_PLANNING = {
   latestUpdate: null,
   costConfirmation: null,
   customProperties: [],
+  pricing: null,
 };
 
 describe("Trip direction", () => {

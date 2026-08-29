@@ -1,3 +1,4 @@
+import type { OverridableComponent } from "@/lib/api/trip-pricing-overrides";
 import type { UpdateTripPayload } from "@/lib/api/trips";
 import type { ChangeableTripStatus, Trip } from "@/lib/api/types";
 import type { TranslationKey } from "@/lib/i18n/translations";
@@ -5,10 +6,14 @@ import type { TranslationKey } from "@/lib/i18n/translations";
 /**
  * What a Ritten row can ask the page to do.
  *
- * One object rather than nine props: every one of these ends in the same place
- * — a backend call followed by a refetch of the authoritative data — and the
- * page owns that sequence. A row never mutates anything itself, and never
- * decides that something succeeded.
+ * One object rather than a dozen props: almost every one of these ends in the
+ * same place — a backend call followed by a refetch of the authoritative data —
+ * and the page owns that sequence. A row never mutates anything itself, and
+ * never decides that something succeeded.
+ *
+ * The two exceptions are named below and say why: sending a PDF changes
+ * nothing, and a pricing correction is answered with the new figures, so
+ * neither has anything to refetch.
  *
  * Restoring, reprocessing pricing and editing a Trip's less common fields are
  * deliberately NOT here. They left with the "Acties" dropdown, and all of them
@@ -54,6 +59,29 @@ export interface RittenActions {
    * otherwise.
    */
   sendPdf: (trip: Trip) => Promise<void>;
+  /**
+   * Corrects one pricing component of one Trip: Tarief, Tol or Tunnel.
+   *
+   * DELIBERATELY DOES NOT REFETCH THE LIST. The endpoint answers with the whole
+   * recalculated breakdown for that Trip, so the page updates that one row from
+   * the response — which is why Brandstof and Totaal are right afterwards
+   * without anything on this side computing either. Refetching would throw away
+   * an answer already in hand, and would move every other row on the page while
+   * an operator was working through them.
+   *
+   * Rejects with the backend's own error so the cell can keep its editor open
+   * and say what was wrong. Nothing is painted before it resolves.
+   */
+  savePricingOverride: (
+    tripId: string,
+    componentCode: OverridableComponent,
+    amount: number,
+  ) => Promise<void>;
+  /** Withdraws such a correction. Same contract, same row-local update. */
+  resetPricingOverride: (
+    tripId: string,
+    componentCode: OverridableComponent,
+  ) => Promise<void>;
 }
 
 /** Translations for the transitions `statusActionsFor` offers. */

@@ -3,6 +3,7 @@ import { Module } from "@nestjs/common";
 import { CostConfirmationModule } from "../cost-confirmations/cost-confirmation.module";
 import { CustomPropertyModule } from "../custom-properties/custom-property.module";
 import { DriverModule } from "../drivers/driver.module";
+import { EffectivePricingModule } from "../trip-pricing/effective-pricing.module";
 import { VehicleAssignmentModule } from "../vehicle-assignments/vehicle-assignment.module";
 import { VehicleModule } from "../vehicles/vehicle.module";
 import { AutomaticFlatPropertyService } from "./automatic-flat.service";
@@ -42,6 +43,13 @@ import { TripService } from "./trip.service";
  * written through a transaction-scoped repository handed out by
  * `runTripWriteTransaction`, so the Trip and its properties commit together.
  *
+ * EffectivePricingModule is imported so a Trip response can CARRY what the
+ * Trip is worth. That module is read-only and depends on nothing but Prisma,
+ * so the arrow still points one way and no cycle forms with the pricing write
+ * module, which imports this one for its own paths. The alternative — every client
+ * asking a second endpoint for the prices of the rows it just received — is
+ * the N+1 the Ritten list must never produce.
+ *
  * TripService is exported because later phases — pricing, export and the
  * parser — read Trips through the service, never through the repository, so
  * database access stays behind a single door.
@@ -53,6 +61,7 @@ import { TripService } from "./trip.service";
     VehicleAssignmentModule,
     CostConfirmationModule,
     CustomPropertyModule,
+    EffectivePricingModule,
   ],
   controllers: [TripController, TripGroupController, DriverStatisticsController],
   providers: [

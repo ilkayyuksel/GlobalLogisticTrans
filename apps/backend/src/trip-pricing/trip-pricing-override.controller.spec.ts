@@ -19,7 +19,6 @@ import { TripPricingOverrideController } from "./trip-pricing-override.controlle
 import { TripPricingOverrideRepository } from "./trip-pricing-override.repository";
 import { TripPricingOverrideService } from "./trip-pricing-override.service";
 import { TripPricingRepository } from "./trip-pricing.repository";
-import { TripPricingService } from "./trip-pricing.service";
 
 const TRIP_ID = "1b9d6bcd-bbfd-4b2d-9b5d-ab8dfbbd4bed";
 const OTHER_TRIP_ID = "2c9d6bcd-bbfd-4b2d-9b5d-ab8dfbbd4bee";
@@ -138,15 +137,12 @@ describe("TripPricingOverrideController (integration)", () => {
         { provide: TripPricingItemRepository, useValue: items },
         {
           /*
-           * Used only by the batch read, which this controller never calls.
-           * Present so the container can build the service, and deliberately
-           * left unimplemented so a call would fail loudly.
+           * The snapshot the effective read resolves against. `findManyByTripIds`
+           * belongs to the batch read, which this controller never calls, so it
+           * is deliberately absent: a call would fail loudly rather than quietly
+           * return nothing.
            */
           provide: TripPricingRepository,
-          useValue: {},
-        },
-        {
-          provide: TripPricingService,
           useValue: {
             findByTripId: jest.fn().mockResolvedValue({ id: PRICING_ID }),
           },

@@ -1,6 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from "@nestjs/swagger";
 
 import { CostConfirmationDto } from "../../cost-confirmations/dto/cost-confirmation-response.dto";
+import { EffectivePricingDto } from "../../trip-pricing/dto/effective-pricing.dto";
 import { Trip, TripDirection, TripStatus } from "@prisma/client";
 
 import { toIsoDate } from "../../common/dates";
@@ -133,6 +134,16 @@ export interface TripPlanningData {
   customProperties: TripCustomPropertySummaryDto[];
   latestUpdate: LatestTripUpdateDto | null;
   costConfirmation: CostConfirmationDto | null;
+  /**
+   * What the Trip is worth, after any operator correction. Null when it has
+   * never been priced.
+   *
+   * Resolved for EVERY Trip response for the same reason `effectiveDriver` is:
+   * if it could be omitted, a path that forgot would answer `null`, and a
+   * client cannot tell that apart from "this Trip has no pricing". Null means
+   * the second, always.
+   */
+  pricing: EffectivePricingDto | null;
 }
 
 /**
@@ -342,6 +353,14 @@ export class TripResponseDto {
   })
   costConfirmation!: CostConfirmationDto | null;
 
+  @ApiPropertyOptional({
+    type: EffectivePricingDto,
+    nullable: true,
+    description:
+      "The effective pricing of this Trip — the Pricing Engine's figures with any operator correction applied — or null when it has never been priced. It travels WITH the Trip so a list of any size costs no pricing request of its own, and it is authoritative: no client may recompute any of these amounts.",
+  })
+  pricing!: EffectivePricingDto | null;
+
   @ApiProperty({ format: "date-time" })
   createdAt!: Date;
 
@@ -402,6 +421,7 @@ export function toTripResponse(
     effectiveDriver: planning.effectiveDriver,
     latestUpdate: planning.latestUpdate,
     costConfirmation: planning.costConfirmation,
+    pricing: planning.pricing,
     customProperties: planning.customProperties,
     createdAt: trip.createdAt,
     updatedAt: trip.updatedAt,

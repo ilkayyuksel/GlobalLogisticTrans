@@ -7,8 +7,8 @@ import { LosritBadge } from "@/components/trips/losrit-badge";
 import { TripStatusBadge } from "@/components/trips/trip-status-badge";
 import { ApiError } from "@/lib/api/client";
 import type { UpdateTripPayload } from "@/lib/api/trips";
-import type { PricingSnapshot, Trip, Vehicle } from "@/lib/api/types";
-import { toPricingCells } from "@/lib/ritten/pricing-cells";
+import type { EffectivePricing, Trip, Vehicle } from "@/lib/api/types";
+import { PricingCells } from "@/components/ritten/pricing-cells";
 import { toClockLabel } from "@/lib/calendar/clock";
 import { formatCalendarDate } from "@/lib/calendar/calendar-dates";
 import { toFleetOptions, type FleetOption } from "@/lib/fleet-options";
@@ -129,8 +129,16 @@ export interface RittenTableProps {
    * shaped; an absent column tells them nothing, which is the point.
    */
   showPricing: boolean;
-  /** The stored snapshots of the Trips on this page, keyed by Trip id. */
-  pricingByTripId: ReadonlyMap<string, PricingSnapshot>;
+  /**
+   * Rows whose pricing has moved since the list was loaded, keyed by Trip id.
+   *
+   * A Trip normally shows the pricing it ARRIVED with, on the Trip itself. This
+   * map holds only the answers the override endpoints gave back after an
+   * operator corrected something, so that one row updates without refetching
+   * the page — see `RittenActions.savePricingOverride`. Empty is the ordinary
+   * state.
+   */
+  updatedPricingByTripId: ReadonlyMap<string, EffectivePricing>;
   /** Whether WhatsApp can deliver, for the send button. One value per page. */
   whatsAppStatus: WhatsAppStatus;
   /** Opens the delete confirmation. A row never deletes anything itself. */
@@ -230,7 +238,7 @@ function RittenRow({
   selectedTripIds,
   onToggleSelection,
   showPricing,
-  pricingByTripId,
+  updatedPricingByTripId,
   whatsAppStatus,
   onDeleteTrip,
   onReopenTrip,
@@ -468,7 +476,21 @@ function RittenRow({
       <CostConfirmationCell trip={trip} actions={actions} isBusy={isBusy} />
 
       {showPricing ? (
-        <PricingCells snapshot={pricingByTripId.get(trip.id) ?? null} />
+        <PricingCells
+          /*
+           * The row-local answer when this Trip has just been corrected,
+           * otherwise the pricing the Trip arrived with. Both come from the
+           * backend; neither is computed here.
+           */
+          pricing={updatedPricingByTripId.get(trip.id) ?? trip.pricing}
+          isDisabled={isBusy}
+          onSaveOverride={(componentCode, amount) =>
+            actions.savePricingOverride(trip.id, componentCode, amount)
+          }
+          onResetOverride={(componentCode) =>
+            actions.resetPricingOverride(trip.id, componentCode)
+          }
+        />
       ) : null}
     </tr>
   );
@@ -721,48 +743,6 @@ function UpdatedValue({
     <span className={UPDATED_FIELD_CLASS} title={t("ritten.status.revisedField")}>
       {children}
     </span>
-  );
-}
-
-/**
- * What the Pricing Engine stored for this Trip, read and shown.
- *
- * Nothing is calculated here — not a component, and least of all the total,
- * which is the backend's own `totalPrice` passed through. See
- * `pricing-cells.ts`.
- *
- * A Trip with no snapshot shows the same empty marker the rest of the table
- * uses, never `0.00`: not yet priced and priced at nothing are different facts.
- */
-function PricingCells({ snapshot }: { snapshot: PricingSnapshot | null }) {
-  const t = useTranslation();
-  const empty = t("ritten.value.empty");
-  const cells = toPricingCells(snapshot);
-
-  const amounts = [
-    cells.tarief,
-    cells.brandstof,
-    cells.backload,
-    cells.tol,
-    cells.tunnel,
-    cells.others,
-    cells.ek,
-  ];
-
-  return (
-    <>
-      {amounts.map((amount, index) => (
-        <td
-          key={PRICING_COLUMN_KEYS[index]}
-          className="whitespace-nowrap px-3 py-2 text-right tabular-nums text-secondary"
-        >
-          {amount ?? empty}
-        </td>
-      ))}
-      <td className="whitespace-nowrap px-3 py-2 text-right font-medium tabular-nums text-foreground">
-        {cells.totaal ?? empty}
-      </td>
-    </>
   );
 }
 

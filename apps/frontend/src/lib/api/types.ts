@@ -199,6 +199,18 @@ export interface Trip {
    */
   costConfirmation: CostConfirmation | null;
   /**
+   * What this Trip is worth, or null when it has never been priced.
+   *
+   * It TRAVELS ON THE TRIP. The list endpoint resolves it for the whole page in
+   * one batched read, so showing prices costs no request of its own and a page
+   * of 200 costs what a page of 1 costs. Nothing on this side may recompute any
+   * of these amounts — the backend is the only place a price is decided.
+   *
+   * Null means "never priced", never "priced at zero" and never "nobody
+   * looked": every Trip response resolves it.
+   */
+  pricing: EffectivePricing | null;
+  /**
    * The Custom Properties assigned to this Trip, in the operator's own display
    * order. Empty means none are assigned.
    */
@@ -293,6 +305,48 @@ export interface TripPricingItem {
   notes: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+/** Where an effective amount came from. */
+export type PricingAmountSource = "ENGINE" | "OVERRIDE";
+
+/**
+ * One component of a price, with the correction that may sit on top of it.
+ *
+ * `engineAmount` is what the Pricing Engine calculated, or null when it
+ * produced no line for this component. `effectiveAmount` is the one that
+ * counts. Keeping both is what lets a screen mark an amount as manually
+ * corrected and offer to withdraw the correction.
+ */
+export interface EffectivePricingComponent {
+  componentCode: string;
+  engineAmount: string | null;
+  effectiveAmount: string;
+  source: PricingAmountSource;
+}
+
+/**
+ * What a Trip is worth, as the Ritten columns read it.
+ *
+ * Every amount is a preformatted two-decimal string and is displayed exactly as
+ * received. `totaal` is the backend's own sum, never one added up here: a total
+ * computed in the browser would be a second opinion about money, and the two
+ * would eventually disagree.
+ *
+ * The three overridable components — BASE_PRICE, TOLL, TUNNEL — are found in
+ * `components`, which is where a cell learns whether the figure it is showing
+ * was typed by an operator.
+ */
+export interface EffectivePricing {
+  tarief: string;
+  brandstof: string;
+  backload: string;
+  tol: string;
+  tunnel: string;
+  others: string;
+  ek: string;
+  totaal: string;
+  components: EffectivePricingComponent[];
 }
 
 /** What the reprocess endpoint returns, and what the detail page displays. */
