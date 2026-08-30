@@ -19,6 +19,7 @@ import {
   ApiTags,
 } from "@nestjs/swagger";
 
+import { ChangeTripPaymentDto } from "./dto/change-trip-payment.dto";
 import { ChangeTripStatusDto } from "./dto/change-trip-status.dto";
 import { CompleteTripsDto } from "./dto/complete-trips.dto";
 import { MarkTripsLooseDto } from "./dto/mark-trips-loose.dto";
@@ -174,6 +175,37 @@ export class TripController {
     @Body() dto: ChangeTripStatusDto,
   ): Promise<TripResponseDto> {
     return this.tripService.changeStatus(params.id, dto);
+  }
+
+  /**
+   * BETAALD / NIET BETAALD.
+   *
+   * Its own sub-resource, beside `:id/status` and for the same reason: payment
+   * is a decision of its own, made in one click, not a field edited among
+   * others. Folding it into the general update would let a request that meant
+   * to correct a container number also mark a Trip paid.
+   *
+   * PATCH rather than POST: it sets the state of an existing Trip rather than
+   * creating anything, and asking for the state a Trip already has is
+   * idempotent.
+   */
+  @Patch(":id/payment")
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: "Mark a Trip paid or unpaid",
+    description:
+      "Sets the payment state and NOTHING else. Payment is independent of the lifecycle: it never changes the Trip's status, never closes, reopens, cancels or deletes it, and never touches its pricing. Only a boolean is accepted, so no other value can be stored. Setting the state the Trip already has is idempotent. Returns the whole updated Trip, so a list can refresh the affected row from the response without refetching.",
+  })
+  @ApiOkResponse({ type: TripResponseDto })
+  @ApiBadRequestResponse({
+    description: "The id is not a valid UUID, or isPaid is not a boolean.",
+  })
+  @ApiNotFoundResponse({ description: "No Trip with that id." })
+  changePayment(
+    @Param() params: TripIdParamDto,
+    @Body() dto: ChangeTripPaymentDto,
+  ): Promise<TripResponseDto> {
+    return this.tripService.changePayment(params.id, dto);
   }
 
   /**

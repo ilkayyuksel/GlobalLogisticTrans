@@ -3,9 +3,8 @@ import { Injectable } from "@nestjs/common";
 import { CustomPropertyService } from "../custom-properties/custom-property.service";
 import { AppLoggerService } from "../logger/app-logger.service";
 import { RoutePricingService } from "../route-pricing/route-pricing.service";
-import { TripCustomPropertyService } from "../trip-custom-properties/trip-custom-property.service";
-import { TripResponseDto } from "../trips/dto/trip-response.dto";
-import { TripService } from "../trips/trip.service";
+import { TripCustomPropertyReadService } from "../trip-custom-properties/trip-custom-property-read.service";
+import { TripReadService, TripReadView } from "../trips/trip-read.service";
 import {
   CombinationLeg,
   CombinationMember,
@@ -40,9 +39,9 @@ import { PricingRuleResolver } from "./pricing-rule.resolver";
 export class PricingComponentResolver {
   constructor(
     private readonly routePricingService: RoutePricingService,
-    private readonly tripCustomPropertyService: TripCustomPropertyService,
+    private readonly tripCustomProperties: TripCustomPropertyReadService,
     private readonly customPropertyService: CustomPropertyService,
-    private readonly tripService: TripService,
+    private readonly trips: TripReadService,
     private readonly ruleResolver: PricingRuleResolver,
     private readonly logger: AppLoggerService,
   ) {
@@ -58,7 +57,7 @@ export class PricingComponentResolver {
    * a base price of zero.
    */
   async resolveBaseSource(
-    trip: TripResponseDto,
+    trip: TripReadView,
     rules: PricingRuleConfiguration,
   ): Promise<PricingBaseSource> {
     if (rules.strategy === PricingStrategy.ROUTE_BASED) {
@@ -86,17 +85,17 @@ export class PricingComponentResolver {
    * is the amount for the fixed-price case.
    */
   async resolveAssignedCustomProperties(
-    trip: TripResponseDto,
+    trip: TripReadView,
     rules: PricingRuleConfiguration,
   ): Promise<PricingCustomPropertyInput[]> {
-    const { items } = await this.tripCustomPropertyService.findByTripId(trip.id);
-
-    const assigned: PricingCustomPropertyInput[] = items.map((assignment) => ({
-      customPropertyId: assignment.customProperty.id,
-      name: assignment.customProperty.name,
-      pricingComponentId: assignment.customProperty.pricingComponentId,
-      defaultPrice: assignment.customProperty.defaultPrice,
-    }));
+    /*
+     * Through the READ side: the write service resolves the Trip again for its
+     * own 404 and returns the container-type rule the Engine has no use for,
+     * and it depends on the Engine now that assigning recalculates. See
+     * TripCustomPropertyReadService.
+     */
+    const assigned: PricingCustomPropertyInput[] =
+      await this.tripCustomProperties.findByTripId(trip.id);
 
     const resolved = await this.withAutomaticProperty(trip, rules, assigned);
 
@@ -137,7 +136,7 @@ export class PricingComponentResolver {
    * ──────────────────────────────────────────────────────────────────────────
    */
   private async withAutomaticProperty(
-    trip: TripResponseDto,
+    trip: TripReadView,
     rules: PricingRuleConfiguration,
     assigned: readonly PricingCustomPropertyInput[],
   ): Promise<PricingCustomPropertyInput[]> {
@@ -200,7 +199,7 @@ export class PricingComponentResolver {
    * `combinationLegOf`.
    */
   async resolveCombinationLeg(
-    trip: TripResponseDto,
+    trip: TripReadView,
   ): Promise<CombinationLeg> {
     if (trip.tripGroupId === null || trip.pdfDocumentId === null) {
       return CombinationLeg.NONE;
@@ -209,19 +208,13 @@ export class PricingComponentResolver {
     return combinationLegOf(trip, await this.groupMembers(trip));
   }
 
-  private async groupMembers(
-    trip: TripResponseDto,
-  ): Promise<CombinationMember[]> {
-    const { items } = await this.tripService.findByGroupId(
-      trip.tripGroupId as string,
-    );
-
-    return items;
+  private groupMembers(trip: TripReadView): Promise<CombinationMember[]> {
+    return this.trips.findByGroupId(trip.tripGroupId as string);
   }
 
   /** For the refusal message, so the fault can be seen without a query. */
   private async directionsOfGroup(
-    trip: TripResponseDto,
+    trip: TripReadView,
   ): Promise<(string | null)[]> {
     const members = await this.groupMembers(trip);
 
@@ -235,7 +228,7 @@ export class PricingComponentResolver {
    * terminal-to-destination route.
    */
   private async resolveRouteBaseSource(
-    trip: TripResponseDto,
+    trip: TripReadView,
   ): Promise<PricingBaseSource> {
     if (!trip.terminal) {
       this.rejectMissingInput(trip.id, "terminal", PricingStrategy.ROUTE_BASED);
@@ -283,7 +276,7 @@ export class PricingComponentResolver {
    * multiplication belongs to the calculation phase.
    */
   private async resolveDistanceBaseSource(
-    trip: TripResponseDto,
+    trip: TripReadView,
   ): Promise<PricingBaseSource> {
     if (trip.distanceKm === null) {
       this.rejectMissingInput(

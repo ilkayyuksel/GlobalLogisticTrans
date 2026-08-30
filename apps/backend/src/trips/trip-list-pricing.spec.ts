@@ -14,6 +14,7 @@ import { AutomaticFlatPropertyService } from "./automatic-flat.service";
 import { TripPlanningDataService } from "./trip-planning-data.service";
 import { TripRepository } from "./trip.repository";
 import { TripService } from "./trip.service";
+import { stubPricingRecalculation } from "../pricing-engine/pricing-recalculation.double";
 
 /**
  * The pricing the Ritten list carries.
@@ -44,6 +45,7 @@ function buildTrip(id: string): Trip {
     driverId: null,
     status: TripStatus.CLOSED,
     isLooseTrip: false,
+    isPaid: false,
     direction: null,
     bookingNumber: `BK-${id.slice(0, 6)}`,
     containerNumber: null,
@@ -176,6 +178,7 @@ describe("the Ritten list carries the effective pricing of each Trip", () => {
       {} as unknown as DriverService,
       planningData,
       {} as unknown as AutomaticFlatPropertyService,
+      stubPricingRecalculation(),
       {} as unknown as DomainEventBus,
       {
         setContext: jest.fn(),

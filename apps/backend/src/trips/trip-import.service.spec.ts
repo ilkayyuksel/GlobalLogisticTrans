@@ -12,6 +12,7 @@ import { TripService } from "./trip.service";
 import { TripCustomPropertyRepository } from "../trip-custom-properties/trip-custom-property.repository";
 import { AutomaticFlatPropertyService } from "./automatic-flat.service";
 import { TripPlanningDataService } from "./trip-planning-data.service";
+import { stubPricingRecalculation } from "../pricing-engine/pricing-recalculation.double";
 
 /**
  * The internal import path.
@@ -33,6 +34,7 @@ function buildTrip(overrides: Partial<Trip> = {}): Trip {
     driverId: null,
     status: TripStatus.OPEN,
     isLooseTrip: false,
+    isPaid: false,
     direction: null,
     bookingNumber: "ANRDUB2602247",
     containerNumber: null,
@@ -167,6 +169,7 @@ describe("TripService.importTrips", () => {
         applyToNewTrip: jest.fn(),
         synchronise: jest.fn(),
       } as unknown as AutomaticFlatPropertyService,
+      stubPricingRecalculation(),
       eventBus as unknown as DomainEventBus,
       logger as unknown as AppLoggerService,
     );

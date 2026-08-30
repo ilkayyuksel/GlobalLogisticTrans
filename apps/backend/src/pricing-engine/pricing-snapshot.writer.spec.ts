@@ -53,7 +53,7 @@ function buildResult(
 
 describe("PricingSnapshotWriter", () => {
   let tripPricingService: {
-    findByTripId: jest.Mock;
+    findSnapshotByTripId: jest.Mock;
     replaceSnapshot: jest.Mock;
   };
   let tripPricingItemService: {
@@ -65,7 +65,7 @@ describe("PricingSnapshotWriter", () => {
 
   beforeEach(() => {
     tripPricingService = {
-      findByTripId: jest.fn().mockResolvedValue(null),
+      findSnapshotByTripId: jest.fn().mockResolvedValue(null),
       replaceSnapshot: jest.fn().mockResolvedValue({
         id: PRICING_ID,
         calculationStatus: PricingCalculationStatus.CALCULATED,
@@ -93,7 +93,7 @@ describe("PricingSnapshotWriter", () => {
     });
 
     it("summarises the snapshot a reprocess would replace", async () => {
-      tripPricingService.findByTripId.mockResolvedValue({
+      tripPricingService.findSnapshotByTripId.mockResolvedValue({
         id: PRICING_ID,
         totalPrice: "482.35",
         calculationStatus: PricingCalculationStatus.CALCULATED,
@@ -110,7 +110,7 @@ describe("PricingSnapshotWriter", () => {
     });
 
     it("counts the lines of that snapshot, not of another", async () => {
-      tripPricingService.findByTripId.mockResolvedValue({
+      tripPricingService.findSnapshotByTripId.mockResolvedValue({
         id: PRICING_ID,
         totalPrice: "482.35",
         calculationStatus: PricingCalculationStatus.CALCULATED,
@@ -124,7 +124,7 @@ describe("PricingSnapshotWriter", () => {
     });
 
     it("reports a FAILED snapshot rather than treating it as absent", async () => {
-      tripPricingService.findByTripId.mockResolvedValue({
+      tripPricingService.findSnapshotByTripId.mockResolvedValue({
         id: PRICING_ID,
         totalPrice: "0.00",
         calculationStatus: PricingCalculationStatus.FAILED,
@@ -136,7 +136,7 @@ describe("PricingSnapshotWriter", () => {
     });
 
     it("never logs the stored total", async () => {
-      tripPricingService.findByTripId.mockResolvedValue({
+      tripPricingService.findSnapshotByTripId.mockResolvedValue({
         id: PRICING_ID,
         totalPrice: "482.35",
         calculationStatus: PricingCalculationStatus.CALCULATED,

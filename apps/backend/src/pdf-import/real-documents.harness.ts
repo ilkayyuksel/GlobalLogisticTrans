@@ -20,6 +20,7 @@ import { TripRevisionService } from "../trips/trip-revision.service";
 import { TripService } from "../trips/trip.service";
 import { VehicleService } from "../vehicles/vehicle.service";
 import { PdfTripImporter } from "./pdf-trip-importer.service";
+import { stubPricingRecalculation } from "../pricing-engine/pricing-recalculation.double";
 
 /**
  * The real import graph, with the DATABASE replaced and nothing else.
@@ -369,6 +370,7 @@ export function buildHarness(storageDirectory: string) {
     {} as unknown as DriverService,
     planningData,
     automaticFlat,
+    stubPricingRecalculation(),
     {
       publish: jest.fn((event: unknown) => events.push(event)),
     } as unknown as DomainEventBus,
@@ -419,6 +421,12 @@ export function buildHarness(storageDirectory: string) {
         ),
       ),
     } as unknown as CostConfirmationRepository,
+    /*
+     * The import harness is about what the DOCUMENTS produce, not about what a
+     * Trip is worth: pricing has no snapshot store here. The stub keeps the
+     * recording path whole while asserting nothing about money.
+     */
+    stubPricingRecalculation(),
     logger,
   );
 

@@ -211,6 +211,19 @@ export interface Trip {
    */
   pricing: EffectivePricing | null;
   /**
+   * Why `pricing` is null after a write that RECALCULATED this Trip.
+   *
+   * A stable backend code — PRICING_MISSING_ROUTE_PRICING and the like. Always
+   * null on a read: a Trip that has simply never been priced is not a failure,
+   * and nothing was attempted to report on.
+   *
+   * It is what separates the two nulls. "Never priced" leaves a row as it is;
+   * "recalculated and it could not be priced" BLANKS it, because the amounts on
+   * screen describe the Trip before the change, and showing them as current
+   * would be a stale figure nothing on the page reveals.
+   */
+  reasonCode: string | null;
+  /**
    * Where this Trip starts and where it ends, as the backend derives it.
    *
    * AUTHORITATIVE. Nothing on this side builds a route: the order of the two
@@ -238,6 +251,14 @@ export interface Trip {
    * no document handling; it is shown, and that is all.
    */
   isLooseTrip: boolean;
+  /**
+   * BETAALD when true, NIET BETAALD when false.
+   *
+   * INDEPENDENT of `status`: a Trip is paid or unpaid whether it is OPEN,
+   * CLOSED or CANCELLED. It travels on the Trip like every other field, so
+   * showing it costs no request of its own.
+   */
+  isPaid: boolean;
   /** What the document said this Trip is. Null when nothing said. */
   direction: TripDirection | null;
   /** Null on a manual Trip whose booking number is not known yet. */
@@ -450,6 +471,25 @@ export interface TripCustomProperty {
    * renders the answer.
    */
   isRequired: boolean;
+}
+
+/**
+ * What assigning or removing a Custom Property answers with.
+ *
+ * The assignment, PLUS what the Trip is now worth. A priced property moves
+ * Others and Others moves Totaal, so the backend recalculates before it
+ * answers and the row updates from this response — no second request for the
+ * prices of a row already in hand, and no list refetch that would move every
+ * other row while an operator works through them.
+ *
+ * `pricing` is null when the Trip could not be priced, and `reasonCode` says
+ * why. The assignment itself still happened: a Trip whose route is not
+ * configured is an ordinary state, not a reason to refuse an operator's edit.
+ * The previous figures are never returned.
+ */
+export interface TripCustomPropertyMutation extends TripCustomProperty {
+  pricing: EffectivePricing | null;
+  reasonCode: string | null;
 }
 
 /**

@@ -8,8 +8,10 @@ import { buildPaginationMeta } from "../common/dto/pagination-meta.dto";
 import { toUtcTime } from "../common/time-of-day";
 import { DriverService } from "../drivers/driver.service";
 import { AppLoggerService } from "../logger/app-logger.service";
+import { PricingRecalculationService } from "../pricing-engine/pricing-recalculation.service";
 import { VehicleService } from "../vehicles/vehicle.service";
 import { AutomaticFlatPropertyService } from "./automatic-flat.service";
+import { ChangeTripPaymentDto } from "./dto/change-trip-payment.dto";
 import { ChangeTripStatusDto } from "./dto/change-trip-status.dto";
 import { CreateTripDto } from "./dto/create-trip.dto";
 import { ListTripsQueryDto } from "./dto/list-trips-query.dto";
@@ -21,7 +23,7 @@ import {
 import { UpdateTripDto } from "./dto/update-trip.dto";
 import { TripClosedEvent } from "./events/trip-closed.event";
 import { toContainerIdentity } from "./document-trip-matching";
-import { toWaitingTimeWrite } from "./waiting-window";
+import { changesWaitingTimeWindow, toWaitingTimeWrite } from "./waiting-window";
 import { ImportTripsCommand } from "./import-trips.command";
 import {
   AssignmentSubject,
@@ -88,6 +90,7 @@ export class TripService {
     private readonly driverService: DriverService,
     private readonly planningData: TripPlanningDataService,
     private readonly automaticFlat: AutomaticFlatPropertyService,
+    private readonly recalculation: PricingRecalculationService,
     private readonly eventBus: DomainEventBus,
     private readonly logger: AppLoggerService,
   ) {
@@ -134,6 +137,13 @@ export class TripService {
     const { items, totalItems } = await this.repository.findPage({
       status: query.status,
       excludeStatuses: HIDDEN_BY_DEFAULT_STATUSES,
+      /*
+       * Passed straight through, `undefined` included: absent means "Alle" and
+       * must stay absent all the way to the query. The database narrows the
+       * result set, so paging and the counts stay correct — filtering a page
+       * after it was fetched would page over the wrong set.
+       */
+      isPaid: query.isPaid,
       planningDate: query.planningDate
         ? toUtcDate(query.planningDate)
         : undefined,
@@ -357,7 +367,58 @@ export class TripService {
       changedFields: changedFieldNames(dto),
     });
 
-    return this.toResponse(updated);
+    return this.respondToUpdate(updated, dto);
+  }
+
+  /**
+   * The updated Trip, priced again when the update touched a pricing input.
+   *
+   * ── WHY WAITING TIME AND NOT EVERY FIELD ────────────────────────────────
+   * The waiting-time window is the one input on this endpoint that an operator
+   * edits AFTER the work is finished and that the Pricing Engine bills from.
+   * Changing it must leave the Trip's stored pricing current, and the operator
+   * must see the new Others and Totaal in the answer to their own request
+   * rather than in a later refresh.
+   *
+   * Every other field here is either not a pricing input at all — a container
+   * number, a vehicle, a note — or belongs to a Trip that is still being
+   * planned, where the price is produced when it closes.
+   *
+   * The window is treated as changed when it was SENT, which is the same test
+   * `toWaitingTimeWrite` uses to decide whether this update is about waiting
+   * time at all. Recalculating a window that was re-sent unchanged costs one
+   * calculation and produces the same snapshot; missing a real change would
+   * leave the money describing the previous window.
+   *
+   * ── AND WHY THE STATUS IS NEVER TOUCHED ─────────────────────────────────
+   * A CLOSED Trip stays CLOSED. The price of a finished job may change; the
+   * fact that it is finished may not, and there is no CLOSED -> OPEN anywhere
+   * in this system.
+   */
+  private async respondToUpdate(
+    updated: Trip,
+    dto: UpdateTripDto,
+  ): Promise<TripResponseDto> {
+    const response = await this.toResponse(updated);
+
+    if (!changesWaitingTimeWindow(dto)) {
+      return response;
+    }
+
+    const outcome = await this.recalculation.recalculate(updated.id);
+
+    /*
+     * The recalculated answer REPLACES what the response already carried. On
+     * failure that means null rather than the figures the read produced: those
+     * describe the window before this edit, and presenting them as current
+     * would be a stale amount nothing on the screen could reveal. The write
+     * itself is kept either way.
+     */
+    return {
+      ...response,
+      pricing: outcome.pricing,
+      reasonCode: outcome.reasonCode,
+    };
   }
 
   /**
@@ -426,6 +487,51 @@ export class TripService {
     await this.announceIfClosed(changed);
 
     return this.toResponse(changed);
+  }
+
+  /**
+   * Marks a Trip BETAALD or NIET BETAALD.
+   *
+   * ── WHAT IT DELIBERATELY DOES NOT DO ──────────────────────────────────────
+   * It does not touch the status, and it cannot: `setPaid` writes one column,
+   * so there is no transition to allow or refuse and no state machine to
+   * consult. Payment is independent of the lifecycle — a Trip is paid or unpaid
+   * whether it is OPEN, CLOSED or CANCELLED — and marking one paid must never
+   * close it, just as marking one unpaid must never reopen it.
+   *
+   * It also touches no pricing. What a Trip is WORTH and whether it has been
+   * PAID are different questions with different owners; no snapshot, override
+   * or recalculation is involved here.
+   *
+   * ── IDEMPOTENT ────────────────────────────────────────────────────────────
+   * Asking for the state a Trip already has writes nothing and answers with the
+   * Trip, exactly as `changeStatus` does. A double click is not an error.
+   *
+   * The Trip's existence is verified first, so an unknown id is the same 404 it
+   * is everywhere else.
+   */
+  async changePayment(
+    id: string,
+    dto: ChangeTripPaymentDto,
+  ): Promise<TripResponseDto> {
+    const trip = await this.requireTrip(id);
+
+    if (trip.isPaid === dto.isPaid) {
+      return this.toResponse(trip);
+    }
+
+    const updated = await this.repository.setPaid(id, dto.isPaid);
+
+    // The state is an identifier-level fact, not a business value: what was
+    // paid is money and stays out of the log, whether it was paid does not.
+    this.logger.log("Trip payment state changed", {
+      tripId: id,
+      isPaid: updated.isPaid,
+      // Logged to make the independence auditable rather than merely claimed.
+      tripStatus: updated.status,
+    });
+
+    return this.toResponse(updated);
   }
 
   /**

@@ -25,6 +25,7 @@ function buildTrip(direction: TripDirection | null) {
     driverId: null,
     status: TripStatus.OPEN,
     isLooseTrip: false,
+    isPaid: false,
     direction,
     bookingNumber: "ANRDUB2602247",
     containerNumber: null,

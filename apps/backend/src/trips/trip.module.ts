@@ -3,6 +3,7 @@ import { Module } from "@nestjs/common";
 import { CostConfirmationModule } from "../cost-confirmations/cost-confirmation.module";
 import { CustomPropertyModule } from "../custom-properties/custom-property.module";
 import { DriverModule } from "../drivers/driver.module";
+import { PricingEngineModule } from "../pricing-engine/pricing-engine.module";
 import { EffectivePricingModule } from "../trip-pricing/effective-pricing.module";
 import { VehicleAssignmentModule } from "../vehicle-assignments/vehicle-assignment.module";
 import { VehicleModule } from "../vehicles/vehicle.module";
@@ -45,10 +46,25 @@ import { TripService } from "./trip.service";
  *
  * EffectivePricingModule is imported so a Trip response can CARRY what the
  * Trip is worth. That module is read-only and depends on nothing but Prisma,
- * so the arrow still points one way and no cycle forms with the pricing write
- * module, which imports this one for its own paths. The alternative — every client
- * asking a second endpoint for the prices of the rows it just received — is
- * the N+1 the Ritten list must never produce.
+ * so the arrow points one way. The alternative — every client asking a second
+ * endpoint for the prices of the rows it just received — is the N+1 the Ritten
+ * list must never produce.
+ *
+ * PricingEngineModule is imported for ONE operation: editing a waiting-time
+ * window must leave the Trip's stored pricing current, and the operator has to
+ * see the new figure in the answer to their own request. That is a call, and it
+ * is awaited.
+ *
+ * It does not invert the direction the architecture set out. Closing a Trip
+ * still ANNOUNCES itself and the Engine listens — see TripClosedPricingListener
+ * — so nothing here knows that closing produces a price. And the Engine reads
+ * Trips through TripReadModule, a narrow read-only module that imports nothing
+ * but Prisma, so it never reaches back into this one:
+ *
+ *     TripModule ──> PricingEngineModule ──> TripReadModule ──> Prisma
+ *
+ * There is no forwardRef in that picture and there must not be: a forwardRef
+ * hides a cycle instead of removing it.
  *
  * TripService is exported because later phases — pricing, export and the
  * parser — read Trips through the service, never through the repository, so
@@ -62,6 +78,7 @@ import { TripService } from "./trip.service";
     CostConfirmationModule,
     CustomPropertyModule,
     EffectivePricingModule,
+    PricingEngineModule,
   ],
   controllers: [TripController, TripGroupController, DriverStatisticsController],
   providers: [

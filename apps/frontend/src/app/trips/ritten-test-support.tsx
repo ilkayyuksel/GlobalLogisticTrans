@@ -65,9 +65,11 @@ export function buildTrip(overrides: Partial<Trip> = {}): Trip {
     latestUpdate: null,
     costConfirmation: null,
     pricing: null,
+    reasonCode: null,
     route: null,
     status: "OPEN",
     isLooseTrip: false,
+    isPaid: false,
     bookingNumber: "ANRDUB2602247",
     containerNumber: "MSKU1234567",
     containerType: "45PH",
@@ -206,6 +208,31 @@ export interface BackendResponses {
   }) => unknown;
   /** The refusal a price correction answers with, as the backend words it. */
   pricingOverrideFailureMessage?: string;
+  /**
+   * What a PATCH on a Trip answers with.
+   *
+   * The whole updated Trip, as the endpoint returns it — including the pricing
+   * a waiting-time change recalculated. A function rather than a value so a
+   * spec can answer per Trip, which is what "only the edited row changed" needs
+   * in order to be provable.
+   */
+  onTripUpdate?: (update: {
+    tripId: string;
+    body: Record<string, unknown>;
+  }) => Trip;
+  /**
+   * What assigning or removing a Custom Property answers with.
+   *
+   * The assignment plus the Trip's recalculated pricing, which is what the row
+   * updates from. `assignmentId` is set on a removal, `customPropertyId` on an
+   * assignment.
+   */
+  onCustomPropertyMutation?: (change: {
+    method: string;
+    tripId?: string;
+    customPropertyId?: string;
+    assignmentId?: string;
+  }) => unknown;
   /** The id a manual grouping request answers with. */
   createdGroupId?: string;
   /**
@@ -356,7 +383,21 @@ export function respondWith(
 
     // Assigning and removing a Custom Property.
     if (path.startsWith("/api/v1/trip-custom-properties")) {
-      return Promise.resolve({});
+      const body = options?.body as
+        | { tripId?: string; customPropertyId?: string }
+        | undefined;
+
+      return Promise.resolve(
+        responses.onCustomPropertyMutation?.({
+          method,
+          tripId: body?.tripId,
+          customPropertyId: body?.customPropertyId,
+          assignmentId:
+            method === "DELETE"
+              ? path.slice("/api/v1/trip-custom-properties/".length)
+              : undefined,
+        }) ?? {},
+      );
     }
 
     if (path.includes("/reprocess")) {
@@ -410,7 +451,14 @@ export function respondWith(
 
     // Every Trip mutation: PATCH on the Trip or one of its sub-resources.
     if (method !== "GET" && path.startsWith("/api/v1/trips/")) {
-      return Promise.resolve(buildTrip());
+      const [, tripId] = path.match(/^\/api\/v1\/trips\/([^/]+)/) ?? [];
+
+      return Promise.resolve(
+        responses.onTripUpdate?.({
+          tripId: tripId ?? "",
+          body: (options?.body ?? {}) as Record<string, unknown>,
+        }) ?? buildTrip(),
+      );
     }
 
     if (query.tripGroupId) {

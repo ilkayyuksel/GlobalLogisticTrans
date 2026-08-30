@@ -3,6 +3,7 @@ import { CostConfirmation } from "@prisma/client";
 import { AppLoggerService } from "../logger/app-logger.service";
 import { CostConfirmationRepository } from "./cost-confirmation.repository";
 import { CostConfirmationService } from "./cost-confirmation.service";
+import { stubPricingRecalculation } from "../pricing-engine/pricing-recalculation.double";
 
 /**
  * ONE confirmed cost per Trip.
@@ -66,6 +67,7 @@ describe("CostConfirmationService", () => {
 
     service = new CostConfirmationService(
       repository as unknown as CostConfirmationRepository,
+      stubPricingRecalculation(),
       {
         setContext: jest.fn(),
         log: jest.fn(),

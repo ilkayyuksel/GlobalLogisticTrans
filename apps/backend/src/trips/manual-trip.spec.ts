@@ -19,6 +19,7 @@ import { FLAT_CUSTOM_PROPERTY_NAME } from "./flat-container-rule";
 import { TripRepository } from "./trip.repository";
 import { TripDocumentsService } from "./trip-documents.service";
 import { TripService } from "./trip.service";
+import { PricingRecalculationService } from "../pricing-engine/pricing-recalculation.service";
 
 /**
  * Creating a Trip by hand, with nothing filled in.
@@ -132,6 +133,14 @@ describe("Manual Trip creation", () => {
          * and that is asserted below rather than assumed.
          */
         AutomaticFlatPropertyService,
+        /*
+         * These tests create Trips; none edits a waiting time, so nothing here
+         * recalculates. It only has to exist for TripService to be built.
+         */
+        {
+          provide: PricingRecalculationService,
+          useValue: { recalculate: jest.fn() },
+        },
         { provide: CustomPropertyService, useValue: customProperties },
         // The documents endpoint has its own tests; this controller only needs
         // it to exist so the rest of the routes can be exercised.

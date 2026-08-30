@@ -3,7 +3,8 @@ import { PricingCalculationStatus, Prisma, TripPricing } from "@prisma/client";
 
 import { changedFieldNames } from "../common/changed-fields";
 import { AppLoggerService } from "../logger/app-logger.service";
-import { TripService } from "../trips/trip.service";
+import { TripNotFoundException } from "../trips/exceptions/trip.exceptions";
+import { TripReadService } from "../trips/trip-read.service";
 import { toTripPricingItemResponse } from "../trip-pricing-items/dto/trip-pricing-item-response.dto";
 import { PricingSnapshotDto } from "./dto/pricing-snapshot.dto";
 import {
@@ -65,7 +66,7 @@ export interface ReplacePricingSnapshotCommand {
 export class TripPricingService {
   constructor(
     private readonly repository: TripPricingRepository,
-    private readonly tripService: TripService,
+    private readonly trips: TripReadService,
     private readonly logger: AppLoggerService,
   ) {
     this.logger.setContext(TripPricingService.name);
@@ -76,21 +77,55 @@ export class TripPricingService {
   }
 
   /**
-   * The snapshot belonging to a Trip, or null when it has none.
+   * The snapshot belonging to a Trip, or null when it has none — for a CALLER
+   * THAT MAY BE WRONG ABOUT THE TRIP.
    *
    * Null rather than 404: a CLOSED Trip awaiting its first calculation, and a
    * Trip that will never be priced, are both ordinary states. The Trip's own
    * existence is still verified, so an unknown Trip is reported as 404 instead
-   * of being reported as "no pricing".
+   * of being reported as "no pricing". That distinction is what the REST
+   * endpoint owes its clients, and it is preserved exactly.
+   *
+   * Existence is checked through the narrow Trip READ side rather than through
+   * TripService. It raises the same TripNotFoundException, so the 404 is
+   * unchanged, but the pricing write paths no longer depend on the planning
+   * domain — which is what lets the Pricing Engine depend on THEM without
+   * closing a cycle.
    */
   async findByTripId(tripId: string): Promise<TripPricingResponseDto | null> {
-    // Delegating existence to TripService reuses its lookup and its 404 rather
-    // than duplicating either here.
-    await this.tripService.findById(tripId);
+    await this.requireTrip(tripId);
 
+    return this.findSnapshotByTripId(tripId);
+  }
+
+  /**
+   * The same snapshot, for a caller that has ALREADY resolved the Trip.
+   *
+   * The Pricing Engine's path. It loaded the Trip, checked its status and
+   * refused to price anything that does not exist before it ever reached the
+   * store, so asking the database a second time whether the Trip is real
+   * answers a question nobody asked and adds a query to every calculation.
+   *
+   * Deliberately separate from `findByTripId` rather than a flag on it: the two
+   * have different contracts — one may raise 404, the other cannot — and a
+   * boolean parameter would hide that at every call site.
+   */
+  async findSnapshotByTripId(
+    tripId: string,
+  ): Promise<TripPricingResponseDto | null> {
     const tripPricing = await this.repository.findByTripId(tripId);
 
     return tripPricing ? toTripPricingResponse(tripPricing) : null;
+  }
+
+  /**
+   * Raises the Trip module's own 404, so an unknown Trip reads identically
+   * whichever endpoint was asked.
+   */
+  private async requireTrip(tripId: string): Promise<void> {
+    if ((await this.trips.findById(tripId)) === null) {
+      throw new TripNotFoundException(tripId);
+    }
   }
 
   /**

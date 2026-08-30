@@ -2,7 +2,7 @@ import { PricingCalculationStatus, Prisma, TripPricing } from "@prisma/client";
 
 import { AppLoggerService } from "../logger/app-logger.service";
 import { TripPricingItemRepository } from "../trip-pricing-items/trip-pricing-item.repository";
-import { TripService } from "../trips/trip.service";
+import { TripReadService } from "../trips/trip-read.service";
 import {
   PricingSnapshotRepositories,
   TripPricingRepository,
@@ -87,7 +87,7 @@ describe("TripPricingService — atomic snapshot write", () => {
     update: jest.Mock;
   };
   let itemRepository: { createMany: jest.Mock; deleteByTripPricingId: jest.Mock };
-  let tripService: { findById: jest.Mock };
+  let trips: { findById: jest.Mock };
   let logger: { setContext: jest.Mock; log: jest.Mock; warn: jest.Mock };
   let service: TripPricingService;
 
@@ -148,12 +148,12 @@ describe("TripPricingService — atomic snapshot write", () => {
       },
     );
 
-    tripService = { findById: jest.fn() };
+    trips = { findById: jest.fn().mockResolvedValue({ id: TRIP_ID }) };
     logger = { setContext: jest.fn(), log: jest.fn(), warn: jest.fn() };
 
     service = new TripPricingService(
       repository,
-      tripService as unknown as TripService,
+      trips as unknown as TripReadService,
       logger as unknown as AppLoggerService,
     );
   });
@@ -229,7 +229,7 @@ describe("TripPricingService — atomic snapshot write", () => {
     it("does not re-read the Trip, which the Engine already validated", async () => {
       await service.replaceSnapshot(buildCommand());
 
-      expect(tripService.findById).not.toHaveBeenCalled();
+      expect(trips.findById).not.toHaveBeenCalled();
     });
   });
 

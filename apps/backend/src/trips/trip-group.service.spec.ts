@@ -14,6 +14,7 @@ import { AutomaticFlatPropertyService } from "./automatic-flat.service";
 import { TripPlanningDataService } from "./trip-planning-data.service";
 import { TripRepository } from "./trip.repository";
 import { TripService } from "./trip.service";
+import { stubPricingRecalculation } from "../pricing-engine/pricing-recalculation.double";
 
 /**
  * Manual grouping and unlinking.
@@ -39,6 +40,7 @@ function trip(overrides: Partial<Trip> = {}): Trip {
     driverId: null,
     status: TripStatus.OPEN,
     isLooseTrip: false,
+    isPaid: false,
     direction: null,
     bookingNumber: "BK-2026-0042",
     containerNumber: null,
@@ -107,6 +109,7 @@ describe("TripService grouping", () => {
         applyToNewTrip: jest.fn(),
         synchronise: jest.fn(),
       } as unknown as AutomaticFlatPropertyService,
+      stubPricingRecalculation(),
       { publish: jest.fn() } as unknown as DomainEventBus,
       {
         setContext: jest.fn(),

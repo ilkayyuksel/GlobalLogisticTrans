@@ -39,6 +39,13 @@ export interface ListTripsParams {
   /** Trips carrying this Custom Property, by the property's own id. */
   customPropertyId?: string;
   /**
+   * BETAALD (true) or NIET BETAALD (false).
+   *
+   * OMIT it for "Alle". `undefined` is the absence of a filter; `false` is the
+   * question "which Trips are unpaid", and the two must never be conflated.
+   */
+  isPaid?: boolean;
+  /**
    * Which time to order a day's Trips by. The backend keeps the planning date
    * as the first ordering key and groups a Vehicle's Trips together, so this
    * chooses the order INSIDE that grouping.
@@ -87,6 +94,7 @@ export function listTrips(
       vehicleId: params.vehicleId,
       terminal: params.terminal,
       customPropertyId: params.customPropertyId,
+      isPaid: params.isPaid,
       sortBy: params.sortBy,
       sortDirection: params.sortDirection,
       tripGroupId: params.tripGroupId,
@@ -261,6 +269,31 @@ export function changeTripStatus(
   return request<Trip>(`${TRIPS_PATH}/${tripId}/status`, {
     method: "PATCH",
     body: { status },
+    signal,
+  });
+}
+
+/**
+ * Marks a Trip BETAALD or NIET BETAALD.
+ *
+ * Its own endpoint, and deliberately not part of `updateTrip`: payment is a
+ * decision of its own rather than a field edited among others.
+ *
+ * The backend answers with the WHOLE updated Trip, which is what lets the
+ * Ritten row refresh from the response instead of refetching the list — the
+ * operator keeps their filter, page, period, selection and scroll position.
+ *
+ * It never changes the Trip's status. That is the backend's guarantee, not an
+ * assumption made here.
+ */
+export function changeTripPayment(
+  tripId: string,
+  isPaid: boolean,
+  signal?: AbortSignal,
+): Promise<Trip> {
+  return request<Trip>(`${TRIPS_PATH}/${tripId}/payment`, {
+    method: "PATCH",
+    body: { isPaid },
     signal,
   });
 }

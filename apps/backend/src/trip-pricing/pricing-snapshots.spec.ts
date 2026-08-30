@@ -6,7 +6,7 @@ import request from "supertest";
 import { AllExceptionsFilter } from "../common/filters/all-exceptions.filter";
 import { ResponseInterceptor } from "../common/interceptors/response.interceptor";
 import { AppLoggerService } from "../logger/app-logger.service";
-import { TripService } from "../trips/trip.service";
+import { TripReadService } from "../trips/trip-read.service";
 import { MAX_SNAPSHOT_TRIP_IDS } from "./dto/pricing-snapshots-query.dto";
 import { TripPricingController } from "./trip-pricing.controller";
 import { TripPricingRepository } from "./trip-pricing.repository";
@@ -84,7 +84,7 @@ describe("GET /trip-pricing/snapshots", () => {
       providers: [
         TripPricingService,
         { provide: TripPricingRepository, useValue: repository },
-        { provide: TripService, useValue: tripService },
+        { provide: TripReadService, useValue: tripService },
         {
           provide: AppLoggerService,
           useValue: {

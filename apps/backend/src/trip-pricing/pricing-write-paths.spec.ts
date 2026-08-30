@@ -9,7 +9,7 @@ import { AppLoggerService } from "../logger/app-logger.service";
 import { TripPricingItemController } from "../trip-pricing-items/trip-pricing-item.controller";
 import { TripPricingItemRepository } from "../trip-pricing-items/trip-pricing-item.repository";
 import { TripPricingItemService } from "../trip-pricing-items/trip-pricing-item.service";
-import { TripService } from "../trips/trip.service";
+import { TripReadService } from "../trips/trip-read.service";
 import { TripPricingController } from "./trip-pricing.controller";
 import { TripPricingRepository } from "./trip-pricing.repository";
 import { TripPricingService } from "./trip-pricing.service";
@@ -69,7 +69,7 @@ describe("Pricing write paths (integration)", () => {
         TripPricingItemService,
         { provide: TripPricingRepository, useValue: tripPricingRepository },
         { provide: TripPricingItemRepository, useValue: itemRepository },
-        { provide: TripService, useValue: { findById: jest.fn() } },
+        { provide: TripReadService, useValue: { findById: jest.fn() } },
         { provide: AppLoggerService, useValue: logger },
         { provide: APP_FILTER, useClass: AllExceptionsFilter },
         { provide: APP_INTERCEPTOR, useClass: ResponseInterceptor },

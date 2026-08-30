@@ -3,12 +3,14 @@ import { Prisma } from "@prisma/client";
 
 import { CustomPropertyService } from "../custom-properties/custom-property.service";
 import { AppLoggerService } from "../logger/app-logger.service";
+import { PricingRecalculationService } from "../pricing-engine/pricing-recalculation.service";
 import {
   FLAT_CUSTOM_PROPERTY_NAME,
   requiresFlatProperty,
 } from "../trips/flat-container-rule";
 import { TripService } from "../trips/trip.service";
 import { AssignCustomPropertyDto } from "./dto/assign-custom-property.dto";
+import { TripCustomPropertyMutationDto } from "./dto/trip-custom-property-mutation.dto";
 import {
   TripCustomPropertiesDto,
   TripCustomPropertyResponseDto,
@@ -31,11 +33,31 @@ const PRISMA_UNIQUE_VIOLATION = "P2002";
 /**
  * Manages which Custom Properties a Trip carries.
  *
- * It records assignments and nothing more. It never prices a property, never
- * touches the Trip's pricing snapshot and never changes the Trip's status —
- * Custom Properties are a manual planning field, and assigning one is a
- * planning decision whose pricing consequence is produced later by the Pricing
- * Engine.
+ * It records assignments; it still prices nothing. Every amount comes from the
+ * Pricing Engine, which this service ASKS to recalculate after a write and then
+ * reports verbatim — no formula, no rate and no sum appears here.
+ *
+ * ── WHY THE WRITE NOW WAITS FOR THE PRICE ───────────────────────────────────
+ * A priced property moves Others, and Others moves Totaal. The assignment used
+ * to be recorded and the pricing left for later, which meant the operator saw
+ * an amount that no longer described the Trip in front of them until something
+ * else happened to reprice it. So the recalculation is AWAITED and its result
+ * travels back on the response.
+ *
+ * It is never fire-and-forget: a caller that returned before the Engine
+ * finished would answer with the previous figures, and a screen has no way to
+ * tell those from current ones.
+ *
+ * ── THE WRITE IS KEPT WHATEVER PRICING DOES ─────────────────────────────────
+ * The assignment succeeded, and a pricing problem cannot un-succeed it. A Trip
+ * whose route has no configured price is an ordinary, recoverable state — it is
+ * the COMMON state on this data — and refusing the operator's edit until an
+ * administrator configures a route would block the work rather than the price.
+ * The response then carries `pricing: null` and a reason code, never the old
+ * figures, and never a rollback. See PricingRecalculationService.
+ *
+ * The Trip's STATUS is untouched throughout. A CLOSED Trip stays CLOSED: the
+ * price of a finished job may change, the fact that it is finished may not.
  *
  * An assignment is a current fact rather than a historical one, which is why
  * this is the only module in the system with a real delete. Removing an
@@ -51,6 +73,7 @@ export class TripCustomPropertyService {
     private readonly repository: TripCustomPropertyRepository,
     private readonly tripService: TripService,
     private readonly customPropertyService: CustomPropertyService,
+    private readonly recalculation: PricingRecalculationService,
     private readonly logger: AppLoggerService,
   ) {
     this.logger.setContext(TripCustomPropertyService.name);
@@ -84,7 +107,7 @@ export class TripCustomPropertyService {
    */
   async assign(
     dto: AssignCustomPropertyDto,
-  ): Promise<TripCustomPropertyResponseDto> {
+  ): Promise<TripCustomPropertyMutationDto> {
     const trip = await this.tripService.findById(dto.tripId);
     await this.assertPropertyAssignable(dto.customPropertyId);
     await this.assertNotAlreadyAssigned(dto.tripId, dto.customPropertyId);
@@ -110,7 +133,9 @@ export class TripCustomPropertyService {
       customPropertyId: created.customPropertyId,
     });
 
-    return toTripCustomPropertyResponse(created, trip.containerType);
+    return this.withRecalculatedPricing(
+      toTripCustomPropertyResponse(created, trip.containerType),
+    );
   }
 
   /**
@@ -121,7 +146,7 @@ export class TripCustomPropertyService {
    * a historical breakdown stays complete and explainable after the property
    * stops being assigned. Only a future calculation sees the change.
    */
-  async remove(id: string): Promise<TripCustomPropertyResponseDto> {
+  async remove(id: string): Promise<TripCustomPropertyMutationDto> {
     const assignment = await this.requireAssignment(id);
     const trip = await this.tripService.findById(assignment.tripId);
 
@@ -135,7 +160,31 @@ export class TripCustomPropertyService {
       customPropertyId: removed.customPropertyId,
     });
 
-    return toTripCustomPropertyResponse(removed, trip.containerType);
+    return this.withRecalculatedPricing(
+      toTripCustomPropertyResponse(removed, trip.containerType),
+    );
+  }
+
+  /**
+   * Prices the Trip again and attaches the answer to the assignment.
+   *
+   * ONE recalculation per mutation, never one per property: the Engine resolves
+   * every input of a Trip in a single preparation, so a Trip carrying five
+   * properties costs exactly the same as a Trip carrying one.
+   *
+   * Called AFTER the row is committed, so the recalculation reads the state the
+   * operator just created rather than the one it replaced.
+   */
+  private async withRecalculatedPricing(
+    assignment: TripCustomPropertyResponseDto,
+  ): Promise<TripCustomPropertyMutationDto> {
+    const outcome = await this.recalculation.recalculate(assignment.tripId);
+
+    return {
+      ...assignment,
+      pricing: outcome.pricing,
+      reasonCode: outcome.reasonCode,
+    };
   }
 
   /**

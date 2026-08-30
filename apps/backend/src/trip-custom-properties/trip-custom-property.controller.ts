@@ -23,19 +23,21 @@ import {
   TripCustomPropertyIdParamDto,
   TripIdParamDto,
 } from "./dto/trip-custom-property-params.dto";
-import {
-  TripCustomPropertiesDto,
-  TripCustomPropertyResponseDto,
-} from "./dto/trip-custom-property-response.dto";
+import { TripCustomPropertyMutationDto } from "./dto/trip-custom-property-mutation.dto";
+import { TripCustomPropertiesDto } from "./dto/trip-custom-property-response.dto";
 import { TripCustomPropertyService } from "./trip-custom-property.service";
 
 /**
  * Returns plain data; ResponseInterceptor applies the envelope and
  * AllExceptionsFilter renders errors.
  *
- * This module records which Custom Properties a Trip carries. It never prices
- * one, never touches the Trip's pricing snapshot and never changes the Trip's
- * status.
+ * This module records which Custom Properties a Trip carries. It prices
+ * nothing itself and never changes the Trip's status — a CLOSED Trip stays
+ * CLOSED — but a priced property changes what the Trip is worth, so both write
+ * operations recalculate through the Pricing Engine and answer with the
+ * complete effective pricing. A recalculation that cannot produce a figure does
+ * not undo the write: the response is still a success, with `pricing: null` and
+ * a reason code.
  *
  * Unlike every other module here it does expose a DELETE, and that is correct:
  * an assignment is a current fact rather than a historical record, and the
@@ -72,9 +74,9 @@ export class TripCustomPropertyController {
   @ApiOperation({
     summary: "Assign a Custom Property to a Trip",
     description:
-      "The Trip and the property must exist, the property must still be active, and it must not already be assigned to that Trip. Assigning a property records a planning decision only — no price is calculated and no pricing snapshot is touched.",
+      "The Trip and the property must exist, the property must still be active, and it must not already be assigned to that Trip. The Trip is then priced again and the response carries its complete effective pricing — Others and Totaal included. The Trip's status never changes. If the Trip cannot be priced against the current configuration the assignment is still kept and the response carries pricing: null with a reason code.",
   })
-  @ApiCreatedResponse({ type: TripCustomPropertyResponseDto })
+  @ApiCreatedResponse({ type: TripCustomPropertyMutationDto })
   @ApiBadRequestResponse({
     description: "Missing or invalid field, or a malformed UUID.",
   })
@@ -87,7 +89,7 @@ export class TripCustomPropertyController {
   })
   assign(
     @Body() dto: AssignCustomPropertyDto,
-  ): Promise<TripCustomPropertyResponseDto> {
+  ): Promise<TripCustomPropertyMutationDto> {
     return this.tripCustomPropertyService.assign(dto);
   }
 
@@ -103,17 +105,18 @@ export class TripCustomPropertyController {
   @ApiOperation({
     summary: "Remove a Custom Property from a Trip",
     description:
-      "Physically removes the assignment. Never blocked by an existing pricing snapshot: the amount the property contributed was frozen into its pricing item when the calculation ran, so historical pricing stays complete and only future calculations see the change. Neither the Trip nor the property itself is modified.",
+      "Physically removes the assignment, then prices the Trip again so the response carries its complete effective pricing without the property. Never blocked by an existing pricing snapshot. Neither the Trip nor the property itself is modified, and the Trip's status never changes. If the Trip cannot be priced the removal is still kept and the response carries pricing: null with a reason code.",
   })
   @ApiOkResponse({
-    type: TripCustomPropertyResponseDto,
-    description: "The assignment that was removed.",
+    type: TripCustomPropertyMutationDto,
+    description:
+      "The assignment that was removed, with the Trip's recalculated pricing.",
   })
   @ApiBadRequestResponse({ description: "The id is not a valid UUID." })
   @ApiNotFoundResponse({ description: "No assignment with that id." })
   remove(
     @Param() params: TripCustomPropertyIdParamDto,
-  ): Promise<TripCustomPropertyResponseDto> {
+  ): Promise<TripCustomPropertyMutationDto> {
     return this.tripCustomPropertyService.remove(params.id);
   }
 }

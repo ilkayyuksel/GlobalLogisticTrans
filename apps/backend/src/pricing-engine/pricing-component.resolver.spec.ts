@@ -3,9 +3,8 @@ import { TripDirection, TripStatus } from "@prisma/client";
 import { AppLoggerService } from "../logger/app-logger.service";
 import { RoutePricingService } from "../route-pricing/route-pricing.service";
 import { CustomPropertyService } from "../custom-properties/custom-property.service";
-import { TripCustomPropertyService } from "../trip-custom-properties/trip-custom-property.service";
-import { TripService } from "../trips/trip.service";
-import { TripResponseDto } from "../trips/dto/trip-response.dto";
+import { TripCustomPropertyReadService } from "../trip-custom-properties/trip-custom-property-read.service";
+import { TripReadService, TripReadView } from "../trips/trip-read.service";
 import {
   InvalidCombinationForPricingException,
   MissingRoutePricingException,
@@ -22,41 +21,23 @@ const TRIP_ID = "3f2504e0-4f89-41d3-9a0c-0305e82c3301";
 const AUTOMATIC_PROPERTY_ID = "property-tar";
 const ROUTE_ID = "9c858901-8a57-4791-81fe-4c455b099bc9";
 
-function buildTrip(overrides: Partial<TripResponseDto> = {}): TripResponseDto {
+/**
+ * The narrow engine shape, not the response DTO: the resolver reads eleven
+ * scalar columns and can reach nothing else.
+ */
+function buildTrip(overrides: Partial<TripReadView> = {}): TripReadView {
   return {
     id: TRIP_ID,
     pdfDocumentId: "pdf-1",
     tripGroupId: null,
-    vehicleId: null,
-    driverId: null,
-    customProperties: [],
-    pricing: null,
-    route: null,
     status: TripStatus.CLOSED,
-    isLooseTrip: false,
     direction: null,
     bookingNumber: "BK-2026-0042",
-    containerNumber: null,
-    containerType: "45PH",
     terminal: "Antwerp",
     destinationCity: "Rotterdam",
-    destinationCountry: "Netherlands",
-    originalPlanningDate: "2026-08-17",
     planningDate: "2026-08-17",
-    startTime: null,
-    endTime: null,
-    executionDatetime: null,
-    waitingTimeStart: null,
-    waitingTimeEnd: null,
     waitingTimeMinutes: null,
     distanceKm: null,
-    internalNotes: null,
-  vehicle: null,
-  effectiveDriver: null,
-  latestUpdate: null,
-  costConfirmation: null,
-    createdAt: new Date("2026-08-01T00:00:00Z"),
-    updatedAt: new Date("2026-08-01T00:00:00Z"),
     ...overrides,
   };
 }
@@ -91,39 +72,29 @@ const ROUTE_PRICING = {
 };
 
 /** One assignment, shaped as TripCustomPropertyService returns it. */
+/**
+ * One assigned property as the READ side returns it.
+ *
+ * Four fields, because those are the four a price depends on. The assignment
+ * row's own id, its timestamp and the property's active flag are absent: the
+ * Engine never reads them, and a builder that supplied them would suggest it
+ * could.
+ */
 function assignment(
   id: string,
   name: string,
   pricingComponentId: string | null,
   defaultPrice: string | null,
-  isActive = true,
 ) {
-  return {
-    id: `assignment-${id}`,
-    tripId: TRIP_ID,
-    customPropertyId: id,
-    customProperty: {
-      id,
-      name,
-      description: null,
-      pricingComponentId,
-      defaultPrice,
-      displayOrder: 1,
-      color: null,
-      isActive,
-      createdAt: new Date("2026-01-01T00:00:00Z"),
-      updatedAt: new Date("2026-01-01T00:00:00Z"),
-    },
-    assignedAt: new Date("2026-08-01T00:00:00Z"),
-  };
+  return { customPropertyId: id, name, pricingComponentId, defaultPrice };
 }
 
 describe("PricingComponentResolver", () => {
   let routePricingService: { findActiveRoute: jest.Mock };
-  let tripCustomPropertyService: { findByTripId: jest.Mock };
+  let tripCustomProperties: { findByTripId: jest.Mock };
   let ruleResolver: { resolveDistanceRatePerKm: jest.Mock };
   let customPropertyService: { findById: jest.Mock };
-  let tripService: { findByGroupId: jest.Mock };
+  let trips: { findByGroupId: jest.Mock };
   let logger: { setContext: jest.Mock; log: jest.Mock; warn: jest.Mock };
   let resolver: PricingComponentResolver;
 
@@ -131,8 +102,8 @@ describe("PricingComponentResolver", () => {
     routePricingService = {
       findActiveRoute: jest.fn().mockResolvedValue(ROUTE_PRICING),
     };
-    tripCustomPropertyService = {
-      findByTripId: jest.fn().mockResolvedValue({ items: [] }),
+    tripCustomProperties = {
+      findByTripId: jest.fn().mockResolvedValue([]),
     };
     customPropertyService = {
       findById: jest.fn().mockResolvedValue({
@@ -142,8 +113,8 @@ describe("PricingComponentResolver", () => {
         defaultPrice: "20.00",
       }),
     };
-    tripService = {
-      findByGroupId: jest.fn().mockResolvedValue({ items: [] }),
+    trips = {
+      findByGroupId: jest.fn().mockResolvedValue([]),
     };
     ruleResolver = {
       resolveDistanceRatePerKm: jest.fn().mockResolvedValue("1.85"),
@@ -152,9 +123,9 @@ describe("PricingComponentResolver", () => {
 
     resolver = new PricingComponentResolver(
       routePricingService as unknown as RoutePricingService,
-      tripCustomPropertyService as unknown as TripCustomPropertyService,
+      tripCustomProperties as unknown as TripCustomPropertyReadService,
       customPropertyService as unknown as CustomPropertyService,
-      tripService as unknown as TripService,
+      trips as unknown as TripReadService,
       ruleResolver as unknown as PricingRuleResolver,
       logger as unknown as AppLoggerService,
     );
@@ -297,14 +268,14 @@ describe("PricingComponentResolver", () => {
       defaultPrice: "20.00",
     };
 
-    function resolve(trip: TripResponseDto = buildTrip()) {
+    function resolve(trip: TripReadView = buildTrip()) {
       return resolver.resolveAssignedCustomProperties(trip, buildRules());
     }
 
     it("asks for this Trip's assignments", async () => {
       await resolve();
 
-      expect(tripCustomPropertyService.findByTripId).toHaveBeenCalledWith(
+      expect(tripCustomProperties.findByTripId).toHaveBeenCalledWith(
         TRIP_ID,
       );
     });
@@ -330,12 +301,10 @@ describe("PricingComponentResolver", () => {
     });
 
     it("carries everything a later calculator needs, so it never looks anything up", async () => {
-      tripCustomPropertyService.findByTripId.mockResolvedValue({
-        items: [
-          assignment("property-flat", "Flat", null, "35.00"),
-          assignment("property-toll", "Toll", "component-toll", null),
-        ],
-      });
+      tripCustomProperties.findByTripId.mockResolvedValue([
+        assignment("property-flat", "Flat", null, "35.00"),
+        assignment("property-toll", "Toll", "component-toll", null),
+      ]);
 
       expect(await resolve()).toEqual([
         {
@@ -366,14 +335,9 @@ describe("PricingComponentResolver", () => {
      * the code carries — change the configuration and the line changes with it.
      */
     it("carries an automatically assigned Flat at its configured price", async () => {
-      tripCustomPropertyService.findByTripId.mockResolvedValue({
-        items: [
-          {
-            ...assignment("property-flat", "Flat", null, "80.00"),
-            isAutomatic: true,
-          },
-        ],
-      });
+      tripCustomProperties.findByTripId.mockResolvedValue([
+        assignment("property-flat", "Flat", null, "80.00"),
+      ]);
 
       const resolved = await resolve();
 
@@ -385,34 +349,33 @@ describe("PricingComponentResolver", () => {
       });
     });
 
-    it("prices a manual and an automatic Flat identically", async () => {
-      const priceOf = async (isAutomatic: boolean) => {
-        tripCustomPropertyService.findByTripId.mockResolvedValue({
-          items: [
-            {
-              ...assignment("property-flat", "Flat", null, "80.00"),
-              isAutomatic,
-            },
-          ],
-        });
+    /*
+     * A manual and an automatic Flat cost the same, and now they cannot differ
+     * even by accident: WHERE an assignment came from does not reach pricing at
+     * all. The read side returns four fields, `isAutomatic` is not one of them,
+     * so there is no provenance for a calculator to branch on.
+     */
+    it("cannot see where an assignment came from", async () => {
+      tripCustomProperties.findByTripId.mockResolvedValue([
+        assignment("property-flat", "Flat", null, "80.00"),
+      ]);
 
-        return (await resolve()).find(
-          (property) => property.customPropertyId === "property-flat",
-        );
-      };
+      const flat = (await resolve()).find(
+        (property) => property.customPropertyId === "property-flat",
+      );
 
-      expect(await priceOf(true)).toEqual(await priceOf(false));
+      expect(Object.keys(flat as object).sort()).toEqual([
+        "customPropertyId",
+        "defaultPrice",
+        "name",
+        "pricingComponentId",
+      ]);
     });
 
     it("charges an automatically assigned Flat exactly once", async () => {
-      tripCustomPropertyService.findByTripId.mockResolvedValue({
-        items: [
-          {
-            ...assignment("property-flat", "Flat", null, "80.00"),
-            isAutomatic: true,
-          },
-        ],
-      });
+      tripCustomProperties.findByTripId.mockResolvedValue([
+        assignment("property-flat", "Flat", null, "80.00"),
+      ]);
 
       const resolved = await resolve();
 
@@ -424,9 +387,7 @@ describe("PricingComponentResolver", () => {
     it("keeps a property that has since been deactivated", async () => {
       // The Trip carries it. Withdrawing a property from the catalog must not
       // silently change what an already-planned Trip is charged.
-      tripCustomPropertyService.findByTripId.mockResolvedValue({
-        items: [assignment("property-flat", "Flat", null, "35.00", false)],
-      });
+      tripCustomProperties.findByTripId.mockResolvedValue([assignment("property-flat", "Flat", null, "35.00")]);
 
       const resolved = await resolve();
 
@@ -437,9 +398,7 @@ describe("PricingComponentResolver", () => {
     });
 
     it("charges it once when it was also assigned by hand", async () => {
-      tripCustomPropertyService.findByTripId.mockResolvedValue({
-        items: [assignment(AUTOMATIC_PROPERTY_ID, "TAR", null, "20.00")],
-      });
+      tripCustomProperties.findByTripId.mockResolvedValue([assignment(AUTOMATIC_PROPERTY_ID, "TAR", null, "20.00")]);
 
       const resolved = await resolve();
 
@@ -485,11 +444,11 @@ describe("PricingComponentResolver", () => {
       direction: TripDirection.COLLECTION,
     });
 
-    function groupOf(...members: TripResponseDto[]) {
-      tripService.findByGroupId.mockResolvedValue({ items: members });
+    function groupOf(...members: TripReadView[]) {
+      trips.findByGroupId.mockResolvedValue(members);
     }
 
-    function resolve(trip: TripResponseDto) {
+    function resolve(trip: TripReadView) {
       return resolver.resolveAssignedCustomProperties(trip, buildRules());
     }
 
@@ -527,18 +486,14 @@ describe("PricingComponentResolver", () => {
 
     it("ignores a stale assignment left on the collection leg", async () => {
       groupOf(DELIVERY_LEG, COLLECTION_LEG);
-      tripCustomPropertyService.findByTripId.mockResolvedValue({
-        items: [assignment(AUTOMATIC_PROPERTY_ID, "TAR", null, "20.00")],
-      });
+      tripCustomProperties.findByTripId.mockResolvedValue([assignment(AUTOMATIC_PROPERTY_ID, "TAR", null, "20.00")]);
 
       expect(hasAutomatic(await resolve(COLLECTION_LEG))).toBe(false);
     });
 
     it("charges once when both legs were assigned it by hand", async () => {
       groupOf(DELIVERY_LEG, COLLECTION_LEG);
-      tripCustomPropertyService.findByTripId.mockResolvedValue({
-        items: [assignment(AUTOMATIC_PROPERTY_ID, "TAR", null, "20.00")],
-      });
+      tripCustomProperties.findByTripId.mockResolvedValue([assignment(AUTOMATIC_PROPERTY_ID, "TAR", null, "20.00")]);
 
       const delivery = await resolve(DELIVERY_LEG);
       const collection = await resolve(COLLECTION_LEG);
@@ -553,7 +508,7 @@ describe("PricingComponentResolver", () => {
 
     it("charges once when neither leg was assigned it", async () => {
       groupOf(DELIVERY_LEG, COLLECTION_LEG);
-      tripCustomPropertyService.findByTripId.mockResolvedValue({ items: [] });
+      tripCustomProperties.findByTripId.mockResolvedValue([]);
 
       expect(hasAutomatic(await resolve(DELIVERY_LEG))).toBe(true);
       expect(hasAutomatic(await resolve(COLLECTION_LEG))).toBe(false);
@@ -612,7 +567,7 @@ describe("PricingComponentResolver", () => {
     it("reads no group at all for a Trip that is in none", async () => {
       await resolve(buildTrip());
 
-      expect(tripService.findByGroupId).not.toHaveBeenCalled();
+      expect(trips.findByGroupId).not.toHaveBeenCalled();
     });
 
     /*

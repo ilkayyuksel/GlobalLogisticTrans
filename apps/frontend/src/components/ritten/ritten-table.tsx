@@ -4,10 +4,12 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 
 import { LosritBadge } from "@/components/trips/losrit-badge";
+import { PaymentBadge } from "@/components/trips/payment-badge";
 import { TripStatusBadge } from "@/components/trips/trip-status-badge";
+import { HoverNote } from "@/components/ui/hover-note";
 import { ApiError } from "@/lib/api/client";
 import type { UpdateTripPayload } from "@/lib/api/trips";
-import type { EffectivePricing, Trip, Vehicle } from "@/lib/api/types";
+import type { Trip, Vehicle } from "@/lib/api/types";
 import { PricingCells } from "@/components/ritten/pricing-cells";
 import { toRouteText } from "@/lib/ritten/route-label";
 import { toClockLabel } from "@/lib/calendar/clock";
@@ -137,16 +139,6 @@ export interface RittenTableProps {
    * shaped; an absent column tells them nothing, which is the point.
    */
   showPricing: boolean;
-  /**
-   * Rows whose pricing has moved since the list was loaded, keyed by Trip id.
-   *
-   * A Trip normally shows the pricing it ARRIVED with, on the Trip itself. This
-   * map holds only the answers the override endpoints gave back after an
-   * operator corrected something, so that one row updates without refetching
-   * the page — see `RittenActions.savePricingOverride`. Empty is the ordinary
-   * state.
-   */
-  updatedPricingByTripId: ReadonlyMap<string, EffectivePricing>;
   /** Whether WhatsApp can deliver, for the send button. One value per page. */
   whatsAppStatus: WhatsAppStatus;
   /** Opens the delete confirmation. A row never deletes anything itself. */
@@ -246,7 +238,6 @@ function RittenRow({
   selectedTripIds,
   onToggleSelection,
   showPricing,
-  updatedPricingByTripId,
   whatsAppStatus,
   onDeleteTrip,
   onReopenTrip,
@@ -329,6 +320,16 @@ function RittenRow({
             OPEN, CLOSED or CANCELLED like any other Trip.
           */}
           <LosritBadge trip={trip} onRemove={actions.removeLosrit} />
+          {/*
+            BETAALD / NIET BETAALD, beside the status for the same reason LOSRIT
+            is: it is a separate classification, not a lifecycle state. The
+            badge IS the toggle — one click, saved immediately, no dialog.
+          */}
+          <PaymentBadge
+            trip={trip}
+            isDisabled={isBusy}
+            onToggle={actions.changePayment}
+          />
         </span>
         {/*
           "Bijgewerkt" is DERIVED, and beside the status rather than instead of
@@ -430,13 +431,30 @@ function RittenRow({
         </UpdatedValue>
       </td>
 
+      {/*
+        The booking number, with the Trip's internal notes on hover and on
+        focus.
+
+        The LINK is untouched: same target, same styling, same keyboard
+        behaviour. `HoverNote` wraps it rather than replacing it, so navigating
+        to the Trip works exactly as it did and the note is additional rather
+        than in the way.
+
+        The note travels on the Trip the list already returned, so showing it
+        costs no request — not one per row, and not one on hover.
+      */}
       <td className="px-3 py-2">
-        <Link
-          href={`/trips/${trip.id}`}
-          className="font-medium text-primary hover:underline"
+        <HoverNote
+          label={t("ritten.notes.label")}
+          note={trip.internalNotes}
         >
-          {trip.bookingNumber}
-        </Link>
+          <Link
+            href={`/trips/${trip.id}`}
+            className="font-medium text-primary hover:underline"
+          >
+            {trip.bookingNumber}
+          </Link>
+        </HoverNote>
       </td>
 
       <td className="px-3 py-2 text-secondary">
@@ -499,11 +517,12 @@ function RittenRow({
       {showPricing ? (
         <PricingCells
           /*
-           * The row-local answer when this Trip has just been corrected,
-           * otherwise the pricing the Trip arrived with. Both come from the
-           * backend; neither is computed here.
+           * The pricing the Trip carries. Either what the list delivered or
+           * what a write answered with — the page lays one over the other
+           * before a row ever reaches here, so this cell has one source and
+           * computes nothing.
            */
-          pricing={updatedPricingByTripId.get(trip.id) ?? trip.pricing}
+          pricing={trip.pricing}
           isDisabled={isBusy}
           onSaveOverride={(componentCode, amount) =>
             actions.savePricingOverride(trip.id, componentCode, amount)

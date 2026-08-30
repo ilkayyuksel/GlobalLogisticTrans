@@ -2,6 +2,8 @@ import { Injectable } from "@nestjs/common";
 import { CostConfirmation } from "@prisma/client";
 
 import { AppLoggerService } from "../logger/app-logger.service";
+import { PricingRecalculationService } from "../pricing-engine/pricing-recalculation.service";
+import { EffectivePricingDto } from "../trip-pricing/dto/effective-pricing.dto";
 import { CostConfirmationRepository } from "./cost-confirmation.repository";
 import { CostConfirmationDto } from "./dto/cost-confirmation-response.dto";
 
@@ -29,6 +31,19 @@ import { CostConfirmationDto } from "./dto/cost-confirmation-response.dto";
  * the database says so too — `cost_confirmation.trip_id` is unique, so no path
  * through this code can produce a second even if this check were bypassed.
  * ────────────────────────────────────────────────────────────────────────────
+ *
+ * ── BUT IT IS A PRICING INPUT ───────────────────────────────────────────────
+ * A confirmed amount becomes the Trip's EK line and therefore moves its Totaal.
+ * So recording one AWAITS a recalculation and answers with the result: nothing
+ * is fire-and-forget, because a caller that returned first would report the
+ * figures from before the confirmation existed.
+ *
+ * The confirmation is kept whatever pricing does. It is a statement by somebody
+ * else and it arrived; a Trip whose route is not configured cannot be priced
+ * yet, and that is a configuration gap to fill rather than a reason to discard
+ * evidence. The result then carries `pricing: null` with a reason code — never
+ * the previous figures — and the Trip's status is untouched throughout.
+ * ────────────────────────────────────────────────────────────────────────────
  */
 
 /** What became of one confirmation. */
@@ -49,6 +64,21 @@ export type CostConfirmationOutcome =
 export interface CostConfirmationResult {
   readonly outcome: CostConfirmationOutcome;
   readonly confirmation: CostConfirmation | null;
+  /**
+   * The Trip's complete effective pricing after this confirmation, or null.
+   *
+   * Present only on RECORDED — the one outcome that WROTE something. Nothing
+   * was written for ALREADY_RECORDED or CC_ALREADY_EXISTS, so there is nothing
+   * to have changed and no recalculation is run: repricing on a duplicate
+   * message would burn a calculation to produce the snapshot that is already
+   * stored.
+   *
+   * Null on RECORDED too when the Trip could not be priced — see `reasonCode`.
+   * It is never the pricing from before the confirmation was recorded.
+   */
+  readonly pricing: EffectivePricingDto | null;
+  /** Why there is no pricing, as a stable code. Null when pricing is present. */
+  readonly reasonCode: string | null;
 }
 
 export interface RecordCostConfirmationCommand {
@@ -66,6 +96,7 @@ export interface RecordCostConfirmationCommand {
 export class CostConfirmationService {
   constructor(
     private readonly repository: CostConfirmationRepository,
+    private readonly recalculation: PricingRecalculationService,
     private readonly logger: AppLoggerService,
   ) {
     this.logger.setContext(CostConfirmationService.name);
@@ -95,7 +126,13 @@ export class CostConfirmationService {
         ccNumber: command.ccNumber,
       });
 
-      return { outcome: "ALREADY_RECORDED", confirmation: existing };
+      return {
+        outcome: "ALREADY_RECORDED",
+        confirmation: existing,
+        // Nothing was written, so nothing can have changed.
+        pricing: null,
+        reasonCode: null,
+      };
     }
 
     if (existing) {
@@ -105,7 +142,12 @@ export class CostConfirmationService {
         refusedCcNumber: command.ccNumber,
       });
 
-      return { outcome: "CC_ALREADY_EXISTS", confirmation: existing };
+      return {
+        outcome: "CC_ALREADY_EXISTS",
+        confirmation: existing,
+        pricing: null,
+        reasonCode: null,
+      };
     }
 
     const confirmation = await this.repository.create({
@@ -126,7 +168,19 @@ export class CostConfirmationService {
       currency: command.currency,
     });
 
-    return { outcome: "RECORDED", confirmation };
+    /*
+     * After the row is committed, so the Engine reads the confirmation that
+     * was just written rather than the absence it replaced. One recalculation,
+     * whatever else the Trip carries.
+     */
+    const outcome = await this.recalculation.recalculate(command.tripId);
+
+    return {
+      outcome: "RECORDED",
+      confirmation,
+      pricing: outcome.pricing,
+      reasonCode: outcome.reasonCode,
+    };
   }
 
   /** The confirmation of each Trip on a page, keyed by Trip id. */

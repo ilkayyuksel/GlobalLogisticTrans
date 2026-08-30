@@ -3,7 +3,8 @@ import { Prisma } from "@prisma/client";
 
 import { MONEY_DECIMAL_PLACES } from "../common/dto/money";
 import { AppLoggerService } from "../logger/app-logger.service";
-import { TripService } from "../trips/trip.service";
+import { TripNotFoundException } from "../trips/exceptions/trip.exceptions";
+import { TripReadService } from "../trips/trip-read.service";
 import {
   EffectivePricingDto,
   toEffectivePricingDto,
@@ -38,7 +39,7 @@ export class TripPricingOverrideService {
   constructor(
     private readonly overrides: TripPricingOverrideRepository,
     private readonly effectivePricing: EffectivePricingService,
-    private readonly tripService: TripService,
+    private readonly trips: TripReadService,
     private readonly logger: AppLoggerService,
   ) {
     this.logger.setContext(TripPricingOverrideService.name);
@@ -62,8 +63,8 @@ export class TripPricingOverrideService {
   ): Promise<EffectivePricingDto | null> {
     assertOverridable(dto.componentCode);
 
-    // Delegated so an unknown Trip raises the same 404 it raises everywhere.
-    await this.tripService.findById(tripId);
+    // An unknown Trip raises the same 404 it raises everywhere.
+    await this.requireTrip(tripId);
 
     await this.overrides.upsert({
       tripId,
@@ -103,7 +104,7 @@ export class TripPricingOverrideService {
   ): Promise<EffectivePricingDto | null> {
     assertOverridable(componentCode);
 
-    await this.tripService.findById(tripId);
+    await this.requireTrip(tripId);
 
     const wasRemoved = await this.overrides.remove(tripId, componentCode);
 
@@ -117,6 +118,20 @@ export class TripPricingOverrideService {
     });
 
     return this.readEffective(tripId);
+  }
+
+  /**
+   * Refuses a correction to a Trip that does not exist.
+   *
+   * Through the narrow Trip READ side rather than TripService: it raises the
+   * same exception, so the 404 is unchanged, and the pricing module stops
+   * depending on the planning domain — which is what keeps the Engine's
+   * dependency on this module from closing a cycle.
+   */
+  private async requireTrip(tripId: string): Promise<void> {
+    if ((await this.trips.findById(tripId)) === null) {
+      throw new TripNotFoundException(tripId);
+    }
   }
 
   /**

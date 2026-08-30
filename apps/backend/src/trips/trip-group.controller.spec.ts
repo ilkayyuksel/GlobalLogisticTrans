@@ -21,6 +21,7 @@ import { TripPlanningDataService } from "./trip-planning-data.service";
 import { TripDocumentsService } from "./trip-documents.service";
 import { TripRepository } from "./trip.repository";
 import { TripService } from "./trip.service";
+import { PricingRecalculationService } from "../pricing-engine/pricing-recalculation.service";
 
 const TRIP_A = "3f2504e0-4f89-41d3-9a0c-0305e82c3301";
 const TRIP_B = "9c858901-8a57-4791-81fe-4c455b099bc9";
@@ -36,6 +37,7 @@ function buildTrip(overrides: Partial<Trip> = {}): Trip {
     driverId: null,
     status: TripStatus.OPEN,
     isLooseTrip: false,
+    isPaid: false,
     direction: null,
     bookingNumber: "BK-2026-0042",
     containerNumber: null,
@@ -110,6 +112,14 @@ describe("TripGroupController (integration)", () => {
         TripService,
         // Not exercised here; the Trips these tests build require no automatic
         // property. It only has to exist for TripService to be constructible.
+        /*
+         * Editing a waiting time recalculates; nothing in this suite does, so
+         * the recalculation only has to exist for TripService to be built.
+         */
+        {
+          provide: PricingRecalculationService,
+          useValue: { recalculate: jest.fn() },
+        },
         {
           provide: AutomaticFlatPropertyService,
           useValue: { applyToNewTrip: jest.fn(), synchronise: jest.fn() },

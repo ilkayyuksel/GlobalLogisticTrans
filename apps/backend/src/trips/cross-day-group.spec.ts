@@ -10,6 +10,7 @@ import { TripPlanningDataService } from "./trip-planning-data.service";
 import { TripRepository } from "./trip.repository";
 import { TripService } from "./trip.service";
 import { VehicleService } from "../vehicles/vehicle.service";
+import { stubPricingRecalculation } from "../pricing-engine/pricing-recalculation.double";
 
 const GROUP_ID = "97777777-7777-4777-8777-777777777777";
 
@@ -118,6 +119,7 @@ describe("grouping Trips from different days", () => {
         applyToNewTrip: jest.fn(),
         synchronise: jest.fn(),
       } as unknown as AutomaticFlatPropertyService,
+      stubPricingRecalculation(),
       { publish: jest.fn() } as unknown as DomainEventBus,
       {
         setContext: jest.fn(),

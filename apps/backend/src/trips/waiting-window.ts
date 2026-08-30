@@ -98,3 +98,20 @@ export function toWaitingTimeWrite(
 function toMinutesOfDay(time: Date): number {
   return time.getUTCHours() * MINUTES_PER_HOUR + time.getUTCMinutes();
 }
+
+/**
+ * Whether an update is about the waiting-time window at all.
+ *
+ * The same test `toWaitingTimeWrite` applies — "were the times sent" — named
+ * once so the write decision and the pricing decision cannot drift apart. A
+ * caller that clears the window sends two explicit nulls, which is a change
+ * like any other and must reprice.
+ */
+export function changesWaitingTimeWindow(update: {
+  waitingTimeStart?: string | null;
+  waitingTimeEnd?: string | null;
+}): boolean {
+  return (
+    update.waitingTimeStart !== undefined || update.waitingTimeEnd !== undefined
+  );
+}

@@ -1,9 +1,8 @@
-import { Inject, Injectable, NotFoundException } from "@nestjs/common";
+import { Inject, Injectable } from "@nestjs/common";
 import { PricingCalculationStatus, TripStatus } from "@prisma/client";
 
 import { AppLoggerService } from "../logger/app-logger.service";
-import { TripResponseDto } from "../trips/dto/trip-response.dto";
-import { TripService } from "../trips/trip.service";
+import { TripReadService, TripReadView } from "../trips/trip-read.service";
 import { isGenuineCombination } from "./combination-leg";
 import {
   MissingRouteCostException,
@@ -31,7 +30,7 @@ import {
 import { PRICING_ENGINE_VERSION } from "./pricing-engine.version";
 import { sumLineAmounts } from "./pricing-money";
 import { PricingRuleResolver } from "./pricing-rule.resolver";
-import { CostConfirmationService } from "../cost-confirmations/cost-confirmation.service";
+import { CostConfirmationReadService } from "../cost-confirmations/cost-confirmation-read.service";
 import { PricingSnapshotWriter } from "./pricing-snapshot.writer";
 import { RouteCostResolver } from "./route-cost.resolver";
 
@@ -69,12 +68,12 @@ const NO_WAITING_TIME_MINUTES = 0;
 @Injectable()
 export class PricingEngineService {
   constructor(
-    private readonly tripService: TripService,
+    private readonly trips: TripReadService,
     private readonly ruleResolver: PricingRuleResolver,
     private readonly componentResolver: PricingComponentResolver,
     private readonly routeCostResolver: RouteCostResolver,
     private readonly snapshotWriter: PricingSnapshotWriter,
-    private readonly costConfirmations: CostConfirmationService,
+    private readonly costConfirmations: CostConfirmationReadService,
     @Inject(PRICING_CALCULATION_STEPS)
     private readonly calculationSteps: readonly PricingCalculationStep[],
     private readonly logger: AppLoggerService,
@@ -306,11 +305,7 @@ export class PricingEngineService {
      * a single lookup rather than a set. A Trip without one prices without an
      * EK line at all, which is different from an EK of zero.
      */
-    const confirmations = await this.costConfirmations.findForTrips([trip.id]);
-    const found = confirmations.get(trip.id) ?? null;
-    const costConfirmation = found
-      ? { ccNumber: found.ccNumber, amount: found.amount }
-      : null;
+    const costConfirmation = await this.costConfirmations.findForTrip(trip.id);
 
     const existingSnapshot =
       await this.snapshotWriter.findExistingSnapshot(tripId);
@@ -354,13 +349,6 @@ export class PricingEngineService {
     };
   }
 
-  /**
-   * Loads the Trip and confirms it may be priced.
-   *
-   * TripService reports absence as an HTTP 404. It is translated here so a
-   * domain service never leaks a transport-level error to its callers, which
-   * may be a queue worker or a scheduled job rather than a request.
-   */
   /**
    * Every route-priced Custom Property the Trip carries must have a matching
    * active RouteCost.
@@ -413,10 +401,20 @@ export class PricingEngineService {
     }
   }
 
-  private async requirePriceableTrip(
-    tripId: string,
-  ): Promise<TripResponseDto> {
-    const trip = await this.findTrip(tripId);
+  /**
+   * Loads the Trip's pricing inputs and confirms it may be priced.
+   *
+   * Through the narrow read side rather than TripService: the Engine needs
+   * eleven scalar columns, not a resolved planning row, and TripModule now
+   * depends on the Engine so that a waiting-time change recalculates. See
+   * TripReadService.
+   *
+   * Absence arrives as null and is reported as a pricing-domain failure. A
+   * domain service has no transport, so it never raises — or re-raises — an
+   * HTTP error for a caller that may be a queue worker or a scheduled job.
+   */
+  private async requirePriceableTrip(tripId: string): Promise<TripReadView> {
+    const trip = await this.trips.findById(tripId);
 
     if (!trip) {
       this.logger.warn("Pricing requested for an unknown Trip", { tripId });
@@ -438,17 +436,5 @@ export class PricingEngineService {
     }
 
     return trip;
-  }
-
-  private async findTrip(tripId: string): Promise<TripResponseDto | null> {
-    try {
-      return await this.tripService.findById(tripId);
-    } catch (error: unknown) {
-      if (error instanceof NotFoundException) {
-        return null;
-      }
-
-      throw error;
-    }
   }
 }

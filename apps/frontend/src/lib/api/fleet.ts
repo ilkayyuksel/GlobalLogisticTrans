@@ -4,6 +4,7 @@ import type {
   Driver,
   Paginated,
   TripCustomProperty,
+  TripCustomPropertyMutation,
   Vehicle,
 } from "./types";
 
@@ -107,20 +108,19 @@ export function assignCustomProperty(
   tripId: string,
   customPropertyId: string,
   signal?: AbortSignal,
-): Promise<TripCustomProperty> {
-  return request<TripCustomProperty>("/api/v1/trip-custom-properties", {
-    method: "POST",
-    body: { tripId, customPropertyId },
-    signal,
-  });
+): Promise<TripCustomPropertyMutation> {
+  return request<TripCustomPropertyMutation>(
+    "/api/v1/trip-custom-properties",
+    { method: "POST", body: { tripId, customPropertyId }, signal },
+  );
 }
 
 /** Removes one assignment by ITS id — not by the property's id. */
 export function removeCustomPropertyAssignment(
   assignmentId: string,
   signal?: AbortSignal,
-): Promise<TripCustomProperty> {
-  return request<TripCustomProperty>(
+): Promise<TripCustomPropertyMutation> {
+  return request<TripCustomPropertyMutation>(
     `/api/v1/trip-custom-properties/${assignmentId}`,
     { method: "DELETE", signal },
   );

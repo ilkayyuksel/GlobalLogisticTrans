@@ -12,7 +12,12 @@ import {
   listTripCustomProperties,
   removeCustomPropertyAssignment,
 } from "@/lib/api/fleet";
-import type { Trip } from "@/lib/api/types";
+import type {
+  EffectivePricing,
+  Trip,
+  TripCustomProperty,
+  TripCustomPropertyMutation,
+} from "@/lib/api/types";
 import { useTranslation } from "@/lib/i18n/language-provider";
 import { RittenDialog } from "./ritten-dialog";
 
@@ -34,9 +39,14 @@ import { RittenDialog } from "./ritten-dialog";
  * hiding them would misrepresent what was agreed. They simply cannot be
  * assigned again, which is the backend's rule, not one invented here.
  *
- * No price is shown or computed. A property's configured price is not what it
- * contributed to this Trip — that is a line in the pricing snapshot, which is
+ * No price is shown or computed HERE. A property's configured price is not what
+ * it contributed to this Trip — that is a line in the pricing snapshot, which is
  * the only place a priced amount is authoritative.
+ *
+ * The write does answer with the Trip's recalculated pricing, and that answer
+ * is passed straight up to the row behind this dialog. It is never displayed in
+ * here and never interpreted: assigning a property is a planning decision, and
+ * the money belongs in the Ritten pricing columns.
  *
  * ── A PROPERTY THE CONTAINER TYPE REQUIRES ──────────────────────────────────
  * Some assignments cannot be removed: a 20FL and a 20ST always carry Flat, and
@@ -58,26 +68,52 @@ export function CustomPropertiesDialog({
   /**
    * Called after the backend accepted an assignment or a removal.
    *
-   * The row behind this dialog shows its own compact list, built from the Trip
-   * the LIST endpoint returned — so this dialog reloading its own data is not
-   * enough to update it. The page refetches instead of the row being patched
-   * here: what appears must be what the backend holds, not what this component
-   * believes it just did.
+   * The row behind this dialog shows its own compact list and its own pricing
+   * columns, so this dialog reloading its own data is not enough to update it.
+   * What travels up is what the BACKEND answered — the recalculated pricing
+   * from the write, and the assignments re-read in the backend's display order
+   * — never what this component believes it just did. The page patches that one
+   * row; nothing refetches the list, so the operator keeps their filter, page,
+   * period, selection and scroll position.
    */
-  onChanged: () => void;
+  onChanged: (update: {
+    /**
+     * The Trip's complete effective pricing after the change, as the write
+     * answered — or null when the Trip could not be priced, which is an
+     * ordinary state rather than a failure of the assignment.
+     *
+     * Applied by the caller either way. Null blanks the row's amounts, because
+     * the previous ones describe the Trip before this change and showing them
+     * as current would be a stale figure nothing reveals.
+     */
+    pricing: EffectivePricing | null;
+    /** Every assignment the Trip now carries, in the backend's display order. */
+    assigned: TripCustomProperty[];
+  }) => void;
   onClose: () => void;
 }) {
   const t = useTranslation();
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<unknown>(null);
 
-  const assigned = useAsync(
+  const loaded = useAsync(
     useCallback(
       (signal: AbortSignal) => listTripCustomProperties(trip.id, signal),
       [trip.id],
     ),
     [trip.id],
   );
+
+  /*
+   * The set as it stands after a change made in this dialog.
+   *
+   * It shadows the first load rather than replacing the hook: one read answers
+   * both this list and the row behind it, so a tick costs a single request. The
+   * ORDER is the backend's — nothing here sorts, because display order is a
+   * configured rule and a second implementation of it would eventually disagree.
+   */
+  const [changed, setChanged] = useState<TripCustomProperty[] | null>(null);
+  const assignments = changed ?? loaded.data ?? [];
 
   const assignable = useAsync(
     useCallback(
@@ -88,25 +124,34 @@ export function CustomPropertiesDialog({
   );
 
   const assignedIds = new Set(
-    (assigned.data ?? []).map((item) => item.customPropertyId),
+    assignments.map((item) => item.customPropertyId),
   );
-  const hasRequired = (assigned.data ?? []).some(
-    (assignment) => assignment.isRequired,
-  );
+  const hasRequired = assignments.some((assignment) => assignment.isRequired);
   const available = (assignable.data ?? []).filter(
     (property) => !assignedIds.has(property.id),
   );
 
-  async function run(id: string, operation: () => Promise<unknown>) {
+  /**
+   * One assignment change, then the two authoritative answers it produced.
+   *
+   * The write already returned the Trip's recalculated pricing. The assignment
+   * SET is read again rather than patched locally: display order is the
+   * backend's, and a list this component reordered for itself would be the same
+   * rule in two places.
+   */
+  async function run(
+    id: string,
+    operation: () => Promise<TripCustomPropertyMutation>,
+  ) {
     setBusyId(id);
     setError(null);
 
     try {
-      await operation();
-      // The authoritative set, re-read rather than patched locally — here for
-      // this dialog, and through `onChanged` for the row underneath it.
-      assigned.reload();
-      onChanged();
+      const { pricing } = await operation();
+      const items = await listTripCustomProperties(trip.id);
+
+      setChanged(items);
+      onChanged({ pricing, assigned: items });
     } catch (caught: unknown) {
       setError(caught);
     } finally {
@@ -125,25 +170,25 @@ export function CustomPropertiesDialog({
         </p>
       ) : null}
 
-      {assigned.isLoading ? (
+      {loaded.isLoading ? (
         <LoadingState label={t("ritten.custom.loading")} />
       ) : null}
 
-      {!assigned.isLoading && assigned.error ? (
-        <ErrorState error={assigned.error} onRetry={assigned.reload} />
+      {!loaded.isLoading && loaded.error ? (
+        <ErrorState error={loaded.error} onRetry={loaded.reload} />
       ) : null}
 
-      {!assigned.isLoading && !assigned.error ? (
+      {!loaded.isLoading && !loaded.error ? (
         <div className="px-4 py-3">
           <h3 className="text-xs font-medium uppercase tracking-wide text-muted">
             {t("ritten.custom.assigned")}
           </h3>
 
-          {assigned.data?.length === 0 ? (
+          {assignments.length === 0 ? (
             <p className="mt-2 text-sm text-muted">{t("ritten.custom.empty")}</p>
           ) : (
             <ul className="mt-2 divide-y divide-border rounded-md border border-border">
-              {(assigned.data ?? []).map((assignment) => (
+              {assignments.map((assignment) => (
                 <li
                   key={assignment.id}
                   className="flex items-center justify-between gap-3 px-3 py-2"

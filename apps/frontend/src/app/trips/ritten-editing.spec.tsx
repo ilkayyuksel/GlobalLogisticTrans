@@ -393,16 +393,28 @@ describe("Ritten editing", () => {
       expect(patchCalls()).toHaveLength(0);
     });
 
-    it("refetches after a successful save", async () => {
+    /**
+     * ── WHY THIS NO LONGER REFETCHES ──────────────────────────────────────
+     * The backend recalculates the Trip's pricing before it answers, so the
+     * response IS the row: the two times, the derived minutes and the eight
+     * pricing columns that followed from them. Refetching would throw away an
+     * answer already in hand and move every other row on the page while an
+     * operator was working through them.
+     *
+     * A waiting-time edit also cannot move a row — no planning date, no
+     * vehicle, no status changes — so there is nothing about the page's
+     * ordering, sections or filters that could have gone stale.
+     */
+    it("does not refetch the list after a successful save", async () => {
       await showTrip({ waitingTimeMinutes: 60 });
       const before = listCalls(requestMock).length;
 
       await openWaitingTime();
       await userEvent.click(screen.getByRole("button", { name: "Opslaan" }));
 
-      await waitFor(() => {
-        expect(listCalls(requestMock).length).toBeGreaterThan(before);
-      });
+      await screen.findByText("Rit bijgewerkt");
+
+      expect(listCalls(requestMock)).toHaveLength(before);
     });
 
     it("is translated", async () => {

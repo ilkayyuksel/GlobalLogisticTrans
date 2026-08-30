@@ -12,6 +12,7 @@ import { TripRepository } from "./trip.repository";
 import { TripService } from "./trip.service";
 import { AutomaticFlatPropertyService } from "./automatic-flat.service";
 import { TripPlanningDataService } from "./trip-planning-data.service";
+import { stubPricingRecalculation } from "../pricing-engine/pricing-recalculation.double";
 
 const TRIP_ID = "3f2504e0-4f89-41d3-9a0c-0305e82c3301";
 
@@ -113,6 +114,7 @@ describe("TripService — TripClosed event", () => {
         applyToNewTrip: jest.fn(),
         synchronise: jest.fn(),
       } as unknown as AutomaticFlatPropertyService,
+      stubPricingRecalculation(),
       eventBus as unknown as DomainEventBus,
       logger as unknown as AppLoggerService,
     );
@@ -266,9 +268,26 @@ describe("TripService — TripClosed event", () => {
   });
 
   /**
-   * The dependency the architecture forbids is TripService -> Pricing Engine.
-   * Asserted against the source, because a compile-time import is exactly the
-   * thing that must never appear.
+   * ── WHAT THE ARCHITECTURE FORBIDS, RESTATED ─────────────────────────────
+   * The rule used to be "the Trip module imports nothing from pricing". It is
+   * now narrower, and deliberately so.
+   *
+   * Editing a waiting-time window must leave the Trip's stored pricing current,
+   * and the operator must see the new figure in the answer to their own
+   * request — so TripService CALLS the recalculation and awaits it. That is one
+   * arrow, to one entry point.
+   *
+   * Everything the old rule really protected still holds:
+   *
+   *   closing is still an EVENT, never a call. Nothing here knows that closing
+   *     produces a price;
+   *   the Trip module still reaches no pricing WRITE path — not the snapshot
+   *     store, not the overrides, not the reprocess endpoint;
+   *   no formula, rate or sum exists in the planning domain;
+   *   and the Engine does not reach back. It reads Trips through
+   *     TripReadModule, which imports nothing but Prisma, so the graph is
+   *     acyclic without a forwardRef.
+   * ────────────────────────────────────────────────────────────────────────
    */
   describe("dependency direction", () => {
     const tripsDirectory = join(__dirname);
@@ -277,33 +296,76 @@ describe("TripService — TripClosed event", () => {
       return readFileSync(join(tripsDirectory, fileName), "utf8");
     }
 
-    it.each(["trip.service.ts", "trip.module.ts", "trip.controller.ts"])(
-      "%s imports nothing from the Pricing Engine",
+    /**
+     * What a file actually REACHES, as opposed to what it talks about.
+     *
+     * The module specifiers only. Prose in a documentation comment names the
+     * Engine on purpose — that is how the direction is explained — and matching
+     * every quoted string would make an explanation indistinguishable from a
+     * dependency.
+     */
+    function importSpecifiersOf(fileName: string): string[] {
+      const IMPORT_SPECIFIER = /^import[^;]*?from "([^"]+)";/gm;
+
+      return [...sourceOf(fileName).matchAll(IMPORT_SPECIFIER)].map(
+        (match) => match[1],
+      );
+    }
+
+    /**
+     * The controller is a transport. It must not know pricing exists at all:
+     * a recalculation is a consequence of a write, decided by the service.
+     */
+    it("the Trip controller imports nothing from the Pricing Engine", () => {
+      const source = sourceOf("trip.controller.ts");
+
+      expect(source).not.toContain("pricing-engine");
+      expect(source).not.toContain("PricingEngineService");
+      expect(source).not.toContain("PricingEngineModule");
+    });
+
+    /**
+     * ONE entry point, and it is the recalculation contract — not the Engine
+     * itself. A Trip that could call `calculate`, `reprocess` or the snapshot
+     * writer would be deciding HOW it is priced, which is the dependency this
+     * suite exists to forbid.
+     */
+    it.each(["trip.service.ts", "trip.module.ts"])(
+      "%s reaches only the recalculation entry point",
       (fileName) => {
         const source = sourceOf(fileName);
 
-        expect(source).not.toContain("pricing-engine");
         expect(source).not.toContain("PricingEngineService");
-        expect(source).not.toContain("PricingEngineModule");
+        expect(source).not.toContain("pricing-engine.service");
+        expect(source).not.toContain("PricingComponentResolver");
+        expect(source).not.toContain("PricingSnapshotWriter");
+        expect(source).not.toContain("PricingRuleResolver");
+        expect(source).not.toContain("RouteCostResolver");
       },
     );
 
+    it("TripService calls the recalculation and nothing else in pricing", () => {
+      expect(
+        importSpecifiersOf("trip.service.ts").filter((specifier) =>
+          specifier.includes("pricing"),
+        ),
+      ).toEqual(["../pricing-engine/pricing-recalculation.service"]);
+    });
+
     /**
-     * The Trip module may READ a stored price. It may not reach anything that
-     * produces, corrects or replaces one.
+     * The Trip module may READ a stored price and ASK for a recalculation. It
+     * may not reach anything that stores, corrects or replaces one.
      *
      * The Ritten list carries each Trip's effective pricing, so a Trip response
      * has to be able to resolve it — the alternative is every client asking a
      * second endpoint about the rows it has just received, which is the N+1 the
      * list exists to avoid. That read arrives through EffectivePricingModule,
-     * which is read-only and depends on nothing but Prisma, so the arrow still
-     * points one way and TripPricingModule can go on importing this one.
+     * which is read-only and depends on nothing but Prisma.
      *
-     * What must stay unreachable from here is everything that WRITES a price:
-     * the Engine, the reprocess path, the override service and the override
-     * repository. A Trip that could correct its own price would put pricing
-     * rules back inside planning, which is the dependency this suite exists to
-     * forbid.
+     * What must stay unreachable from here is everything that WRITES a price
+     * directly: the snapshot store, the reprocess path, the override service
+     * and the override repository. A Trip that could correct its own price
+     * would put pricing rules back inside planning.
      */
     it("the Trip module reaches no pricing WRITE path", () => {
       const source = sourceOf("trip.module.ts");
@@ -315,19 +377,46 @@ describe("TripService — TripClosed event", () => {
       expect(source).not.toContain("TripPricingOverrideRepository");
     });
 
-    /** And the one pricing module it does import is the read-only one. */
+    /** And the one trip-pricing module it imports is the read-only one. */
     it("imports only the read-only effective-pricing module", () => {
-      const source = sourceOf("trip.module.ts");
-
-      // The quoted module specifiers, which is what an import actually reaches.
-      const pricingSpecifiers = source
-        .split('"')
-        .filter((part) => part.includes("trip-pricing"));
-
-      expect(pricingSpecifiers).toEqual([
-        "../trip-pricing/effective-pricing.module",
-      ]);
+      expect(
+        importSpecifiersOf("trip.module.ts").filter((specifier) =>
+          specifier.includes("trip-pricing"),
+        ),
+      ).toEqual(["../trip-pricing/effective-pricing.module"]);
     });
+
+    /** The module the recalculation arrives through, and no other. */
+    it("imports exactly one pricing-engine module", () => {
+      expect(
+        importSpecifiersOf("trip.module.ts").filter((specifier) =>
+          specifier.includes("pricing-engine"),
+        ),
+      ).toEqual(["../pricing-engine/pricing-engine.module"]);
+    });
+
+    /**
+     * The read side must never depend on the Engine. It exists precisely to
+     * break the cycle the recalculation call would otherwise create, and an
+     * import here would close it again silently.
+     */
+    it.each(["trip-read.service.ts", "trip-read.repository.ts", "trip-read.module.ts"])(
+      "%s knows nothing about pricing",
+      (fileName) => {
+        const source = sourceOf(fileName);
+
+        expect(source).not.toContain("pricing-engine");
+        expect(source).not.toContain("trip-pricing");
+      },
+    );
+
+    /** A forwardRef would hide the cycle rather than remove it. */
+    it.each(["trip.module.ts", "trip-read.module.ts"])(
+      "%s uses no forwardRef",
+      (fileName) => {
+        expect(sourceOf(fileName)).not.toContain("forwardRef(");
+      },
+    );
 
     it("TripService reaches the outside world only through the event bus", () => {
       const source = sourceOf("trip.service.ts");

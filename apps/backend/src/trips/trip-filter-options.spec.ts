@@ -8,6 +8,7 @@ import { AutomaticFlatPropertyService } from "./automatic-flat.service";
 import { TripPlanningDataService } from "./trip-planning-data.service";
 import { TripRepository } from "./trip.repository";
 import { TripService } from "./trip.service";
+import { stubPricingRecalculation } from "../pricing-engine/pricing-recalculation.double";
 
 /**
  * The two things the Ritten filters need from the backend: which terminals
@@ -66,6 +67,7 @@ describe("Trip filter options", () => {
         applyToNewTrip: jest.fn(),
         synchronise: jest.fn(),
       } as unknown as AutomaticFlatPropertyService,
+      stubPricingRecalculation(),
       { publish: jest.fn() } as unknown as DomainEventBus,
       {
         setContext: jest.fn(),

@@ -189,6 +189,8 @@ Previously calculated trips should only change after a manual recalculation.
 
 # Recalculation
 
+## Manual recalculation
+
 The Administrator can manually recalculate pricing.
 
 Recalculation uses:
@@ -204,6 +206,69 @@ Current Waiting Time Rules
 Parser information is not modified.
 
 Planning information is not modified.
+
+## Automatic recalculation after a Trip input changes
+
+Three writes change what a Trip is worth without touching its status, and each
+of them recalculates the Trip and answers with the result:
+
+Assigning or removing a Custom Property
+
+Entering, changing or clearing a Waiting Time window
+
+Recording a Cost Confirmation
+
+The recalculation is AWAITED. It is never fire-and-forget: a response that
+returned before the Engine finished would carry the figures from before the
+change, and no screen can tell those from current ones.
+
+Only a change to the Trip's OWN inputs triggers this. A change to global
+configuration — the fuel percentage, the TAR price, the waiting-time rules —
+never reprices a historical CLOSED Trip. Manual recalculation is how an
+Administrator applies new configuration.
+
+The Trip's status is never touched. A CLOSED Trip stays CLOSED: the price of a
+finished job may change, the fact that it is finished may not.
+
+## The failure contract
+
+The underlying write and the recalculation are separate concerns, and a pricing
+problem never undoes a write:
+
+The write is KEPT. It succeeded, and the endpoint answers 2xx.
+
+`pricing` is null and `reasonCode` carries a stable machine-readable code —
+PRICING_MISSING_ROUTE_PRICING, PRICING_TRIP_NOT_CLOSED and the rest.
+
+The PREVIOUS figures are never returned. They describe the Trip before the
+change, and presenting them as current would be a stale amount that nothing on
+the screen reveals. The Ritten row shows the empty marker instead.
+
+Nothing is rolled back, and the Trip is never reopened.
+
+A Trip whose route has no configured price is an ORDINARY state on this data,
+not an edge case. Refusing the operator's edit until an administrator configures
+the route would block the work rather than the price.
+
+## Dependency direction
+
+The three domains that trigger a recalculation depend on the Pricing Engine.
+The Engine does not depend on them in return: it reads Trips, assignments and
+confirmed costs through narrow READ modules that depend on nothing but the
+database.
+
+    TripCustomPropertyModule ─┐                ┌─> TripReadModule
+    CostConfirmationModule ───┼─> PricingEngine┼─> CostConfirmationReadModule
+    TripModule ───────────────┘       │        └─> TripCustomPropertyReadModule
+                                      └─> TripPricingModule ─> TripReadModule
+
+A read module must never import the Pricing Engine, and no cycle may be hidden
+behind a lazy reference.
+
+Closing a Trip still prices it through an EVENT rather than a call, so the
+planning domain does not know that closing produces a price. Recalculating after
+an input change is a direct call because the caller must WAIT for the answer and
+return it.
 
 ---
 

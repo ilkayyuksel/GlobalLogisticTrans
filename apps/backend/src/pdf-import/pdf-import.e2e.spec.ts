@@ -224,6 +224,9 @@ describe("Manual PDF upload, end to end over HTTP", () => {
           provide: DomainEventBus,
           useValue: {
             publish: jest.fn((event: unknown) => publishedEvents.push(event)),
+            // The Pricing Engine subscribes to trip.closed wherever the real
+            // module is wired in; this suite is about the import, not pricing.
+            subscribe: jest.fn(),
           },
         },
       ],

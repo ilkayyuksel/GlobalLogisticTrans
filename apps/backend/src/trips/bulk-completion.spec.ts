@@ -13,6 +13,7 @@ import { TripPlanningDataService } from "./trip-planning-data.service";
 import { TripRepository } from "./trip.repository";
 import { TripService } from "./trip.service";
 import { VehicleService } from "../vehicles/vehicle.service";
+import { stubPricingRecalculation } from "../pricing-engine/pricing-recalculation.double";
 
 /**
  * Completing several Trips at once.
@@ -120,6 +121,7 @@ describe("completing several Trips", () => {
         applyToNewTrip: jest.fn(),
         synchronise: jest.fn(),
       } as unknown as AutomaticFlatPropertyService,
+      stubPricingRecalculation(),
       {
         publish: jest.fn((event: unknown) => {
           published.push(event);

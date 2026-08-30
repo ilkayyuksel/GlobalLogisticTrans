@@ -13,7 +13,7 @@ import { AllExceptionsFilter } from "../common/filters/all-exceptions.filter";
 import { ResponseInterceptor } from "../common/interceptors/response.interceptor";
 import { AppLoggerService } from "../logger/app-logger.service";
 import { TripPricingItemRepository } from "../trip-pricing-items/trip-pricing-item.repository";
-import { TripService } from "../trips/trip.service";
+import { TripReadService } from "../trips/trip-read.service";
 import { EffectivePricingService } from "./effective-pricing.service";
 import { TripPricingOverrideController } from "./trip-pricing-override.controller";
 import { TripPricingOverrideRepository } from "./trip-pricing-override.repository";
@@ -148,7 +148,7 @@ describe("TripPricingOverrideController (integration)", () => {
           },
         },
         {
-          provide: TripService,
+          provide: TripReadService,
           useValue: {
             findById: jest
               .fn()

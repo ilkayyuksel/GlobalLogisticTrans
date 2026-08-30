@@ -37,6 +37,14 @@ export interface FindTripsFilter {
   tripIds?: readonly string[];
   /** Trips carrying this Custom Property. */
   customPropertyId?: string;
+  /**
+   * BETAALD or NIET BETAALD. Absent means "Alle": no payment filter at all.
+   *
+   * A tri-state carried as an optional boolean, which is why `undefined` and
+   * `false` must never be conflated — `false` is a real question ("show me the
+   * unpaid ones") and `undefined` is the absence of one.
+   */
+  isPaid?: boolean;
   terminal?: string;
   destinationCity?: string;
   destinationCountry?: string;
@@ -232,6 +240,18 @@ export class TripRepository {
 
   findById(id: string): Promise<Trip | null> {
     return this.prisma.trip.findUnique({ where: { id } });
+  }
+
+  /**
+   * Marks a Trip paid or unpaid, and touches nothing else.
+   *
+   * Its own method rather than a general `update` call, so the ONE column this
+   * operation may write is visible here rather than trusted to every call site.
+   * A payment change must never move a Trip's status, and the surest way to
+   * guarantee that is an update that cannot express one.
+   */
+  setPaid(id: string, isPaid: boolean): Promise<Trip> {
+    return this.prisma.trip.update({ where: { id }, data: { isPaid } });
   }
 
   /**
@@ -499,6 +519,12 @@ export class TripRepository {
             },
           }
         : {}),
+      /*
+       * Explicitly against undefined, NOT truthiness: `isPaid: false` is the
+       * "Niet betaald" filter and must reach the database, where a truthiness
+       * check would silently drop it and return everything.
+       */
+      ...(filter.isPaid === undefined ? {} : { isPaid: filter.isPaid }),
       ...(filter.terminal ? { terminal: filter.terminal } : {}),
       ...(filter.destinationCity
         ? { destinationCity: filter.destinationCity }

@@ -20,6 +20,8 @@ import {
   TripCustomPropertyWithProperty,
 } from "./trip-custom-property.repository";
 import { TripCustomPropertyService } from "./trip-custom-property.service";
+import { PricingRecalculationService } from "../pricing-engine/pricing-recalculation.service";
+import { stubPricingRecalculation } from "../pricing-engine/pricing-recalculation.double";
 
 const ASSIGNMENT_ID = "3f2504e0-4f89-41d3-9a0c-0305e82c3301";
 const OTHER_ASSIGNMENT_ID = "9c858901-8a57-4791-81fe-4c455b099bc9";
@@ -72,6 +74,7 @@ describe("TripCustomPropertyController (integration)", () => {
   let repository: jest.Mocked<TripCustomPropertyRepository>;
   let tripService: { findById: jest.Mock };
   let customPropertyService: { findById: jest.Mock };
+  let recalculation: ReturnType<typeof stubPricingRecalculation>;
 
   beforeEach(async () => {
     repository = {
@@ -94,6 +97,7 @@ describe("TripCustomPropertyController (integration)", () => {
         .fn()
         .mockResolvedValue({ id: PROPERTY_ID, isActive: true }),
     };
+    recalculation = stubPricingRecalculation();
 
     const logger = {
       setContext: jest.fn(),
@@ -111,6 +115,7 @@ describe("TripCustomPropertyController (integration)", () => {
         { provide: TripCustomPropertyRepository, useValue: repository },
         { provide: TripService, useValue: tripService },
         { provide: CustomPropertyService, useValue: customPropertyService },
+        { provide: PricingRecalculationService, useValue: recalculation },
         { provide: AppLoggerService, useValue: logger },
         { provide: APP_FILTER, useClass: AllExceptionsFilter },
         { provide: APP_INTERCEPTOR, useClass: ResponseInterceptor },

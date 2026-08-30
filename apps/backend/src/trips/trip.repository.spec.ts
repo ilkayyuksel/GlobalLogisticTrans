@@ -303,6 +303,108 @@ describe("TripRepository", () => {
     });
   });
 
+  /**
+   * BETAALD / NIET BETAALD, as a clause on the SAME query.
+   *
+   * The count and the page share one `where`, so a payment filter narrows both
+   * — which is what keeps the week and month views whole. Filtering rows after
+   * they were fetched would leave the count describing a different set.
+   */
+  describe("the payment filter", () => {
+    it("matches the paid Trips", async () => {
+      await repository.findPage({ isPaid: true, skip: 0, take: 25 });
+
+      expect(prisma.trip.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { isPaid: true } }),
+      );
+    });
+
+    /*
+     * The clause a truthiness check would silently drop. `false` is a real
+     * question — "show me the unpaid ones" — and losing it would answer with
+     * every Trip there is.
+     */
+    it("matches the UNPAID Trips rather than dropping the clause", async () => {
+      await repository.findPage({ isPaid: false, skip: 0, take: 25 });
+
+      expect(prisma.trip.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { isPaid: false } }),
+      );
+    });
+
+    it("applies no payment clause when none was asked for", async () => {
+      await repository.findPage({ skip: 0, take: 25 });
+
+      const [{ where }] = prisma.trip.findMany.mock.calls[0];
+
+      expect(where).not.toHaveProperty("isPaid");
+    });
+
+    it("narrows the COUNT as well as the page", async () => {
+      await repository.findPage({ isPaid: true, skip: 0, take: 25 });
+
+      expect(prisma.trip.count).toHaveBeenCalledWith({
+        where: { isPaid: true },
+      });
+    });
+
+    it("combines with every other clause on one query", async () => {
+      await repository.findPage({
+        status: TripStatus.CLOSED,
+        planningDate: PLANNING_DATE,
+        terminal: "Quay 869",
+        isPaid: false,
+        skip: 0,
+        take: 25,
+      });
+
+      expect(prisma.trip.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            status: TripStatus.CLOSED,
+            planningDate: PLANNING_DATE,
+            terminal: "Quay 869",
+            isPaid: false,
+          },
+        }),
+      );
+    });
+  });
+
+  /**
+   * The payment write, which can express ONE column.
+   *
+   * That is the design rather than a convention: an update that cannot name a
+   * status is an update that cannot change one, whatever a future caller does.
+   */
+  describe("setPaid", () => {
+    it("writes the payment column of one Trip", async () => {
+      await repository.setPaid("trip-1", true);
+
+      expect(prisma.trip.update).toHaveBeenCalledWith({
+        where: { id: "trip-1" },
+        data: { isPaid: true },
+      });
+    });
+
+    it("can also take it back off", async () => {
+      await repository.setPaid("trip-1", false);
+
+      expect(prisma.trip.update).toHaveBeenCalledWith({
+        where: { id: "trip-1" },
+        data: { isPaid: false },
+      });
+    });
+
+    it("writes nothing but the payment column", async () => {
+      await repository.setPaid("trip-1", true);
+
+      const [{ data }] = prisma.trip.update.mock.calls[0];
+
+      expect(Object.keys(data)).toEqual(["isPaid"]);
+    });
+  });
+
   describe("findById", () => {
     it("looks up by primary key", async () => {
       await repository.findById("trip-1");

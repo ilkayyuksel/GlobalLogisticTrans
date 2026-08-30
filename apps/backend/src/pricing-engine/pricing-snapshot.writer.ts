@@ -45,7 +45,13 @@ export class PricingSnapshotWriter {
   async findExistingSnapshot(
     tripId: string,
   ): Promise<ExistingPricingSnapshot | null> {
-    const snapshot = await this.tripPricingService.findByTripId(tripId);
+    /*
+     * The variant that does NOT re-verify the Trip: the Engine resolved it and
+     * checked its status before any of this ran, so a second existence query
+     * per calculation answers a question already asked.
+     */
+    const snapshot =
+      await this.tripPricingService.findSnapshotByTripId(tripId);
 
     if (!snapshot) {
       return null;

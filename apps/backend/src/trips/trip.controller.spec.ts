@@ -21,6 +21,7 @@ import { TripRepository } from "./trip.repository";
 import { TripPlanningDataService } from "./trip-planning-data.service";
 import { TripDocumentsService } from "./trip-documents.service";
 import { TripService } from "./trip.service";
+import { PricingRecalculationService } from "../pricing-engine/pricing-recalculation.service";
 
 const TRIP_ID = "3f2504e0-4f89-41d3-9a0c-0305e82c3301";
 const OTHER_TRIP_ID = "9c858901-8a57-4791-81fe-4c455b099bc9";
@@ -37,6 +38,7 @@ function buildTrip(overrides: Partial<Trip> = {}): Trip {
     driverId: null,
     status: TripStatus.OPEN,
     isLooseTrip: false,
+    isPaid: false,
     direction: null,
     bookingNumber: "BK-2026-0042",
     containerNumber: null,
@@ -95,6 +97,9 @@ describe("TripController (integration)", () => {
       create: jest.fn().mockResolvedValue(buildTrip()),
       update: jest.fn().mockResolvedValue(buildTrip()),
       setStatus: jest.fn().mockResolvedValue(buildTrip()),
+      setPaid: jest.fn((id: string, isPaid: boolean) =>
+        Promise.resolve(buildTrip({ id, isPaid })),
+      ),
       runInTransaction: jest.fn(),
       runTripWriteTransaction: jest.fn(),
     } as unknown as jest.Mocked<TripRepository>;
@@ -128,6 +133,14 @@ describe("TripController (integration)", () => {
         TripService,
         // Not exercised here; the Trips these tests build require no automatic
         // property. It only has to exist for TripService to be constructible.
+        /*
+         * Editing a waiting time recalculates; nothing in this suite does, so
+         * the recalculation only has to exist for TripService to be built.
+         */
+        {
+          provide: PricingRecalculationService,
+          useValue: { recalculate: jest.fn() },
+        },
         {
           provide: AutomaticFlatPropertyService,
           useValue: { applyToNewTrip: jest.fn(), synchronise: jest.fn() },
@@ -564,6 +577,107 @@ describe("TripController (integration)", () => {
       await request(app.getHttpServer())
         .patch(`${BASE}/${TRIP_ID}/status`)
         .send({ status: "CLOSED" })
+        .expect(404);
+    });
+  });
+
+  /**
+   * BETAALD / NIET BETAALD, over HTTP.
+   *
+   * The endpoint accepts a boolean and nothing else, so no value a caller
+   * invents can be stored — the validation pipe refuses the request before the
+   * service ever sees it.
+   */
+  describe("PATCH /trips/:id/payment", () => {
+    it("marks a Trip BETAALD", async () => {
+      repository.findById.mockResolvedValue(buildTrip());
+
+      const response = await request(app.getHttpServer())
+        .patch(`${BASE}/${TRIP_ID}/payment`)
+        .send({ isPaid: true })
+        .expect(200);
+
+      expect(response.body.data.isPaid).toBe(true);
+    });
+
+    it("marks it NIET BETAALD again", async () => {
+      repository.findById.mockResolvedValue(buildTrip({ isPaid: true }));
+
+      const response = await request(app.getHttpServer())
+        .patch(`${BASE}/${TRIP_ID}/payment`)
+        .send({ isPaid: false })
+        .expect(200);
+
+      expect(response.body.data.isPaid).toBe(false);
+    });
+
+    /* The whole Trip, so the Ritten row can refresh from the response alone. */
+    it("answers with the whole Trip", async () => {
+      repository.findById.mockResolvedValue(buildTrip());
+
+      const response = await request(app.getHttpServer())
+        .patch(`${BASE}/${TRIP_ID}/payment`)
+        .send({ isPaid: true })
+        .expect(200);
+
+      expect(response.body.data).toMatchObject({
+        id: TRIP_ID,
+        bookingNumber: "BK-2026-0042",
+        status: TripStatus.OPEN,
+        isPaid: true,
+      });
+    });
+
+    it.each([TripStatus.OPEN, TripStatus.CLOSED, TripStatus.CANCELLED])(
+      "leaves a %s Trip in that status",
+      async (status) => {
+        repository.findById.mockResolvedValue(buildTrip({ status }));
+        repository.setPaid.mockResolvedValue(
+          buildTrip({ status, isPaid: true }),
+        );
+
+        const response = await request(app.getHttpServer())
+          .patch(`${BASE}/${TRIP_ID}/payment`)
+          .send({ isPaid: true })
+          .expect(200);
+
+        expect(response.body.data.status).toBe(status);
+        expect(repository.setStatus).not.toHaveBeenCalled();
+      },
+    );
+
+    it.each([
+      [{}, "a missing flag"],
+      [{ isPaid: "true" }, "a string"],
+      [{ isPaid: 1 }, "a number"],
+      [{ isPaid: "BETAALD" }, "a label"],
+      [{ isPaid: null }, "null"],
+      [{ isPaid: true, status: "CLOSED" }, "a smuggled status"],
+      [{ isPaid: true, extra: 1 }, "an unknown field"],
+    ])("rejects %j (%s)", async (body, _reason) => {
+      repository.findById.mockResolvedValue(buildTrip());
+
+      await request(app.getHttpServer())
+        .patch(`${BASE}/${TRIP_ID}/payment`)
+        .send(body)
+        .expect(400);
+
+      expect(repository.setPaid).not.toHaveBeenCalled();
+    });
+
+    it("returns 400 for a malformed id", async () => {
+      await request(app.getHttpServer())
+        .patch(`${BASE}/not-a-uuid/payment`)
+        .send({ isPaid: true })
+        .expect(400);
+    });
+
+    it("returns 404 for a Trip that does not exist", async () => {
+      repository.findById.mockResolvedValue(null);
+
+      await request(app.getHttpServer())
+        .patch(`${BASE}/${TRIP_ID}/payment`)
+        .send({ isPaid: true })
         .expect(404);
     });
   });

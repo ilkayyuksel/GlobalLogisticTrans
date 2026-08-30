@@ -17,7 +17,7 @@ import request from "supertest";
 import { AllExceptionsFilter } from "../common/filters/all-exceptions.filter";
 import { ResponseInterceptor } from "../common/interceptors/response.interceptor";
 import { AppLoggerService } from "../logger/app-logger.service";
-import { TripService } from "../trips/trip.service";
+import { TripReadService } from "../trips/trip-read.service";
 import { TripPricingController } from "./trip-pricing.controller";
 import { TripPricingRepository } from "./trip-pricing.repository";
 import { TripPricingService } from "./trip-pricing.service";
@@ -82,7 +82,7 @@ describe("TripPricingController (integration)", () => {
       providers: [
         TripPricingService,
         { provide: TripPricingRepository, useValue: repository },
-        { provide: TripService, useValue: tripService },
+        { provide: TripReadService, useValue: tripService },
         { provide: AppLoggerService, useValue: logger },
         { provide: APP_FILTER, useClass: AllExceptionsFilter },
         { provide: APP_INTERCEPTOR, useClass: ResponseInterceptor },

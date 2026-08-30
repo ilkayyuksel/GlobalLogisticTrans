@@ -2,8 +2,7 @@ import { NotFoundException } from "@nestjs/common";
 import { PricingCalculationStatus, Prisma, TripStatus } from "@prisma/client";
 
 import { AppLoggerService } from "../logger/app-logger.service";
-import { TripResponseDto } from "../trips/dto/trip-response.dto";
-import { TripService } from "../trips/trip.service";
+import { TripReadService, TripReadView } from "../trips/trip-read.service";
 import { CombinationLeg } from "./combination-leg";
 import {
   MissingPricingSettingException,
@@ -41,41 +40,26 @@ const TRIP_ID = "3f2504e0-4f89-41d3-9a0c-0305e82c3301";
 const PRICING_ID = "9c858901-8a57-4791-81fe-4c455b099bc9";
 const ROUTE_ID = "1b9d6bcd-bbfd-4b2d-9b5d-ab8dfbbd4bed";
 
-function buildTrip(overrides: Partial<TripResponseDto> = {}): TripResponseDto {
+/**
+ * The narrow engine shape the Engine now reads, not the response DTO.
+ *
+ * Eleven scalar columns: no vehicle, no effective driver, no assigned
+ * properties and no pricing. A field this builder does not list is a field the
+ * Engine has no way to reach, which is the point of the read side.
+ */
+function buildTrip(overrides: Partial<TripReadView> = {}): TripReadView {
   return {
     id: TRIP_ID,
     pdfDocumentId: "pdf-1",
     tripGroupId: null,
-    vehicleId: null,
-    driverId: null,
-    customProperties: [],
-    pricing: null,
-    route: null,
     status: TripStatus.CLOSED,
-    isLooseTrip: false,
     direction: null,
     bookingNumber: "BK-2026-0042",
-    containerNumber: null,
-    containerType: "45PH",
     terminal: "Antwerp",
     destinationCity: "Rotterdam",
-    destinationCountry: "Netherlands",
-    originalPlanningDate: "2026-08-17",
     planningDate: "2026-08-18",
-    startTime: null,
-    endTime: null,
-    executionDatetime: null,
-    waitingTimeStart: null,
-    waitingTimeEnd: null,
     waitingTimeMinutes: null,
     distanceKm: null,
-    internalNotes: null,
-  vehicle: null,
-  effectiveDriver: null,
-  latestUpdate: null,
-  costConfirmation: null,
-    createdAt: new Date("2026-08-01T00:00:00Z"),
-    updatedAt: new Date("2026-08-01T00:00:00Z"),
     ...overrides,
   };
 }
@@ -129,7 +113,7 @@ const SECOND_LINE: PricingLine = {
 };
 
 describe("PricingEngineService", () => {
-  let tripService: { findById: jest.Mock };
+  let trips: { findById: jest.Mock; findByGroupId: jest.Mock };
   let ruleResolver: { resolve: jest.Mock; resolveDistanceRatePerKm: jest.Mock };
   let componentResolver: {
     resolveBaseSource: jest.Mock;
@@ -149,21 +133,24 @@ describe("PricingEngineService", () => {
   /** Rebuilds the engine with a specific ordered step list. */
   function buildEngine(steps: PricingCalculationStep[]): PricingEngineService {
     return new PricingEngineService(
-      tripService as unknown as TripService,
+      trips as unknown as TripReadService,
       ruleResolver as unknown as PricingRuleResolver,
       componentResolver as unknown as PricingComponentResolver,
       routeCostResolver as unknown as RouteCostResolver,
       snapshotWriter as unknown as PricingSnapshotWriter,
       // No confirmation unless a test says otherwise: these specs are about the
       // step sequence, not about what a Cost Confirmation contributes.
-      { findForTrips: async () => new Map() } as never,
+      { findForTrip: async () => null } as never,
       steps,
       logger as unknown as AppLoggerService,
     );
   }
 
   beforeEach(() => {
-    tripService = { findById: jest.fn().mockResolvedValue(buildTrip()) };
+    trips = {
+      findById: jest.fn().mockResolvedValue(buildTrip()),
+      findByGroupId: jest.fn().mockResolvedValue([]),
+    };
     ruleResolver = {
       resolve: jest.fn().mockResolvedValue(RULES),
       resolveDistanceRatePerKm: jest.fn(),
@@ -180,7 +167,7 @@ describe("PricingEngineService", () => {
        */
       resolveCombinationLeg: jest
         .fn()
-        .mockImplementation((trip: TripResponseDto) =>
+        .mockImplementation((trip: TripReadView) =>
           Promise.resolve(
             trip.tripGroupId === null
               ? CombinationLeg.NONE
@@ -204,7 +191,7 @@ describe("PricingEngineService", () => {
     it("loads the Trip, the rules, the base source, the properties and the snapshot", async () => {
       await engine.prepareCalculation(TRIP_ID);
 
-      expect(tripService.findById).toHaveBeenCalledWith(TRIP_ID);
+      expect(trips.findById).toHaveBeenCalledWith(TRIP_ID);
       expect(ruleResolver.resolve).toHaveBeenCalledTimes(1);
       expect(componentResolver.resolveBaseSource).toHaveBeenCalledWith(
         buildTrip(),
@@ -223,7 +210,7 @@ describe("PricingEngineService", () => {
     });
 
     it("stops before loading anything else when the Trip is unusable", async () => {
-      tripService.findById.mockResolvedValue(
+      trips.findById.mockResolvedValue(
         buildTrip({ status: TripStatus.OPEN }),
       );
 
@@ -254,8 +241,8 @@ describe("PricingEngineService", () => {
   });
 
   describe("missing trip", () => {
-    it("translates the Trip module's 404 into a domain exception", async () => {
-      tripService.findById.mockRejectedValue(new NotFoundException());
+    it("reports an absent Trip as a domain exception", async () => {
+      trips.findById.mockResolvedValue(null);
 
       await expect(engine.prepareCalculation(TRIP_ID)).rejects.toBeInstanceOf(
         TripNotFoundForPricingException,
@@ -263,7 +250,7 @@ describe("PricingEngineService", () => {
     });
 
     it("never lets an HTTP exception escape a domain service", async () => {
-      tripService.findById.mockRejectedValue(new NotFoundException());
+      trips.findById.mockResolvedValue(null);
 
       await expect(engine.prepareCalculation(TRIP_ID)).rejects.not.toBeInstanceOf(
         NotFoundException,
@@ -272,7 +259,7 @@ describe("PricingEngineService", () => {
 
     it("rethrows an unexpected Trip failure untouched", async () => {
       const failure = new Error("database unavailable");
-      tripService.findById.mockRejectedValue(failure);
+      trips.findById.mockRejectedValue(failure);
 
       await expect(engine.prepareCalculation(TRIP_ID)).rejects.toBe(failure);
     });
@@ -282,7 +269,7 @@ describe("PricingEngineService", () => {
     it.each([TripStatus.OPEN, TripStatus.CANCELLED, TripStatus.DELETED])(
       "refuses to price a %s Trip",
       async (status) => {
-        tripService.findById.mockResolvedValue(buildTrip({ status }));
+        trips.findById.mockResolvedValue(buildTrip({ status }));
 
         await expect(engine.prepareCalculation(TRIP_ID)).rejects.toBeInstanceOf(
           TripNotPriceableException,
@@ -382,7 +369,7 @@ describe("PricingEngineService", () => {
     });
 
     it("reads the route from the Trip, not from the configured route pricing", async () => {
-      tripService.findById.mockResolvedValue(
+      trips.findById.mockResolvedValue(
         buildTrip({ terminal: "PSA Antwerp", destinationCity: "Dourges" }),
       );
 
@@ -396,7 +383,7 @@ describe("PricingEngineService", () => {
 
     it("carries a null departure through for a Trip with no terminal", async () => {
       // trip.terminal is nullable; a distance-priced Trip may have none.
-      tripService.findById.mockResolvedValue(buildTrip({ terminal: null }));
+      trips.findById.mockResolvedValue(buildTrip({ terminal: null }));
       componentResolver.resolveBaseSource.mockResolvedValue({
         strategy: PricingStrategy.DISTANCE_BASED,
         distanceKm: "132.50",
@@ -565,7 +552,7 @@ describe("PricingEngineService", () => {
     it.each([CombinationLeg.DELIVERY, CombinationLeg.COLLECTION])(
       "marks the %s leg of a genuine Combination as a Combination",
       async (leg) => {
-        tripService.findById.mockResolvedValue(
+        trips.findById.mockResolvedValue(
           buildTrip({ tripGroupId: "group-1" }),
         );
         componentResolver.resolveCombinationLeg.mockResolvedValue(leg);
@@ -579,7 +566,7 @@ describe("PricingEngineService", () => {
     it.each([CombinationLeg.NONE, CombinationLeg.INVALID])(
       "does not treat a Trip whose leg is %s as a Combination",
       async (leg) => {
-        tripService.findById.mockResolvedValue(
+        trips.findById.mockResolvedValue(
           buildTrip({ tripGroupId: "group-1" }),
         );
         componentResolver.resolveCombinationLeg.mockResolvedValue(leg);
@@ -597,7 +584,7 @@ describe("PricingEngineService", () => {
     });
 
     it("carries a recorded waiting time through unchanged", async () => {
-      tripService.findById.mockResolvedValue(
+      trips.findById.mockResolvedValue(
         buildTrip({ waitingTimeMinutes: 90 }),
       );
 
@@ -655,7 +642,7 @@ describe("PricingEngineService", () => {
     });
 
     it("logs a validation failure as a warning", async () => {
-      tripService.findById.mockResolvedValue(
+      trips.findById.mockResolvedValue(
         buildTrip({ status: TripStatus.OPEN }),
       );
 
@@ -668,7 +655,7 @@ describe("PricingEngineService", () => {
     });
 
     it("logs the unknown-Trip failure as a warning", async () => {
-      tripService.findById.mockRejectedValue(new NotFoundException());
+      trips.findById.mockResolvedValue(null);
 
       await expect(engine.prepareCalculation(TRIP_ID)).rejects.toBeDefined();
 
@@ -763,7 +750,7 @@ describe("PricingEngineService", () => {
     });
 
     it("runs no step when the Trip cannot be priced", async () => {
-      tripService.findById.mockResolvedValue(
+      trips.findById.mockResolvedValue(
         buildTrip({ status: TripStatus.OPEN }),
       );
 
@@ -859,7 +846,7 @@ describe("PricingEngineService", () => {
     });
 
     it("adds the surcharge for a Combination Trip, in sequence", async () => {
-      tripService.findById.mockResolvedValue(
+      trips.findById.mockResolvedValue(
         buildTrip({ tripGroupId: "group-1" }),
       );
 
@@ -880,7 +867,7 @@ describe("PricingEngineService", () => {
 
     it("charges fuel on the base price only, never on the combination", async () => {
       // 15% of 380 is 57.00. 15% of 380 + 75 would be 68.25.
-      tripService.findById.mockResolvedValue(
+      trips.findById.mockResolvedValue(
         buildTrip({ tripGroupId: "group-1" }),
       );
 
@@ -895,7 +882,7 @@ describe("PricingEngineService", () => {
     it("leaves the base price untouched by the new phase", async () => {
       const normal = await engine.calculate(TRIP_ID);
 
-      tripService.findById.mockResolvedValue(
+      trips.findById.mockResolvedValue(
         buildTrip({ tripGroupId: "group-1" }),
       );
       const combination = await engine.calculate(TRIP_ID);
@@ -905,7 +892,7 @@ describe("PricingEngineService", () => {
     });
 
     it("adds waiting time when the Trip waited beyond the free allowance", async () => {
-      tripService.findById.mockResolvedValue(
+      trips.findById.mockResolvedValue(
         buildTrip({ waitingTimeMinutes: 90 }),
       );
 
@@ -926,7 +913,7 @@ describe("PricingEngineService", () => {
 
     it("charges fuel on the base price only, never on the waiting time", async () => {
       // 15% of 380 is 57.00. 15% of 380 + 25 would be 60.75.
-      tripService.findById.mockResolvedValue(
+      trips.findById.mockResolvedValue(
         buildTrip({ waitingTimeMinutes: 90 }),
       );
 
@@ -939,7 +926,7 @@ describe("PricingEngineService", () => {
     });
 
     it("produces the full documented sequence for a Combination that waited", async () => {
-      tripService.findById.mockResolvedValue(
+      trips.findById.mockResolvedValue(
         buildTrip({ tripGroupId: "group-1", waitingTimeMinutes: 105 }),
       );
 
@@ -1059,7 +1046,7 @@ describe("PricingEngineService", () => {
       });
 
       it("produces the full documented sequence when everything applies", async () => {
-        tripService.findById.mockResolvedValue(
+        trips.findById.mockResolvedValue(
           buildTrip({ tripGroupId: "group-1", waitingTimeMinutes: 105 }),
         );
         assign(
@@ -1197,7 +1184,7 @@ describe("PricingEngineService", () => {
         });
 
         it("produces the whole documented sequence, all seven components", async () => {
-          tripService.findById.mockResolvedValue(
+          trips.findById.mockResolvedValue(
             buildTrip({ tripGroupId: "group-1", waitingTimeMinutes: 105 }),
           );
           assign(
@@ -1275,7 +1262,7 @@ describe("PricingEngineService", () => {
       });
 
       it("equals the sum recomputed from the lines themselves", async () => {
-        tripService.findById.mockResolvedValue(
+        trips.findById.mockResolvedValue(
           buildTrip({ tripGroupId: "group-1", waitingTimeMinutes: 105 }),
         );
 
@@ -1289,7 +1276,7 @@ describe("PricingEngineService", () => {
       });
 
       it("includes every component when all seven apply", async () => {
-        tripService.findById.mockResolvedValue(
+        trips.findById.mockResolvedValue(
           buildTrip({ tripGroupId: "group-1", waitingTimeMinutes: 105 }),
         );
         componentResolver.resolveAssignedCustomProperties.mockResolvedValue([
@@ -1602,7 +1589,7 @@ describe("PricingEngineService", () => {
 
     it("still rejects a Trip that is not CLOSED, in either state", async () => {
       snapshotWriter.findExistingSnapshot.mockResolvedValue(null);
-      tripService.findById.mockResolvedValue(
+      trips.findById.mockResolvedValue(
         buildTrip({ status: TripStatus.CANCELLED }),
       );
 
@@ -1614,7 +1601,7 @@ describe("PricingEngineService", () => {
 
     it("applies every precondition `calculate` applies", async () => {
       snapshotWriter.findExistingSnapshot.mockResolvedValue(EXISTING_SNAPSHOT);
-      tripService.findById.mockResolvedValue(
+      trips.findById.mockResolvedValue(
         buildTrip({ status: TripStatus.OPEN }),
       );
 

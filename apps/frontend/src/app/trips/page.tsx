@@ -55,6 +55,7 @@ import {
   changeTripStatus,
   completeTrips,
   createTrip,
+  changeTripPayment,
   createTripGroup,
   listTripTerminals,
   deleteTrip,
@@ -165,10 +166,32 @@ function fill(text: string, values: Readonly<Record<string, string>> = {}): stri
 }
 
 /**
- * One shared empty map, so clearing the row-local corrections changes no
- * identity and costs no render.
+ * One shared empty map, so clearing the row-local updates changes no identity
+ * and costs no render.
  */
-const NO_UPDATED_PRICING: ReadonlyMap<string, EffectivePricing> = new Map();
+const NO_ROW_UPDATES: ReadonlyMap<string, Partial<Trip>> = new Map();
+
+/**
+ * The fields that describe a waiting-time window, and nothing else.
+ *
+ * An update touching only these cannot move a row: it changes no planning date,
+ * no vehicle and no status, so nothing about the page's ordering, its sections
+ * or its filters can have changed. That is exactly the case where the mutation
+ * response is the whole truth about the row and the list must be left alone.
+ */
+const WAITING_TIME_FIELDS: readonly (keyof UpdateTripPayload)[] = [
+  "waitingTimeStart",
+  "waitingTimeEnd",
+];
+
+function isWaitingTimeOnly(payload: UpdateTripPayload): boolean {
+  const sent = Object.keys(payload) as (keyof UpdateTripPayload)[];
+
+  return (
+    sent.length > 0 &&
+    sent.every((field) => WAITING_TIME_FIELDS.includes(field))
+  );
+}
 
 export default function RittenPage() {
   const t = useTranslation();
@@ -226,7 +249,7 @@ export default function RittenPage() {
 
   const debouncedSearch = useDebounced(filters.search, SEARCH_DEBOUNCE_MS);
 
-  const { status, vehicleId, terminal, customPropertyId } = filters;
+  const { status, vehicleId, terminal, customPropertyId, isPaid } = filters;
 
   // Built from the individual values so a keystroke in an unrelated field
   // cannot retrigger the request through a new object identity.
@@ -234,7 +257,7 @@ export default function RittenPage() {
     () => ({
       ...periodQuery(view, anchor),
       ...toFilterParams(
-        { search: "", status, vehicleId, terminal, customPropertyId },
+        { search: "", status, vehicleId, terminal, customPropertyId, isPaid },
         debouncedSearch,
       ),
       // The DATABASE orders the rows. Sorting the page in the browser would
@@ -249,6 +272,7 @@ export default function RittenPage() {
       vehicleId,
       terminal,
       customPropertyId,
+      isPaid,
       debouncedSearch,
       sort,
     ],
@@ -351,7 +375,7 @@ export default function RittenPage() {
   );
 
   /**
-   * Corrections made since this page of Trips was loaded, keyed by Trip id.
+   * What has changed about individual rows since this page of Trips was loaded.
    *
    * ── WHY THERE IS NO PRICING REQUEST HERE ──────────────────────────────────
    * The pricing of every row TRAVELS ON THE TRIP: the list endpoint resolves
@@ -360,31 +384,49 @@ export default function RittenPage() {
    * cost, and there is no second read that could fail on its own or arrive out
    * of step with the rows it describes.
    *
-   * This map holds only what the override endpoints answered after an operator
-   * corrected an amount. Each of those answers is the complete recalculated
-   * breakdown for ONE Trip, which is what lets that row update without
-   * refetching the list — and why Brandstof and Totaal are right afterwards
-   * without anything on this side computing either.
+   * ── AND WHY A MUTATION DOES NOT REFETCH THE LIST ──────────────────────────
+   * Every write that changes what a Trip is worth — a waiting-time window, a
+   * Custom Property, a manual price correction — answers with the complete
+   * recalculated breakdown for THAT Trip. So the row is patched from the
+   * response and the list is left exactly as it is: the filter, the page, the
+   * period, the selection and the operator's scroll position all survive, and
+   * no other row moves under their hands.
+   *
+   * Nothing here computes an amount. Every patch in this map came from the
+   * backend.
    */
-  const [updatedPricingByTripId, setUpdatedPricingByTripId] = useState(
-    NO_UPDATED_PRICING,
-  );
+  const [rowUpdatesByTripId, setRowUpdatesByTripId] = useState(NO_ROW_UPDATES);
 
   /*
    * A freshly loaded list is authoritative, so the row-local answers are
-   * dropped when one arrives. Keeping them would let a correction made before a
+   * dropped when one arrives. Keeping them would let a change made before a
    * refetch shadow the newer figures that same refetch just delivered.
    */
   useEffect(() => {
-    setUpdatedPricingByTripId(NO_UPDATED_PRICING);
+    setRowUpdatesByTripId(NO_ROW_UPDATES);
   }, [trips.data]);
 
+  /** Applies what the backend answered to one row. */
+  const patchRow = useCallback((tripId: string, patch: Partial<Trip>): void => {
+    setRowUpdatesByTripId((current) => {
+      const updated = new Map(current);
+
+      updated.set(tripId, { ...updated.get(tripId), ...patch });
+
+      return updated;
+    });
+  }, []);
+
   /**
-   * Applies one recalculated breakdown to one row.
+   * Applies one recalculated breakdown from an OVERRIDE endpoint.
    *
-   * A null answer means the Trip has never been priced — the correction is
-   * stored and will apply once the Engine prices it, but there is nothing to
+   * A null answer there means the Trip has never been priced — the correction
+   * is stored and will apply once the Engine prices it, but there is nothing to
    * show yet, so the row is left as it is rather than being blanked.
+   *
+   * That is NOT the same null a recalculation returns. There, null comes with a
+   * reason code and means the figures on screen are no longer current, so they
+   * must go; see `patchRow` at those call sites.
    */
   const applyPricing = useCallback(
     (tripId: string, pricing: EffectivePricing | null): void => {
@@ -392,16 +434,29 @@ export default function RittenPage() {
         return;
       }
 
-      setUpdatedPricingByTripId((current) =>
-        new Map(current).set(tripId, pricing),
-      );
+      patchRow(tripId, { pricing });
     },
-    [],
+    [patchRow],
   );
 
+  /*
+   * The rows as they are now: what the list delivered, with each row's own
+   * later answer laid over it. One place, so every cell of a patched row — the
+   * waiting time, the properties, the eight pricing columns — reads the same
+   * version of that Trip.
+   */
   const sections = useMemo(
-    () => buildSections(view, anchor, trips.data?.items ?? []),
-    [view, anchor, trips.data],
+    () =>
+      buildSections(
+        view,
+        anchor,
+        (trips.data?.items ?? []).map((trip) => {
+          const update = rowUpdatesByTripId.get(trip.id);
+
+          return update ? { ...trip, ...update } : trip;
+        }),
+      ),
+    [view, anchor, trips.data, rowUpdatesByTripId],
   );
 
   const isFiltered = hasActiveRittenFilters(filters);
@@ -465,6 +520,43 @@ export default function RittenPage() {
 
       // Rethrown so an inline cell can keep its editor open and show the
       // field-level detail the backend returned.
+      throw error;
+    } finally {
+      setBusyTripId(null);
+    }
+  }
+
+  /**
+   * A waiting-time edit: one request, one authoritative answer, one row.
+   *
+   * The backend keeps the write whatever pricing does. When it could not price
+   * the Trip the response carries `pricing: null` with a reason code, and that
+   * null is applied verbatim — the row shows the empty marker in all eight
+   * columns rather than the amounts from before the edit, which describe a
+   * window that no longer exists. The Trip stays CLOSED either way; nothing
+   * here reopens anything.
+   *
+   * The error is rethrown so the cell can keep its editor open with the times
+   * the operator typed and show the backend's own wording beside them.
+   */
+  async function saveWaitingTime(
+    tripId: string,
+    payload: UpdateTripPayload,
+  ): Promise<void> {
+    setBusyTripId(tripId);
+    setFeedback(null);
+
+    try {
+      patchRow(tripId, await updateTrip(tripId, payload));
+
+      setFeedback({ messageKey: "ritten.feedback.saved", isError: false });
+    } catch (error: unknown) {
+      setFeedback({
+        messageKey: "ritten.feedback.failed",
+        detail: userFacingMessage(error),
+        isError: true,
+      });
+
       throw error;
     } finally {
       setBusyTripId(null);
@@ -647,8 +739,28 @@ export default function RittenPage() {
   }
 
   const actions: RittenActions = {
+    /**
+     * One field edit on one row.
+     *
+     * ── WHY A WAITING-TIME EDIT DOES NOT REFETCH ──────────────────────────
+     * Changing the window changes what the Trip is worth, and the backend
+     * recalculates before it answers — so the response IS the row: the two
+     * times, the derived minutes, and the eight pricing columns that followed
+     * from them. Patching it costs nothing and leaves the filter, the page, the
+     * period, the selection and the scroll position exactly where they were.
+     *
+     * Every other field can move the row — a planning date moves it to another
+     * day, a vehicle changes the ordering — so those still refetch, because the
+     * response describes one Trip and the page may have rearranged around it.
+     */
     saveTrip: async (tripId, payload: UpdateTripPayload) => {
       const trip = trips.data?.items.find((item) => item.id === tripId);
+
+      if (isWaitingTimeOnly(payload)) {
+        await saveWaitingTime(tripId, payload);
+
+        return;
+      }
 
       await runMutation(
         trip ?? ({ id: tripId } as Trip),
@@ -670,6 +782,52 @@ export default function RittenPage() {
         () => removeTripFromGroup(trip.id),
         "ritten.group.unlinked",
       ),
+    /**
+     * BETAALD / NIET BETAALD, on one row.
+     *
+     * ── WHY THIS IS NOT `runMutation` ─────────────────────────────────────
+     * The same reason a pricing correction is not: the endpoint answers with
+     * the WHOLE updated Trip, and payment cannot move a row — it changes no
+     * planning date, no vehicle and no status, so nothing about the page's
+     * ordering or its sections can have changed. The row is patched from the
+     * response, the list is left alone, and the selection, the filters, the
+     * period and the scroll position all survive.
+     *
+     * The one case that DOES need the list: a payment filter is active, because
+     * the row that just changed may no longer belong in the result. Even then
+     * the row is patched first, so the operator sees their own click take
+     * effect rather than a table that flickers and rearranges.
+     */
+    changePayment: async (trip: Trip, isPaid: boolean) => {
+      setBusyTripId(trip.id);
+      setFeedback(null);
+
+      try {
+        patchRow(trip.id, await changeTripPayment(trip.id, isPaid));
+
+        setFeedback({
+          messageKey: isPaid
+            ? "ritten.payment.markedPaid"
+            : "ritten.payment.markedUnpaid",
+          isError: false,
+        });
+
+        if (filters.isPaid !== "") {
+          trips.reload();
+          counts.reload();
+        }
+      } catch (error: unknown) {
+        setFeedback({
+          messageKey: "ritten.feedback.failed",
+          detail: userFacingMessage(error),
+          isError: true,
+        });
+
+        throw error;
+      } finally {
+        setBusyTripId(null);
+      }
+    },
     openPdf: (trip) => setViewing({ trip }),
     /*
      * The confirmation's own document, resolved from the CostConfirmation the
@@ -976,7 +1134,6 @@ export default function RittenPage() {
                   selectedTripIds={selectedTripIds}
                   onToggleSelection={toggleSelection}
                   showPricing={showPricing}
-                  updatedPricingByTripId={updatedPricingByTripId}
                   whatsAppStatus={whatsAppStatus}
                   onDeleteTrip={setDeletingTrip}
                   onReopenTrip={setReopeningTrip}
@@ -1075,7 +1232,27 @@ export default function RittenPage() {
       {customPropertiesTrip ? (
         <CustomPropertiesDialog
           trip={customPropertiesTrip}
-          onChanged={trips.reload}
+          /*
+           * The row is patched from what the backend answered — the recalculated
+           * pricing from the write, and the assignments the dialog re-read in
+           * the backend's own display order. Neither is computed here, and the
+           * list is not refetched: assigning a property cannot move a row, and
+           * a refetch would move every other one instead.
+           *
+           * `pricing` is applied even when it is null: a recalculation that
+           * could not price the Trip means the amounts on screen are no longer
+           * current, and an empty column is honest where a stale total is not.
+           */
+          onChanged={({ pricing, assigned }) =>
+            patchRow(customPropertiesTrip.id, {
+              pricing,
+              customProperties: assigned.map((assignment) => ({
+                id: assignment.customProperty.id,
+                name: assignment.customProperty.name,
+                isActive: assignment.customProperty.isActive,
+              })),
+            })
+          }
           onClose={() => setCustomPropertiesTrip(null)}
         />
       ) : null}

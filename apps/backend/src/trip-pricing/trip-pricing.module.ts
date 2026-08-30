@@ -1,6 +1,6 @@
 import { Module } from "@nestjs/common";
 
-import { TripModule } from "../trips/trip.module";
+import { TripReadModule } from "../trips/trip-read.module";
 import { EffectivePricingModule } from "./effective-pricing.module";
 import { TripPricingController } from "./trip-pricing.controller";
 import { TripPricingOverrideController } from "./trip-pricing-override.controller";
@@ -13,22 +13,29 @@ import { TripPricingService } from "./trip-pricing.service";
 /**
  * PrismaModule and LoggerModule are global, so only two modules are imported.
  *
- * TripModule supplies the Trip existence lookup and the Trip's status, rather
- * than this module's repository reading the trip table. That direction is
- * deliberate: the pricing WRITE paths depend on Trip, never the reverse, so a
- * correction can always be refused for a Trip that does not exist.
+ * ── WHY TripReadModule AND NOT TripModule ───────────────────────────────────
+ * The Trip existence lookup still happens: a correction is refused, and a
+ * pricing read 404s, for a Trip that does not exist. What changed is where the
+ * lookup comes from.
  *
- * The Ritten list now carries each Trip's effective pricing, so TripModule does
- * read a stored figure — but through EffectivePricingModule, which sits BELOW
- * both of us and depends on neither. Nothing here became reachable from Trip:
- * not the overrides, not the Engine, not the reprocess path.
+ * The Pricing Engine imports this module to persist its snapshots, and
+ * TripModule imports the Engine so that editing a waiting time recalculates. So
+ * an import of TripModule from here would close the loop
+ * TripModule -> PricingEngine -> TripPricing -> TripModule. TripReadModule is
+ * the narrow read side of the same table: it imports nothing but Prisma, it
+ * raises the same TripNotFoundException, and it sits below all three.
+ *
+ * The Ritten list carries each Trip's effective pricing, which TripModule reads
+ * through EffectivePricingModule — also below both of us, also depending on
+ * neither. Nothing here is reachable from Trip: not the overrides, not the
+ * Engine, not the reprocess path.
  *
  * TripPricingService is exported because the future Pricing Engine persists its
  * results through the service, never through the repository, so database access
  * stays behind a single door.
  */
 @Module({
-  imports: [TripModule, EffectivePricingModule],
+  imports: [TripReadModule, EffectivePricingModule],
   controllers: [TripPricingController, TripPricingOverrideController],
   providers: [
     TripPricingService,

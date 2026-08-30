@@ -243,6 +243,12 @@ export class TripResponseDto {
   })
   isLooseTrip!: boolean;
 
+  @ApiProperty({
+    description:
+      "BETAALD when true, NIET BETAALD when false. INDEPENDENT of status — a Trip is paid or unpaid whether it is OPEN, CLOSED or CANCELLED — and it changes no lifecycle rule, no pricing and no document handling. Travels on every Trip, so a list costs no extra request to show it.",
+  })
+  isPaid!: boolean;
+
   @ApiPropertyOptional({
     enum: TripDirection,
     nullable: true,
@@ -378,6 +384,15 @@ export class TripResponseDto {
   })
   pricing!: EffectivePricingDto | null;
 
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description:
+      "Why `pricing` is null after a write that RECALCULATED this Trip — a waiting-time change above all. A stable machine-readable code such as PRICING_MISSING_ROUTE_PRICING. Always null on a read: a Trip that has simply never been priced is not a failure, and nothing was attempted to report on.",
+    example: null,
+  })
+  reasonCode!: string | null;
+
   @ApiPropertyOptional({
     type: TripRouteDto,
     nullable: true,
@@ -414,6 +429,7 @@ export function toTripResponse(
     driverId: trip.driverId,
     status: trip.status,
     isLooseTrip: trip.isLooseTrip,
+    isPaid: trip.isPaid,
     direction: trip.direction,
     bookingNumber: trip.bookingNumber,
     containerNumber: trip.containerNumber,
@@ -447,6 +463,12 @@ export function toTripResponse(
     latestUpdate: planning.latestUpdate,
     costConfirmation: planning.costConfirmation,
     pricing: planning.pricing,
+    /*
+     * A READ never attempted a recalculation, so there is nothing to explain.
+     * Only the update path — which does attempt one — replaces this, and only
+     * when the attempt failed.
+     */
+    reasonCode: null,
     /*
      * Derived here rather than resolved with the rest of the planning data:
      * every fact it needs is already on the Trip, so it costs nothing and

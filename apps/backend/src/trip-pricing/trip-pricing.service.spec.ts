@@ -1,4 +1,3 @@
-import { NotFoundException } from "@nestjs/common";
 import {
   PricingCalculationStatus,
   Prisma,
@@ -7,7 +6,8 @@ import {
 } from "@prisma/client";
 
 import { AppLoggerService } from "../logger/app-logger.service";
-import { TripService } from "../trips/trip.service";
+import { TripNotFoundException } from "../trips/exceptions/trip.exceptions";
+import { TripReadService } from "../trips/trip-read.service";
 import { TripPricingNotFoundException } from "./exceptions/trip-pricing.exceptions";
 import { TripPricingRepository } from "./trip-pricing.repository";
 import { TripPricingService } from "./trip-pricing.service";
@@ -34,7 +34,7 @@ function buildTripPricing(overrides: Partial<TripPricing> = {}): TripPricing {
 
 describe("TripPricingService", () => {
   let repository: jest.Mocked<TripPricingRepository>;
-  let tripService: { findById: jest.Mock };
+  let trips: { findById: jest.Mock };
   let logger: { setContext: jest.Mock; log: jest.Mock; warn: jest.Mock };
   let service: TripPricingService;
 
@@ -46,7 +46,7 @@ describe("TripPricingService", () => {
       update: jest.fn().mockResolvedValue(buildTripPricing()),
     } as unknown as jest.Mocked<TripPricingRepository>;
 
-    tripService = {
+    trips = {
       findById: jest
         .fn()
         .mockResolvedValue({ id: TRIP_ID, status: TripStatus.CLOSED }),
@@ -55,7 +55,7 @@ describe("TripPricingService", () => {
 
     service = new TripPricingService(
       repository,
-      tripService as unknown as TripService,
+      trips as unknown as TripReadService,
       logger as unknown as AppLoggerService,
     );
   });
@@ -88,17 +88,29 @@ describe("TripPricingService", () => {
       expect(await service.findByTripId(TRIP_ID)).toBeNull();
     });
 
-    it("propagates the Trip's own 404 rather than reporting no pricing", async () => {
-      tripService.findById.mockRejectedValue(new NotFoundException());
+    it("raises the Trip's own 404 rather than reporting no pricing", async () => {
+      trips.findById.mockResolvedValue(null);
 
       await expect(service.findByTripId(TRIP_ID)).rejects.toBeInstanceOf(
-        NotFoundException,
+        TripNotFoundException,
       );
       expect(repository.findByTripId).not.toHaveBeenCalled();
     });
 
+    /*
+     * The Engine's path. It has already loaded the Trip and refused to price
+     * one that does not exist, so a second existence query per calculation
+     * answers a question nobody asked.
+     */
+    it("skips the existence check on the engine's own read", async () => {
+      await service.findSnapshotByTripId(TRIP_ID);
+
+      expect(trips.findById).not.toHaveBeenCalled();
+      expect(repository.findByTripId).toHaveBeenCalledWith(TRIP_ID);
+    });
+
     it("does not require the Trip to be CLOSED in order to be queried", async () => {
-      tripService.findById.mockResolvedValue({
+      trips.findById.mockResolvedValue({
         id: TRIP_ID,
         status: TripStatus.OPEN,
       });
@@ -209,7 +221,7 @@ describe("TripPricingService", () => {
       // A Trip cannot leave CLOSED, and correcting metadata must stay possible.
       await service.update(PRICING_ID, { notes: "x" });
 
-      expect(tripService.findById).not.toHaveBeenCalled();
+      expect(trips.findById).not.toHaveBeenCalled();
     });
   });
 

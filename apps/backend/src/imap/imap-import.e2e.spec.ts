@@ -27,6 +27,7 @@ import {
 import { ImapScanService } from "./imap-scan.service";
 import { ImportedEmailService } from "./imported-email.service";
 import { TripPlanningDataService } from "../trips/trip-planning-data.service";
+import { stubPricingRecalculation } from "../pricing-engine/pricing-recalculation.double";
 
 /**
  * One real transport order, from a mocked mailbox to the rows that would be
@@ -298,6 +299,7 @@ describe("IMAP import, end to end with a real transport order", () => {
           ),
       } as unknown as TripPlanningDataService,
       automaticFlat,
+      stubPricingRecalculation(),
       { publish: jest.fn() } as unknown as DomainEventBus,
       logger,
     );

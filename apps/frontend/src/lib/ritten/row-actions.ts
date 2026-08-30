@@ -35,6 +35,20 @@ export interface RittenActions {
    * status, same planning, same identity, same documents, same pricing.
    */
   removeLosrit: (trip: Trip) => Promise<void>;
+  /**
+   * Marks a Trip BETAALD or NIET BETAALD.
+   *
+   * DELIBERATELY DOES NOT REFETCH THE LIST, for the same reason a pricing
+   * correction does not: the endpoint answers with the whole updated Trip, so
+   * the page patches that one row and the filter, the page, the period, the
+   * selection and the scroll position all survive. Refetching would throw away
+   * an answer already in hand and move every other row while an operator was
+   * working through them.
+   *
+   * It never changes the Trip's status — that is the backend's guarantee, and
+   * nothing on this side assumes otherwise.
+   */
+  changePayment: (trip: Trip, isPaid: boolean) => Promise<void>;
   openCombination: (tripGroupId: string) => void;
   /** Clears this Trip's group; the group and its other members survive. */
   unlinkFromGroup: (trip: Trip) => Promise<void>;

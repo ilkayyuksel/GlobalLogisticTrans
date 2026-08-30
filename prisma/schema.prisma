@@ -322,6 +322,23 @@ model Trip {
   /// every Trip that existed before this column is an ordinary Trip.
   isLooseTrip Boolean @default(false) @map("is_loose_trip")
 
+  /// BETAALD: whether this Trip has been paid.
+  ///
+  /// NOT a lifecycle state, which is why it is a column of its own rather than
+  /// a TripStatus value — exactly the reasoning behind is_loose_trip above. A
+  /// Trip is BETAALD *and* OPEN, or BETAALD *and* CLOSED, or CANCELLED *and*
+  /// still unpaid. Folding payment into status would have made every one of
+  /// those combinations unrepresentable and would have broken every transition
+  /// rule that reasons about the four real states.
+  ///
+  /// Operator-controlled and independent of everything else. No parser writes
+  /// it, no document clears it, pricing neither reads nor writes it, and
+  /// changing it never touches status. False by default, so every Trip that
+  /// existed before this column is NIET BETAALD — nothing is backfilled and
+  /// nothing is inferred from a Cost Confirmation, which is a third party's
+  /// promise to pay rather than a record that payment arrived.
+  isPaid      Boolean @default(false) @map("is_paid")
+
   /// COLLECTION fetches a container, DELIVERY brings one. Null on a manually
   /// created Trip: it is what the DOCUMENT said, and a manual Trip has none.
   /// Nullable also keeps every Trip imported before this column existed valid.

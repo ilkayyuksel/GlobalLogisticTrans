@@ -38,7 +38,20 @@ export interface RittenFilterValues {
   terminal: string;
   /** A Custom Property id; the backend filters Trips carrying it. */
   customPropertyId: string;
+  /**
+   * BETAALD / NIET BETAALD, or "" for Alle.
+   *
+   * A tri-state, which is why it is not a boolean: "" means no payment filter,
+   * and it must stay distinguishable from "paid = false". A boolean could not
+   * say "Alle" without conflating it with "Niet betaald".
+   */
+  isPaid: PaymentFilter;
 }
+
+/** Alle / Betaald / Niet betaald, in the order the control offers them. */
+export type PaymentFilter = "" | "paid" | "unpaid";
+
+const PAYMENT_CHOICES: readonly PaymentFilter[] = ["", "paid", "unpaid"];
 
 export const EMPTY_RITTEN_FILTERS: RittenFilterValues = {
   search: "",
@@ -46,6 +59,7 @@ export const EMPTY_RITTEN_FILTERS: RittenFilterValues = {
   vehicleId: "",
   terminal: "",
   customPropertyId: "",
+  isPaid: "",
 };
 
 export function hasActiveRittenFilters(values: RittenFilterValues): boolean {
@@ -54,7 +68,8 @@ export function hasActiveRittenFilters(values: RittenFilterValues): boolean {
     values.status !== "" ||
     values.vehicleId !== "" ||
     values.terminal.trim() !== "" ||
-    values.customPropertyId !== ""
+    values.customPropertyId !== "" ||
+    values.isPaid !== ""
   );
 }
 
@@ -70,6 +85,12 @@ export function toFilterParams(
     terminal: values.terminal.trim() === "" ? undefined : values.terminal.trim(),
     customPropertyId:
       values.customPropertyId === "" ? undefined : values.customPropertyId,
+    /*
+     * UNDEFINED for "Alle", so the parameter is not sent at all. Sending
+     * `false` would ask the backend for the unpaid Trips, which is a different
+     * question — and exactly the mistake a boolean here would invite.
+     */
+    isPaid: values.isPaid === "" ? undefined : values.isPaid === "paid",
   };
 }
 
@@ -118,6 +139,16 @@ export function RittenFilters({
 
   const statusLabel = (status: TripStatus | "") =>
     status === "" ? t("ritten.filter.statusAll") : t(`status.${status}`);
+
+  const paymentLabel = (choice: PaymentFilter) => {
+    if (choice === "") {
+      return t("ritten.filter.paymentAll");
+    }
+
+    return t(
+      choice === "paid" ? "ritten.payment.paid" : "ritten.payment.unpaid",
+    );
+  };
 
   return (
     <div className="flex flex-wrap items-end gap-3 border-b border-border px-4 py-3">
@@ -192,6 +223,35 @@ export function RittenFilters({
           ))}
         </select>
       </Field>
+
+      {/*
+        Payment, in its own group beside the lifecycle rather than among its
+        choices: the two are independent, and one control offering "Afgewerkt"
+        next to "Betaald" would suggest they are alternatives.
+      */}
+      <div
+        role="radiogroup"
+        aria-label={t("ritten.filter.payment")}
+        className="inline-flex rounded-md border border-border bg-card p-0.5"
+      >
+        {PAYMENT_CHOICES.map((choice) => (
+          <button
+            key={choice === "" ? "all" : choice}
+            type="button"
+            role="radio"
+            aria-checked={values.isPaid === choice}
+            onClick={() => update({ isPaid: choice })}
+            className={cn(
+              "rounded px-3 py-1.5 text-sm font-medium",
+              values.isPaid === choice
+                ? "bg-primary text-white"
+                : "text-secondary hover:bg-hover hover:text-foreground",
+            )}
+          >
+            {paymentLabel(choice)}
+          </button>
+        ))}
+      </div>
 
       <div role="radiogroup" aria-label={t("ritten.filter.status")} className="inline-flex rounded-md border border-border bg-card p-0.5">
         {STATUS_CHOICES.map((status) => (

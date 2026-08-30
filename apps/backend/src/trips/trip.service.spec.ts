@@ -21,6 +21,7 @@ import { TripRepository } from "./trip.repository";
 import { TripService } from "./trip.service";
 import { AutomaticFlatPropertyService } from "./automatic-flat.service";
 import { TripPlanningDataService } from "./trip-planning-data.service";
+import { stubPricingRecalculation } from "../pricing-engine/pricing-recalculation.double";
 
 const TRIP_ID = "3f2504e0-4f89-41d3-9a0c-0305e82c3301";
 const OTHER_TRIP_ID = "9c858901-8a57-4791-81fe-4c455b099bc9";
@@ -37,6 +38,7 @@ function buildTrip(overrides: Partial<Trip> = {}): Trip {
     driverId: null,
     status: TripStatus.OPEN,
     isLooseTrip: false,
+    isPaid: false,
     direction: null,
     bookingNumber: "BK-2026-0042",
     containerNumber: null,
@@ -140,6 +142,7 @@ describe("TripService", () => {
         applyToNewTrip: jest.fn(),
         synchronise: jest.fn(),
       } as unknown as AutomaticFlatPropertyService,
+      stubPricingRecalculation(),
       eventBus as unknown as DomainEventBus,
       logger as unknown as AppLoggerService,
     );

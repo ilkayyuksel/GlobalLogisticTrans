@@ -4,6 +4,7 @@ import { Transform } from "class-transformer";
 import {
   ArrayMaxSize,
   IsArray,
+  IsBoolean,
   IsEnum,
   IsIn,
   IsOptional,
@@ -16,7 +17,11 @@ import {
   MAX_PAGE_SIZE,
   PaginationQueryDto,
 } from "../../common/dto/pagination-query.dto";
-import { rawValueOf, trimToUndefined } from "../../common/dto/transforms";
+import {
+  rawValueOf,
+  toOptionalBoolean,
+  trimToUndefined,
+} from "../../common/dto/transforms";
 import { IsCalendarDateString } from "../../common/validators/is-calendar-date-string.validator";
 import {
   BOOKING_NUMBER_MAX_LENGTH,
@@ -76,6 +81,16 @@ export class ListTripsQueryDto extends PaginationQueryDto {
   @IsOptional()
   @IsEnum(TripStatus)
   status?: TripStatus;
+
+  @ApiPropertyOptional({
+    description:
+      "BETAALD when true, NIET BETAALD when false. OMIT it for \"Alle\": absent is no payment filter at all, which is not the same as false. Combines with every other filter here.",
+    example: true,
+  })
+  @Transform(toOptionalBoolean)
+  @IsOptional()
+  @IsBoolean()
+  isPaid?: boolean;
 
   @ApiPropertyOptional({
     description:

@@ -39,7 +39,10 @@ jest.mock("@tms/parser", () => ({ parse: jest.fn() }));
       provide: ConfigService,
       useValue: { get: () => false, getOrThrow: () => "storage/pdf" },
     },
-    { provide: DomainEventBus, useValue: { publish: jest.fn() } },
+    {
+      provide: DomainEventBus,
+      useValue: { publish: jest.fn(), subscribe: jest.fn() },
+    },
     { provide: SchedulerRegistry, useValue: { addCronJob: jest.fn() } },
   ],
   exports: [

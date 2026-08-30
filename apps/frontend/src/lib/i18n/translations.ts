@@ -271,6 +271,17 @@ const nl = {
   "ritten.edit.close": "Sluiten",
   "ritten.edit.required": "Dit veld is verplicht.",
 
+  "ritten.payment.paid": "Betaald",
+  "ritten.payment.unpaid": "Niet betaald",
+  "ritten.payment.markPaid": "Markeer als betaald",
+  "ritten.payment.markUnpaid": "Markeer als niet betaald",
+  "ritten.payment.markedPaid": "Rit gemarkeerd als betaald",
+  "ritten.payment.markedUnpaid": "Rit gemarkeerd als niet betaald",
+  "ritten.filter.payment": "Betaling",
+  "ritten.filter.paymentAll": "Alle",
+
+  "ritten.notes.label": "Extra notities",
+
   "ritten.custom.title": "Custom waarden",
   "ritten.custom.assigned": "Toegewezen",
   "ritten.custom.available": "Beschikbaar",
@@ -1079,6 +1090,17 @@ const tr: Translations = {
     "Kendi sütunu olmayan alanlar. Başlangıç ve bitiş saati PDF'ten gelir ve değiştirilemez.",
   "ritten.edit.close": "Kapat",
   "ritten.edit.required": "Bu alan zorunludur.",
+
+  "ritten.payment.paid": "Ödendi",
+  "ritten.payment.unpaid": "Ödenmedi",
+  "ritten.payment.markPaid": "Ödendi olarak işaretle",
+  "ritten.payment.markUnpaid": "Ödenmedi olarak işaretle",
+  "ritten.payment.markedPaid": "Sefer ödendi olarak işaretlendi",
+  "ritten.payment.markedUnpaid": "Sefer ödenmedi olarak işaretlendi",
+  "ritten.filter.payment": "Ödeme",
+  "ritten.filter.paymentAll": "Tümü",
+
+  "ritten.notes.label": "Ek notlar",
 
   "ritten.custom.title": "Özel değerler",
   "ritten.custom.assigned": "Atanmış",
