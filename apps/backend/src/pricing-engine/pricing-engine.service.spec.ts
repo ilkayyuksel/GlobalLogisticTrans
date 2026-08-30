@@ -10,7 +10,6 @@ import {
   TripNotFoundForPricingException,
   TripNotPriceableException,
 } from "./exceptions/pricing-engine.exceptions";
-import { MissingRouteCostException } from "./exceptions/pricing-engine.exceptions";
 import {
   PricingCustomPropertyInput,
   PricingRouteCostInput,
@@ -413,7 +412,7 @@ describe("PricingEngineService", () => {
    * The rule names no component, so it holds for Toll, for Tunnel and for any
    * route-priced component added later.
    */
-  describe("route-priced properties must have a route cost", () => {
+  describe("a route-priced property the route does not price", () => {
     const TOLL_PROPERTY = {
       customPropertyId: "property-toll",
       name: "Toll",
@@ -428,36 +427,39 @@ describe("PricingEngineService", () => {
       defaultPrice: "50.00",
     };
 
-    it("refuses the calculation when the matching cost is missing", async () => {
+    /**
+     * ── IT IS REPORTED, NOT REFUSED ─────────────────────────────────────────
+     * The gap is real: the property says the component applies, and the route
+     * says nothing about what it costs.
+     *
+     * Refusing the whole calculation was out of all proportion to it. A Trip
+     * carrying a Toll property on an unconfigured route received NO snapshot,
+     * so its Tarief, its waiting time, its other properties and its cost
+     * confirmation were all unpriceable too — because of one component nobody
+     * had configured.
+     *
+     * So the component now contributes nothing, which is exactly what the Toll
+     * and Tunnel calculators already did on their own with no route cost, and
+     * the operator can correct Toll or Tunnel by hand. The gap is still stated
+     * in the log so an administrator can close it.
+     */
+    it("prices the Trip rather than refusing it", async () => {
       componentResolver.resolveAssignedCustomProperties.mockResolvedValue([
         TOLL_PROPERTY,
       ]);
       routeCostResolver.resolve.mockResolvedValue([]);
 
-      await expect(engine.prepareCalculation(TRIP_ID)).rejects.toBeInstanceOf(
-        MissingRouteCostException,
-      );
+      await expect(engine.prepareCalculation(TRIP_ID)).resolves.toBeDefined();
     });
 
-    it("refuses before any calculation step runs", async () => {
+    it("still runs every calculation step", async () => {
       componentResolver.resolveAssignedCustomProperties.mockResolvedValue([
         TOLL_PROPERTY,
       ]);
       routeCostResolver.resolve.mockResolvedValue([]);
 
-      await expect(engine.calculate(TRIP_ID)).rejects.toBeInstanceOf(
-        MissingRouteCostException,
-      );
-      expect(firstStep.calculate).not.toHaveBeenCalled();
-    });
-
-    it("refuses rather than pricing the component at zero", async () => {
-      componentResolver.resolveAssignedCustomProperties.mockResolvedValue([
-        TOLL_PROPERTY,
-      ]);
-      routeCostResolver.resolve.mockResolvedValue([]);
-
-      await expect(engine.calculate(TRIP_ID)).rejects.toThrow();
+      await expect(engine.calculate(TRIP_ID)).resolves.toBeDefined();
+      expect(firstStep.calculate).toHaveBeenCalled();
     });
 
     it("names the component and the route so the gap can be configured", async () => {
@@ -466,12 +468,44 @@ describe("PricingEngineService", () => {
       ]);
       routeCostResolver.resolve.mockResolvedValue([]);
 
-      await expect(engine.prepareCalculation(TRIP_ID)).rejects.toThrow(
-        /component-toll/,
+      await engine.prepareCalculation(TRIP_ID);
+
+      expect(logger.warn).toHaveBeenCalledWith(
+        "Route-priced custom property has no route cost",
+        expect.objectContaining({
+          tripId: TRIP_ID,
+          customPropertyId: "property-toll",
+          pricingComponentId: "component-toll",
+          destination: "Rotterdam",
+        }),
       );
-      await expect(engine.prepareCalculation(TRIP_ID)).rejects.toThrow(
-        /Antwerp/,
+    });
+
+    it("reports every assigned property, not only the first", async () => {
+      componentResolver.resolveAssignedCustomProperties.mockResolvedValue([
+        FLAT_PROPERTY,
+        TOLL_PROPERTY,
+      ]);
+      routeCostResolver.resolve.mockResolvedValue([]);
+
+      await engine.prepareCalculation(TRIP_ID);
+
+      expect(logger.warn).toHaveBeenCalledWith(
+        "Route-priced custom property has no route cost",
+        expect.objectContaining({ customPropertyId: "property-toll" }),
       );
+    });
+
+    /** Amounts are commercial information and stay out of the log. */
+    it("logs identifiers only", async () => {
+      componentResolver.resolveAssignedCustomProperties.mockResolvedValue([
+        { ...TOLL_PROPERTY, defaultPrice: "1234.56" },
+      ]);
+      routeCostResolver.resolve.mockResolvedValue([]);
+
+      await engine.prepareCalculation(TRIP_ID);
+
+      expect(JSON.stringify(logger.warn.mock.calls)).not.toContain("1234.56");
     });
 
     it("accepts a fixed-price property, which needs no route cost", async () => {
@@ -513,36 +547,6 @@ describe("PricingEngineService", () => {
       ).resolves.toBeDefined();
     });
 
-    it("checks every assigned property, not only the first", async () => {
-      componentResolver.resolveAssignedCustomProperties.mockResolvedValue([
-        FLAT_PROPERTY,
-        TOLL_PROPERTY,
-      ]);
-      routeCostResolver.resolve.mockResolvedValue([]);
-
-      await expect(engine.prepareCalculation(TRIP_ID)).rejects.toBeInstanceOf(
-        MissingRouteCostException,
-      );
-    });
-
-    it("logs identifiers only when refusing", async () => {
-      componentResolver.resolveAssignedCustomProperties.mockResolvedValue([
-        { ...TOLL_PROPERTY, defaultPrice: "1234.56" },
-      ]);
-      routeCostResolver.resolve.mockResolvedValue([]);
-
-      await expect(engine.prepareCalculation(TRIP_ID)).rejects.toThrow();
-
-      expect(logger.warn).toHaveBeenCalledWith(
-        "Route-priced custom property has no route cost",
-        {
-          tripId: TRIP_ID,
-          customPropertyId: "property-toll",
-          pricingComponentId: "component-toll",
-        },
-      );
-      expect(JSON.stringify(logger.warn.mock.calls)).not.toContain("1234.56");
-    });
 
     /**
      * Eligibility follows the Combination rule, not group membership. A manual
@@ -1012,24 +1016,32 @@ describe("PricingEngineService", () => {
         expect(tunnel[0].description).toBe("Tunnel");
       });
 
-      it("refuses when the Tunnel cost is missing entirely", async () => {
+      /** No configured cost, no charge — and the rest of the Trip is priced. */
+      it("charges no Tunnel when its cost is missing entirely", async () => {
         assign([TUNNEL_PROPERTY], []);
 
-        await expect(engine.calculate(TRIP_ID)).rejects.toMatchObject({
-          code: "PRICING_MISSING_ROUTE_COST",
-        });
+        const { lines } = await engine.calculate(TRIP_ID);
+
+        expect(lines.map((line) => line.component)).not.toContain(
+          PricingComponentCode.TUNNEL,
+        );
+        expect(lines.map((line) => line.component)).toContain(
+          PricingComponentCode.BASE_PRICE,
+        );
       });
 
       /**
        * The resolver returns only ACTIVE costs, so a deactivated one reaches
-       * the Engine as an absent one — and must be refused just the same.
+       * the Engine as an absent one — and takes the same answer.
        */
-      it("refuses when the Tunnel cost has been deactivated", async () => {
+      it("charges no Tunnel when its cost has been deactivated", async () => {
         assign([TUNNEL_PROPERTY], [TOLL_ROUTE_COST]);
 
-        await expect(engine.calculate(TRIP_ID)).rejects.toMatchObject({
-          code: "PRICING_MISSING_ROUTE_COST",
-        });
+        const { lines } = await engine.calculate(TRIP_ID);
+
+        expect(lines.map((line) => line.component)).not.toContain(
+          PricingComponentCode.TUNNEL,
+        );
       });
 
       it("never mistakes the Toll cost for the Tunnel", async () => {
@@ -1478,7 +1490,12 @@ describe("PricingEngineService", () => {
       expect(snapshotWriter.writeSnapshot).not.toHaveBeenCalled();
     });
 
-    it("writes nothing when a route cost is missing", async () => {
+    /**
+     * A snapshot is written even when a route-priced component has no cost.
+     * The component contributes nothing; everything else about the Trip is
+     * still priced, and that is what the snapshot is for.
+     */
+    it("still writes a snapshot when a route cost is missing", async () => {
       componentResolver.resolveAssignedCustomProperties.mockResolvedValue([
         {
           customPropertyId: "property-toll",
@@ -1489,8 +1506,8 @@ describe("PricingEngineService", () => {
       ]);
       routeCostResolver.resolve.mockResolvedValue([]);
 
-      await expect(engine.calculateAndStore(TRIP_ID)).rejects.toThrow();
-      expect(snapshotWriter.writeSnapshot).not.toHaveBeenCalled();
+      await expect(engine.calculateAndStore(TRIP_ID)).resolves.toBeDefined();
+      expect(snapshotWriter.writeSnapshot).toHaveBeenCalledTimes(1);
     });
 
     it("propagates a persistence failure rather than reporting success", async () => {
@@ -1623,7 +1640,7 @@ describe("PricingEngineService", () => {
       expect(snapshotWriter.writeSnapshot).not.toHaveBeenCalled();
     });
 
-    it("leaves the old snapshot alone when a route cost is missing", async () => {
+    it("replaces the snapshot even when a route cost is missing", async () => {
       snapshotWriter.findExistingSnapshot.mockResolvedValue(EXISTING_SNAPSHOT);
       componentResolver.resolveAssignedCustomProperties.mockResolvedValue([
         {
@@ -1635,10 +1652,8 @@ describe("PricingEngineService", () => {
       ]);
       routeCostResolver.resolve.mockResolvedValue([]);
 
-      await expect(engine.reprocess(TRIP_ID)).rejects.toMatchObject({
-        code: "PRICING_MISSING_ROUTE_COST",
-      });
-      expect(snapshotWriter.writeSnapshot).not.toHaveBeenCalled();
+      await expect(engine.reprocess(TRIP_ID)).resolves.toBeDefined();
+      expect(snapshotWriter.writeSnapshot).toHaveBeenCalledTimes(1);
     });
 
     it("leaves the old snapshot alone when a property has no price", async () => {

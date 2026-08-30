@@ -141,12 +141,16 @@ function toEngineAmount(item: {
   amount: EngineAmount["amount"];
   customPropertyId: string | null;
   description: string;
+  unitPrice: EngineAmount["unitPrice"];
 }): EngineAmount {
   return {
     componentCode: item.pricingComponent.code,
     amount: item.amount,
     customPropertyId: item.customPropertyId,
     description: item.description,
+    // The line's own rate. On the fuel line it is the percentage that produced
+    // the amount, which is what lets a corrected Tarief carry its fuel with it.
+    unitPrice: item.unitPrice,
   };
 }
 

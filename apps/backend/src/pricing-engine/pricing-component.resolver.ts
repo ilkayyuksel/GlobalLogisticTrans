@@ -12,7 +12,6 @@ import {
 } from "./combination-leg";
 import {
   InvalidCombinationForPricingException,
-  MissingRoutePricingException,
   MissingTripPricingInputException,
 } from "./exceptions/pricing-engine.exceptions";
 import {
@@ -21,6 +20,19 @@ import {
   PricingRuleConfiguration,
 } from "./pricing-calculation-context";
 import { PricingStrategy } from "./pricing-settings";
+
+/**
+ * What a Trip is priced at when its route has no configuration.
+ *
+ * A real zero rather than an absent value: the Base Price line is still
+ * written, the Fuel Surcharge is still calculated from it (and comes out at
+ * zero), and the operator can override the Tarief afterwards.
+ */
+const UNCONFIGURED_ROUTE_BASE = {
+  strategy: PricingStrategy.ROUTE_BASED,
+  routePricingId: null,
+  basePrice: "0.00",
+} as const;
 import { PricingRuleResolver } from "./pricing-rule.resolver";
 
 /**
@@ -230,18 +242,19 @@ export class PricingComponentResolver {
   private async resolveRouteBaseSource(
     trip: TripReadView,
   ): Promise<PricingBaseSource> {
-    if (!trip.terminal) {
-      this.rejectMissingInput(trip.id, "terminal", PricingStrategy.ROUTE_BASED);
-    }
+    /*
+     * A route needs two ends. A Trip missing either cannot MATCH a
+     * configuration, which is the same situation as a route nobody has
+     * configured — so it takes the same answer rather than a different one.
+     */
+    if (!trip.terminal || !trip.destinationCity) {
+      this.logger.warn("Trip has no complete route, so it prices at zero", {
+        tripId: trip.id,
+        hasTerminal: Boolean(trip.terminal),
+        hasDestination: Boolean(trip.destinationCity),
+      });
 
-    // A route has two ends. A Trip created by hand may not have been given a
-    // destination yet, and half a route matches nothing.
-    if (!trip.destinationCity) {
-      this.rejectMissingInput(
-        trip.id,
-        "destinationCity",
-        PricingStrategy.ROUTE_BASED,
-      );
+      return UNCONFIGURED_ROUTE_BASE;
     }
 
     const routePricing = await this.routePricingService.findActiveRoute(
@@ -249,15 +262,33 @@ export class PricingComponentResolver {
       trip.destinationCity,
     );
 
+    /*
+     * ── AN UNCONFIGURED ROUTE IS NOT A FAILURE ──────────────────────────────
+     * It used to raise MissingRoutePricingException, which meant no snapshot
+     * was written at all — and that had consequences far beyond the base
+     * price. A CLOSED Trip on an unconfigured route showed nothing in any of
+     * the eight pricing columns, offered no way to correct the Tarief by hand,
+     * and could not carry a waiting time, a custom property or a cost
+     * confirmation, because every one of those reads the snapshot that was
+     * never created.
+     *
+     * On this business's data that was the ORDINARY case rather than an edge
+     * one: most real routes have no configured price. So the absence of a
+     * configuration is now what it always was in fact — a price of zero that
+     * an operator can correct — and the Trip receives a complete snapshot that
+     * the dynamic components can move.
+     *
+     * Nothing is invented. Zero is not a guess at what the route costs; it is
+     * the honest statement that nobody has said what it costs, and it is
+     * visibly zero on screen rather than silently absent.
+     * ────────────────────────────────────────────────────────────────────────
+     */
     if (!routePricing) {
-      this.logger.warn("No active route pricing for the Trip's route", {
+      this.logger.warn("No active route pricing; the Trip prices at zero", {
         tripId: trip.id,
       });
 
-      throw new MissingRoutePricingException(
-        trip.terminal,
-        trip.destinationCity,
-      );
+      return UNCONFIGURED_ROUTE_BASE;
     }
 
     // The route itself is not repeated here: the lookup above matched departure

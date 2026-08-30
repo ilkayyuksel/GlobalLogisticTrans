@@ -564,3 +564,120 @@ describe("the confirmed cost in Ritten", () => {
     expect(within(row).queryByText(/^CC/)).toBeNull();
   });
 });
+
+/**
+ * ── A TRIP PRICED AT ZERO IS STILL A PRICED TRIP ────────────────────────────
+ * A CLOSED Trip on a route nobody has configured is priced at zero rather than
+ * left unpriced. It therefore has a breakdown, and everything a breakdown
+ * allows must work on it — above all the three corrections, because a zero
+ * Tarief is exactly the case an operator needs to type over.
+ *
+ * The condition for offering an editor is that PRICING EXISTS. It is not
+ * "pricing exists and this component has a non-zero value": a component worth
+ * zero is a value like any other, and hiding its editor would make the one
+ * Trip that most needs correcting the one that cannot be corrected.
+ * ────────────────────────────────────────────────────────────────────────────
+ */
+describe("a Trip priced at zero", () => {
+  const ZERO_PRICED_TRIP = buildTrip({
+    id: "trip-zero",
+    bookingNumber: "ANRGHL2790641",
+    status: "CLOSED",
+    pricing: buildPricing({
+      tarief: "0.00",
+      brandstof: "0.00",
+      backload: "0.00",
+      tol: "0.00",
+      tunnel: "0.00",
+      others: "20.00",
+      ek: "0.00",
+      totaal: "20.00",
+    }),
+  });
+
+  beforeEach(() => {
+    respondWith(requestMock, { trips: buildPage([ZERO_PRICED_TRIP]) });
+  });
+
+  it("shows the zeros rather than the empty marker", async () => {
+    renderRitten();
+    await userEvent.click(toggle());
+
+    const cells = pricingCells(await rowOf("ANRGHL2790641"));
+
+    expect(cells[CELL.tarief]).toHaveTextContent("0.00");
+    expect(cells[CELL.brandstof]).toHaveTextContent("0.00");
+    expect(cells[CELL.tol]).toHaveTextContent("0.00");
+    expect(cells[CELL.tunnel]).toHaveTextContent("0.00");
+    expect(cells[CELL.totaal]).toHaveTextContent("20.00");
+  });
+
+  /** The three that may be typed, each still a control at zero. */
+  it.each([
+    ["tarief", "Tarief"],
+    ["tol", "Tol"],
+    ["tunnel", "Tunnel"],
+  ] as const)("offers an editor on %s", async (key, _label) => {
+    renderRitten();
+    await userEvent.click(toggle());
+
+    const cell = pricingCells(await rowOf("ANRGHL2790641"))[CELL[key]];
+
+    expect(within(cell).getAllByRole("button").length).toBeGreaterThan(0);
+  });
+
+  /** And the five that are derived stay text, exactly as on any other Trip. */
+  it.each([
+    ["brandstof", "Brandstof"],
+    ["backload", "Backload"],
+    ["others", "Others"],
+    ["ek", "EK"],
+    ["totaal", "Totaal"],
+  ] as const)("offers no editor on %s", async (key, _label) => {
+    renderRitten();
+    await userEvent.click(toggle());
+
+    const cell = pricingCells(await rowOf("ANRGHL2790641"))[CELL[key]];
+
+    expect(within(cell).queryAllByRole("button")).toHaveLength(0);
+  });
+
+  /**
+   * The whole point of the zero-safe snapshot: the operator types the Tarief
+   * the route should have had, and the backend answers with the recalculated
+   * breakdown — Brandstof derived from the corrected figure.
+   */
+  it("saves a correction typed over a zero", async () => {
+    respondWith(requestMock, {
+      trips: buildPage([ZERO_PRICED_TRIP]),
+      onPricingOverride: () =>
+        buildPricing({
+          tarief: "50.00",
+          brandstof: "7.50",
+          others: "20.00",
+          totaal: "77.50",
+          overriddenComponents: ["BASE_PRICE"],
+        }),
+    });
+
+    renderRitten();
+    await userEvent.click(toggle());
+
+    const cell = pricingCells(await rowOf("ANRGHL2790641"))[CELL.tarief];
+
+    await userEvent.click(within(cell).getAllByRole("button")[0]);
+    const input = within(cell).getByRole("spinbutton");
+
+    await userEvent.clear(input);
+    await userEvent.type(input, "50");
+    await userEvent.click(within(cell).getByRole("button", { name: "Opslaan" }));
+
+    await waitFor(async () => {
+      const updated = pricingCells(await rowOf("ANRGHL2790641"));
+
+      expect(updated[CELL.tarief]).toHaveTextContent("50.00");
+      expect(updated[CELL.brandstof]).toHaveTextContent("7.50");
+      expect(updated[CELL.totaal]).toHaveTextContent("77.50");
+    });
+  });
+});

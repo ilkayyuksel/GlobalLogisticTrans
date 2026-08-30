@@ -85,7 +85,18 @@ export interface PricingRouteIdentity {
 export type PricingBaseSource =
   | {
       readonly strategy: typeof PricingStrategy.ROUTE_BASED;
-      readonly routePricingId: string;
+      /**
+       * The configured row this price came from, or NULL when the route has no
+       * configuration at all.
+       *
+       * Null is an ordinary state rather than an error: a CLOSED Trip on an
+       * unconfigured route is priced at zero and still receives a complete
+       * snapshot, so the operator can correct the Tarief by hand and the
+       * dynamic components — waiting time, custom properties, the cost
+       * confirmation — keep working. See `resolveRouteBaseSource`.
+       */
+      readonly routePricingId: string | null;
+      /** "0.00" when the route is unconfigured. Never absent. */
       readonly basePrice: string;
     }
   | {

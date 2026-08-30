@@ -104,7 +104,30 @@ export class FuelSurchargeCalculator implements PricingCalculationStep {
       amount: toStorableAmount(amount),
       calculationOrder: FUEL_CALCULATION_ORDER,
       quantity: null,
-      unitPrice: null,
+      /*
+       * ── THE RATE THIS CALCULATION USED, KEPT WITH ITS RESULT ──────────────
+       * `unitPrice` is the line's own rate — exactly what the Waiting Time
+       * calculator stores in it, where it holds the price of one block. Here
+       * it holds the percentage.
+       *
+       * Two things depend on it, and neither can be answered without it:
+       *
+       *   an operator correcting the Tarief needs the fuel to follow. The
+       *     effective read used to derive the rate by dividing the stored fuel
+       *     by the stored base, which is exact — until the base is zero, which
+       *     is now the ordinary case for an unconfigured route. 0/0 names no
+       *     percentage, so the rate has to be recorded rather than inferred;
+       *
+       *   a closed Trip must stay historical. The rate that applied on the day
+       *     it was priced lives on the line, so moving the global
+       *     FUEL_PERCENTAGE afterwards cannot change what was charged.
+       *
+       * It is an existing nullable column being used for the thing it is
+       * named after, not an unrelated field pressed into service, and it needs
+       * no schema change.
+       * ─────────────────────────────────────────────────────────────────────
+       */
+      unitPrice: new Prisma.Decimal(fuelPercentage),
       customPropertyId: null,
     };
   }

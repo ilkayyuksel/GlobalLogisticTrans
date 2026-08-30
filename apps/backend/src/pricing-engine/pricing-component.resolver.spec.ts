@@ -7,7 +7,6 @@ import { TripCustomPropertyReadService } from "../trip-custom-properties/trip-cu
 import { TripReadService, TripReadView } from "../trips/trip-read.service";
 import {
   InvalidCombinationForPricingException,
-  MissingRoutePricingException,
   MissingTripPricingInputException,
 } from "./exceptions/pricing-engine.exceptions";
 import { PricingRuleConfiguration } from "./pricing-calculation-context";
@@ -164,19 +163,68 @@ describe("PricingComponentResolver", () => {
       expect(source).not.toHaveProperty("destination");
     });
 
-    it("fails when no active route pricing is configured", async () => {
+    /**
+     * ── AN UNCONFIGURED ROUTE PRICES AT ZERO ────────────────────────────────
+     * It used to raise MissingRoutePricingException, and the consequence
+     * reached far past the base price: no snapshot was written at all, so the
+     * Trip showed nothing in any pricing column, offered no way to correct the
+     * Tarief by hand, and could carry no waiting time, custom property or cost
+     * confirmation — every one of those reads the snapshot that never existed.
+     *
+     * On this business's data an unconfigured route is the ORDINARY case. So
+     * it is now what it always was in fact: a price of zero that an operator
+     * can correct, on a Trip that still receives a complete snapshot.
+     *
+     * Zero is not a guess at what the route costs. It is the honest statement
+     * that nobody has said what it costs, and it is visibly zero rather than
+     * silently absent.
+     */
+    it("prices at zero when no active route pricing is configured", async () => {
       routePricingService.findActiveRoute.mockResolvedValue(null);
 
-      await expect(
-        resolver.resolveBaseSource(buildTrip(), buildRules()),
-      ).rejects.toBeInstanceOf(MissingRoutePricingException);
+      const source = await resolver.resolveBaseSource(
+        buildTrip(),
+        buildRules(),
+      );
+
+      expect(source).toEqual({
+        strategy: PricingStrategy.ROUTE_BASED,
+        routePricingId: null,
+        basePrice: "0.00",
+      });
     });
 
-    it("fails when the Trip has no terminal to price from", async () => {
-      await expect(
-        resolver.resolveBaseSource(buildTrip({ terminal: null }), buildRules()),
-      ).rejects.toBeInstanceOf(MissingTripPricingInputException);
+    /** Half a route matches no configuration, so it takes the same answer. */
+    it("prices at zero when the Trip has no terminal", async () => {
+      const source = await resolver.resolveBaseSource(
+        buildTrip({ terminal: null }),
+        buildRules(),
+      );
+
+      expect(source).toMatchObject({ basePrice: "0.00", routePricingId: null });
       expect(routePricingService.findActiveRoute).not.toHaveBeenCalled();
+    });
+
+    it("prices at zero when the Trip has no destination", async () => {
+      const source = await resolver.resolveBaseSource(
+        buildTrip({ destinationCity: null }),
+        buildRules(),
+      );
+
+      expect(source).toMatchObject({ basePrice: "0.00", routePricingId: null });
+      expect(routePricingService.findActiveRoute).not.toHaveBeenCalled();
+    });
+
+    /** The gap is still reported, so an administrator can close it. */
+    it("says so in the log rather than passing over it", async () => {
+      routePricingService.findActiveRoute.mockResolvedValue(null);
+
+      await resolver.resolveBaseSource(buildTrip(), buildRules());
+
+      expect(logger.warn).toHaveBeenCalledWith(
+        "No active route pricing; the Trip prices at zero",
+        { tripId: TRIP_ID },
+      );
     });
 
     it("never reads the distance rate", async () => {

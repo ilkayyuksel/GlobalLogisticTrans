@@ -61,3 +61,27 @@ export function minimumValueFor(
 ): number | undefined {
   return MINIMUM_BY_SETTING.get(settingIdentity(category, key));
 }
+
+/**
+ * Inclusive MAXIMUMS, for the settings where an upper bound is meaningful.
+ *
+ * Only the fuel percentage has one so far, and it is a percentage: a rate above
+ * 100% would mean the surcharge exceeded the fare it is charged on. That is not
+ * a rate anyone means to type, and a typo — 150 for 15 — would otherwise be
+ * stored and then applied to every Trip closed afterwards.
+ *
+ * The bound is generous rather than tight. It refuses the impossible, not the
+ * unusual: no judgement is made about which percentages are commercially
+ * sensible, because that is the operator's to make.
+ */
+const MAXIMUM_BY_SETTING: ReadonlyMap<string, number> = new Map([
+  [settingIdentity("PRICING", "FUEL_PERCENTAGE"), 100],
+]);
+
+/** The inclusive maximum for a setting, or undefined when it has no bound. */
+export function maximumValueFor(
+  category: string,
+  key: string,
+): number | undefined {
+  return MAXIMUM_BY_SETTING.get(settingIdentity(category, key));
+}

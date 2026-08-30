@@ -45,7 +45,12 @@ describe("PricingRecalculationService", () => {
 
   /** A stored breakdown, as the shared effective read produces one. */
   function breakdown(
-    lines: readonly { componentCode: string; amount: string }[],
+    lines: readonly {
+      componentCode: string;
+      amount: string;
+      /** The fuel line's percentage, where a case needs one. */
+      unitPrice?: string;
+    }[],
     overrides: readonly { componentCode: string; amount: string }[] = [],
   ) {
     return resolveEffectivePricing(
@@ -54,6 +59,10 @@ describe("PricingRecalculationService", () => {
         amount: new Prisma.Decimal(line.amount),
         customPropertyId: null,
         description: line.componentCode,
+        unitPrice:
+          line.unitPrice === undefined
+            ? null
+            : new Prisma.Decimal(line.unitPrice),
       })),
       overrides.map((override) => ({
         componentCode: override.componentCode,

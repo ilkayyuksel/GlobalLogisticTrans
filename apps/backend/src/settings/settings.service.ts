@@ -2,7 +2,10 @@ import { Injectable } from "@nestjs/common";
 import { Setting, SettingValueType } from "@prisma/client";
 
 import { AppLoggerService } from "../logger/app-logger.service";
-import { minimumValueFor } from "./setting-value-bounds";
+import {
+  maximumValueFor,
+  minimumValueFor,
+} from "./setting-value-bounds";
 import { ListSettingsQueryDto } from "./dto/list-settings-query.dto";
 import { SettingCategoryGroupDto } from "./dto/setting-category-group.dto";
 import {
@@ -83,7 +86,7 @@ export class SettingsService {
 
     // Type first, bound second: a bound is only meaningful once the value is
     // known to be a number.
-    this.assertMeetsMinimum(category, key, dto.value, setting.valueType);
+    this.assertWithinBounds(category, key, dto.value, setting.valueType);
 
     const updated = await this.repository.updateValue(setting.id, dto.value);
 
@@ -106,24 +109,33 @@ export class SettingsService {
    * parse — a divisor that may not be zero, for instance. The bound and its
    * reason live in setting-value-bounds.ts.
    */
-  private assertMeetsMinimum(
+  private assertWithinBounds(
     category: string,
     key: string,
     value: string,
     valueType: SettingValueType,
   ): void {
+    const parsed = Number(value);
     const minimum = minimumValueFor(category, key);
+    const maximum = maximumValueFor(category, key);
 
-    if (minimum === undefined || Number(value) >= minimum) {
-      return;
+    if (minimum !== undefined && parsed < minimum) {
+      this.rejectValue(
+        category,
+        key,
+        valueType,
+        `value must be at least ${minimum}`,
+      );
     }
 
-    this.rejectValue(
-      category,
-      key,
-      valueType,
-      `value must be at least ${minimum}`,
-    );
+    if (maximum !== undefined && parsed > maximum) {
+      this.rejectValue(
+        category,
+        key,
+        valueType,
+        `value must be at most ${maximum}`,
+      );
+    }
   }
 
   /** Warn rather than error: a rejected value is a client mistake, not a system failure. */

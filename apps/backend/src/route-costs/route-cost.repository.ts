@@ -168,6 +168,24 @@ export class RouteCostRepository {
   }
 
   /**
+   * The same component, found by the CODE the catalog gives it.
+   *
+   * The route configuration screen speaks in components an operator
+   * recognises — Toll, Tunnel — and never in identifiers. It needs the id to
+   * write a route cost, so the translation happens once, here, beside the
+   * lookup by id rather than in a second module that would then own half of
+   * the same relationship.
+   */
+  findPricingComponentByCode(
+    code: string,
+  ): Promise<PricingComponentSummary | null> {
+    return this.prisma.pricingComponent.findFirst({
+      where: { code },
+      select: { id: true, code: true, name: true },
+    });
+  }
+
+  /**
    * True when any Custom Property links to this component.
    *
    * That link is how the model expresses "this component applies per Trip and is

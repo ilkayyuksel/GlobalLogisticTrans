@@ -114,11 +114,7 @@ export function extractAddress(
     );
   }
 
-  const place =
-    readPrefixedPostcode(block) ??
-    readCountryLine(block) ??
-    readBarePostcode(block, fragments) ??
-    readBracketedPostcode(block);
+  const place = readPlace(block, fragments);
 
   if (!place) {
     throw new ExtractionError(
@@ -134,6 +130,40 @@ export function extractAddress(
     rawAddress: joinText(block.slice(0, place.lastLineIndex + 1)),
     section: sectionHeader.text.replace(/:$/, ""),
   };
+}
+
+/**
+ * The rules that read a place out of an address block, strongest evidence
+ * first.
+ *
+ * ── THE ORDER IS THE STRUCTURE, NOT A PREFERENCE ────────────────────────────
+ * Each rule answers a question the one before it could not, and every one of
+ * them is narrower than "take the last line". They are listed here once and
+ * shared by both callers, so a numbered section and a `Startpoint:` block can
+ * never drift apart in how they are read.
+ *
+ *   1. `CC-NNNNN City`        the normal printed form
+ *   2. a country on its OWN line, naming the city directly above it
+ *   3. a postcode and a country SHARING a line, same idea, different layout
+ *   4. `NNNNN City`, when no country is stated beside it
+ *   5. the bracketed reference, when the block states no postcode at all
+ *
+ * Rules 2 and 3 are siblings: both say "the country is stated, so the city is
+ * the line beside it". They stay separate functions because the EVIDENCE
+ * differs — a line that IS a country, and a line that ENDS in one after a
+ * postcode.
+ */
+function readPlace(
+  block: readonly Fragment[],
+  fragments: readonly Fragment[],
+): ReadPlace | null {
+  return (
+    readPrefixedPostcode(block) ??
+    readCountryLine(block) ??
+    readPostcodeCountryLine(block) ??
+    readBarePostcode(block, fragments) ??
+    readBracketedPostcode(block)
+  );
 }
 
 /**
@@ -180,6 +210,17 @@ function readPrefixedPostcode(block: readonly Fragment[]): ReadPlace | null {
   }
 
   const [, prefix, , city] = match;
+
+  /*
+   * `BE-8730 Belgium` is a postcode and a COUNTRY, not a postcode and a city.
+   * Reading it here would store "Belgium" as the destination, so the line is
+   * declined and `readPostcodeCountryLine` takes it — which knows to look for
+   * the city on the line beside it.
+   */
+  if (countryFromName(city) !== null) {
+    return null;
+  }
+
   const next = block[index + 1] ?? null;
   const statedCountry = next ? countryFromName(next.text) : null;
 
@@ -251,6 +292,125 @@ function readCountryLine(block: readonly Fragment[]): ReadPlace | null {
 }
 
 /**
+ * VARIATION 1b — the postcode and the country share ONE line.
+ *
+ * ── THE LAYOUT THAT BROKE THE OLD READING ───────────────────────────────────
+ * A real order prints its address like this:
+ *
+ *   [62110]
+ *   AMD
+ *   416 Boulevard Ferdinand de Lesseps
+ *   Heinin-Beaumont
+ *   62110 France
+ *
+ * There is no `CC-NNNNN City` line, and the last line is not a country on its
+ * own — so the two rules above both declined, and the bare-postcode rule read
+ * `62110 France` as "postcode 62110, city France". The destination became the
+ * COUNTRY, and the country field was left empty. That is the bug this rule
+ * exists to remove.
+ *
+ * ── WHAT THE LINE ACTUALLY MEANS ────────────────────────────────────────────
+ * A number followed by a country name is a postcode and a country. It contains
+ * no city at all, so the city has to come from the line beside it — the same
+ * structural move `readCountryLine` makes for a country printed on its own
+ * line. The two are siblings; only the layout differs.
+ *
+ * Both postcode forms are accepted, because both occur:
+ *
+ *   62110 France        bare
+ *   BE-8730 Belgium     prefixed
+ *
+ * ── AND WHEN THERE IS NO CITY TO FIND ───────────────────────────────────────
+ * The search upward stops at anything that is not a city name, and REFUSES
+ * rather than guessing. A street keeps its number — `416 Boulevard Ferdinand
+ * de Lesseps` — so a block that states no city between the street and the
+ * postcode line yields nothing here and falls through to the rules below. A
+ * street stored as a destination would match no route and mislead an operator,
+ * which is worse than an address reported as unreadable.
+ *
+ * A line holding ONLY a postcode is stepped over on the way up: `62110` above
+ * `62110 France` is the same number twice, not a place.
+ */
+function readPostcodeCountryLine(block: readonly Fragment[]): ReadPlace | null {
+  for (let index = block.length - 1; index > 0; index -= 1) {
+    const country = countryOnPostcodeLine(block[index].text);
+
+    if (!country) {
+      continue;
+    }
+
+    const city = cityAbove(block, index);
+
+    return city === null ? null : { city, country, lastLineIndex: index };
+  }
+
+  return null;
+}
+
+/**
+ * The country a postcode line names, or null when it names a city instead.
+ *
+ * `62110 France` and `BE-8730 Belgium` yield a country; `62110 Heinin-Beaumont`
+ * and `BE-8730 Beernem` yield null, because their trailing text is a place
+ * rather than one of the known country names. Only exact, known names count —
+ * the same rule `countryFromName` applies everywhere else, so a remark sharing
+ * the column can never be read as a country.
+ */
+function countryOnPostcodeLine(line: string): string | null {
+  const match =
+    POSTCODE_LINE.exec(line.trim()) ?? BARE_POSTCODE_LINE.exec(line.trim());
+
+  if (!match) {
+    return null;
+  }
+
+  // The trailing text: group 3 on the prefixed form, group 2 on the bare one.
+  return countryFromName(match[match.length - 1]);
+}
+
+/**
+ * The city stated above a postcode-and-country line, or null when none is.
+ *
+ * Walks upward from the line, stepping over a line that holds only a postcode,
+ * and stops at the first line that could be a place name. Everything else —
+ * a street, a company, the bracketed reference, another country — ends the
+ * search with null, because a wrong city is worse than a missing one.
+ */
+function cityAbove(
+  block: readonly Fragment[],
+  postcodeLineIndex: number,
+): string | null {
+  for (let index = postcodeLineIndex - 1; index >= 0; index -= 1) {
+    const line = toCityName(block[index].text);
+
+    // The same postcode printed on a line of its own says nothing new.
+    if (POSTCODE_ONLY_LINE.test(line)) {
+      continue;
+    }
+
+    if (line.length === 0) {
+      continue;
+    }
+
+    /*
+     * A city carries no digits. A street does — "416 Boulevard Ferdinand de
+     * Lesseps", "Rue de Kan 7" — and so does the bracketed reference. This is
+     * the same test `readBracketedPostcode` applies for the same reason.
+     */
+    if (/\d/.test(line) || countryFromName(line) !== null) {
+      return null;
+    }
+
+    return line;
+  }
+
+  return null;
+}
+
+/** `62110` — a postcode occupying a line by itself. */
+const POSTCODE_ONLY_LINE = /^\d{4,5}$/;
+
+/**
  * VARIATION 2 — a bare postcode: `2040 Antwerpen`, with no `BE-` prefix.
  *
  * A postcode alone belongs to no country: 2040 is a real postcode in several.
@@ -276,6 +436,16 @@ function readBarePostcode(
     }
 
     const [, postcode, city] = match;
+
+    /*
+     * Defence in depth. `readPostcodeCountryLine` above already claims a line
+     * like `62110 France`, so this should be unreachable — but the invariant
+     * "a country is never a city" must not depend on the order of the rules
+     * that happen to run before this one.
+     */
+    if (countryFromName(city) !== null) {
+      continue;
+    }
 
     return {
       city: toCityName(city),
@@ -403,11 +573,7 @@ export function extractStartpointAddress(
   }
 
   const block = [firstLine, ...valuesBelow(fragments, firstLine)];
-  const place =
-    readPrefixedPostcode(block) ??
-    readCountryLine(block) ??
-    readBarePostcode(block, fragments) ??
-    readBracketedPostcode(block);
+  const place = readPlace(block, fragments);
 
   if (!place) {
     return null;

@@ -42,8 +42,11 @@ const COLUMNS = [
   "Booking",
   "Terminal",
   "Adres",
-  // The canonical route, beside the two fields it is derived from.
-  "Route",
+  /*
+   * NO Route column. The Trip still carries its canonical route and Excel still
+   * prints it; the list does not, because the terminal and the address beside
+   * it are the same two ends and are the fields an operator edits.
+   */
   "Custom",
   "Wachttijd",
   "PDF",
@@ -475,7 +478,6 @@ describe("Ritten table", () => {
         "Booking",
         "Terminal",
         "Adres",
-        "Rota",
         "Özel",
         "Bekleme",
         "PDF",

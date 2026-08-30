@@ -22,6 +22,33 @@ export function listSettings(signal?: AbortSignal): Promise<Setting[]> {
   return request<Setting[]>(SETTINGS_PATH, { signal });
 }
 
+/**
+ * Changes one setting's value.
+ *
+ * The value travels as the RAW string the backend stores, whatever the declared
+ * type: interpreting it is the backend's job, and a number formatted here would
+ * be a second opinion about the format. Validation is the backend's too — the
+ * refusal comes back with its own wording.
+ */
+export function updateSetting(
+  category: string,
+  key: string,
+  value: string,
+  signal?: AbortSignal,
+): Promise<Setting> {
+  return request<Setting>(`${SETTINGS_PATH}/${category}/${key}`, {
+    method: "PATCH",
+    body: { value },
+    signal,
+  });
+}
+
+/** The category and key the fuel percentage lives under. */
+export const FUEL_PERCENTAGE_SETTING = {
+  category: "PRICING",
+  key: "FUEL_PERCENTAGE",
+} as const;
+
 /** The category and key the Pricing Engine reads its fuel percentage from. */
 const PRICING_CATEGORY = "PRICING";
 const FUEL_PERCENTAGE_KEY = "FUEL_PERCENTAGE";

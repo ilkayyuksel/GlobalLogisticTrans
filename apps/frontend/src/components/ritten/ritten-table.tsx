@@ -11,7 +11,6 @@ import { ApiError } from "@/lib/api/client";
 import type { UpdateTripPayload } from "@/lib/api/trips";
 import type { Trip, Vehicle } from "@/lib/api/types";
 import { PricingCells } from "@/components/ritten/pricing-cells";
-import { toRouteText } from "@/lib/ritten/route-label";
 import { toClockLabel } from "@/lib/calendar/clock";
 import { formatCalendarDate } from "@/lib/calendar/calendar-dates";
 import { toFleetOptions, type FleetOption } from "@/lib/fleet-options";
@@ -75,13 +74,6 @@ const COLUMN_KEYS = [
   "ritten.column.booking",
   "ritten.column.terminal",
   "ritten.column.address",
-  /*
-   * The canonical route, supplied by the backend and only formatted here.
-   * Beside the terminal and the address rather than replacing them: those two
-   * are the raw values an operator edits, while this is the directional reading
-   * of them that pricing will use.
-   */
-  "ritten.column.route",
   "ritten.column.custom",
   "ritten.column.waitingTime",
   "ritten.column.pdf",
@@ -469,17 +461,19 @@ function RittenRow({
       </td>
 
       {/*
-        The canonical route, read-only.
+        THERE IS NO ROUTE COLUMN, and that is deliberate.
 
-        The backend decided both ends and their order; this only formats them.
-        It is not editable: correcting a route means correcting the terminal,
-        the address or the direction the document stated, which are the fields
-        beside it — a second way to type the same thing would be a competing
-        answer.
+        The Trip still HAS a canonical route: the backend derives it, Excel
+        prints it, and pricing matches on it. It is simply not shown here. The
+        two ends it is built from — the terminal and the destination — are
+        already columns of their own and are the fields an operator actually
+        edits, so a third column restating them directionally added width to
+        every row without adding an answer.
+
+        Removing the column removed the RENDERING only. `Trip.route` and the
+        shared backend calculation are untouched; see `lib/ritten/route-label`,
+        which the Excel export still uses.
       */}
-      <td className="whitespace-nowrap px-3 py-2 text-secondary">
-        {toRouteText(trip, empty)}
-      </td>
 
       <td className="px-3 py-2">
         <CustomPropertiesCell trip={trip} actions={actions} />

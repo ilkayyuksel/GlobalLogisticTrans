@@ -26,12 +26,18 @@ function euro(amount: string): Prisma.Decimal {
   return new Prisma.Decimal(amount);
 }
 
-function engine(componentCode: string, amount: string): EngineAmount {
+function engine(
+  componentCode: string,
+  amount: string,
+  /** The line's own rate — the percentage, on the fuel line. */
+  unitPrice: string | null = null,
+): EngineAmount {
   return {
     componentCode,
     amount: euro(amount),
     customPropertyId: null,
     description: componentCode,
+    unitPrice: unitPrice === null ? null : euro(unitPrice),
   };
 }
 

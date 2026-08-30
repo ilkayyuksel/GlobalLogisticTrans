@@ -32,6 +32,7 @@ export const MAIN_NAVIGATION: readonly NavigationItem[] = [
 export const SETTINGS_NAVIGATION: readonly NavigationItem[] = [
   { href: "/settings/license-plates", labelKey: "navigation.licensePlates" },
   { href: "/settings/custom-values", labelKey: "navigation.customValues" },
+  { href: "/settings/pricing", labelKey: "navigation.pricingSettings" },
 ];
 
 /**

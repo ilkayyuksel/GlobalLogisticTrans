@@ -735,6 +735,297 @@ describe("address", () => {
       );
     });
   });
+
+  /**
+   * ── THE ADDRESS BLOCK IS NOT A FIXED SHAPE ────────────────────────────────
+   * The senders fill this form by hand, and they split the postcode, the city
+   * and the country across lines in whatever way suits them. Five layouts have
+   * been seen, and none of them can be read by counting lines from the end.
+   *
+   * Every case below asserts the SAME two invariants, because the bug that
+   * prompted them broke both at once:
+   *
+   *     A POSTCODE MUST NEVER BECOME THE CITY
+   *     A COUNTRY MUST NEVER BECOME THE CITY
+   *
+   * The city is identified from the STRUCTURE of the block — which line states
+   * a postcode, which states a country, and which is therefore left to be the
+   * place — never from its position.
+   * ──────────────────────────────────────────────────────────────────────────
+   */
+  describe("the address layouts the senders actually print", () => {
+    /**
+     * PATTERN A — the normal form: a prefixed postcode, then the country. This
+     * is what most orders print, and it must keep reading as it always did.
+     */
+    it("A: reads `BE-8730 Beernem` above `Belgium`", () => {
+      const result = extractAddress(
+        addressBlock([
+          "[8730]",
+          "Belgosuc NV",
+          "Indistriepark 20",
+          "BE-8730 Beernem",
+          "Belgium",
+        ]),
+        header,
+      );
+
+      expect(result.destinationCity).toBe("Beernem");
+      expect(result.destinationCountry).toBe("Belgium");
+    });
+
+    /**
+     * PATTERN B — the layout that broke: the postcode and the country share a
+     * line, and the city stands alone above them.
+     *
+     * `62110 France` used to be read as "postcode 62110, city France", which
+     * stored the COUNTRY as the destination and left the country empty.
+     */
+    it("B: reads the city above a `62110 France` line", () => {
+      const result = extractAddress(
+        addressBlock([
+          "[62110]",
+          "AMD",
+          "416 Boulevard Ferdinand de Lesseps",
+          "Heinin-Beaumont",
+          "62110 France",
+        ]),
+        header,
+      );
+
+      expect(result.destinationCity).toBe("Heinin-Beaumont");
+      expect(result.destinationCountry).toBe("France");
+    });
+
+    /** PATTERN C — postcode with the city, country on its own line. */
+    it("C: reads `62110 Heinin-Beaumont` above `France`", () => {
+      const result = extractAddress(
+        addressBlock([
+          "[62110]",
+          "AMD",
+          "416 Boulevard Ferdinand de Lesseps",
+          "62110 Heinin-Beaumont",
+          "France",
+        ]),
+        header,
+      );
+
+      expect(result.destinationCity).toBe("Heinin-Beaumont");
+      expect(result.destinationCountry).toBe("France");
+    });
+
+    /** PATTERN D — postcode, city and country each on a line of their own. */
+    it("D: reads a postcode, a city and a country on three lines", () => {
+      const result = extractAddress(
+        addressBlock([
+          "[62110]",
+          "AMD",
+          "416 Boulevard Ferdinand de Lesseps",
+          "62110",
+          "Heinin-Beaumont",
+          "France",
+        ]),
+        header,
+      );
+
+      expect(result.destinationCity).toBe("Heinin-Beaumont");
+      expect(result.destinationCountry).toBe("France");
+    });
+
+    /** A prefixed postcode line stating the COUNTRY instead of the city. */
+    it("reads the city beside `BE-8730 Belgium`, not the country", () => {
+      const result = extractAddress(
+        addressBlock([
+          "[8730]",
+          "Belgosuc NV",
+          "Indistriepark 20",
+          "Beernem",
+          "BE-8730 Belgium",
+        ]),
+        header,
+      );
+
+      expect(result.destinationCity).toBe("Beernem");
+      expect(result.destinationCountry).toBe("Belgium");
+    });
+
+    /** A repeated postcode is the same number twice, not a place. */
+    it("steps over a postcode-only line on the way to the city", () => {
+      const result = extractAddress(
+        addressBlock([
+          "[62110]",
+          "AMD",
+          "416 Boulevard Ferdinand de Lesseps",
+          "Heinin-Beaumont",
+          "62110",
+          "62110 France",
+        ]),
+        header,
+      );
+
+      expect(result.destinationCity).toBe("Heinin-Beaumont");
+      expect(result.destinationCountry).toBe("France");
+    });
+
+    describe("the two invariants, on every layout", () => {
+      const LAYOUTS: readonly (readonly [string, string[]])[] = [
+        ["postcode + city, country below", ["62110 Heinin-Beaumont", "France"]],
+        ["city, postcode + country below", ["Heinin-Beaumont", "62110 France"]],
+        ["postcode, city, country", ["62110", "Heinin-Beaumont", "France"]],
+        ["prefixed postcode + city", ["FR-62110 Heinin-Beaumont"]],
+        [
+          "prefixed postcode + city, country below",
+          ["FR-62110 Heinin-Beaumont", "France"],
+        ],
+        [
+          "city, prefixed postcode + country",
+          ["Heinin-Beaumont", "FR-62110 France"],
+        ],
+      ];
+
+      function cityOf(tail: string[]): string {
+        return extractAddress(
+          addressBlock([
+            "[62110]",
+            "AMD",
+            "416 Boulevard Ferdinand de Lesseps",
+            ...tail,
+          ]),
+          header,
+        ).destinationCity;
+      }
+
+      it.each(LAYOUTS)("%s never yields a postcode as the city", (_what, tail) => {
+        expect(cityOf(tail)).toBe("Heinin-Beaumont");
+        expect(cityOf(tail)).not.toMatch(/\d/);
+      });
+
+      it.each(LAYOUTS)("%s never yields a country as the city", (_what, tail) => {
+        expect(cityOf(tail)).not.toBe("France");
+        expect(countryFromName(cityOf(tail))).toBeNull();
+      });
+    });
+
+    /** Every prefix the country table knows, on the shared-line layout. */
+    it.each([
+      ["BE", "Belgium"],
+      ["B", "Belgium"],
+      ["FR", "France"],
+      ["F", "France"],
+      ["NL", "Netherlands"],
+      ["DE", "Germany"],
+      ["D", "Germany"],
+      ["LU", "Luxembourg"],
+      ["L", "Luxembourg"],
+    ])(
+      "resolves a %s- prefixed postcode sharing a line with its country",
+      (prefix, country) => {
+        const result = extractAddress(
+          addressBlock([
+            "[1234]",
+            "Some Company",
+            "Some Street 1",
+            "Somewhere",
+            `${prefix}-1234 ${country}`,
+          ]),
+          header,
+        );
+
+        expect(result.destinationCity).toBe("Somewhere");
+        expect(result.destinationCountry).toBe(country);
+      },
+    );
+
+    /**
+     * ── AND WHERE THERE IS NO CITY, NOTHING IS INVENTED ─────────────────────
+     * A block that jumps from the street straight to the postcode-and-country
+     * line states no city. The street carries a number, so it is not mistaken
+     * for one — the address is reported as unreadable instead, which an
+     * operator can act on. A street stored as a destination would match no
+     * route and mislead everyone downstream.
+     */
+    it("refuses when the line above the postcode is a street", () => {
+      expect(() =>
+        extractAddress(
+          addressBlock([
+            "[62110]",
+            "AMD",
+            "416 Boulevard Ferdinand de Lesseps",
+            "62110 France",
+          ]),
+          header,
+        ),
+      ).toThrow(/No readable city line/);
+    });
+
+    it("refuses when the country line stands directly on the bracket", () => {
+      expect(() =>
+        extractAddress(addressBlock(["[62110]", "62110 France"]), header),
+      ).toThrow(/No readable city line/);
+    });
+
+    /**
+     * ── THE BLOCK STILL ENDS WHERE IT ALWAYS DID ────────────────────────────
+     * Remarks, load references and the Date/time row sit in the same region of
+     * the page. None of them may reach the city, whatever the address layout
+     * above them looks like.
+     */
+    it("keeps a load reference out of the address", () => {
+      const result = extractAddress(
+        addressBlock([
+          "[62110]",
+          "AMD",
+          "416 Boulevard Ferdinand de Lesseps",
+          "Heinin-Beaumont",
+          "62110 France",
+          "Load ref; AF2609027",
+        ]),
+        header,
+      );
+
+      expect(result.destinationCity).toBe("Heinin-Beaumont");
+      expect(result.rawAddress).not.toContain("AF2609027");
+    });
+
+    /**
+     * ── THE RAW EVIDENCE IS THE PRINTED TEXT ────────────────────────────────
+     * What the parser DERIVED never overwrites what the document PRINTED. The
+     * postcode and the country line survive in the raw address even though
+     * neither is stored as the city.
+     */
+    it("keeps the printed address as raw evidence", () => {
+      const result = extractAddress(
+        addressBlock([
+          "[8730]",
+          "Belgosuc NV",
+          "Indistriepark 20",
+          "BE-8730 Beernem",
+          "Belgium",
+        ]),
+        header,
+      );
+
+      expect(result.rawAddress).toContain("BE-8730 Beernem");
+      expect(result.rawAddress).toContain("Belgium");
+      expect(result.rawAddress).toContain("Indistriepark 20");
+    });
+
+    it("keeps the postcode-and-country line as raw evidence too", () => {
+      const result = extractAddress(
+        addressBlock([
+          "[62110]",
+          "AMD",
+          "416 Boulevard Ferdinand de Lesseps",
+          "Heinin-Beaumont",
+          "62110 France",
+        ]),
+        header,
+      );
+
+      expect(result.rawAddress).toContain("62110 France");
+      expect(result.rawAddress).toContain("416 Boulevard Ferdinand de Lesseps");
+    });
+  });
 });
 
 describe("country mapping", () => {

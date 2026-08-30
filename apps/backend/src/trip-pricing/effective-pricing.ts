@@ -68,6 +68,14 @@ export interface EngineAmount {
   /** Set only on a Custom Property line — which property produced the charge. */
   readonly customPropertyId: string | null;
   readonly description: string;
+  /**
+   * The line's own rate, where it has one.
+   *
+   * On the FUEL_SURCHARGE line it is the percentage that produced the amount.
+   * Null on a snapshot written before the rate was recorded — see `resolveFuel`
+   * for what happens then.
+   */
+  readonly unitPrice: Prisma.Decimal | null;
 }
 
 /** One operator correction. */
@@ -118,6 +126,9 @@ export interface EffectivePricing {
 
 const ZERO = new Prisma.Decimal(0);
 
+/** A percentage is a rate per hundred, as the fuel calculator applies it. */
+const PERCENT_DIVISOR = new Prisma.Decimal(100);
+
 /**
  * The fuel surcharge, following the EFFECTIVE Tarief.
  *
@@ -128,12 +139,20 @@ const ZERO = new Prisma.Decimal(0);
  * charged the fuel of 100 — a figure that no longer matches its own basis.
  *
  * ── AND WHY IT USES THE SNAPSHOT'S OWN PERCENTAGE ───────────────────────────
- * The rate is DERIVED from the snapshot — `engineFuel / engineTarief` — rather
- * than read from the current FUEL_PERCENTAGE setting. That is deliberate and it
- * is what keeps a closed Trip historical: the ratio is the percentage that
- * applied on the day the Trip was priced, so an administrator moving the
- * setting from 15% to 20% changes nothing here. Only an explicit reprocess
- * writes a new snapshot, and with it a new ratio.
+ * The rate comes from the SNAPSHOT, never from the current FUEL_PERCENTAGE
+ * setting. That is what keeps a closed Trip historical: an administrator moving
+ * the setting from 15% to 20% changes nothing here, and only an explicit
+ * reprocess writes a new snapshot with a new rate.
+ *
+ * It is read in two ways, in this order:
+ *
+ *   the rate STORED on the fuel line, which the calculator records there;
+ *   failing that, the ratio `engineFuel / engineTarief`, for a snapshot
+ *     written before the rate was recorded.
+ *
+ * The stored rate is what makes an unconfigured route work. The Engine prices
+ * such a Trip at zero, so the ratio would be 0/0 — no percentage at all — and
+ * an operator who then typed a Tarief would get no fuel on it.
  *
  * Without an override the Engine's own line is returned untouched, so a Trip
  * nobody has corrected reads exactly as it always did.
@@ -142,21 +161,36 @@ function resolveFuel(
   effectiveTarief: Prisma.Decimal,
   engineTarief: Prisma.Decimal | null,
   engineFuel: Prisma.Decimal | null,
+  storedRate: Prisma.Decimal | null,
 ): Prisma.Decimal {
   if (engineFuel === null) {
     return ZERO;
   }
 
-  /*
-   * No basis to derive a rate from: a Trip the Engine priced at nothing, or one
-   * with no base price line at all. Recomputing would mean inventing a
-   * percentage, so the stored figure stands.
-   */
-  if (engineTarief === null || engineTarief.isZero()) {
+  if (effectiveTarief.equals(engineTarief ?? ZERO)) {
     return engineFuel;
   }
 
-  if (effectiveTarief.equals(engineTarief)) {
+  /*
+   * The rate the calculation actually used, kept on the line itself.
+   *
+   * This is the only answer that works when the Engine priced the Trip at
+   * zero — an unconfigured route — and the operator then typed a Tarief. The
+   * ratio below cannot help there: 0/0 names no percentage.
+   */
+  if (storedRate !== null) {
+    return effectiveTarief
+      .times(storedRate)
+      .dividedBy(PERCENT_DIVISOR)
+      .toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP);
+  }
+
+  /*
+   * A snapshot written before the rate was recorded. The ratio
+   * `engineFuel / engineTarief` is the percentage that applied on the day, so
+   * an older Trip keeps behaving exactly as it did.
+   */
+  if (engineTarief === null || engineTarief.isZero()) {
     return engineFuel;
   }
 
@@ -197,6 +231,15 @@ export function resolveEffectivePricing(
     engineByComponent.set(line.componentCode, running.plus(line.amount));
   }
 
+  /*
+   * The percentage the fuel line was calculated with, when the snapshot
+   * recorded one. There is exactly one fuel line per Trip.
+   */
+  const fuelRate =
+    engineAmounts.find(
+      (line) => line.componentCode === EffectiveComponent.FUEL_SURCHARGE,
+    )?.unitPrice ?? null;
+
   // Every component either side knows about, so an override on a component the
   // Engine produced nothing for is still resolved.
   const codes = new Set([
@@ -234,6 +277,7 @@ export function resolveEffectivePricing(
     tarief,
     engineByComponent.get(EffectiveComponent.BASE_PRICE) ?? null,
     engineByComponent.get(EffectiveComponent.FUEL_SURCHARGE) ?? null,
+    fuelRate,
   );
   const backload = effective(EffectiveComponent.COMBINATION);
   const tol = effective(EffectiveComponent.TOLL);

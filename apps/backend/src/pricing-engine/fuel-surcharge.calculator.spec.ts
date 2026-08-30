@@ -105,11 +105,31 @@ describe("FuelSurchargeCalculator", () => {
       expect(fuel.description).toBe("Fuel 15%");
     });
 
-    it("leaves quantity and unit price null", () => {
+    /**
+     * ── THE RATE IS KEPT WITH ITS RESULT ────────────────────────────────────
+     * `unitPrice` holds the percentage this calculation applied — the same
+     * field the Waiting Time calculator uses for the price of one block.
+     *
+     * Two things need it. An operator correcting the Tarief needs the fuel to
+     * follow, and the ratio `fuel / base` cannot say what the rate was when the
+     * base is zero — which is the ordinary case for an unconfigured route. And
+     * a closed Trip must stay historical: the rate that applied on the day is
+     * on the line, so moving the global setting afterwards changes nothing.
+     *
+     * `quantity` stays null: there is no count here, only a rate.
+     */
+    it("records the percentage it applied as the line's rate", () => {
       const [fuel] = calculator.calculate(buildContext(), [baseLine("450.00")]);
 
       expect(fuel.quantity).toBeNull();
-      expect(fuel.unitPrice).toBeNull();
+      expect(fuel.unitPrice?.toFixed(2)).toBe("15.00");
+    });
+
+    it("records the rate even when the base price is zero", () => {
+      const [fuel] = calculator.calculate(buildContext(), [baseLine("0.00")]);
+
+      expect(fuel.amount.toFixed(2)).toBe("0.00");
+      expect(fuel.unitPrice?.toFixed(2)).toBe("15.00");
     });
 
     it("produces no other component", () => {

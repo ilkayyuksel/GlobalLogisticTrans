@@ -49,149 +49,85 @@ const COLLECTION_TRIP = buildTrip({
   route: { from: "Warneton", to: "Quay 869" },
 });
 
-async function routeCellOf(bookingNumber: string): Promise<HTMLElement> {
-  const row = (await screen.findByText(bookingNumber)).closest(
-    "tr",
-  ) as HTMLElement;
-
-  // The Route column sits directly after Terminal and Adres.
-  const headers = screen
-    .getAllByRole("columnheader")
-    .map((header) => header.textContent);
-
-  return within(row).getAllByRole("cell")[headers.indexOf("Route")];
-}
-
 beforeEach(() => {
   requestMock.mockReset();
   window.localStorage.clear();
 });
 
-describe("the route column in Ritten", () => {
+/**
+ * ── THE ROUTE IS NOT A COLUMN ─────────────────────────────────────────────
+ * Ritten used to show the canonical route beside the terminal and the address.
+ * It no longer does: those two are already columns of their own and are the
+ * fields an operator actually edits, so a third restating them directionally
+ * cost width on every row without adding an answer.
+ *
+ * What was removed is the RENDERING, and these tests hold that line. The Trip
+ * still carries `route`, the backend still derives it, Excel still prints it
+ * and pricing still matches on it — all asserted below and in the Excel block
+ * that follows.
+ * ──────────────────────────────────────────────────────────────────────────
+ */
+describe("the route in the Ritten list", () => {
   beforeEach(() => {
     respondWith(requestMock, {
       trips: buildPage([DELIVERY_TRIP, COLLECTION_TRIP]),
     });
   });
 
-  it("has its own heading", async () => {
+  it("has no column of its own, in either language", async () => {
     renderRitten();
     await screen.findByText("DUBANR2598395");
 
-    expect(
-      screen.getByRole("columnheader", { name: "Route" }),
-    ).toBeInTheDocument();
+    const headings = screen
+      .getAllByRole("columnheader")
+      .map((header) => header.textContent);
+
+    expect(headings).not.toContain("Route");
+    expect(headings).not.toContain("Rota");
   });
 
-  /** DELIVERY: out of the quay to the customer. */
-  it("shows a delivery running from the terminal to the city", async () => {
+  it("does not print the arrow anywhere in a row", async () => {
     renderRitten();
 
-    expect(await routeCellOf("DUBANR2598395")).toHaveTextContent(
-      "Quay 869 → Kallo",
-    );
-  });
+    const row = (await screen.findByText("ANRBEL2603249")).closest(
+      "tr",
+    ) as HTMLElement;
 
-  /** COLLECTION — the document's `LOADING` section: back to the quay. */
-  it("shows a collection running from the city to the terminal", async () => {
-    renderRitten();
-
-    expect(await routeCellOf("ANRBEL2603249")).toHaveTextContent(
-      "Warneton → Quay 869",
-    );
-  });
-
-  /** The prefix never reaches the screen. */
-  it("never shows the PSA spelling of the quay", async () => {
-    renderRitten();
-    await screen.findByText("ANRBEL2603249");
-
-    const cell = await routeCellOf("ANRBEL2603249");
-
-    expect(cell).not.toHaveTextContent("PSA");
+    expect(row.textContent).not.toContain("→");
   });
 
   /**
-   * The raw terminal column is untouched: it still shows what the document
-   * printed, because that is the value an operator edits and recognises.
+   * The two ends are still on screen, in the columns that own them. Removing
+   * the route removed a DERIVED reading, never the underlying values.
    */
-  it("leaves the terminal column showing the document's own spelling", async () => {
+  it("still shows the terminal and the destination, as the document printed them", async () => {
     renderRitten();
+
     const row = (await screen.findByText("ANRBEL2603249")).closest(
       "tr",
     ) as HTMLElement;
 
     expect(within(row).getByText("PSA Quay 869")).toBeInTheDocument();
+    // The destination is an inline editor, so it is read through the row's
+    // text rather than as a bare node.
+    expect(row.textContent).toContain("Warneton");
   });
 
-  /**
-   * ── THE DECIDING TEST ─────────────────────────────────────────────────────
-   * The backend's route deliberately disagrees with what terminal + city would
-   * produce locally. The screen must show the backend's answer.
-   * ──────────────────────────────────────────────────────────────────────────
-   */
-  it("shows the backend's route even when it contradicts the raw fields", async () => {
-    respondWith(requestMock, {
-      trips: buildPage([
-        buildTrip({
-          id: "trip-authoritative",
-          bookingNumber: "ANRDUB2602247",
-          direction: "DELIVERY",
-          terminal: "Quay 869",
-          destinationCity: "Dourges",
-          route: { from: "Somewhere Else", to: "Another Place" },
-        }),
-      ]),
+  /** The data is untouched: only the rendering went. */
+  it("still receives the route on the Trip", () => {
+    expect(COLLECTION_TRIP.route).toEqual({
+      from: "Warneton",
+      to: "Quay 869",
     });
-
-    renderRitten();
-
-    expect(await routeCellOf("ANRDUB2602247")).toHaveTextContent(
-      "Somewhere Else → Another Place",
-    );
   });
 
-  it("shows the empty marker for a Trip with no route", async () => {
-    respondWith(requestMock, {
-      trips: buildPage([
-        buildTrip({
-          id: "trip-routeless",
-          bookingNumber: "ANRBEL2768902",
-          route: null,
-        }),
-      ]),
-    });
-
-    renderRitten();
-
-    expect(await routeCellOf("ANRBEL2768902")).toHaveTextContent("—");
-  });
-
-  /** Read-only: a route is corrected through the fields it is made of. */
-  it("offers no control to edit the route", async () => {
-    renderRitten();
-    const cell = await routeCellOf("DUBANR2598395");
-
-    expect(within(cell).queryAllByRole("button")).toHaveLength(0);
-    expect(within(cell).queryByRole("textbox")).toBeNull();
-  });
-
-  it("costs no request of its own", async () => {
+  it("asks for no route of its own", async () => {
     renderRitten();
     await screen.findByText("DUBANR2598395");
 
     expect(
       requestMock.mock.calls.filter(([path]) => String(path).includes("route")),
     ).toHaveLength(0);
-  });
-
-  it("is translated", async () => {
-    renderRitten({ language: "tr" });
-    await screen.findByText("DUBANR2598395");
-
-    expect(
-      screen.getByRole("columnheader", { name: "Rota" }),
-    ).toBeInTheDocument();
   });
 });
 
@@ -216,13 +152,23 @@ describe("the route in the Excel exports", () => {
     expect(toRouteLabel(COLLECTION_TRIP)).not.toContain("PSA");
   });
 
-  it("writes the same text the Ritten column shows", async () => {
-    respondWith(requestMock, { trips: buildPage([COLLECTION_TRIP]) });
-    renderRitten();
-
-    expect(await routeCellOf("ANRBEL2603249")).toHaveTextContent(
-      toRouteLabel(COLLECTION_TRIP),
-    );
+  /*
+   * The screen no longer shows a route, so there is no on-screen text to
+   * compare against. What still matters is that the SHEET reads the Trip's own
+   * `route` rather than assembling one — asserted by the contradiction case
+   * below, where a locally assembled route would differ.
+   */
+  it("writes the backend's route rather than assembling one", () => {
+    expect(
+      toRouteLabel(
+        buildTrip({
+          direction: "DELIVERY",
+          terminal: "Quay 869",
+          destinationCity: "Dourges",
+          route: { from: "Somewhere Else", to: "Another Place" },
+        }),
+      ),
+    ).toBe("Somewhere Else → Another Place");
   });
 
   it("gives the two legs of a Combination their own routes", () => {

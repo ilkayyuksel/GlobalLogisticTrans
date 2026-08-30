@@ -19,6 +19,7 @@ import { PdfImportModule } from "./pdf-import/pdf-import.module";
 import { PricingEngineModule } from "./pricing-engine/pricing-engine.module";
 import { PricingReprocessModule } from "./pricing-reprocess/pricing-reprocess.module";
 import { PrismaModule } from "./prisma/prisma.module";
+import { RouteConfigurationModule } from "./route-configuration/route-configuration.module";
 import { RouteCostModule } from "./route-costs/route-cost.module";
 import { RoutePricingModule } from "./route-pricing/route-pricing.module";
 import { SettingsModule } from "./settings/settings.module";
@@ -64,6 +65,7 @@ import { WhatsAppModule } from "./whatsapp/whatsapp.module";
     MaintenanceModule,
     RoutePricingModule,
     RouteCostModule,
+    RouteConfigurationModule,
     CustomPropertyModule,
     TripModule,
     TripPricingModule,

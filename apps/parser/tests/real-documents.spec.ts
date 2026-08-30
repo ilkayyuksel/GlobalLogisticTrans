@@ -611,6 +611,56 @@ const PARSED_DOCUMENTS: readonly ExpectedDocument[] = [
      * x=350.3, well past the x=295.4 boundary, so it stays out of the address —
      * which is what the row-continuation boundary was built to guarantee.
      */
+    /*
+     * BUG-CITY — the address layout that prompted the structural rewrite of
+     * how a place is read out of an address block.
+     *
+     * The block is five fragments in the value column at x=97.5, one per
+     * printed row:
+     *
+     *     y=221  [8730]
+     *     y=209  Belgosuc NV
+     *     y=197  Indistriepark 20
+     *     y=185  BE-8730 Beernem
+     *     y=173  Belgium
+     *
+     * This is PATTERN A — the normal printed form — and it reads correctly
+     * both before and after that work: the prefixed-postcode rule claims
+     * `BE-8730 Beernem` and the country word below it confirms Belgium.
+     *
+     * It is registered anyway, and deliberately. The layouts that DID break —
+     * a postcode sharing its line with a country — are covered by
+     * `fields.spec.ts`, which exercises them as positioned text. This document
+     * is the real-world counterpart: it proves that hardening those layouts
+     * changed nothing for the ordinary one, and it pins the fields around the
+     * address as well, which a synthetic block cannot.
+     *
+     * Every value below was read from the parser's own output on these bytes,
+     * never transcribed from a description.
+     */
+    file: "BUG-CITY/bug-postcode.pdf",
+    pageCount: 2,
+    layout: "SINGLE_TWO_PAGE",
+    documentStatus: "PLANNED",
+    trips: [
+      {
+        bookingNumber: "ANRDUB2797162",
+        direction: "COLLECTION",
+        containerType: "45PH",
+        containerNumber: null,
+        terminal: "PSA Quay 869",
+        destinationCity: "Beernem",
+        destinationCountry: "Belgium",
+        date: "2026-08-31",
+        startTime: "08:00",
+        endTime: "15:00",
+        groupKey: null,
+        page: 1,
+        addressSection: "LOADING 1",
+      },
+    ],
+  },
+  {
     file: "BUG-CITY/transportorder1372937.pdf",
     pageCount: 1,
     layout: "SINGLE_ONE_PAGE",
@@ -1574,5 +1624,120 @@ describe("an address followed by remarks", () => {
       expect(trip.destinationCity.split(/\s+/).length).toBeLessThanOrEqual(4);
       expect(trip.destinationCity).not.toContain(":");
     }
+  });
+});
+
+/**
+ * ── THE REAL DOCUMENT BEHIND THE ADDRESS-LAYOUT WORK ────────────────────────
+ * `bug-postcode.pdf` — booking ANRDUB2797162 — is the order that prompted the
+ * structural rewrite of how a place is read out of an address block.
+ *
+ * It prints PATTERN A, the ordinary form:
+ *
+ *     [8730]
+ *     Belgosuc NV
+ *     Indistriepark 20
+ *     BE-8730 Beernem
+ *     Belgium
+ *
+ * The layouts that genuinely broke — a postcode sharing its line with a
+ * country — are exercised as positioned text in `fields.spec.ts`, because no
+ * real document containing one has reached the repository yet. This one is the
+ * real-world half of the same guarantee, and it is worth its own block rather
+ * than only a row in the table above: it states, against actual bytes, the two
+ * invariants the rewrite exists to protect.
+ *
+ *     A POSTCODE MUST NEVER BECOME THE CITY
+ *     A COUNTRY MUST NEVER BECOME THE CITY
+ * ────────────────────────────────────────────────────────────────────────────
+ */
+describe("the real order whose address block is BE-8730 Beernem", () => {
+  const FILE = "BUG-CITY/bug-postcode.pdf";
+
+  async function trip() {
+    const result = await parseFixture(FILE);
+
+    if (!result.ok) {
+      throw new Error(`expected a parse: ${result.reason} — ${result.message}`);
+    }
+
+    return result.trips[0];
+  }
+
+  it("reads the city from the postcode line", async () => {
+    expect((await trip()).destinationCity).toBe("Beernem");
+  });
+
+  it("reads the country from the word below it", async () => {
+    expect((await trip()).destinationCountry).toBe("Belgium");
+  });
+
+  /** The two invariants, on a real document rather than a synthetic block. */
+  it("never stores the postcode as the city", async () => {
+    const city = (await trip()).destinationCity;
+
+    expect(city).not.toMatch(/\d/);
+    expect(city).not.toContain("8730");
+  });
+
+  it("never stores the country as the city", async () => {
+    expect((await trip()).destinationCity).not.toBe("Belgium");
+  });
+
+  it("does not take the company or the street", async () => {
+    const city = (await trip()).destinationCity;
+
+    expect(city).not.toMatch(/belgosuc/i);
+    expect(city).not.toMatch(/indistriepark/i);
+  });
+
+  /**
+   * The raw evidence is what the document PRINTED, never what the parser
+   * derived from it. Both address lines survive even though only the city and
+   * the country are stored.
+   */
+  it("keeps the printed address as raw evidence", async () => {
+    const { rawAddress } = (await trip()).raw;
+
+    expect(rawAddress).toContain("BE-8730 Beernem");
+    expect(rawAddress).toContain("Belgium");
+    expect(rawAddress).toContain("Belgosuc NV");
+    expect(rawAddress).toContain("Indistriepark 20");
+  });
+
+  /** The block stops where it always did: the Date/time row is not address. */
+  it("keeps the date row out of the address", async () => {
+    expect((await trip()).raw.rawAddress).not.toContain("31/08/2026");
+  });
+
+  /**
+   * The fields AROUND the address, which a synthetic block cannot pin. They
+   * are asserted here so a future change to address reading cannot quietly
+   * disturb the rest of the document.
+   */
+  it("reads the booking, the direction and the window unchanged", async () => {
+    const parsed = await trip();
+
+    expect(parsed.bookingNumber).toBe("ANRDUB2797162");
+    expect(parsed.direction).toBe("COLLECTION");
+    expect(parsed.date).toBe("2026-08-31");
+    expect(parsed.startTime).toBe("08:00");
+    expect(parsed.endTime).toBe("15:00");
+  });
+
+  it("leaves the terminal and container fields as the document states them", async () => {
+    const parsed = await trip();
+
+    expect(parsed.terminal).toBe("PSA Quay 869");
+    expect(parsed.containerType).toBe("45PH");
+    expect(parsed.containerNumber).toBeNull();
+  });
+
+  /** The address comes from the LOADING section, not from `Startpoint:`. */
+  it("reads the customer's address rather than the terminal's", async () => {
+    const parsed = await trip();
+
+    expect(parsed.raw.sections.addressSection).toBe("LOADING 1");
+    expect(parsed.raw.rawAddress).not.toContain("Scheldelaan");
   });
 });

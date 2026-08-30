@@ -5,8 +5,6 @@ import { AppLoggerService } from "../logger/app-logger.service";
 import { TripReadService, TripReadView } from "../trips/trip-read.service";
 import { isGenuineCombination } from "./combination-leg";
 import {
-  MissingRouteCostException,
-  MissingTripPricingInputException,
   NegativeTotalPriceException,
   TripNotFoundForPricingException,
   TripNotPriceableException,
@@ -252,26 +250,17 @@ export class PricingEngineService {
      * The route is read straight off the Trip and does not depend on the
      * strategy: a Trip runs one route however its base price is derived.
      *
-     * A destination is required to have one at all. A manually created Trip
-     * may not have been given one yet, and that is refused here — through the
-     * same "missing input" report the engine already uses — rather than being
-     * carried as a null into calculators that all assume a route exists.
+     * A missing destination is NOT refused. It used to be — the Trip was
+     * reported as having no priceable input — but the consequence was that no
+     * snapshot existed at all, and with it no waiting time, no custom
+     * property and no cost confirmation could be priced either. A Trip with
+     * half a route simply matches no configuration, which is the same answer
+     * as a route nobody configured: zero, visibly, with everything else still
+     * working. See `resolveRouteBaseSource`.
      */
-    if (!trip.destinationCity) {
-      this.logger.warn("Pricing requested for a Trip with no destination", {
-        tripId,
-      });
-
-      throw new MissingTripPricingInputException(
-        tripId,
-        "destinationCity",
-        rules.strategy,
-      );
-    }
-
     const route: PricingRouteIdentity = {
       departure: trip.terminal,
-      destination: trip.destinationCity,
+      destination: trip.destinationCity ?? "",
     };
 
     const baseSource = await this.componentResolver.resolveBaseSource(
@@ -291,9 +280,9 @@ export class PricingEngineService {
       await this.componentResolver.resolveCombinationLeg(trip);
     const routeCosts = await this.routeCostResolver.resolve(trip.id, route);
 
-    // Both halves of every route-priced component are now known, so the pairing
-    // between them can be checked before any step runs.
-    this.assertRoutePricedPropertiesArePriced(
+    // Both halves of every route-priced component are now known, so a gap
+    // between them can be reported before any step runs.
+    this.reportUnpricedRouteComponents(
       trip.id,
       route,
       assignedCustomProperties,
@@ -350,25 +339,36 @@ export class PricingEngineService {
   }
 
   /**
-   * Every route-priced Custom Property the Trip carries must have a matching
-   * active RouteCost.
+   * Reports a route-priced Custom Property the route does not price.
    *
-   * A property linked to a Pricing Component declares only that the component
-   * APPLIES; its amount lives in the route cost configuration. If the property
-   * was assigned but no cost is configured for this route, the component
-   * applies and its amount is unknown — a configuration error. Pricing the Trip
-   * anyway would either invent a zero charge or drop a real one silently.
+   * ── WHY THIS NO LONGER REFUSES ────────────────────────────────────────────
+   * A property linked to a Pricing Component declares that the component
+   * APPLIES; its amount lives in the route cost configuration. When the
+   * property is assigned but no cost is configured for the route, the
+   * component applies and its amount is unknown.
    *
-   * The check names no component. It is expressed purely as "a linked property
-   * must be priced", so it holds for Toll, for Tunnel and for any route-priced
-   * component added later, without a calculator having to re-implement it and
-   * without a component code appearing in this service.
+   * That used to abort the whole calculation, and the cost was out of all
+   * proportion to the gap: a Trip carrying a Toll property on an unconfigured
+   * route got NO snapshot, so its Tarief, its waiting time, its other
+   * properties and its cost confirmation were all unpriceable too — because of
+   * one component nobody had configured.
+   *
+   * So it is now what the Toll and Tunnel calculators already did on their own
+   * with no route cost: the component contributes nothing. The gap is real and
+   * is still reported — as a WARNING naming the component and the route, so an
+   * administrator can configure it — but it no longer takes the rest of the
+   * Trip's pricing down with it. An operator can meanwhile correct Toll or
+   * Tunnel by hand, which is exactly what those overrides are for.
+   *
+   * It names no component. The rule is expressed purely as "a linked property
+   * should be priced", so it holds for Toll, for Tunnel and for any
+   * route-priced component added later.
    *
    * It lives here rather than in a resolver because it spans two resolvers'
    * output: applicability comes from the Trip's assignments, the amount from
    * the route. Pairing them is orchestration, which is this service's job.
    */
-  private assertRoutePricedPropertiesArePriced(
+  private reportUnpricedRouteComponents(
     tripId: string,
     route: PricingRouteIdentity,
     assignedCustomProperties: readonly PricingCustomPropertyInput[],
@@ -389,30 +389,13 @@ export class PricingEngineService {
           tripId,
           customPropertyId: property.customPropertyId,
           pricingComponentId: property.pricingComponentId,
+          departure: route.departure,
+          destination: route.destination,
         });
-
-        throw new MissingRouteCostException(
-          tripId,
-          property.pricingComponentId,
-          route.departure,
-          route.destination,
-        );
       }
     }
   }
 
-  /**
-   * Loads the Trip's pricing inputs and confirms it may be priced.
-   *
-   * Through the narrow read side rather than TripService: the Engine needs
-   * eleven scalar columns, not a resolved planning row, and TripModule now
-   * depends on the Engine so that a waiting-time change recalculates. See
-   * TripReadService.
-   *
-   * Absence arrives as null and is reported as a pricing-domain failure. A
-   * domain service has no transport, so it never raises — or re-raises — an
-   * HTTP error for a caller that may be a queue worker or a scheduled job.
-   */
   private async requirePriceableTrip(tripId: string): Promise<TripReadView> {
     const trip = await this.trips.findById(tripId);
 
