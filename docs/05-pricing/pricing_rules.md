@@ -611,6 +611,46 @@ Examples include:
 
 Actual values are intentionally excluded from this document.
 
+## Configuring a new environment
+
+Migrations create the tables; they do not configure the business. A freshly
+migrated database therefore has no pricing Settings at all, and the Pricing
+Engine refuses every calculation until they exist — no snapshot is written and
+the Ritten pricing screen is empty.
+
+Two mechanisms close that gap, and they are deliberately separate:
+
+- **Pricing components are system data.** `prisma db seed` creates the component
+  catalog. It is idempotent — an existing component is left untouched, so
+  re-running the seed never duplicates a row or reverts a local rename. Running
+  the seed is part of provisioning an environment.
+- **Pricing settings are operator configuration.** They are created from
+  Settings → Prijzen, which lists every setting the Engine reads together with
+  its current value, or the fact that it has none. Missing settings can be
+  created from that screen in one action; an existing value is never
+  overwritten, because a configured setting is somebody's decision.
+
+The report always precedes the write: the screen shows what would be created
+before anything is created, and creating is idempotent — a second run finds
+nothing missing and writes nothing.
+
+One setting cannot be created from a stored value. `AUTOMATIC_CUSTOM_PROPERTY_ID`
+holds the id of a Custom Property row in the database it lives in, so it is
+resolved from that database by the property's name. Where no such property
+exists the screen reports it as blocked and says why, rather than writing an id
+that would point at nothing — or at some unrelated property, which would
+silently charge the wrong amount on every Trip.
+
+Route prices are configuration too, and have their own prerequisite: a pricing
+component may only carry route costs once a Custom Property links to it (see
+`database_model.md` §4.12). Until a property is linked to the TOLL and TUNNEL
+components, a route's Toll and Tunnel cannot be stored.
+
+Configuration becomes effective for the NEXT calculation. Creating or changing
+a setting prices no Trip and alters no existing snapshot; a Trip already closed
+keeps the amounts, and the rates, it was priced with. Only an explicit
+Reprocess Pricing produces a new snapshot.
+
 ## Pricing Rule Version
 
 `PRICING_RULE_VERSION` (STRING, PRICING category) records which version of the

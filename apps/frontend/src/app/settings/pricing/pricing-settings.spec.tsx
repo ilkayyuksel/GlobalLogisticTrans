@@ -41,6 +41,64 @@ const FUEL_SETTING = {
   description: null,
 };
 
+/** The keys the Pricing Engine reads, as the backend catalog lists them. */
+const CANONICAL_KEYS = [
+  "PRICING_STRATEGY",
+  "FUEL_PERCENTAGE",
+  "COMBINATION_SURCHARGE",
+  "AUTOMATIC_CUSTOM_PROPERTY_ID",
+  "WAITING_TIME_FREE_MINUTES",
+  "WAITING_TIME_THRESHOLD_MINUTES",
+  "WAITING_TIME_BLOCK_MINUTES",
+  "WAITING_TIME_BLOCK_PRICE",
+  "DISTANCE_RATE_PER_KM",
+  "PRICING_RULE_VERSION",
+];
+
+function settingStatus(overrides: Record<string, unknown> = {}) {
+  return {
+    key: "PRICING_STRATEGY",
+    value: "ROUTE_BASED",
+    isConfigured: true,
+    isActive: true,
+    proposedValue: null,
+    blockedReason: null,
+    ...overrides,
+  };
+}
+
+/** Every setting present — the state an established database is already in. */
+function configuredPlan() {
+  return {
+    settings: CANONICAL_KEYS.map((key) => settingStatus({ key, value: "15" })),
+    missingCount: 0,
+    creatableCount: 0,
+    blockedCount: 0,
+  };
+}
+
+/** A fresh deployment: migrations ran, nothing is configured. */
+function freshPlan() {
+  return {
+    settings: CANONICAL_KEYS.map((key) =>
+      settingStatus({
+        key,
+        value: null,
+        isConfigured: false,
+        isActive: false,
+        proposedValue: key === "AUTOMATIC_CUSTOM_PROPERTY_ID" ? null : "15",
+        blockedReason:
+          key === "AUTOMATIC_CUSTOM_PROPERTY_ID"
+            ? 'No active Custom Property named "TAR" exists in this database.'
+            : null,
+      }),
+    ),
+    missingCount: CANONICAL_KEYS.length,
+    creatableCount: CANONICAL_KEYS.length - 1,
+    blockedCount: 1,
+  };
+}
+
 function route(overrides: Record<string, unknown> = {}) {
   return {
     id: "route-1",
@@ -56,9 +114,12 @@ function route(overrides: Record<string, unknown> = {}) {
   };
 }
 
+const BOOTSTRAP_PATH = "/api/v1/settings/pricing/bootstrap";
+
 interface Responses {
   routes?: unknown[];
   settings?: unknown[];
+  plan?: unknown;
   onSave?: (path: string, options?: Record<string, unknown>) => unknown;
   failWith?: Error;
 }
@@ -75,12 +136,31 @@ function respondWith(responses: Responses = {}): void {
       return Promise.resolve(responses.onSave?.(path, options) ?? {});
     }
 
+    // Before the bare settings path below: it is a longer path under it.
+    if (path === BOOTSTRAP_PATH) {
+      return Promise.resolve(responses.plan ?? configuredPlan());
+    }
+
     if (path === "/api/v1/settings") {
       return Promise.resolve(responses.settings ?? [FUEL_SETTING]);
     }
 
     return Promise.resolve(responses.routes ?? [route()]);
   });
+}
+
+/**
+ * One section of the page, by its heading.
+ *
+ * The page has three, and several of them have a Save button and a table. A
+ * query against the whole document would pick whichever came first in the DOM,
+ * which is how a test ends up asserting the wrong section's behaviour.
+ *
+ * `getAllByText` because each heading also appears as its table's screen-reader
+ * caption; both are inside the section being looked for.
+ */
+function sectionOf(heading: string): HTMLElement {
+  return screen.getAllByText(heading)[0].closest("section") as HTMLElement;
 }
 
 function renderPage(language?: "nl" | "tr", theme?: "light" | "dark") {
@@ -150,9 +230,7 @@ describe("the fuel percentage", () => {
     await userEvent.clear(input);
     await userEvent.type(input, "20");
     await userEvent.click(
-      within(
-        screen.getByText("Brandstof").closest("section") as HTMLElement,
-      ).getByRole("button", { name: "Opslaan" }),
+      within(sectionOf("Brandstof")).getByRole("button", { name: "Opslaan" }),
     );
 
     await waitFor(() => expect(writes()).toHaveLength(1));
@@ -160,8 +238,37 @@ describe("the fuel percentage", () => {
     const [path, options] = writes()[0];
 
     expect(path).toBe("/api/v1/settings/PRICING/FUEL_PERCENTAGE");
-    expect(options?.method).toBe("PATCH");
+    // PUT, not PATCH: the same call has to work whether or not the setting has
+    // ever existed. As an update it failed on every fresh deployment.
+    expect(options?.method).toBe("PUT");
     expect(options?.body).toEqual({ value: "20" });
+  });
+
+  /**
+   * The state a fresh deployment is actually in. The control used to send an
+   * update for a row that had never been created, so it could not be the thing
+   * that created it — and there was no other way in.
+   */
+  it("saves a value that was never configured before", async () => {
+    respondWith({ settings: [], plan: freshPlan() });
+    renderPage();
+
+    const input = await screen.findByLabelText("Brandstofpercentage");
+
+    expect(input).toHaveValue(null);
+
+    await userEvent.type(input, "15");
+    await userEvent.click(
+      within(sectionOf("Brandstof")).getByRole("button", { name: "Opslaan" }),
+    );
+
+    await waitFor(() => expect(writes()).toHaveLength(1));
+
+    const [path, options] = writes()[0];
+
+    expect(path).toBe("/api/v1/settings/PRICING/FUEL_PERCENTAGE");
+    expect(options?.method).toBe("PUT");
+    expect(options?.body).toEqual({ value: "15" });
   });
 
   /** Validation is the backend's, and so is the wording of its refusal. */
@@ -174,9 +281,7 @@ describe("the fuel percentage", () => {
     await userEvent.clear(input);
     await userEvent.type(input, "150");
     await userEvent.click(
-      within(
-        screen.getByText("Brandstof").closest("section") as HTMLElement,
-      ).getByRole("button", { name: "Opslaan" }),
+      within(sectionOf("Brandstof")).getByRole("button", { name: "Opslaan" }),
     );
 
     expect(await screen.findByText(/Opslaan mislukt/)).toBeInTheDocument();
@@ -204,7 +309,7 @@ describe("the route prices", () => {
     renderPage();
     await screen.findByText("Dourges");
 
-    const headings = screen
+    const headings = within(sectionOf("Routeprijzen"))
       .getAllByRole("columnheader")
       .map((header) => header.textContent);
 
@@ -259,7 +364,9 @@ describe("the route prices", () => {
     await userEvent.type(screen.getByLabelText("Tunnel"), "0");
 
     await userEvent.click(
-      screen.getAllByRole("button", { name: "Opslaan" })[1],
+      within(sectionOf("Routeprijzen")).getAllByRole("button", {
+        name: "Opslaan",
+      })[0],
     );
 
     await waitFor(() => expect(writes()).toHaveLength(1));
@@ -293,7 +400,9 @@ describe("the route prices", () => {
     await userEvent.type(screen.getByLabelText("Tunnel"), "0");
 
     await userEvent.click(
-      screen.getAllByRole("button", { name: "Opslaan" })[1],
+      within(sectionOf("Routeprijzen")).getAllByRole("button", {
+        name: "Opslaan",
+      })[0],
     );
 
     await waitFor(() => expect(writes()).toHaveLength(1));
@@ -320,7 +429,9 @@ describe("the route prices", () => {
     await userEvent.clear(tarief);
     await userEvent.type(tarief, "550");
     await userEvent.click(
-      screen.getAllByRole("button", { name: "Opslaan" })[1],
+      within(sectionOf("Routeprijzen")).getAllByRole("button", {
+        name: "Opslaan",
+      })[0],
     );
 
     await waitFor(() => expect(writes()).toHaveLength(1));
@@ -398,7 +509,9 @@ describe("the route prices", () => {
     await userEvent.type(screen.getByLabelText("Tunnel"), "0");
 
     await userEvent.click(
-      screen.getAllByRole("button", { name: "Opslaan" })[1],
+      within(sectionOf("Routeprijzen")).getAllByRole("button", {
+        name: "Opslaan",
+      })[0],
     );
 
     expect(await screen.findByText(/Opslaan mislukt/)).toBeInTheDocument();
@@ -414,6 +527,192 @@ describe("the route prices", () => {
       await screen.findByText("Nog geen routeprijzen"),
     ).toBeInTheDocument();
     expect(screen.getByText(/Tarief, Toll en Tunnel op €0/)).toBeInTheDocument();
+  });
+});
+
+/**
+ * ── THE STATE THIS SECTION EXISTS FOR ───────────────────────────────────────
+ * A fresh deployment has migrations but no pricing settings. The Engine then
+ * refuses every calculation and the Ritten pricing screen is empty — and until
+ * this section existed there was nothing an operator could do about it from
+ * inside the application, because the interface could only ever edit a setting
+ * that already existed.
+ *
+ * So these tests are about one promise: no SQL, and no manual database work.
+ * ────────────────────────────────────────────────────────────────────────────
+ */
+describe("the pricing configuration", () => {
+  it("lists every setting the Pricing Engine reads", async () => {
+    respondWith();
+    renderPage();
+
+    const section = sectionOf("Prijsinstellingen");
+
+    await waitFor(() =>
+      expect(
+        within(section).getByText("PRICING_STRATEGY"),
+      ).toBeInTheDocument(),
+    );
+
+    for (const key of CANONICAL_KEYS) {
+      expect(within(section).getByText(key)).toBeInTheDocument();
+    }
+  });
+
+  it("marks every setting as missing on a fresh database", async () => {
+    respondWith({ settings: [], plan: freshPlan() });
+    renderPage();
+
+    const section = sectionOf("Prijsinstellingen");
+
+    await waitFor(() =>
+      expect(within(section).getAllByText("Ontbreekt")).toHaveLength(
+        CANONICAL_KEYS.length,
+      ),
+    );
+  });
+
+  it("says that nothing will be priced while they are missing", async () => {
+    respondWith({ settings: [], plan: freshPlan() });
+    renderPage();
+
+    expect(
+      await screen.findByText(/berekent het systeem geen prijzen/),
+    ).toBeInTheDocument();
+  });
+
+  /** The report comes before the write. Displaying it must change nothing. */
+  it("writes nothing merely by showing what is missing", async () => {
+    respondWith({ settings: [], plan: freshPlan() });
+    renderPage();
+
+    await screen.findByText(/berekent het systeem geen prijzen/);
+
+    expect(writes()).toHaveLength(0);
+  });
+
+  /** What each one would be created with, shown before anything is created. */
+  it("shows the value a missing setting would be created with", async () => {
+    respondWith({ settings: [], plan: freshPlan() });
+    renderPage();
+
+    expect(await screen.findByLabelText("PRICING_STRATEGY")).toHaveValue("15");
+  });
+
+  it("creates the missing settings in one action, without SQL", async () => {
+    respondWith({ settings: [], plan: freshPlan() });
+    renderPage();
+
+    await userEvent.click(
+      await screen.findByRole("button", {
+        name: "Ontbrekende instellingen aanmaken",
+      }),
+    );
+
+    await waitFor(() => expect(writes()).toHaveLength(1));
+
+    const [path, options] = writes()[0];
+
+    expect(path).toBe(BOOTSTRAP_PATH);
+    expect(options?.method).toBe("POST");
+  });
+
+  it("offers nothing to create once everything is configured", async () => {
+    respondWith();
+    renderPage();
+
+    await waitFor(() =>
+      expect(screen.getByText("PRICING_STRATEGY")).toBeInTheDocument(),
+    );
+
+    expect(
+      screen.queryByRole("button", {
+        name: "Ontbrekende instellingen aanmaken",
+      }),
+    ).toBeNull();
+  });
+
+  /**
+   * The one value that cannot be invented: it is an id in the operator's own
+   * database. The backend says why, and the page repeats the backend's words
+   * rather than composing an explanation of its own.
+   */
+  it("shows the backend's reason for a setting it cannot create", async () => {
+    respondWith({ settings: [], plan: freshPlan() });
+    renderPage();
+
+    expect(
+      await screen.findByText(/No active Custom Property named "TAR"/),
+    ).toBeInTheDocument();
+  });
+
+  /**
+   * The Engine treats a switched-off setting exactly as a missing one, so a row
+   * that read "configured" would be the most misleading thing here.
+   */
+  it("distinguishes a switched-off setting from a configured one", async () => {
+    respondWith({
+      plan: {
+        ...configuredPlan(),
+        settings: [
+          settingStatus({ key: "FUEL_PERCENTAGE", isActive: false }),
+          settingStatus({ key: "PRICING_STRATEGY" }),
+        ],
+      },
+    });
+    renderPage();
+
+    const row = (await screen.findByText("FUEL_PERCENTAGE")).closest(
+      "tr",
+    ) as HTMLElement;
+
+    expect(within(row).getByText("Uitgeschakeld")).toBeInTheDocument();
+    expect(within(row).queryByText("Ingesteld")).toBeNull();
+  });
+
+  /** One call, whether the setting exists or not — the page never has to know. */
+  it("saves one setting through the same idempotent call either way", async () => {
+    respondWith({ settings: [], plan: freshPlan() });
+    renderPage();
+
+    const input = await screen.findByLabelText("WAITING_TIME_BLOCK_PRICE");
+
+    await userEvent.clear(input);
+    await userEvent.type(input, "13.75");
+    await userEvent.click(
+      within(input.closest("tr") as HTMLElement).getByRole("button", {
+        name: "Opslaan",
+      }),
+    );
+
+    await waitFor(() => expect(writes()).toHaveLength(1));
+
+    const [path, options] = writes()[0];
+
+    expect(path).toBe("/api/v1/settings/PRICING/WAITING_TIME_BLOCK_PRICE");
+    expect(options?.method).toBe("PUT");
+    expect(options?.body).toEqual({ value: "13.75" });
+  });
+
+  it("shows the backend's refusal when a value is rejected", async () => {
+    respondWith({
+      settings: [],
+      plan: freshPlan(),
+      failWith: new Error("out of range"),
+    });
+    renderPage();
+
+    const input = await screen.findByLabelText("FUEL_PERCENTAGE");
+
+    await userEvent.clear(input);
+    await userEvent.type(input, "150");
+    await userEvent.click(
+      within(input.closest("tr") as HTMLElement).getByRole("button", {
+        name: "Opslaan",
+      }),
+    );
+
+    expect(await screen.findByText(/Opslaan mislukt/)).toBeInTheDocument();
   });
 });
 

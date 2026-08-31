@@ -281,6 +281,19 @@ const nl = {
   "settings.pricing.fuel.label": "Brandstofpercentage",
   "settings.pricing.fuel.historyNote":
     "Geldt voor toekomstige berekeningen. Reeds afgewerkte ritten behouden het percentage waarmee ze berekend zijn.",
+  "settings.pricing.configuration.title": "Prijsinstellingen",
+  "settings.pricing.configuration.intro":
+    "Alle instellingen die de prijsberekening nodig heeft. Ontbrekende instellingen kunnen hier aangemaakt worden; bestaande waarden worden nooit overschreven.",
+  "settings.pricing.configuration.setting": "Instelling",
+  "settings.pricing.configuration.status": "Status",
+  "settings.pricing.configuration.value": "Waarde",
+  "settings.pricing.configuration.configured": "Ingesteld",
+  "settings.pricing.configuration.missing": "Ontbreekt",
+  "settings.pricing.configuration.inactive": "Uitgeschakeld",
+  "settings.pricing.configuration.missingCount":
+    "instelling(en) ontbreken. Zolang ze ontbreken berekent het systeem geen prijzen.",
+  "settings.pricing.configuration.createMissing":
+    "Ontbrekende instellingen aanmaken",
   "settings.pricing.routes.title": "Routeprijzen",
   "settings.pricing.routes.add": "Route toevoegen",
   "settings.pricing.routes.directionNote":
@@ -1132,6 +1145,18 @@ const tr: Translations = {
   "settings.pricing.fuel.label": "Yakıt yüzdesi",
   "settings.pricing.fuel.historyNote":
     "Gelecekteki hesaplamalar için geçerlidir. Tamamlanmış seferler hesaplandıkları yüzdeyi korur.",
+  "settings.pricing.configuration.title": "Fiyat ayarları",
+  "settings.pricing.configuration.intro":
+    "Fiyat hesaplamasının ihtiyaç duyduğu tüm ayarlar. Eksik ayarlar buradan oluşturulabilir; mevcut değerlerin üzerine asla yazılmaz.",
+  "settings.pricing.configuration.setting": "Ayar",
+  "settings.pricing.configuration.status": "Durum",
+  "settings.pricing.configuration.value": "Değer",
+  "settings.pricing.configuration.configured": "Ayarlandı",
+  "settings.pricing.configuration.missing": "Eksik",
+  "settings.pricing.configuration.inactive": "Devre dışı",
+  "settings.pricing.configuration.missingCount":
+    "ayar eksik. Eksik olduğu sürece sistem fiyat hesaplamaz.",
+  "settings.pricing.configuration.createMissing": "Eksik ayarları oluştur",
   "settings.pricing.routes.title": "Rota fiyatları",
   "settings.pricing.routes.add": "Rota ekle",
   "settings.pricing.routes.directionNote":

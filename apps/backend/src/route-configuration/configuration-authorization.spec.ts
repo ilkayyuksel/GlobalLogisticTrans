@@ -11,6 +11,7 @@ import { IS_PUBLIC_ROUTE, Public } from "../auth/public.decorator";
 import { AllExceptionsFilter } from "../common/filters/all-exceptions.filter";
 import { ResponseInterceptor } from "../common/interceptors/response.interceptor";
 import { AppLoggerService } from "../logger/app-logger.service";
+import { PricingBootstrapService } from "../settings/pricing-bootstrap.service";
 import { SettingsController } from "../settings/settings.controller";
 import { SettingsService } from "../settings/settings.service";
 import { RouteConfigurationController } from "./route-configuration.controller";
@@ -104,7 +105,8 @@ describe("pricing configuration is protected", () => {
     update: jest.Mock;
     changeState: jest.Mock;
   };
-  let settings: { findAll: jest.Mock; update: jest.Mock };
+  let settings: { findAll: jest.Mock; update: jest.Mock; upsert: jest.Mock };
+  let bootstrap: { plan: jest.Mock; apply: jest.Mock };
 
   const logger = {
     setContext: jest.fn(),
@@ -160,16 +162,31 @@ describe("pricing configuration is protected", () => {
       update: jest.fn().mockResolvedValue(CONFIGURATION),
       changeState: jest.fn().mockResolvedValue(CONFIGURATION),
     };
+    const savedSetting = {
+      id: "setting-fuel",
+      category: "PRICING",
+      key: "FUEL_PERCENTAGE",
+      value: "20",
+      valueType: "DECIMAL",
+      description: null,
+    };
+
     settings = {
       findAll: jest.fn().mockResolvedValue([]),
-      update: jest.fn().mockResolvedValue({
-        id: "setting-fuel",
-        category: "PRICING",
-        key: "FUEL_PERCENTAGE",
-        value: "20",
-        valueType: "DECIMAL",
-        description: null,
-      }),
+      update: jest.fn().mockResolvedValue(savedSetting),
+      upsert: jest.fn().mockResolvedValue(savedSetting),
+    };
+
+    const emptyPlan = {
+      settings: [],
+      missingCount: 0,
+      creatableCount: 0,
+      blockedCount: 0,
+    };
+
+    bootstrap = {
+      plan: jest.fn().mockResolvedValue(emptyPlan),
+      apply: jest.fn().mockResolvedValue(emptyPlan),
     };
 
     const configuration: Record<string, unknown> = {
@@ -189,6 +206,7 @@ describe("pricing configuration is protected", () => {
           useValue: routeConfiguration,
         },
         { provide: SettingsService, useValue: settings },
+        { provide: PricingBootstrapService, useValue: bootstrap },
         {
           provide: ConfigService,
           useValue: { get: (key: string) => configuration[key] },
@@ -243,6 +261,24 @@ describe("pricing configuration is protected", () => {
       `/api/v1/route-configuration/${ROUTE_ID}/state`,
       { isActive: false },
     ],
+    /*
+     * Bootstrapping CREATES pricing settings on a database that has none, so it
+     * is a configuration write like any other here — and the most valuable one
+     * to leave open by accident, because it is the endpoint whose whole purpose
+     * is to work on a system nobody has configured yet.
+     */
+    [
+      "a setting that does not exist yet",
+      "put",
+      "/api/v1/settings/PRICING/FUEL_PERCENTAGE",
+      { value: "20" },
+    ],
+    [
+      "the whole pricing configuration at once",
+      "post",
+      "/api/v1/settings/pricing/bootstrap",
+      {},
+    ],
   ];
 
   describe("without a token", () => {
@@ -282,6 +318,8 @@ describe("pricing configuration is protected", () => {
           .expect(401);
 
         expect(settings.update).not.toHaveBeenCalled();
+        expect(settings.upsert).not.toHaveBeenCalled();
+        expect(bootstrap.apply).not.toHaveBeenCalled();
         expect(routeConfiguration.create).not.toHaveBeenCalled();
         expect(routeConfiguration.update).not.toHaveBeenCalled();
         expect(routeConfiguration.changeState).not.toHaveBeenCalled();
@@ -292,6 +330,7 @@ describe("pricing configuration is protected", () => {
     it.each([
       ["the route configuration", "/api/v1/route-configuration"],
       ["the settings", "/api/v1/settings"],
+      ["what is missing from the pricing configuration", "/api/v1/settings/pricing/bootstrap"],
     ])("refuses to read %s", async (_what, path) => {
       await request(application.getHttpServer()).get(path).expect(401);
     });
@@ -399,6 +438,39 @@ describe("pricing configuration is protected", () => {
         .expect(200);
 
       expect(response.body.data).toHaveLength(1);
+    });
+
+    it("sets a setting that has never been configured", async () => {
+      await request(application.getHttpServer())
+        .put("/api/v1/settings/PRICING/FUEL_PERCENTAGE")
+        .set("Authorization", `Bearer ${await signToken()}`)
+        .send({ value: "20" })
+        .expect(200);
+
+      expect(settings.upsert).toHaveBeenCalledWith(
+        "PRICING",
+        "FUEL_PERCENTAGE",
+        { value: "20" },
+      );
+    });
+
+    it("bootstraps the pricing configuration", async () => {
+      await request(application.getHttpServer())
+        .post("/api/v1/settings/pricing/bootstrap")
+        .set("Authorization", `Bearer ${await signToken()}`)
+        .expect(200);
+
+      expect(bootstrap.apply).toHaveBeenCalledTimes(1);
+    });
+
+    it("reports what is missing without creating it", async () => {
+      await request(application.getHttpServer())
+        .get("/api/v1/settings/pricing/bootstrap")
+        .set("Authorization", `Bearer ${await signToken()}`)
+        .expect(200);
+
+      expect(bootstrap.plan).toHaveBeenCalledTimes(1);
+      expect(bootstrap.apply).not.toHaveBeenCalled();
     });
   });
 

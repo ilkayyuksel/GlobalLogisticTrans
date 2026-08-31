@@ -2,6 +2,7 @@
 
 import { useCallback, useState } from "react";
 
+import { PricingConfigurationSection } from "@/components/pricing/pricing-configuration-section";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState, ErrorState, LoadingState } from "@/components/ui/states";
 import { useAsync } from "@/hooks/use-async";
@@ -17,7 +18,7 @@ import {
 import {
   FUEL_PERCENTAGE_SETTING,
   listSettings,
-  updateSetting,
+  saveSetting,
 } from "@/lib/api/settings";
 import { useTranslation } from "@/lib/i18n/language-provider";
 import type { TranslationKey } from "@/lib/i18n/translations";
@@ -121,6 +122,25 @@ export default function PricingSettingsPage() {
         }
       />
 
+      {/*
+        Below the fuel control, which stays the shortcut for the number that
+        changes most often. This is the complete picture: every setting the
+        Engine reads, including the ones that have no row yet.
+      */}
+      <PricingConfigurationSection
+        onSaved={() => {
+          settings.reload();
+          setFeedback({ messageKey: "settings.pricing.saved", isError: false });
+        }}
+        onFailed={(error) =>
+          setFeedback({
+            messageKey: "settings.pricing.failed",
+            detail: userFacingMessage(error),
+            isError: true,
+          })
+        }
+      />
+
       <RouteSection
         routes={routes}
         onSaved={() => {
@@ -171,7 +191,12 @@ function FuelSection({
     setIsSaving(true);
 
     try {
-      await updateSetting(
+      /*
+       * Saves whether or not the setting has ever existed. It used to be an
+       * update, which meant this control silently failed on every fresh
+       * deployment — where FUEL_PERCENTAGE has no row at all.
+       */
+      await saveSetting(
         FUEL_PERCENTAGE_SETTING.category,
         FUEL_PERCENTAGE_SETTING.key,
         value.trim(),

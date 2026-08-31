@@ -1,5 +1,5 @@
 import { Injectable } from "@nestjs/common";
-import { Prisma, Setting } from "@prisma/client";
+import { Prisma, Setting, SettingValueType } from "@prisma/client";
 
 import { PrismaService } from "../prisma/prisma.service";
 
@@ -57,5 +57,26 @@ export class SettingsRepository {
       where: { id },
       data: { value },
     });
+  }
+
+  /**
+   * Creates a setting that does not exist yet.
+   *
+   * Deliberately NOT a general-purpose create: the caller supplies a definition
+   * from the pricing catalog rather than an arbitrary row, so a client cannot
+   * invent a key the application never reads. See `SettingsService.upsert`.
+   *
+   * `defaultValue` records what the row was created with, which is what lets an
+   * administrator see later how far the current value has moved from it.
+   */
+  create(data: {
+    category: string;
+    key: string;
+    value: string;
+    valueType: SettingValueType;
+    description: string;
+    defaultValue: string | null;
+  }): Promise<Setting> {
+    return this.prisma.setting.create({ data });
   }
 }
