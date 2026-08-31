@@ -35,6 +35,19 @@ import {
 
 const BOOKING = "ANRDUB2602247";
 
+/**
+ * The transport date every document in this file states, and the third part of
+ * the Trip identity. A cancellation names it exactly as the order did.
+ */
+const TRANSPORT_DATE = new Date("2026-08-21T00:00:00.000Z");
+
+/** Exact date comparison, with absence as a value rather than a wildcard. */
+function sameOriginalDate(trip: Trip, date: Date | null): boolean {
+  return trip.originalPlanningDate === null || date === null
+    ? trip.originalPlanningDate === date
+    : trip.originalPlanningDate.getTime() === date.getTime();
+}
+
 function buildTrip(overrides: Partial<Trip> = {}): Trip {
   return {
     id: "trip-1",
@@ -97,6 +110,7 @@ describe("sequences of transport documents", () => {
 
     const repository: {
       findManyByBookingNumber: jest.Mock;
+      findManyByBookingNumberAndOriginalDate: jest.Mock;
       findByIdentity: jest.Mock;
       findByBookingNumber: jest.Mock;
       setStatus: jest.Mock;
@@ -121,12 +135,35 @@ describe("sequences of transport documents", () => {
             ),
           ),
       ),
+      findManyByBookingNumberAndOriginalDate: jest.fn(
+        ({
+          bookingNumber,
+          originalPlanningDate,
+          statuses,
+        }: {
+          bookingNumber: string;
+          originalPlanningDate: Date | null;
+          statuses: readonly TripStatus[];
+        }) =>
+          Promise.resolve(
+            stored.filter(
+              (trip) =>
+                trip.bookingNumber === bookingNumber &&
+                sameOriginalDate(trip, originalPlanningDate) &&
+                statuses.includes(trip.status),
+            ),
+          ),
+      ),
       findByIdentity: jest.fn(
         ({
           identity,
           statuses,
         }: {
-          identity: { bookingNumber: string; containerNumber: string | null };
+          identity: {
+            bookingNumber: string;
+            containerNumber: string | null;
+            originalPlanningDate: Date | null;
+          };
           statuses: readonly TripStatus[];
         }) =>
           Promise.resolve(
@@ -135,6 +172,7 @@ describe("sequences of transport documents", () => {
                 trip.bookingNumber === identity.bookingNumber &&
                 // The real rule: absent is a value, so `null` matches `null`.
                 trip.containerNumber === identity.containerNumber &&
+                sameOriginalDate(trip, identity.originalPlanningDate) &&
                 statuses.includes(trip.status),
             ) ?? null,
           ),
@@ -202,7 +240,11 @@ describe("sequences of transport documents", () => {
   }
 
   const cancel = () =>
-    service.cancelByIdentity({ bookingNumber: BOOKING, containerNumber: null });
+    service.cancelByIdentity({
+      bookingNumber: BOOKING,
+      containerNumber: null,
+      originalPlanningDate: TRANSPORT_DATE,
+    });
 
   const update = (overrides: Partial<ImportedTripData> = {}) =>
     service.applyDocumentRevision(buildDocument(overrides));
@@ -387,14 +429,38 @@ describe("sequences of transport documents", () => {
       expect(trip().status).toBe(TripStatus.OPEN);
     });
 
-    it("does not cancel the Trip that has no container", async () => {
+    /**
+     * ── WHERE CANCEL PARTS FROM UPDATE ──────────────────────────────────────
+     * The revision above refuses, because a document naming a container we do
+     * not hold describes a transport we do not have.
+     *
+     * A cancellation does NOT refuse. The order was placed without a container
+     * — this Trip still has none — and the customer cancels naming the one they
+     * assigned. Refusing would leave a real cancellation unapplied, and a
+     * cancellation creates nothing, so falling back to the booking and the date
+     * is safe here in a way it would not be for a revision.
+     */
+    it("cancels the Trip that has no container, through the fallback", async () => {
       const outcome = await service.cancelByIdentity({
         bookingNumber: BOOKING,
         containerNumber: "EUCU4532322",
+        originalPlanningDate: TRANSPORT_DATE,
+      });
+
+      expect(outcome).toBe("CANCELLED");
+      expect(trip().status).toBe(TripStatus.CANCELLED);
+    });
+
+    /** And it never invents a Trip when the booking and date name none. */
+    it("creates nothing when the booking is not held on that date", async () => {
+      const outcome = await service.cancelByIdentity({
+        bookingNumber: "ANRDUB9999999",
+        containerNumber: "EUCU4532322",
+        originalPlanningDate: TRANSPORT_DATE,
       });
 
       expect(outcome).toBe("NO_MATCHING_TRIP");
-      expect(trip().status).toBe(TripStatus.OPEN);
+      expect(stored).toHaveLength(1);
     });
 
     it("leaves the other container's Trip alone", async () => {
@@ -403,6 +469,7 @@ describe("sequences of transport documents", () => {
       await service.cancelByIdentity({
         bookingNumber: BOOKING,
         containerNumber: "EUCU4532322",
+        originalPlanningDate: TRANSPORT_DATE,
       });
 
       expect(stored[0].status).toBe(TripStatus.OPEN);
@@ -561,6 +628,7 @@ describe("sequences of transport documents", () => {
       const outcome = await service.cancelByIdentity({
         bookingNumber: BOOKING,
         containerNumber: "EUCU1111111",
+        originalPlanningDate: TRANSPORT_DATE,
       });
 
       expect(outcome).toBe("CANCELLED");

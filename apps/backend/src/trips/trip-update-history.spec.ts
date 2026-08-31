@@ -66,6 +66,25 @@ function buildTrip(overrides: Partial<Trip> = {}): Trip {
   } as unknown as Trip;
 }
 
+/** Exact date comparison, with absence as a value rather than a wildcard. */
+function sameOriginalDate(trip: Trip, date: Date | null): boolean {
+  return trip.originalPlanningDate === null || date === null
+    ? trip.originalPlanningDate === date
+    : trip.originalPlanningDate.getTime() === date.getTime();
+}
+
+/**
+ * What a cancellation names: the same booking, no container, and the SAME
+ * transport date — which is what lets it reach this Trip at all.
+ */
+function cancelIdentity() {
+  return {
+    bookingNumber: BOOKING,
+    containerNumber: null,
+    originalPlanningDate: new Date("2026-08-21T00:00:00.000Z"),
+  };
+}
+
 /** The order as the document states it — identical to the Trip by default. */
 function buildDocument(
   overrides: Partial<ImportedTripData> = {},
@@ -139,7 +158,11 @@ describe("many updates to one Trip", () => {
           identity,
           statuses,
         }: {
-          identity: { bookingNumber: string; containerNumber: string | null };
+          identity: {
+            bookingNumber: string;
+            containerNumber: string | null;
+            originalPlanningDate: Date | null;
+          };
           statuses: readonly TripStatus[];
         }) =>
           Promise.resolve(
@@ -147,8 +170,28 @@ describe("many updates to one Trip", () => {
               (trip) =>
                 trip.bookingNumber === identity.bookingNumber &&
                 trip.containerNumber === identity.containerNumber &&
+                sameOriginalDate(trip, identity.originalPlanningDate) &&
                 statuses.includes(trip.status),
             ) ?? null,
+          ),
+      ),
+      findManyByBookingNumberAndOriginalDate: jest.fn(
+        ({
+          bookingNumber,
+          originalPlanningDate,
+          statuses,
+        }: {
+          bookingNumber: string;
+          originalPlanningDate: Date | null;
+          statuses: readonly TripStatus[];
+        }) =>
+          Promise.resolve(
+            stored.filter(
+              (trip) =>
+                trip.bookingNumber === bookingNumber &&
+                sameOriginalDate(trip, originalPlanningDate) &&
+                statuses.includes(trip.status),
+            ),
           ),
       ),
       findByBookingNumber: jest.fn(
@@ -323,17 +366,32 @@ describe("many updates to one Trip", () => {
       await update("update-1", {
         containerType: "45RH",
         terminal: "Quay 869",
-        planningDate: "2026-08-22",
+        destinationCity: "Lessines",
       });
 
       expect(changeSetsOf("update-1")).toEqual([
         "containerType",
         "terminal",
-        "originalPlanningDate",
+        "destinationCity",
       ]);
       expect(
         history.filter((entry) => entry.pdfDocumentId === "update-1"),
       ).toHaveLength(3);
+    });
+
+    /**
+     * The transport date is not among the fields an update can move: it is part
+     * of the Trip's identity, so a document stating another date describes
+     * another transport and never reaches this Trip.
+     */
+    it("does not reach a Trip ordered for a different date", async () => {
+      const before = { ...stored[0] };
+
+      const result = await update("update-1", { planningDate: "2026-08-22" });
+
+      expect(result.outcome).toBe("NO_MATCHING_TRIP");
+      expect(stored[0]).toEqual(before);
+      expect(changeSetsOf("update-1")).toEqual([]);
     });
 
     /**
@@ -366,16 +424,16 @@ describe("many updates to one Trip", () => {
       await update("update-1", { containerType: "45RH" });
       await update("update-2", {
         containerType: "45RH",
-        planningDate: "2026-08-22",
+        destinationCity: "Lessines",
       });
       await update("update-3", {
         containerType: "45OS",
-        planningDate: "2026-08-22",
+        destinationCity: "Lessines",
         terminal: "Quay 869",
       });
 
       expect(changeSetsOf("update-1")).toEqual(["containerType"]);
-      expect(changeSetsOf("update-2")).toEqual(["originalPlanningDate"]);
+      expect(changeSetsOf("update-2")).toEqual(["destinationCity"]);
       expect(changeSetsOf("update-3")).toEqual([
         "containerType",
         "terminal",
@@ -430,11 +488,11 @@ describe("many updates to one Trip", () => {
       await update("update-1", { containerType: "45RH" });
       await update("update-2", {
         containerType: "45RH",
-        planningDate: "2026-08-22",
+        destinationCity: "Lessines",
       });
 
       expect(await latestUpdate()).toMatchObject({
-        changedFields: ["originalPlanningDate"],
+        changedFields: ["destinationCity"],
         pdfDocumentId: "update-2",
       });
     });
@@ -444,7 +502,7 @@ describe("many updates to one Trip", () => {
       await update("update-1", { containerType: "45RH" });
       await update("update-2", {
         containerType: "45RH",
-        planningDate: "2026-08-22",
+        destinationCity: "Lessines",
       });
 
       expect((await latestUpdate())?.changedFields).not.toContain(
@@ -462,7 +520,7 @@ describe("many updates to one Trip", () => {
      */
     it("survives a later cancellation", async () => {
       await update("update-1", { containerType: "45RH" });
-      await revision.cancelByIdentity({ bookingNumber: BOOKING, containerNumber: null }, documentNamed("cancel-1"));
+      await revision.cancelByIdentity(cancelIdentity(), documentNamed("cancel-1"));
 
       expect(await latestUpdate()).toMatchObject({
         changedFields: ["containerType"],
@@ -480,7 +538,7 @@ describe("many updates to one Trip", () => {
     it("reports an update that reopened the Trip", async () => {
       await update("update-1", { containerType: "45RH" });
       await revision.cancelByIdentity(
-        { bookingNumber: BOOKING, containerNumber: null },
+        cancelIdentity(),
         documentNamed("cancel-1"),
       );
       await update("update-2", { containerType: "45OS" });
@@ -492,7 +550,7 @@ describe("many updates to one Trip", () => {
   describe("documents that could not be applied", () => {
     it("records an update that arrived after cancellation as a reopening", async () => {
       await revision.cancelByIdentity(
-        { bookingNumber: BOOKING, containerNumber: null },
+        cancelIdentity(),
         documentNamed("cancel-1"),
       );
 
@@ -517,10 +575,10 @@ describe("many updates to one Trip", () => {
     });
 
     it("records a second cancellation without touching the Trip", async () => {
-      await revision.cancelByIdentity({ bookingNumber: BOOKING, containerNumber: null }, documentNamed("cancel-1"));
+      await revision.cancelByIdentity(cancelIdentity(), documentNamed("cancel-1"));
       const afterFirst = { ...stored[0] };
 
-      const outcome = await revision.cancelByIdentity({ bookingNumber: BOOKING, containerNumber: null },
+      const outcome = await revision.cancelByIdentity(cancelIdentity(),
         documentNamed("cancel-2"),
       );
 
@@ -549,7 +607,7 @@ describe("many updates to one Trip", () => {
     it("records a cancellation refused because the Trip is finished", async () => {
       stored[0].status = TripStatus.CLOSED;
 
-      const outcome = await revision.cancelByIdentity({ bookingNumber: BOOKING, containerNumber: null },
+      const outcome = await revision.cancelByIdentity(cancelIdentity(),
         documentNamed("cancel-1"),
       );
 
@@ -567,7 +625,7 @@ describe("many updates to one Trip", () => {
      */
     it("reopens the Trip when a new order arrives after a cancellation", async () => {
       await revision.cancelByIdentity(
-        { bookingNumber: BOOKING, containerNumber: null },
+        cancelIdentity(),
         documentNamed("cancel-1"),
       );
 
@@ -605,7 +663,7 @@ describe("many updates to one Trip", () => {
     it("shows every document of the Trip, newest first", async () => {
       await update("update-1", { containerType: "45RH" });
       await update("update-2", { containerType: "45OS" });
-      await revision.cancelByIdentity({ bookingNumber: BOOKING, containerNumber: null }, documentNamed("cancel-1"));
+      await revision.cancelByIdentity(cancelIdentity(), documentNamed("cancel-1"));
 
       const items = await listDocuments();
 
@@ -655,7 +713,7 @@ describe("many updates to one Trip", () => {
     it("marks the latest applied document as the effective one", async () => {
       await update("update-1", { containerType: "45RH" });
       await revision.cancelByIdentity(
-        { bookingNumber: BOOKING, containerNumber: null },
+        cancelIdentity(),
         documentNamed("cancel-1"),
       );
 
@@ -669,7 +727,7 @@ describe("many updates to one Trip", () => {
 
     it("moves the effective document when a later one supersedes it", async () => {
       await revision.cancelByIdentity(
-        { bookingNumber: BOOKING, containerNumber: null },
+        cancelIdentity(),
         documentNamed("cancel-1"),
       );
       await update("update-1", { containerType: "45RH" });

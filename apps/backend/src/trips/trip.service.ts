@@ -1,6 +1,7 @@
 import { Injectable } from "@nestjs/common";
 import { Prisma, Trip, TripStatus } from "@prisma/client";
 
+import { bookingNumberDigits } from "../common/booking-digits";
 import { changedFieldNames } from "../common/changed-fields";
 import { toUtcDate } from "../common/dates";
 import { DomainEventBus } from "../common/events/domain-event-bus";
@@ -275,9 +276,12 @@ export class TripService {
           await this.assertIdentityFree(repository, {
             bookingNumber,
             // Canonical before it is stored: an operator types `EUCU 145129/5`
-          // off a document and the Trip holds `EUCU1451295`, which is what
-          // every later document is matched against.
-          containerNumber: toContainerIdentity(dto.containerNumber),
+            // off a document and the Trip holds `EUCU1451295`, which is what
+            // every later document is matched against.
+            containerNumber: toContainerIdentity(dto.containerNumber),
+            // The date this Trip is being created with. The same booking and
+            // container on another date is another transport, not a duplicate.
+            originalPlanningDate,
           });
         }
 
@@ -450,8 +454,38 @@ export class TripService {
    * `CostConfirmationAmbiguousException`.
    */
   async findAllByBookingNumber(bookingNumber: string): Promise<Trip[]> {
-    return this.repository.findManyByBookingNumber({
+    const exact = await this.repository.findManyByBookingNumber({
       bookingNumber,
+      statuses: BOOKING_NUMBER_HOLDING_STATUSES,
+    });
+
+    if (exact.length > 0) {
+      return exact;
+    }
+
+    /*
+     * ── THE FALLBACK, AND WHY IT IS SECOND ────────────────────────────────
+     * A Cost Confirmation is produced by a different system, and it does not
+     * always print the booking number in full: `ANRDUB2793554` on the transport
+     * order can arrive as `DUB2793554` or as `2793554`. Compared as strings
+     * those name no Trip, and real money went unrecorded.
+     *
+     * The digits are what the two systems agree on, so they are what is
+     * compared — by EXACT equality, never as a substring. It runs only when the
+     * exact lookup found nothing, so a confirmation that names a booking
+     * properly is never decided by anything looser.
+     *
+     * The COUNT is still the answer: the caller refuses an ambiguous booking
+     * rather than choosing a Trip, and that is unchanged here.
+     */
+    const digits = bookingNumberDigits(bookingNumber);
+
+    if (digits === null) {
+      return exact;
+    }
+
+    return this.repository.findManyByBookingDigits({
+      digits,
       statuses: BOOKING_NUMBER_HOLDING_STATUSES,
     });
   }
@@ -756,6 +790,9 @@ export class TripService {
           await this.assertIdentityFree(trips, {
             bookingNumber: trip.bookingNumber,
             containerNumber: trip.containerNumber,
+            // The document's own transport date, which is what this Trip is
+            // about to store as its original planning date.
+            originalPlanningDate: toUtcDate(trip.planningDate),
           });
 
           const stored = await trips.create({
@@ -1095,6 +1132,9 @@ export class TripService {
       {
         bookingNumber: trip.bookingNumber,
         containerNumber: trip.containerNumber,
+        // The identity this Trip is reclaiming is the whole one it already
+        // holds, date included — it is being restored, not re-dated.
+        originalPlanningDate: trip.originalPlanningDate,
       },
       trip.id,
     );

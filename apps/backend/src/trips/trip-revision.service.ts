@@ -17,6 +17,7 @@ import {
   TripHistoryEvent,
   describeChange,
   detectFieldChanges,
+  revisedContainerNumber,
 } from "./trip-history";
 import { AutomaticFlatPropertyService } from "./automatic-flat.service";
 import { TripIdentity, TripRepository } from "./trip.repository";
@@ -133,11 +134,19 @@ export interface DocumentReference {
  * only whitespace says exactly what a missing one says, and treating `""`,
  * `" "` and null as three identities would make matching depend on invisible
  * characters.
+ *
+ * ── AND THE DATE ────────────────────────────────────────────────────────────
+ * `document.planningDate` is the transport date the document itself prints, on
+ * the `Date/time:` line of its LOADING or DELIVERY section. It is the value a
+ * Trip stores as `original_planning_date`, so comparing the two compares like
+ * with like. No email date, no import timestamp and no voyage date reaches
+ * this: the parser reads that one labelled line and nothing else.
  */
 export function identityOf(document: ImportedTripData): TripIdentity {
   return {
     bookingNumber: document.bookingNumber,
     containerNumber: toContainerIdentity(document.containerNumber),
+    originalPlanningDate: toUtcDate(document.planningDate),
   };
 }
 
@@ -190,7 +199,17 @@ export class TripRevisionService {
 
     const outcome = await this.repository.runInTransaction(
       async (repository): Promise<CancellationOutcome> => {
-        const match = await resolveTripForDocument(repository, identity);
+        /*
+         * A cancellation that names a container we do not hold still cancels
+         * the transport: the order may have been placed without one and given
+         * a container by hand afterwards, so OUR record and the customer's
+         * differ. Refusing would leave a real cancellation unapplied.
+         */
+        const match = await resolveTripForDocument(
+          repository,
+          identity,
+          "FALL_BACK_TO_BOOKING_AND_DATE",
+        );
 
         if (match.kind === "AMBIGUOUS_BOOKING_MATCH") {
           this.logger.warn("Cancellation names an ambiguous booking number", {
@@ -287,9 +306,15 @@ export class TripRevisionService {
         trips: repository,
         customProperties,
       }): Promise<RevisionResult> => {
+        /*
+         * A revision naming a container nothing holds describes a transport we
+         * do not have. It is refused here and the caller creates the Trip —
+         * never applied to a different container's Trip on the same booking.
+         */
         const match = await resolveTripForDocument(
           repository,
           identityOf(document),
+          "REFUSE",
         );
 
         /*
@@ -674,13 +699,35 @@ export class TripRevisionService {
     const documentDate = toUtcDate(document.planningDate);
 
     return {
-      containerNumber: document.containerNumber,
+      /*
+       * ── A DOCUMENT NEVER ERASES A CONTAINER ────────────────────────────────
+       * A Loading is ordered before anyone knows which container will be picked
+       * up, so the order prints none and the operator enters it later from the
+       * driver. Every revision of that order still prints none — so writing the
+       * document's value straight through would delete what the operator
+       * entered, on every UPDATE, for exactly the Trips this matters most for.
+       *
+       * `database_model.md` and `planningRules.md` both state the rule
+       * directly: parser updates must never erase a manually entered container
+       * number.
+       *
+       * The same helper decides what the audit trail reports, so the history
+       * cannot claim a change the write did not make.
+       */
+      containerNumber: revisedContainerNumber(existing, document),
       containerType: document.containerType,
       terminal: document.terminal,
       destinationCity: document.destinationCity,
       destinationCountry: document.destinationCountry,
-      // What the document says, always. This is the document's own date.
-      originalPlanningDate: documentDate,
+      /*
+       * `originalPlanningDate` is deliberately NOT written here.
+       *
+       * It is part of the Trip's identity, and identity is fixed when the Trip
+       * is created. A revision can only ever reach this Trip by naming that
+       * same date — that is what matching now requires — so writing it would
+       * assign the value it already holds, and leaving it out makes it
+       * structurally impossible for a document to move a Trip's identity.
+       */
       // What the operator plans, only while they have not moved it themselves.
       planningDate: this.hasOperatorMovedTheTrip(existing)
         ? existing.planningDate

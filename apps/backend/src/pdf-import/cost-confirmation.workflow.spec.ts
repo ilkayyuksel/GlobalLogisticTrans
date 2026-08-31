@@ -115,6 +115,27 @@ describe("every real Cost Confirmation, through the real workflow", () => {
     );
   });
 
+  /**
+   * ── WHY NO REAL DOCUMENT EXERCISES THE DIGIT FALLBACK ─────────────────────
+   * The fallback exists because a confirmation can print a partial booking
+   * reference — `DUB2793554` or `2793554` for `ANRDUB2793554`. Every real
+   * confirmation we hold prints the booking IN FULL, so all four are served by
+   * the exact lookup and none of them reaches the fallback.
+   *
+   * Asserted rather than assumed, so that the day a real partial arrives this
+   * test fails and the fallback gains the real-document regression it currently
+   * cannot have. Nothing here is fabricated to stand in for one.
+   */
+  it("shows that every real confirmation prints a full booking number", () => {
+    expect(EXPECTED.length).toBeGreaterThan(0);
+
+    for (const expected of EXPECTED) {
+      // A full booking number carries its alphabetic prefix; a partial one
+      // would be the digits alone or a shortened prefix.
+      expect(expected.bookingNumber).toMatch(/^[A-Z]{6}\d+$/);
+    }
+  });
+
   describe.each(EXPECTED)("$file", (expected) => {
     it("records the confirmed amount against the Trip it names", async () => {
       const trip = seedTrip(expected.bookingNumber);
@@ -341,6 +362,88 @@ describe("every real Cost Confirmation, through the real workflow", () => {
       await harness.importer.confirmCost(readConfirmation(file), file);
 
       expect(harness.costConfirmations).toHaveLength(1);
+    });
+  });
+
+  /**
+   * ── A CONFIRMATION IS NOT MATCHED BY TRIP IDENTITY ────────────────────────
+   * A Trip is identified by its booking number, its container AND its original
+   * transport date. A Cost Confirmation is matched on the booking number ALONE,
+   * and deliberately so: it prints its container reference in a different
+   * format from a transport order — `EUCU4530818` against `EUCU 453232/2` — and
+   * often prints no date of transport at all.
+   *
+   * Narrowing confirmations by date would therefore not make them more precise;
+   * it would make them refuse money that belongs to a Trip we hold. These tests
+   * exist because the two lookups sit beside each other in the repository, and
+   * a date added to the wrong one would fail silently and only in production.
+   */
+  describe("a booking whose Trips were ordered for different dates", () => {
+    const { file, bookingNumber } = EXPECTED[0];
+
+    it("finds the Trip whatever its original planning date", async () => {
+      harness.trips.push({
+        id: "trip-far-future",
+        bookingNumber,
+        containerNumber: null,
+        // Deliberately unrelated to anything the confirmation states.
+        originalPlanningDate: new Date("2027-03-01T00:00:00.000Z"),
+        planningDate: new Date("2027-03-05T00:00:00.000Z"),
+        status: TripStatus.OPEN,
+      });
+
+      await harness.importer.confirmCost(readConfirmation(file), file);
+
+      expect(harness.costConfirmations).toHaveLength(1);
+    });
+
+    /**
+     * Two Trips on one booking are ambiguous even when their dates differ. The
+     * date does not disambiguate a confirmation, because the confirmation never
+     * named one — so it still refuses rather than choosing.
+     */
+    it("is still ambiguous when only the date separates the Trips", async () => {
+      harness.trips.push(
+        {
+          id: "trip-week-1",
+          bookingNumber,
+          containerNumber: "EUCU4532322",
+          originalPlanningDate: new Date("2026-08-24T00:00:00.000Z"),
+          status: TripStatus.OPEN,
+        },
+        {
+          id: "trip-week-2",
+          bookingNumber,
+          containerNumber: "EUCU4532322",
+          originalPlanningDate: new Date("2026-08-31T00:00:00.000Z"),
+          status: TripStatus.OPEN,
+        },
+      );
+
+      await expect(
+        harness.importer.confirmCost(readConfirmation(file), file),
+      ).rejects.toThrow(/2 Trips/);
+
+      expect(harness.costConfirmations).toEqual([]);
+    });
+
+    /** The date-blind lookup is the one a confirmation reaches for. */
+    it("uses the booking-only lookup, never the identity one", async () => {
+      harness.trips.push({
+        id: "trip-only",
+        bookingNumber,
+        containerNumber: null,
+        originalPlanningDate: new Date("2027-03-01T00:00:00.000Z"),
+        status: TripStatus.OPEN,
+      });
+
+      await harness.importer.confirmCost(readConfirmation(file), file);
+
+      expect(harness.tripRepository.findManyByBookingNumber).toHaveBeenCalled();
+      expect(
+        harness.tripRepository.findManyByBookingNumberAndOriginalDate,
+      ).not.toHaveBeenCalled();
+      expect(harness.tripRepository.findByIdentity).not.toHaveBeenCalled();
     });
   });
 

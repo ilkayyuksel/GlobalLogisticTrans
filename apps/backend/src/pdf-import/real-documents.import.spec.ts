@@ -88,35 +88,43 @@ const IMPORTABLE: readonly ExpectedImport[] = [
 /**
  * Each cancellation with the identity it names.
  *
- * The container number is the other half of a Trip's identity, so a seeded Trip
- * has to carry the one its document states. Most of these are collections,
- * which name none — and (booking, null) is a whole identity, not a gap.
+ * The container number and the transport DATE are the other two thirds of a
+ * Trip's identity, so a seeded Trip has to carry the ones its document states.
+ * Most of these are collections, which name no container — and (booking, null,
+ * date) is a whole identity, not a gap.
+ *
+ * The dates are the ones the real files print; nothing here invents one.
  */
 const CANCELLED_DOCUMENTS = [
   {
     file: "CANCEL/cancelled_transportorder1353889.pdf",
     booking: "ANRBEL2772352",
     container: "EUCU2000249",
+    date: "2026-07-06",
   },
   {
     file: "CANCEL/cancelled_transportorder1354204.pdf",
     booking: "ANRDUB2767189",
     container: null,
+    date: "2026-07-07",
   },
   {
     file: "CANCEL/cancelled_transportorder1365387.pdf",
     booking: "DUBANR2776470",
     container: "EUCU4551322",
+    date: "2026-08-07",
   },
   {
     file: "CANCEL/cancelled_transportorder1367583.pdf",
     booking: "ANRCRK2786827",
     container: null,
+    date: "2026-08-14",
   },
   {
     file: "CANCEL/cancelled_transportorder1367584.pdf",
     booking: "ANRDUB2787843",
     container: null,
+    date: "2026-08-14",
   },
 ] as const;
 
@@ -299,7 +307,7 @@ describe("every real transport order, through the real import pipeline", () => {
    * does not create.
    * ────────────────────────────────────────────────────────────────────────────
    */
-  describe.each(CANCELLED_DOCUMENTS)("$file", ({ file, booking, container }) => {
+  describe.each(CANCELLED_DOCUMENTS)("$file", ({ file, booking, container, date }) => {
     it("creates no Trip and no TripGroup, but keeps the document", async () => {
       const result = await harness.importer.import(readFixture(file), file);
 
@@ -332,6 +340,7 @@ describe("every real transport order, through the real import pipeline", () => {
         id: "trip-existing",
         bookingNumber: booking,
         containerNumber: container,
+        originalPlanningDate: new Date(`${date}T00:00:00.000Z`),
         status: TripStatus.OPEN,
       });
 
@@ -347,6 +356,7 @@ describe("every real transport order, through the real import pipeline", () => {
         id: "trip-existing",
         bookingNumber: booking,
         containerNumber: container,
+        originalPlanningDate: new Date(`${date}T00:00:00.000Z`),
         status: TripStatus.OPEN,
       });
 
@@ -362,6 +372,7 @@ describe("every real transport order, through the real import pipeline", () => {
         id: "trip-existing",
         bookingNumber: booking,
         containerNumber: container,
+        originalPlanningDate: new Date(`${date}T00:00:00.000Z`),
         status: TripStatus.CLOSED,
       });
 
@@ -375,6 +386,7 @@ describe("every real transport order, through the real import pipeline", () => {
       harness.trips.push({
         id: "trip-existing",
         bookingNumber: booking,
+        originalPlanningDate: new Date(`${date}T00:00:00.000Z`),
         status: TripStatus.OPEN,
       });
 
@@ -532,8 +544,9 @@ describe("every real transport order, through the real import pipeline", () => {
       harness.trips.push({
         id: "trip-existing",
         bookingNumber: cancelled.booking,
-        // The identity the document names, container included.
+        // The identity the document names: container and transport date too.
         containerNumber: cancelled.container,
+        originalPlanningDate: new Date(`${cancelled.date}T00:00:00.000Z`),
         status: TripStatus.OPEN,
       });
 

@@ -8,6 +8,7 @@ import { CustomPropertyService } from "../custom-properties/custom-property.serv
 import { DomainEventBus } from "../common/events/domain-event-bus";
 import { DriverService } from "../drivers/driver.service";
 import { AppLoggerService } from "../logger/app-logger.service";
+import { bookingNumberDigits } from "../common/booking-digits";
 import { PdfDocumentRepository } from "../pdf-documents/pdf-document.repository";
 import { PdfDocumentService } from "../pdf-documents/pdf-document.service";
 import { TripCustomPropertyRepository } from "../trip-custom-properties/trip-custom-property.repository";
@@ -149,6 +150,25 @@ export function buildHarness(storageDirectory: string) {
     logger,
   );
 
+  /**
+   * Exact date comparison, with absence as a value rather than a wildcard.
+   *
+   * The stored date may be a Date or an ISO string depending on how a test
+   * seeded it, so both are reduced to the same calendar day before comparing.
+   */
+  const sameOriginalDate = (
+    trip: { originalPlanningDate?: Date | string | null },
+    wanted: Date | null,
+  ): boolean => {
+    const stored = trip.originalPlanningDate ?? null;
+
+    if (stored === null || wanted === null) {
+      return stored === null && wanted === null;
+    }
+
+    return new Date(stored).getTime() === wanted.getTime();
+  };
+
   const tripRepository = {
     /**
      * The real rule, in memory — including `excludeTripId`.
@@ -194,10 +214,32 @@ export function buildHarness(storageDirectory: string) {
         ),
     ),
     /**
-     * The real identity rule, in memory: the booking number AND the container
-     * number, with ABSENT compared as a value rather than as an unknown. A
-     * double that used `=` on the container would match nothing for a
-     * collection and every test here would silently create second Trips.
+     * The Cost Confirmation fallback: the same booking reduced to its digits,
+     * compared by exact equality. Reached only when the lookup above found
+     * nothing.
+     */
+    findManyByBookingDigits: jest.fn(
+      ({
+        digits,
+        statuses,
+      }: {
+        digits: string;
+        statuses: readonly TripStatus[];
+      }) =>
+        Promise.resolve(
+          trips.filter(
+            (trip) =>
+              bookingNumberDigits(trip.bookingNumber as string | null) ===
+                digits && statuses.includes(trip.status as TripStatus),
+          ),
+        ),
+    ),
+    /**
+     * The real identity rule, in memory: the booking number, the container
+     * number AND the original transport date, with ABSENT compared as a value
+     * rather than as an unknown. A double that used `=` on the container would
+     * match nothing for a collection and every test here would silently create
+     * second Trips.
      */
     findByIdentity: jest.fn(
       ({
@@ -205,7 +247,11 @@ export function buildHarness(storageDirectory: string) {
         statuses,
         excludeTripId,
       }: {
-        identity: { bookingNumber: string; containerNumber: string | null };
+        identity: {
+          bookingNumber: string;
+          containerNumber: string | null;
+          originalPlanningDate: Date | null;
+        };
         statuses: readonly TripStatus[];
         excludeTripId?: string;
       }) =>
@@ -214,9 +260,34 @@ export function buildHarness(storageDirectory: string) {
             (trip) =>
               trip.bookingNumber === identity.bookingNumber &&
               (trip.containerNumber ?? null) === identity.containerNumber &&
+              sameOriginalDate(trip, identity.originalPlanningDate) &&
               statuses.includes(trip.status as TripStatus) &&
               trip.id !== excludeTripId,
           ) ?? null,
+        ),
+    ),
+    /**
+     * The booking-only half of document matching, narrowed to one transport
+     * date. Deliberately separate from `findManyByBookingNumber` above, which
+     * belongs to Cost Confirmations and stays date-blind.
+     */
+    findManyByBookingNumberAndOriginalDate: jest.fn(
+      ({
+        bookingNumber,
+        originalPlanningDate,
+        statuses,
+      }: {
+        bookingNumber: string;
+        originalPlanningDate: Date | null;
+        statuses: readonly TripStatus[];
+      }) =>
+        Promise.resolve(
+          trips.filter(
+            (trip) =>
+              trip.bookingNumber === bookingNumber &&
+              sameOriginalDate(trip, originalPlanningDate) &&
+              statuses.includes(trip.status as TripStatus),
+          ),
         ),
     ),
     findById: jest.fn((id: string) =>
@@ -446,6 +517,12 @@ export function buildHarness(storageDirectory: string) {
     ),
     tripService,
     pdfDocumentService,
+    /**
+     * Exposed so a test can assert WHICH lookup a path used, not only what it
+     * returned. Cost Confirmations must reach the date-blind booking lookup and
+     * never the identity one, and only the call itself shows that.
+     */
+    tripRepository,
     documents: new TripDocumentsService(tripRepository, logger),
     /** The real resolver, for the derived `latestUpdate` a Trip reports. */
     latestUpdateOf: async (tripId: string) => {

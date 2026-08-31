@@ -23,6 +23,36 @@ const BOOKING = "ANRDUB2602247";
 /** The canonical form. A document prints `EUCU 455075/3`; a Trip holds this. */
 const CONTAINER = "EUCU4550753";
 
+/**
+ * The transport date, and the third part of the identity.
+ *
+ * Every document in this spec states it, because a revision can only reach a
+ * Trip that was ordered for the same date — that is what identity now means. A
+ * document naming another date describes another transport, and the tests for
+ * that live in their own describe below.
+ */
+const TRANSPORT_DATE = "2025-05-22";
+
+/** The same date as a Trip stores it. */
+const TRANSPORT_DATE_UTC = new Date(`${TRANSPORT_DATE}T00:00:00.000Z`);
+
+/** Exact date comparison, with absence as a value rather than a wildcard. */
+function sameOriginalDate(trip: Trip, date: Date | null): boolean {
+  return trip.originalPlanningDate === null || date === null
+    ? trip.originalPlanningDate === date
+    : trip.originalPlanningDate.getTime() === date.getTime();
+}
+
+/** What a document says about which Trip it is. */
+function identity(overrides: Record<string, unknown> = {}) {
+  return {
+    bookingNumber: BOOKING,
+    containerNumber: CONTAINER,
+    originalPlanningDate: TRANSPORT_DATE_UTC,
+    ...overrides,
+  };
+}
+
 function buildTrip(overrides: Partial<Trip> = {}): Trip {
   return {
     id: "trip-1",
@@ -66,7 +96,7 @@ function buildDocument(
     terminal: "Quay 869",
     destinationCity: "Lessines",
     destinationCountry: "Belgium",
-    planningDate: "2025-05-30",
+    planningDate: TRANSPORT_DATE,
     startTime: "07:00",
     endTime: "15:00",
     direction: "DELIVERY",
@@ -80,6 +110,7 @@ describe("TripRevisionService", () => {
   let history: unknown[];
   let repository: {
     findManyByBookingNumber: jest.Mock;
+    findManyByBookingNumberAndOriginalDate: jest.Mock;
     findByIdentity: jest.Mock;
     findByBookingNumber: jest.Mock;
     setStatus: jest.Mock;
@@ -113,20 +144,44 @@ describe("TripRevisionService", () => {
       ),
       findByIdentity: jest.fn(
         ({
-          identity,
+          identity: wanted,
           statuses,
         }: {
-          identity: { bookingNumber: string; containerNumber: string | null };
+          identity: {
+            bookingNumber: string;
+            containerNumber: string | null;
+            originalPlanningDate: Date | null;
+          };
           statuses: readonly TripStatus[];
         }) =>
           Promise.resolve(
             stored.find(
               (trip) =>
-                trip.bookingNumber === identity.bookingNumber &&
+                trip.bookingNumber === wanted.bookingNumber &&
                 // The real rule: absent is a value, so `null` matches `null`.
-                trip.containerNumber === identity.containerNumber &&
+                trip.containerNumber === wanted.containerNumber &&
+                sameOriginalDate(trip, wanted.originalPlanningDate) &&
                 statuses.includes(trip.status),
             ) ?? null,
+          ),
+      ),
+      findManyByBookingNumberAndOriginalDate: jest.fn(
+        ({
+          bookingNumber,
+          originalPlanningDate,
+          statuses,
+        }: {
+          bookingNumber: string;
+          originalPlanningDate: Date | null;
+          statuses: readonly TripStatus[];
+        }) =>
+          Promise.resolve(
+            stored.filter(
+              (trip) =>
+                trip.bookingNumber === bookingNumber &&
+                sameOriginalDate(trip, originalPlanningDate) &&
+                statuses.includes(trip.status),
+            ),
           ),
       ),
       findByBookingNumber: jest.fn(
@@ -188,7 +243,7 @@ describe("TripRevisionService", () => {
     it("moves an OPEN Trip to CANCELLED", async () => {
       stored.push(buildTrip());
 
-      const outcome = await service.cancelByIdentity({ bookingNumber: BOOKING, containerNumber: CONTAINER });
+      const outcome = await service.cancelByIdentity(identity());
 
       expect(outcome).toBe("CANCELLED");
       expect(stored[0].status).toBe(TripStatus.CANCELLED);
@@ -197,7 +252,7 @@ describe("TripRevisionService", () => {
     it("does nothing to a Trip that is already CANCELLED", async () => {
       stored.push(buildTrip({ status: TripStatus.CANCELLED }));
 
-      const outcome = await service.cancelByIdentity({ bookingNumber: BOOKING, containerNumber: CONTAINER });
+      const outcome = await service.cancelByIdentity(identity());
 
       expect(outcome).toBe("ALREADY_CANCELLED");
       expect(repository.setStatus).not.toHaveBeenCalled();
@@ -210,7 +265,7 @@ describe("TripRevisionService", () => {
     it("leaves a CLOSED Trip exactly as it is", async () => {
       stored.push(buildTrip({ status: TripStatus.CLOSED }));
 
-      const outcome = await service.cancelByIdentity({ bookingNumber: BOOKING, containerNumber: CONTAINER });
+      const outcome = await service.cancelByIdentity(identity());
 
       expect(outcome).toBe("REFUSED_CLOSED");
       expect(stored[0].status).toBe(TripStatus.CLOSED);
@@ -218,7 +273,7 @@ describe("TripRevisionService", () => {
     });
 
     it("creates nothing when no Trip holds the booking number", async () => {
-      const outcome = await service.cancelByIdentity({ bookingNumber: "ANRDUB9999999", containerNumber: null });
+      const outcome = await service.cancelByIdentity(identity({ bookingNumber: "ANRDUB9999999", containerNumber: null }));
 
       expect(outcome).toBe("NO_MATCHING_TRIP");
       expect(stored).toEqual([]);
@@ -229,8 +284,8 @@ describe("TripRevisionService", () => {
     it("is idempotent", async () => {
       stored.push(buildTrip());
 
-      const first = await service.cancelByIdentity({ bookingNumber: BOOKING, containerNumber: CONTAINER });
-      const second = await service.cancelByIdentity({ bookingNumber: BOOKING, containerNumber: CONTAINER });
+      const first = await service.cancelByIdentity(identity());
+      const second = await service.cancelByIdentity(identity());
 
       expect(first).toBe("CANCELLED");
       expect(second).toBe("ALREADY_CANCELLED");
@@ -242,10 +297,7 @@ describe("TripRevisionService", () => {
       stored.push(buildTrip({ id: "trip-1", bookingNumber: "ANRDUB2790449" }));
       stored.push(buildTrip({ id: "trip-2", bookingNumber: "ANRDUB2790528" }));
 
-      await service.cancelByIdentity({
-        bookingNumber: "ANRDUB2790528",
-        containerNumber: CONTAINER,
-      });
+      await service.cancelByIdentity(identity({ bookingNumber: "ANRDUB2790528" }));
 
       // Same city, same date, same container type — only the booking decides.
       expect(stored[0].status).toBe(TripStatus.OPEN);
@@ -256,7 +308,7 @@ describe("TripRevisionService", () => {
       stored.push(buildTrip());
       repository.setStatus.mockRejectedValue(new Error("database unavailable"));
 
-      await expect(service.cancelByIdentity({ bookingNumber: BOOKING, containerNumber: CONTAINER })).rejects.toThrow();
+      await expect(service.cancelByIdentity(identity())).rejects.toThrow();
       expect(stored[0].status).toBe(TripStatus.OPEN);
     });
   });
@@ -338,26 +390,40 @@ describe("TripRevisionService", () => {
     });
 
     /*
-     * The planned date is the operator's while they have moved it, and the
-     * document's while they have not. `originalPlanningDate` always follows the
-     * document, because that is what the document said.
+     * ── THE TWO DATES, AND WHICH ONE A REVISION MAY TOUCH ────────────────────
+     * `originalPlanningDate` is the identity date and is fixed when the Trip is
+     * created. A revision can only reach this Trip by naming that same date, so
+     * there is nothing for it to change — and it does not write the column at
+     * all, which is what makes identity drift impossible rather than merely
+     * unlikely.
+     *
+     * `planningDate` is the operator's. It is left alone once they have moved
+     * it, and otherwise follows the document.
      */
-    it("follows the document's date while the operator has not moved it", async () => {
+    it("leaves the identity date exactly as it was", async () => {
       stored.push(buildTrip());
 
       await service.applyDocumentRevision(buildDocument());
 
-      expect(stored[0].planningDate).toEqual(new Date("2025-05-30T00:00:00.000Z"));
-      expect(stored[0].originalPlanningDate).toEqual(
-        new Date("2025-05-30T00:00:00.000Z"),
-      );
+      expect(stored[0].originalPlanningDate).toEqual(TRANSPORT_DATE_UTC);
     });
 
-    it("keeps a date the operator moved, and still records the document's", async () => {
+    it("never writes the identity date, even to the same value", async () => {
+      stored.push(buildTrip());
+
+      await service.applyDocumentRevision(buildDocument());
+
+      expect(repository.update).toHaveBeenCalled();
+
+      for (const [, written] of repository.update.mock.calls) {
+        expect(written).not.toHaveProperty("originalPlanningDate");
+      }
+    });
+
+    it("keeps the operator's date on a Trip they re-planned", async () => {
       stored.push(
         buildTrip({
-          originalPlanningDate: new Date("2025-05-22T00:00:00.000Z"),
-          // Re-planned by hand to another day.
+          // Re-planned by hand to another day. Its identity is unchanged.
           planningDate: new Date("2025-05-26T00:00:00.000Z"),
         }),
       );
@@ -365,9 +431,114 @@ describe("TripRevisionService", () => {
       await service.applyDocumentRevision(buildDocument());
 
       expect(stored[0].planningDate).toEqual(new Date("2025-05-26T00:00:00.000Z"));
-      expect(stored[0].originalPlanningDate).toEqual(
-        new Date("2025-05-30T00:00:00.000Z"),
+      expect(stored[0].originalPlanningDate).toEqual(TRANSPORT_DATE_UTC);
+    });
+
+    /**
+     * A Trip created by hand may have no planned date at all. The document
+     * supplies one, which is the case that keeps this branch alive.
+     */
+    it("fills a planning date the Trip does not have", async () => {
+      stored.push(buildTrip({ planningDate: null }));
+
+      await service.applyDocumentRevision(buildDocument());
+
+      expect(stored[0].planningDate).toEqual(TRANSPORT_DATE_UTC);
+    });
+
+    /**
+     * ── AND A DOCUMENT FOR ANOTHER DATE IS ANOTHER TRANSPORT ─────────────────
+     * The same booking and container ordered again a week later. It does not
+     * revise this Trip; it does not reach it at all.
+     */
+    it("does not revise a Trip ordered for a different date", async () => {
+      stored.push(buildTrip());
+      const before = { ...stored[0] };
+
+      const result = await service.applyDocumentRevision(
+        buildDocument({ planningDate: "2025-05-29" }),
       );
+
+      expect(result.outcome).toBe("NO_MATCHING_TRIP");
+      expect(stored[0]).toEqual(before);
+    });
+
+    /**
+     * ── A DOCUMENT NEVER ERASES A CONTAINER ─────────────────────────────────
+     * A Loading is ordered before anyone knows which container will be picked
+     * up, so the order prints none and the operator enters it later from the
+     * driver. Every revision of that order still prints none.
+     *
+     * Writing the document's value straight through therefore deleted what the
+     * operator had entered, on every single UPDATE — and precisely for the
+     * Trips where the container matters most. `database_model.md` and
+     * `planningRules.md` both state the rule directly: a parser update must
+     * never erase a manually entered container number.
+     */
+    it("keeps a container the operator entered when the document names none", async () => {
+      stored.push(buildTrip({ containerNumber: "EUCU9999999" }));
+
+      await service.applyDocumentRevision(
+        buildDocument({ containerNumber: null }),
+      );
+
+      expect(stored[0].containerNumber).toBe("EUCU9999999");
+    });
+
+    it("does not report the container as a changed field", async () => {
+      stored.push(buildTrip({ containerNumber: "EUCU9999999" }));
+
+      const result = await service.applyDocumentRevision(
+        buildDocument({ containerNumber: null }),
+      );
+
+      expect(result.changedFields).not.toContain("containerNumber");
+    });
+
+    /**
+     * A revision can never CHANGE a container, and that falls out of the
+     * matching rule rather than being a rule of its own:
+     *
+     *   a document naming a container reaches only the Trip already holding it,
+     *   so what it writes is what was already there;
+     *   a document naming none is matched on the booking and the date, and
+     *   leaves the stored value alone.
+     *
+     * A document naming a DIFFERENT container therefore describes a different
+     * transport, and revises nothing here.
+     */
+    it("keeps the stored container when the document names another", async () => {
+      stored.push(buildTrip({ containerNumber: "EUCU9999999" }));
+
+      const result = await service.applyDocumentRevision(
+        buildDocument({ containerNumber: CONTAINER }),
+      );
+
+      expect(result.outcome).toBe("NO_MATCHING_TRIP");
+      expect(stored[0].containerNumber).toBe("EUCU9999999");
+    });
+
+    it("writes the same container back when the document repeats it", async () => {
+      stored.push(buildTrip({ containerNumber: CONTAINER }));
+
+      const result = await service.applyDocumentRevision(
+        buildDocument({ containerNumber: CONTAINER }),
+      );
+
+      expect(result.outcome).toBe("UPDATED");
+      expect(result.changedFields).not.toContain("containerNumber");
+      expect(stored[0].containerNumber).toBe(CONTAINER);
+    });
+
+    /** A Trip that never had one still ends up with none. */
+    it("leaves an absent container absent", async () => {
+      stored.push(buildTrip({ containerNumber: null }));
+
+      await service.applyDocumentRevision(
+        buildDocument({ containerNumber: null }),
+      );
+
+      expect(stored[0].containerNumber).toBeNull();
     });
 
     it("refuses a CLOSED Trip and changes nothing", async () => {

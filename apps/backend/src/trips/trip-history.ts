@@ -120,11 +120,33 @@ export interface FieldChange {
  * time — so that a Date object and the string a document carries can be
  * compared at all, and so the stored history reads as what the operator saw.
  */
+/**
+ * The container number a revision will actually store.
+ *
+ * A document that states none leaves the stored one alone — an order printed
+ * before the container was known is revised by documents that still print none,
+ * and the operator's entry must survive every one of them.
+ *
+ * Exported because the audit trail and the write have to agree: comparing
+ * against the document's bare null would record a change that never happened,
+ * and a history saying the container was cleared while it still sits on the
+ * Trip is worse than no history at all.
+ */
+export function revisedContainerNumber(
+  trip: Trip,
+  document: ImportedTripData,
+): string | null {
+  return document.containerNumber ?? trip.containerNumber;
+}
+
 export function detectFieldChanges(
   trip: Trip,
   document: ImportedTripData,
 ): FieldChange[] {
-  const incoming = toComparableDocument(document);
+  const incoming = {
+    ...toComparableDocument(document),
+    containerNumber: revisedContainerNumber(trip, document),
+  };
   const current = toComparableTrip(trip);
 
   return COMPARED_FIELDS.filter(

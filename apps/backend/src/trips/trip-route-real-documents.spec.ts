@@ -138,3 +138,96 @@ describe("real single-order documents", () => {
     ).toBe("Quay 869");
   });
 });
+
+/**
+ * ── NO ROUTE END IS EVER A COUNTRY ──────────────────────────────────────────
+ * A route reading `Quay 869 -> Belgium` names no destination: it matches no
+ * configured route and tells an operator nothing about where a truck is going.
+ *
+ * The route is built from the Trip's stored `destinationCity`, so the guarantee
+ * is really the parser's — a country can no longer become a city, and a city
+ * printed beside its country is separated structurally. What this asserts is
+ * the CONSEQUENCE: given the cities the parser actually produces, neither end
+ * of a route is ever one of the five country names.
+ */
+describe("a route never names a country", () => {
+  const FORBIDDEN = ["France", "Belgium", "Netherlands", "Luxembourg", "Germany"];
+
+  /** Every city the real fixtures produce, across both directions. */
+  const REAL_CITIES = [
+    "Avelgem",
+    "Beernem",
+    "Kallo",
+    "Saint Laurent Blangy",
+    "Tessenderlo",
+    "Evergem",
+    "Aubel",
+    "Raillencourt Ste Olle",
+    "Wimille",
+    "Bousbecque",
+    "Dourges",
+    "Antwerpen",
+    "Gondecourt",
+    "Lessines",
+    "Zemst",
+    "Warneton",
+    "Bilzen",
+    "Calais",
+    "Dendermonde",
+  ];
+
+  it.each(REAL_CITIES)("keeps %s intact as the destination", (city) => {
+    expect(
+      toTripRoute({
+        direction: TripDirection.DELIVERY,
+        terminal: "PSA Quay 869",
+        destinationCity: city,
+      }),
+    ).toEqual({ from: "Quay 869", to: city });
+  });
+
+  it.each(REAL_CITIES)("puts %s at the start of a collection", (city) => {
+    expect(
+      toTripRoute({
+        direction: TripDirection.COLLECTION,
+        terminal: "PSA Quay 869",
+        destinationCity: city,
+      }),
+    ).toEqual({ from: city, to: "Quay 869" });
+  });
+
+  it.each(REAL_CITIES)("never yields a country for %s", (city) => {
+    for (const direction of [
+      TripDirection.DELIVERY,
+      TripDirection.COLLECTION,
+    ]) {
+      const route = toTripRoute({
+        direction,
+        terminal: "PSA Quay 869",
+        destinationCity: city,
+      });
+
+      for (const end of [route?.from, route?.to]) {
+        expect(FORBIDDEN.map((name) => name.toLowerCase())).not.toContain(
+          String(end).trim().toLowerCase(),
+        );
+      }
+    }
+  });
+
+  /**
+   * The route layer does NOT repair a bad city, and must not be mistaken for
+   * the place that guarantees this. It renders what it is given; the guarantee
+   * is upstream, where the address is read. Asserted so nobody later removes
+   * the parser rule believing this layer covers it.
+   */
+  it("does not sanitise a city it is handed", () => {
+    expect(
+      toTripRoute({
+        direction: TripDirection.DELIVERY,
+        terminal: "Quay 869",
+        destinationCity: "Belgium",
+      }),
+    ).toEqual({ from: "Quay 869", to: "Belgium" });
+  });
+});

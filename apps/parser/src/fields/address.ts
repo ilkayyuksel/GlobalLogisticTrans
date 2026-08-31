@@ -1,5 +1,10 @@
 import { ExtractionError, missingField } from "../errors";
-import { COUNTRY_BY_POSTCODE_PREFIX, countryFromName } from "./country";
+import {
+  COUNTRY_BY_POSTCODE_PREFIX,
+  countryFromName,
+  isCountryName,
+  splitTrailingCountry,
+} from "./country";
 import { COLUMN_TOLERANCE, Fragment, ROW_TOLERANCE } from "../text/extract";
 import {
   findLabel,
@@ -82,9 +87,24 @@ const BRACKETED_POSTCODE = /^\[(\d{4,5})\]$/;
 /** The bracket, a company, a street and the city: anything less is truncated. */
 const MINIMUM_ADDRESS_LINES = 4;
 
-/** `Evergem,` is the same city as `Evergem`. */
+/**
+ * `Evergem,` is the same city as `Evergem` — and `Kallo, Belgium` is `Kallo`.
+ *
+ * The trailing country is removed here, in the one function every rule already
+ * passes its city through, so no rule can produce a city with a country stuck
+ * to it. The removal is structural: `splitTrailingCountry` only fires when the
+ * trailing words are exactly a known country name, so a real city is never
+ * truncated because its letters happen to resemble one.
+ */
 function toCityName(value: string): string {
-  return value.trim().replace(/[,;]+$/, "").trim();
+  const trimmed = value.trim().replace(/[,;]+$/, "").trim();
+
+  return splitTrailingCountry(trimmed)?.rest ?? trimmed;
+}
+
+/** The country a city line carried with it, when it carried one. */
+function countryOnCityLine(value: string): string | null {
+  return splitTrailingCountry(value.trim())?.country ?? null;
 }
 
 export interface ExtractedAddress {
@@ -124,9 +144,32 @@ export function extractAddress(
     );
   }
 
+  const city = toCityName(place.city);
+
+  /*
+   * ── THE INVARIANT, ENFORCED WHERE EVERY RULE MEETS ────────────────────────
+   * A destination city is never a country. Each rule above already declines the
+   * lines it can recognise as a country, but those are five separate defences
+   * and this is the one place all of them come back together — so the guarantee
+   * holds even if a future rule forgets, and it holds for a layout none of them
+   * anticipated.
+   *
+   * It REFUSES rather than falling through to a weaker rule. A block whose only
+   * candidate is a country states no city at all, and reporting the address as
+   * unreadable is the honest answer: a Trip routed to "Belgium" would match no
+   * configured route and would tell an operator nothing.
+   */
+  if (isCountryName(city)) {
+    throw new ExtractionError(
+      "MALFORMED_ADDRESS",
+      `The '${sectionHeader.text}' section names a country where its city should be. Read instead: ${JSON.stringify(joinText(block))}.`,
+      ["destinationCity"],
+    );
+  }
+
   return {
-    destinationCity: toTitleCase(place.city.trim()),
-    destinationCountry: place.country,
+    destinationCity: toTitleCase(city),
+    destinationCountry: place.country ?? countryOnCityLine(place.city),
     rawAddress: joinText(block.slice(0, place.lastLineIndex + 1)),
     section: sectionHeader.text.replace(/:$/, ""),
   };
@@ -217,7 +260,7 @@ function readPrefixedPostcode(block: readonly Fragment[]): ReadPlace | null {
    * declined and `readPostcodeCountryLine` takes it — which knows to look for
    * the city on the line beside it.
    */
-  if (countryFromName(city) !== null) {
+  if (isCountryName(city)) {
     return null;
   }
 
@@ -279,13 +322,24 @@ function readCountryLine(block: readonly Fragment[]): ReadPlace | null {
      * as nonsense in an export. The country still comes from the word below,
      * never from the number.
      */
-    const bare = BARE_POSTCODE_LINE.exec(cityLine);
+    const withPostcode = POSTCODE_THEN_CITY.exec(cityLine);
+    const city = toCityName(withPostcode ? withPostcode[1] : cityLine);
 
-    return {
-      city: toCityName(bare ? bare[2] : cityLine),
-      country,
-      lastLineIndex: index,
-    };
+    /*
+     * A city carries no digits; a street does — `Ketenislaan 1`, `Rue de Kan
+     * 7`. Without this, a block whose last two lines are a street and a country
+     * would store the STREET as the destination, which matches no route and
+     * misleads an operator. `cityAbove` refuses the same shape for the sibling
+     * layout, and the two must agree.
+     *
+     * The postcode form above is already reduced to its name by then, so
+     * `9940 Evergem,` still reads as `Evergem` and is unaffected.
+     */
+    if (city.length === 0 || /\d/.test(city)) {
+      return null;
+    }
+
+    return { city, country, lastLineIndex: index };
   }
 
   return null;
@@ -397,7 +451,7 @@ function cityAbove(
      * Lesseps", "Rue de Kan 7" — and so does the bracketed reference. This is
      * the same test `readBracketedPostcode` applies for the same reason.
      */
-    if (/\d/.test(line) || countryFromName(line) !== null) {
+    if (/\d/.test(line) || isCountryName(line)) {
       return null;
     }
 
@@ -409,6 +463,25 @@ function cityAbove(
 
 /** `62110` — a postcode occupying a line by itself. */
 const POSTCODE_ONLY_LINE = /^\d{4,5}$/;
+
+/**
+ * A postcode token followed by the city: `BE-8730 Beernem`, `9940 Evergem`,
+ * and — the reason the digit run is deliberately wide — `FR-6212603 Wimille`.
+ *
+ * ── WHY IT ACCEPTS MORE DIGITS THAN A POSTCODE HAS ──────────────────────────
+ * A real order prints `FR-6212603 Wimille`: the postcode with a three-digit
+ * suffix run onto it. `POSTCODE_LINE` requires four or five digits followed by
+ * a space and therefore declines it, and every other rule declined it too — so
+ * the whole string was stored as the destination, which is where the recorded
+ * city `Fr-6212603 Wimille` came from.
+ *
+ * A postcode must never become part of the city, whatever its length, so the
+ * leading number is dropped and the NAME after it is the city. The name must
+ * begin with a letter, which is what stops a house number from being read as
+ * one: `416 Boulevard Ferdinand` has only three digits and does not match at
+ * all.
+ */
+const POSTCODE_THEN_CITY = /^(?:[A-Za-z]{1,2}\s*-\s*)?\d{4,8}[\s,]+([A-Za-z].*)$/;
 
 /**
  * VARIATION 2 — a bare postcode: `2040 Antwerpen`, with no `BE-` prefix.
@@ -443,13 +516,19 @@ function readBarePostcode(
      * "a country is never a city" must not depend on the order of the rules
      * that happen to run before this one.
      */
-    if (countryFromName(city) !== null) {
+    if (isCountryName(city)) {
       continue;
     }
 
     return {
       city: toCityName(city),
-      country: countryForBarePostcode(postcode, fragments),
+      /*
+       * `9940 Evergem, Belgium` states its country on the city's own line. The
+       * postcode search stays the primary evidence; this is what the line
+       * itself said, used only when the document states nothing better.
+       */
+      country:
+        countryForBarePostcode(postcode, fragments) ?? countryOnCityLine(city),
       lastLineIndex: index,
     };
   }
@@ -499,13 +578,29 @@ function readBracketedPostcode(block: readonly Fragment[]): ReadPlace | null {
   }
 
   const lastIndex = block.length - 1;
-  const candidate = toCityName(block[lastIndex].text);
+  const lastLine = block[lastIndex].text;
+  const candidate = toCityName(lastLine);
 
-  if (candidate.length === 0 || /\d/.test(candidate)) {
+  /*
+   * A country is not a city, here as everywhere else. This rule is the last
+   * resort and takes the final line of the block, so without this a block
+   * ending in `France` would offer the country as the destination — which is
+   * exactly what the invariant at the top of this file then has to refuse.
+   */
+  if (candidate.length === 0 || /\d/.test(candidate) || isCountryName(candidate)) {
     return null;
   }
 
-  return { city: candidate, country: null, lastLineIndex: lastIndex };
+  /*
+   * `Kallo, Belgium` on the final line is a city AND a country. The country is
+   * kept rather than discarded — the document stated it plainly, and this rule
+   * is the only one that would otherwise report the country as absent.
+   */
+  return {
+    city: candidate,
+    country: countryOnCityLine(lastLine),
+    lastLineIndex: lastIndex,
+  };
 }
 
 /**

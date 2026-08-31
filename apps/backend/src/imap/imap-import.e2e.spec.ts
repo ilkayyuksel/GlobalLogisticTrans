@@ -61,6 +61,25 @@ const PDF_DOCUMENT_ID = "d2222222-2222-4222-8222-222222222222";
 const TRIP_GROUP_ID = "97777777-7777-4777-8777-777777777777";
 const TRUSTED_SENDER = "orders@carrier.test";
 
+/**
+ * Exact date comparison, with absence as a value rather than a wildcard.
+ *
+ * The stored value comes from whatever the import wrote, so a Date and an ISO
+ * string are reduced to the same calendar day before comparing.
+ */
+function sameOriginalDate(
+  trip: Record<string, unknown>,
+  wanted: Date | null,
+): boolean {
+  const stored = (trip.originalPlanningDate ?? null) as Date | string | null;
+
+  if (stored === null || wanted === null) {
+    return stored === null && wanted === null;
+  }
+
+  return new Date(stored).getTime() === wanted.getTime();
+}
+
 function readFixture(name: string): Uint8Array {
   return new Uint8Array(readFileSync(join(FIXTURES, name)));
 }
@@ -162,13 +181,20 @@ describe("IMAP import, end to end with a real transport order", () => {
             ),
           ),
       ),
-      /** The identity rule, with ABSENT compared as a value rather than unknown. */
+      /**
+       * The identity rule: booking, container AND the original transport date,
+       * with ABSENT compared as a value rather than as unknown.
+       */
       findByIdentity: jest.fn(
         ({
           identity,
           statuses,
         }: {
-          identity: { bookingNumber: string; containerNumber: string | null };
+          identity: {
+            bookingNumber: string;
+            containerNumber: string | null;
+            originalPlanningDate: Date | null;
+          };
           statuses: readonly TripStatus[];
         }) =>
           Promise.resolve(
@@ -177,8 +203,33 @@ describe("IMAP import, end to end with a real transport order", () => {
                 trip.bookingNumber === identity.bookingNumber &&
                 ((trip as { containerNumber?: string | null }).containerNumber ??
                   null) === identity.containerNumber &&
+                sameOriginalDate(trip, identity.originalPlanningDate) &&
                 statuses.includes(trip.status as TripStatus),
             ) ?? null,
+          ),
+      ),
+      /**
+       * The booking-only half of document matching, narrowed to one transport
+       * date. Separate from `findManyByBookingNumber` above, which is the Cost
+       * Confirmation lookup and stays date-blind.
+       */
+      findManyByBookingNumberAndOriginalDate: jest.fn(
+        ({
+          bookingNumber,
+          originalPlanningDate,
+          statuses,
+        }: {
+          bookingNumber: string;
+          originalPlanningDate: Date | null;
+          statuses: readonly TripStatus[];
+        }) =>
+          Promise.resolve(
+            createdTrips.filter(
+              (trip) =>
+                trip.bookingNumber === bookingNumber &&
+                sameOriginalDate(trip, originalPlanningDate) &&
+                statuses.includes(trip.status as TripStatus),
+            ),
           ),
       ),
       findByBookingNumber: jest.fn(

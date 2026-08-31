@@ -1,6 +1,7 @@
 import { Injectable } from "@nestjs/common";
 import { Prisma, Trip, TripGroup, TripStatus } from "@prisma/client";
 
+import { bookingNumberDigits } from "../common/booking-digits";
 import { PdfDocumentRepository } from "../pdf-documents/pdf-document.repository";
 import { TripCustomPropertyRepository } from "../trip-custom-properties/trip-custom-property.repository";
 import { TripHistoryEvent } from "./trip-history";
@@ -72,6 +73,25 @@ export interface TripPage {
 export interface TripIdentity {
   readonly bookingNumber: string;
   readonly containerNumber: string | null;
+  /**
+   * The transport date the document stated, and the third part of the identity.
+   *
+   * ── WHY THE DATE BELONGS HERE ─────────────────────────────────────────────
+   * The same booking and the same container legitimately come round again on a
+   * later date — the same box, the same reference, a new transport. Without the
+   * date those are one identity, so the second order could not be imported at
+   * all.
+   *
+   * ── AND WHY IT IS THE *ORIGINAL* DATE ─────────────────────────────────────
+   * `original_planning_date`, never `planning_date`. The current planning date
+   * is the operator's to move, and identity that moved with it would mean a
+   * later UPDATE or CANCEL for the transport as ORDERED could no longer find
+   * the Trip it belongs to.
+   *
+   * Null on a Trip created by hand with no date at all, and null is a value
+   * here rather than a wildcard — exactly as it is for the container number.
+   */
+  readonly originalPlanningDate: Date | null;
 }
 
 export interface TripIdentityQuery {
@@ -86,6 +106,25 @@ export interface BookingNumberQuery {
   /** Only these statuses count as holding the booking number. */
   statuses: readonly TripStatus[];
   excludeTripId?: string;
+}
+
+/** A booking number narrowed to one transport date. See the method's note. */
+export interface BookingNumberOnDateQuery extends BookingNumberQuery {
+  readonly originalPlanningDate: Date | null;
+}
+
+/**
+ * A booking number reduced to its digits — the Cost Confirmation fallback.
+ *
+ * Deliberately NOT an extension of `BookingNumberQuery`: it carries digits
+ * rather than a booking number, and the two must not be passed to each other's
+ * lookup by accident.
+ */
+export interface BookingDigitsQuery {
+  readonly digits: string;
+  /** Only these statuses count as holding the booking number. */
+  readonly statuses: readonly TripStatus[];
+  readonly excludeTripId?: string;
 }
 
 /** The time a planner asked to sort a day's work by. */
@@ -365,9 +404,38 @@ export class TripRepository {
       where: {
         bookingNumber: query.identity.bookingNumber,
         containerNumber: query.identity.containerNumber,
+        // Exact, including null. Prisma renders `null` as `IS NULL` here, so a
+        // Trip with no original date is found only by a query for none.
+        originalPlanningDate: query.identity.originalPlanningDate,
         status: { in: [...query.statuses] },
         ...(query.excludeTripId ? { id: { not: query.excludeTripId } } : {}),
       },
+    });
+  }
+
+  /**
+   * Every Trip holding a booking number ON ONE ORIGINAL DATE.
+   *
+   * The booking-only half of document matching, and it is deliberately NOT
+   * `findManyByBookingNumber` with an extra argument. That method belongs to
+   * Cost Confirmations, which match on the booking alone and must keep doing
+   * so; giving it an optional date would leave one call away from quietly
+   * date-scoping money that is not date-scoped.
+   *
+   * Like the identity lookup, the date is matched exactly — a null original
+   * date is found only by a document that states none.
+   */
+  findManyByBookingNumberAndOriginalDate(
+    query: BookingNumberOnDateQuery,
+  ): Promise<Trip[]> {
+    return this.prisma.trip.findMany({
+      where: {
+        bookingNumber: query.bookingNumber,
+        originalPlanningDate: query.originalPlanningDate,
+        status: { in: [...query.statuses] },
+        ...(query.excludeTripId ? { id: { not: query.excludeTripId } } : {}),
+      },
+      orderBy: { createdAt: "asc" },
     });
   }
 
@@ -389,6 +457,41 @@ export class TripRepository {
       },
       orderBy: { createdAt: "asc" },
     });
+  }
+
+  /**
+   * Every Trip whose booking number has the SAME DIGITS as the one given.
+   *
+   * The Cost Confirmation fallback, and its only caller. A confirmation may
+   * print `DUB2793554` or `2793554` for the Trip's `ANRDUB2793554`, so the
+   * digits are what the two systems agree on. The comparison is exact equality
+   * of those digit strings — never a substring test.
+   *
+   * ── WHY THE COMPARISON HAPPENS HERE RATHER THAN IN SQL ──────────────────
+   * The digits are derived, so a database filter would need
+   * `regexp_replace(...)`, which means `$queryRaw` — and raw results skip
+   * Prisma's column mapping, handing back `booking_number` instead of
+   * `bookingNumber` for every consumer of a Trip. Reading the eligible rows and
+   * comparing here keeps one query and correctly typed Trips.
+   *
+   * The set read is already narrow: DELETED Trips are excluded by the caller's
+   * status filter, exactly as they are for every other booking lookup. If this
+   * ever needs to scale, the next step is an expression index and a raw query
+   * returning ids only — not a second normalisation rule.
+   */
+  async findManyByBookingDigits(query: BookingDigitsQuery): Promise<Trip[]> {
+    const trips = await this.prisma.trip.findMany({
+      where: {
+        bookingNumber: { not: null },
+        status: { in: [...query.statuses] },
+        ...(query.excludeTripId ? { id: { not: query.excludeTripId } } : {}),
+      },
+      orderBy: { createdAt: "asc" },
+    });
+
+    return trips.filter(
+      (trip) => bookingNumberDigits(trip.bookingNumber) === query.digits,
+    );
   }
 
   /** The Trip currently holding a booking number, if any. */

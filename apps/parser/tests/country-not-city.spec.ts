@@ -1,0 +1,345 @@
+import { extractAddress } from "../src/fields/address";
+import { isCountryName, splitTrailingCountry } from "../src/fields/country";
+import { ExtractionError } from "../src/errors";
+import { Fragment } from "../src/text/extract";
+
+/**
+ * ── A COUNTRY IS NEVER A CITY ───────────────────────────────────────────────
+ * The five countries these documents name — France, Belgium, Netherlands,
+ * Luxembourg, Germany — must never reach `destinationCity`. A Trip routed to
+ * "Belgium" matches no configured route and tells an operator nothing about
+ * where a truck is going, and the same value in an export is simply wrong.
+ *
+ * The vocabulary in `country.ts` is the single source of that list: the same
+ * table that RECOGNISES a country is the one that FORBIDS it as a city, so the
+ * two can never drift apart. Nothing else is a country as far as this parser is
+ * concerned — Spain and Italy are not in the table and are not treated as
+ * countries here.
+ *
+ * These tests exercise the field rules on positioned text rather than through a
+ * PDF, in the same shape the fixtures print, so a layout the business has not
+ * sent us yet can be covered without inventing a document to hold it.
+ * ────────────────────────────────────────────────────────────────────────────
+ */
+
+const header: Fragment = { page: 1, x: 26, y: 400, text: "LOADING 1:" };
+
+/** Mirrors the fixtures: section header, then the value column at x98. */
+function addressBlock(lines: readonly string[]): Fragment[] {
+  const fragments: Fragment[] = [
+    { page: 1, x: 26, y: 400, text: "LOADING 1:" },
+    { page: 1, x: 30, y: 380, text: "Address:" },
+  ];
+
+  lines.forEach((text, index) =>
+    fragments.push({ page: 1, x: 98, y: 380 - index * 12, text }),
+  );
+  fragments.push({
+    page: 1,
+    x: 32,
+    y: 380 - lines.length * 12,
+    text: "Date/time:",
+  });
+
+  return fragments;
+}
+
+function cityOf(lines: readonly string[]): string {
+  return extractAddress(addressBlock(lines), header).destinationCity;
+}
+
+/** The five names, exactly as the documents print them in English. */
+const FORBIDDEN = ["France", "Belgium", "Netherlands", "Luxembourg", "Germany"];
+
+describe("the predicate that decides what a country is", () => {
+  it.each(FORBIDDEN)("recognises %s", (name) => {
+    expect(isCountryName(name)).toBe(true);
+  });
+
+  it.each(["belgium", " BELGIUM ", "france", "  Germany", "netherlands "])(
+    "is case-insensitive and trimmed for %p",
+    (value) => {
+      expect(isCountryName(value)).toBe(true);
+    },
+  );
+
+  /** Real destinations from the fixtures. None of them is a country. */
+  it.each([
+    "Kallo",
+    "Beernem",
+    "Avelgem",
+    "Dourges",
+    "Antwerpen",
+    "Saint Laurent Blangy",
+    "Raillencourt Ste Olle",
+    "Wimille",
+    "Bousbecque",
+    "Tessenderlo",
+    "Evergem",
+    "Aubel",
+  ])("does not claim %s is a country", (city) => {
+    expect(isCountryName(city)).toBe(false);
+  });
+
+  /**
+   * The list is exactly the countries these documents use. It is not quietly
+   * wider: a country this parser has never seen is not a country here, and
+   * treating one as such would start rejecting cities on no evidence.
+   */
+  it.each(["Spain", "Italy", "Austria", "Switzerland", "Poland"])(
+    "does not treat %s as a known country",
+    (name) => {
+      expect(isCountryName(name)).toBe(false);
+    },
+  );
+});
+
+/**
+ * The split is STRUCTURAL: the trailing words must be exactly a known country
+ * name. It is not a substring cleanup, which is what keeps a real city intact.
+ */
+describe("splitting a country off the end of a line", () => {
+  it.each([
+    ["Kallo, Belgium", "Kallo", "Belgium"],
+    ["Kallo Belgium", "Kallo", "Belgium"],
+    ["Dourges, France", "Dourges", "France"],
+    ["9940 Evergem, Belgium", "9940 Evergem", "Belgium"],
+  ])("splits %p", (line, rest, country) => {
+    expect(splitTrailingCountry(line)).toEqual({ rest, country });
+  });
+
+  /** Nothing precedes the country, so there is no city to be had. */
+  it.each(["Belgium", " France ", "Germany"])(
+    "refuses to split %p, which names no city",
+    (line) => {
+      expect(splitTrailingCountry(line)).toBeNull();
+    },
+  );
+
+  it.each([
+    "Kallo",
+    "Saint Laurent Blangy",
+    "Raillencourt Ste Olle",
+    "Bergen Op Zoom",
+  ])("leaves %p alone", (line) => {
+    expect(splitTrailingCountry(line)).toBeNull();
+  });
+});
+
+/**
+ * A block whose only candidate is a country states no city at all. It is
+ * REFUSED rather than guessed at — a wrong destination is worse than an address
+ * reported as unreadable.
+ */
+describe("a country standing alone", () => {
+  it.each(FORBIDDEN)("refuses %s as the whole address", (country) => {
+    expect(() => cityOf([country])).toThrow(ExtractionError);
+  });
+
+  it.each(["belgium", "BELGIUM", " Belgium ", "Belgium,"])(
+    "refuses %p whatever its casing or padding",
+    (printed) => {
+      expect(() => cityOf([printed])).toThrow(ExtractionError);
+    },
+  );
+
+  /** Even with a full block around it, a country is not promoted to a city. */
+  it("refuses a country as the last line of a complete block", () => {
+    expect(() =>
+      cityOf(["[9130]", "DP World", "Ketenislaan 1", "Belgium"]),
+    ).toThrow(ExtractionError);
+  });
+});
+
+/**
+ * ── THE CITY AND THE COUNTRY ON ONE LINE ────────────────────────────────────
+ * Some orders print them together. Stored as read, the destination becomes
+ * "Kallo, Belgium" and the route reads `Quay 869 -> Kallo, Belgium`.
+ */
+describe("a city and a country sharing one line", () => {
+  it.each([
+    ["Kallo, Belgium", "Kallo", "Belgium"],
+    ["Kallo Belgium", "Kallo", "Belgium"],
+    ["Dourges, France", "Dourges", "France"],
+    ["Bousbecque France", "Bousbecque", "France"],
+    ["Venlo, Netherlands", "Venlo", "Netherlands"],
+    ["Aachen Germany", "Aachen", "Germany"],
+  ])("reads %p as %s in %s", (printed, city, country) => {
+    const result = extractAddress(
+      addressBlock(["[9130]", "DP World", "Ketenislaan 1", printed]),
+      header,
+    );
+
+    expect(result.destinationCity).toBe(city);
+    expect(result.destinationCountry).toBe(country);
+  });
+
+  it("keeps the country when the city line carries a postcode too", () => {
+    const result = extractAddress(
+      addressBlock([
+        "[9940]",
+        "Stukwerkers",
+        "Rigakaai 14",
+        "9940 Evergem, Belgium",
+      ]),
+      header,
+    );
+
+    expect(result.destinationCity).toBe("Evergem");
+    expect(result.destinationCountry).toBe("Belgium");
+  });
+
+  it("splits the prefixed form too", () => {
+    const result = extractAddress(
+      addressBlock([
+        "[9130]",
+        "DP World",
+        "Ketenislaan 1",
+        "BE-9130 Kallo, Belgium",
+      ]),
+      header,
+    );
+
+    expect(result.destinationCity).toBe("Kallo");
+    expect(result.destinationCountry).toBe("Belgium");
+  });
+
+  /** The country on its own line is the layout that already worked. */
+  it("still reads the city when the country is on the next line", () => {
+    const result = extractAddress(
+      addressBlock(["[9130]", "DP World", "Ketenislaan 1", "Kallo", "Belgium"]),
+      header,
+    );
+
+    expect(result.destinationCity).toBe("Kallo");
+    expect(result.destinationCountry).toBe("Belgium");
+  });
+});
+
+/**
+ * ── A REAL CITY IS NEVER TRUNCATED ──────────────────────────────────────────
+ * The split fires only on an exact trailing country token. A city whose name
+ * merely contains those letters keeps every one of them.
+ */
+describe("real city names survive intact", () => {
+  it.each([
+    "Saint Laurent Blangy",
+    "Raillencourt Ste Olle",
+    "Saint-Martin-Au-Laert",
+  ])("keeps %s whole", (city) => {
+    expect(cityOf(["[59554]", "LENGLET", "Avenue Des Deux Vallees", city])).toBe(
+      city,
+    );
+  });
+
+  /** Nothing is stripped when the trailing word is not a country. */
+  it("does not strip a trailing word that is not a country", () => {
+    expect(cityOf(["[2040]", "Depot", "Havenweg 3", "Kallo Noord"])).toBe(
+      "Kallo Noord",
+    );
+  });
+});
+
+/**
+ * ── THE POSTCODE / COUNTRY LINE ─────────────────────────────────────────────
+ * `62110 France` is a postcode and a country, and holds no city at all. The
+ * city comes from the line beside it; where there is none, nothing is invented.
+ * This is the regression that once made the destination "France".
+ */
+describe("a postcode and a country sharing a line", () => {
+  it("takes the city from the line above, never the country", () => {
+    const result = extractAddress(
+      addressBlock([
+        "[62110]",
+        "AMD",
+        "416 Boulevard Ferdinand de Lesseps",
+        "Heinin-Beaumont",
+        "62110 France",
+      ]),
+      header,
+    );
+
+    expect(result.destinationCity).toBe("Heinin-Beaumont");
+    expect(result.destinationCountry).toBe("France");
+  });
+
+  it("guesses no city when only a street stands above it", () => {
+    expect(() =>
+      cityOf([
+        "[62110]",
+        "AMD",
+        "416 Boulevard Ferdinand de Lesseps",
+        "62110 France",
+      ]),
+    ).toThrow(ExtractionError);
+  });
+});
+
+/**
+ * ── A POSTCODE IS NEVER PART OF THE CITY EITHER ─────────────────────────────
+ * A real uploaded order prints `FR-6212603 Wimille` — the postcode with a
+ * three-digit suffix run onto it. No rule recognised that as a postcode line,
+ * so the whole string became the destination, and a Trip in the database still
+ * records the city as `Fr-6212603 Wimille`.
+ *
+ * The number is dropped and the name after it is the city, whatever the digit
+ * run's length. That is the same rule `readBarePostcode` applies to
+ * `9940 Evergem`; only the malformed length made this line escape it.
+ */
+describe("a malformed postcode in front of the city", () => {
+  const WIMILLE = [
+    "[62126]",
+    "Continentale Wimille",
+    "C&D Foods",
+    "Zone Industrielle de la Tresorerie",
+    "FR-6212603 Wimille",
+    "France",
+  ];
+
+  it("reads the city after the postcode, not the whole line", () => {
+    const result = extractAddress(addressBlock(WIMILLE), header);
+
+    expect(result.destinationCity).toBe("Wimille");
+    expect(result.destinationCountry).toBe("France");
+  });
+
+  it("keeps no digit in the city", () => {
+    expect(cityOf(WIMILLE)).not.toMatch(/\d/);
+  });
+
+  /** A house number is not a postcode: a street must still not become a city. */
+  it("refuses a street where the city should be", () => {
+    expect(() =>
+      cityOf([
+        "[62110]",
+        "AMD",
+        "Zone Industrielle",
+        "416 Boulevard Ferdinand de Lesseps",
+        "France",
+      ]),
+    ).toThrow(ExtractionError);
+  });
+});
+
+/**
+ * ── THE NEGATIVE ASSERTION, STATED DIRECTLY ─────────────────────────────────
+ * Whatever the block contains, the city that comes out is never one of the
+ * five — across every layout the parser knows.
+ */
+describe("no layout ever yields a country as the city", () => {
+  it.each([
+    [["[9130]", "DP World", "Ketenislaan 1", "Kallo, Belgium"]],
+    [["[9130]", "DP World", "Ketenislaan 1", "BE-9130 Kallo"]],
+    [["[62110]", "AMD", "Boulevard Ferdinand", "Heinin-Beaumont", "62110 France"]],
+    [["[8730]", "Company", "Street 1", "BE-8730 Beernem", "Belgium"]],
+    [["[2040]", "Company", "Street 1", "2040 Antwerpen", "Belgium"]],
+    [["[9940]", "Company", "Street 1", "9940 Evergem,", "Belgium"]],
+  ])("never yields a country from %p", (lines) => {
+    const city = cityOf(lines);
+
+    expect(isCountryName(city)).toBe(false);
+    expect(FORBIDDEN.map((name) => name.toLowerCase())).not.toContain(
+      city.trim().toLowerCase(),
+    );
+  });
+});

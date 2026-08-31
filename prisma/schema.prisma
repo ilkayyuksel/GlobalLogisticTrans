@@ -348,14 +348,16 @@ model Trip {
   /// DIFFERENT booking numbers and are linked by trip_group_id instead.
   ///
   /// Not unique on its own: a booking may carry several containers, and each is
-  /// its own Trip. The IDENTITY is (booking_number, container_number); see the
-  /// note on container_number below.
+  /// its own Trip. The IDENTITY is
+  /// (booking_number, container_number, original_planning_date); see the notes
+  /// on those two columns below.
   bookingNumber   String? @map("booking_number") @db.Text
   /// Empty on a Loading until the driver reports the container.
   ///
-  /// Part of the Trip's IDENTITY together with booking_number, and ABSENT is
-  /// part of it: a COLLECTION fetches an empty container the document cannot
-  /// name, so (booking, NULL) identifies exactly one Trip.
+  /// Part of the Trip's IDENTITY together with booking_number and
+  /// original_planning_date, and ABSENT is part of it: a COLLECTION fetches an
+  /// empty container the document cannot name, so (booking, NULL, date)
+  /// identifies exactly one Trip.
   ///
   /// Enforced by a hand-written partial index, `trip_identity_key`, because
   /// Prisma can express neither half of what it needs: `NULLS NOT DISTINCT`, so

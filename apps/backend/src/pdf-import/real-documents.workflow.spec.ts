@@ -61,46 +61,56 @@ const CANCEL_DOCUMENTS: readonly {
   file: string;
   booking: string;
   container: string | null;
+  /** The transport date the file prints, and the third part of the identity. */
+  date: string;
 }[] = [
   {
     file: "CANCEL/cancelled_transportorder1353889.pdf",
     booking: "ANRBEL2772352",
     container: "EUCU2000249",
+    date: "2026-07-06",
   },
   {
     file: "CANCEL/cancelled_transportorder1354204.pdf",
     booking: "ANRDUB2767189",
     container: null,
+    date: "2026-07-07",
   },
   {
     file: "CANCEL/cancelled_transportorder1365387.pdf",
     booking: "DUBANR2776470",
     container: "EUCU4551322",
+    date: "2026-08-07",
   },
   {
     file: "CANCEL/cancelled_transportorder1367320.pdf",
     booking: "ANRCRK2786825",
     container: null,
+    date: "2026-08-13",
   },
   {
     file: "CANCEL/cancelled_transportorder1367583.pdf",
     booking: "ANRCRK2786827",
     container: null,
+    date: "2026-08-14",
   },
   {
     file: "CANCEL/cancelled_transportorder1367584.pdf",
     booking: "ANRDUB2787843",
     container: null,
+    date: "2026-08-14",
   },
   {
     file: "CANCEL/cancelled_transportorder1369485.pdf",
     booking: "ANRDUB2790203",
     container: null,
+    date: "2026-08-19",
   },
   {
     file: "CANCEL/cancelled_transportorder1369488.pdf",
     booking: "ANRDUB2790211",
     container: null,
+    date: "2026-08-19",
   },
 ];
 
@@ -264,7 +274,7 @@ describe("every real UPDATE and CANCEL document, through the real workflow", () 
 
   describe.each(CANCEL_DOCUMENTS)(
     "$file as a cancellation",
-    ({ file, booking, container }) => {
+    ({ file, booking, container, date }) => {
     it("cancels the Trip it names and keeps everything", async () => {
       const created = await importAsNew(file.replace("CANCEL/", "CANCEL/"));
 
@@ -287,8 +297,10 @@ describe("every real UPDATE and CANCEL document, through the real workflow", () 
         terminal: "PSA Quay 869",
         destinationCity: "Antwerpen",
         destinationCountry: "Belgium",
-        originalPlanningDate: new Date("2026-08-19T00:00:00.000Z"),
-        planningDate: new Date("2026-08-19T00:00:00.000Z"),
+        // The document's own transport date: the third part of the identity
+        // it names, and what lets the cancellation reach this Trip.
+        originalPlanningDate: new Date(`${date}T00:00:00.000Z`),
+        planningDate: new Date(`${date}T00:00:00.000Z`),
         startTime: null,
         endTime: null,
         direction: "COLLECTION",
