@@ -92,6 +92,10 @@ describe("PdfUploadService", () => {
         {
           filename: "transport-order.pdf",
           ok: true,
+          // The upload accepts two families of document, so every result says
+          // which one it was: a confirmation creates no Trip, and a caller must
+          // not read that as an import of nothing.
+          kind: "TRANSPORT_ORDER",
           combination: false,
           trips: [tripResponse("ANRDUB2602247")],
         },

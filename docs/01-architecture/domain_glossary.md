@@ -40,6 +40,32 @@ A Combination consists of exactly two linked Trips.
 
 Both Trips belong to the same TripGroup.
 
+## What makes a Combination genuine
+
+A Combination is ONE transport order that printed two legs. All of the following
+must hold at once:
+
+- one transport order, that is one PDF document
+- exactly two Trips
+- one DELIVERY leg and one COLLECTION leg
+- the same `pdf_document_id`
+- the same parser group key / Combination structure
+
+Two Trips that came from DIFFERENT documents are never a Combination, and are
+never paired automatically — however closely their booking number, container
+number or date happen to match. Pairing across documents is a business decision,
+not something the import may infer.
+
+Sharing a TripGroup is therefore a CONSEQUENCE of being a Combination and never
+the definition of one. `isGenuineCombination()` must stay independent of
+`trip_group_id`, because a manual TripGroup is a different concept entirely — see
+below — and simplifying the check to "has a group" would price manual groups as
+Combinations.
+
+When one leg of a Combination already exists and is planned, a later document
+that recreates only the other leg does NOT join it to a Combination: grouping it
+would rearrange work somebody is already doing, which no document asks for.
+
 Both Trips may be planned independently.
 
 Both Trips may have different:
@@ -64,6 +90,23 @@ Its only purpose is grouping.
 A TripGroup contains no planning information.
 
 A TripGroup contains no pricing information.
+
+## Two things share this table
+
+A TripGroup is created automatically for a genuine Combination, and it may also
+be created by an operator to tie Trips together for their own reasons. The two
+must not be confused:
+
+| | Genuine Combination | Manual TripGroup |
+|---|---|---|
+| Created by | the import, from one document | an operator |
+| Members | exactly two, one of each direction | any Trips at all |
+| Claims about direction or pairing | yes | none |
+| Affects pricing | yes | never |
+
+A group carries no pricing meaning by itself. Only a genuine Combination attracts
+the Combination charges, and whether a Trip is one is decided by
+`combinationLegOf()` — never by the presence of a group.
 
 ---
 

@@ -578,8 +578,30 @@ describe("Dashboard PDF upload", () => {
     return {
       filename,
       ok: true,
+      kind: "TRANSPORT_ORDER" as const,
       combination: false,
       trips: [buildTrip({ id: `trip-${bookingNumber}`, bookingNumber })],
+    };
+  }
+
+  /** What the backend returns for an uploaded Cost Confirmation. */
+  function costConfirmationResult(filename: string) {
+    return {
+      filename,
+      ok: true,
+      kind: "COST_CONFIRMATION" as const,
+      combination: false,
+      trips: [],
+      costConfirmations: [
+        {
+          ccNumber: "4156173",
+          bookingNumber: "ANRDUB2794719",
+          tripId: "trip-cc",
+          amount: "68.75",
+          currency: "EUR",
+          outcome: "RECORDED" as const,
+        },
+      ],
     };
   }
 
@@ -731,6 +753,97 @@ describe("Dashboard PDF upload", () => {
     });
 
     /*
+     * ── A COST CONFIRMATION IS NOT AN IMPORT ────────────────────────────────
+     * It attaches a confirmed amount to a Trip that already exists and creates
+     * none. Reporting it as "Rit geïmporteerd" — or as an import of zero Trips
+     * — would tell the operator the opposite of what happened.
+     */
+    it("reports an uploaded Cost Confirmation as processed", async () => {
+      uploadMock.mockResolvedValue({
+        results: [costConfirmationResult("confirmation.pdf")],
+      });
+
+      renderDashboard();
+      await choose(pdf("confirmation.pdf"));
+      await userEvent.click(uploadButton());
+
+      expect(
+        await screen.findByText(/Cost Confirmation verwerkt/),
+      ).toBeInTheDocument();
+      expect(screen.queryByText(/Rit geïmporteerd/)).not.toBeInTheDocument();
+    });
+
+    it("shows the confirmation's number, booking and amount", async () => {
+      uploadMock.mockResolvedValue({
+        results: [costConfirmationResult("confirmation.pdf")],
+      });
+
+      renderDashboard();
+      await choose(pdf("confirmation.pdf"));
+      await userEvent.click(uploadButton());
+
+      const row = (await screen.findByText("confirmation.pdf")).closest(
+        "li",
+      ) as HTMLElement;
+
+      expect(row.textContent).toContain("CC4156173");
+      expect(row.textContent).toContain("EUR 68.75");
+      expect(
+        within(row).getByRole("link", { name: "ANRDUB2794719" }),
+      ).toHaveAttribute("href", "/trips/trip-cc");
+    });
+
+    /** The same confirmation again changed nothing, and says so. */
+    it("marks a confirmation that was already recorded", async () => {
+      const result = costConfirmationResult("confirmation.pdf");
+
+      uploadMock.mockResolvedValue({
+        results: [
+          {
+            ...result,
+            costConfirmations: [
+              { ...result.costConfirmations[0], outcome: "ALREADY_RECORDED" as const },
+            ],
+          },
+        ],
+      });
+
+      renderDashboard();
+      await choose(pdf("confirmation.pdf"));
+      await userEvent.click(uploadButton());
+
+      const row = (await screen.findByText("confirmation.pdf")).closest(
+        "li",
+      ) as HTMLElement;
+
+      expect(row.textContent).toContain("al eerder verwerkt");
+    });
+
+    /** A refused confirmation shows the backend's own reason, as orders do. */
+    it("shows the backend's reason when a confirmation is refused", async () => {
+      uploadMock.mockResolvedValue({
+        results: [
+          {
+            filename: "confirmation.pdf",
+            ok: false,
+            kind: "COST_CONFIRMATION" as const,
+            code: "IMPORT_COST_CONFIRMATION_REFUSED",
+            message:
+              'Cost confirmation "4156173" was not recorded: No Trip holds booking number ANRDUB2794719.',
+          },
+        ],
+      });
+
+      renderDashboard();
+      await choose(pdf("confirmation.pdf"));
+      await userEvent.click(uploadButton());
+
+      expect(
+        await screen.findByText(/No Trip holds booking number/),
+      ).toBeInTheDocument();
+    });
+
+    /*
      * A cancelled order creates no Trip. The row must say what happened rather
      * than report an import that did not occur.
      */
@@ -740,6 +853,7 @@ describe("Dashboard PDF upload", () => {
           {
             filename: "cancelled.pdf",
             ok: true,
+            kind: "TRANSPORT_ORDER" as const,
             combination: false,
             trips: [],
             cancellations: [
@@ -765,6 +879,7 @@ describe("Dashboard PDF upload", () => {
           {
             filename: "cancelled.pdf",
             ok: true,
+            kind: "TRANSPORT_ORDER" as const,
             combination: false,
             trips: [],
             cancellations: [
@@ -792,6 +907,7 @@ describe("Dashboard PDF upload", () => {
           {
             filename: "order.pdf",
             ok: true,
+            kind: "TRANSPORT_ORDER" as const,
             combination: true,
             trips: [
               buildTrip({ id: "trip-a", bookingNumber: "DUBANR2598395" }),
@@ -820,6 +936,7 @@ describe("Dashboard PDF upload", () => {
           {
             filename: "order.pdf",
             ok: false,
+            kind: "TRANSPORT_ORDER" as const,
             code: "IMPORT_UNREADABLE_PDF",
             message: '"order.pdf" could not be parsed: no text layer.',
           },
@@ -841,6 +958,7 @@ describe("Dashboard PDF upload", () => {
           {
             filename: "order.pdf",
             ok: false,
+            kind: "TRANSPORT_ORDER" as const,
             code: "IMPORT_UNREADABLE_PDF",
             message: "Dit document kon niet gelezen worden.",
           },
@@ -863,6 +981,7 @@ describe("Dashboard PDF upload", () => {
           {
             filename: "broken.pdf",
             ok: false,
+            kind: "TRANSPORT_ORDER" as const,
             code: "IMPORT_UNREADABLE_PDF",
             message: "Onleesbaar document.",
           },

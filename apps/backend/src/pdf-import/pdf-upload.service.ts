@@ -1,11 +1,15 @@
 import { BadRequestException, Injectable } from "@nestjs/common";
 
+import { parseCostConfirmation } from "@tms/parser";
+
 import { AppLoggerService } from "../logger/app-logger.service";
 import { MANUAL_UPLOAD_PROVENANCE } from "../pdf-documents/pdf-document.service";
 import {
   PdfImportFileResultDto,
   PdfImportResponseDto,
+  UploadedDocumentKind,
   cancelledFileResult,
+  costConfirmationFileResult,
   importedFileResult,
   refusedFileResult,
 } from "./dto/pdf-import-response.dto";
@@ -105,12 +109,17 @@ export class PdfUploadService {
       return refusedFileResult(file.originalname, refusal);
     }
 
+    // A copy, not the multipart buffer itself: buffers from the request are
+    // pooled, and the parser is entitled to take ownership of what it is given.
+    const content = new Uint8Array(file.buffer);
+
+    if (await this.isCostConfirmation(content, file.originalname)) {
+      return this.confirmCost(file, content);
+    }
+
     try {
-      // A copy, not the multipart buffer itself: buffers from the request are
-      // pooled, and the parser is entitled to take ownership of what it is
-      // given.
       const imported = await this.importer.import(
-        new Uint8Array(file.buffer),
+        content,
         file.originalname,
         { provenance: MANUAL_UPLOAD_PROVENANCE },
       );
@@ -145,6 +154,92 @@ export class PdfUploadService {
   }
 
   /**
+   * Whether this file is a Cost Confirmation rather than a transport order.
+   *
+   * ── THE DOCUMENT DECIDES, NOT THE FILENAME ────────────────────────────────
+   * The parser already answers this, and its answer is what is used: a
+   * confirmation carries a `COST CONFIRMATION NR` header, and a document
+   * without one is reported as `NOT_A_COST_CONFIRMATION`. No filename, booking
+   * number or customer name is consulted — an operator renaming a file must not
+   * change what it is.
+   *
+   * ── WHAT EACH OTHER ANSWER MEANS ──────────────────────────────────────────
+   * `MISSING_REQUIRED_FIELD` means the header WAS found and a field below it
+   * was not. That is a broken confirmation, not a transport order, so it is
+   * routed to the confirmation path and refused there — where the message names
+   * what is missing instead of complaining about a booking line that this
+   * document was never going to have.
+   *
+   * A file too damaged to open reports `INVALID_PDF` or `UNREADABLE_PDF` before
+   * either family can be told apart. Those fall through to the transport-order
+   * path deliberately, so an unreadable upload keeps the exact wording it has
+   * always had.
+   */
+  private async isCostConfirmation(
+    content: Uint8Array,
+    originalFilename: string,
+  ): Promise<boolean> {
+    const parsed = await parseCostConfirmation(content);
+
+    if (parsed.ok) {
+      return true;
+    }
+
+    if (parsed.reason === "MISSING_REQUIRED_FIELD") {
+      this.logger.warn("Uploaded cost confirmation is incomplete", {
+        originalFilename,
+        missingFields: parsed.missingFields,
+      });
+
+      return true;
+    }
+
+    return false;
+  }
+
+  /**
+   * Applies a Cost Confirmation through the SAME path an emailed one takes.
+   *
+   * `PdfTripImporter.confirmCost` owns every rule that follows — finding the
+   * Trip by booking number, the digit-only fallback, refusing an ambiguous
+   * booking, recording the cost, storing the document and updating the pricing.
+   * None of it is repeated here. This method reads a file, and the importer
+   * decides what it means.
+   *
+   * No subject is passed: a manual upload has none, and the importer's subject
+   * check is skipped when there is nothing to check against.
+   */
+  private async confirmCost(
+    file: UploadedPdfFile,
+    content: Uint8Array,
+  ): Promise<PdfImportFileResultDto> {
+    try {
+      const confirmed = await this.importer.confirmCost(
+        content,
+        file.originalname,
+        { provenance: MANUAL_UPLOAD_PROVENANCE },
+      );
+
+      this.logger.log("Uploaded cost confirmation processed", {
+        originalFilename: file.originalname,
+        byteCount: file.size,
+        outcomes: confirmed.costConfirmations.map((entry) => entry.outcome),
+      });
+
+      return costConfirmationFileResult(
+        file.originalname,
+        confirmed.costConfirmations,
+      );
+    } catch (error: unknown) {
+      return this.recordFailure(
+        file,
+        error,
+        UploadedDocumentKind.COST_CONFIRMATION,
+      );
+    }
+  }
+
+  /**
    * Reports one file's import failure without letting it fail the request.
    *
    * An anticipated refusal — an unreadable document, a booking that already
@@ -156,23 +251,28 @@ export class PdfUploadService {
   private recordFailure(
     file: UploadedPdfFile,
     error: unknown,
+    kind: UploadedDocumentKind = UploadedDocumentKind.TRANSPORT_ORDER,
   ): PdfImportFileResultDto {
     const failure = describeImportFailure(error);
+    const document =
+      kind === UploadedDocumentKind.COST_CONFIRMATION
+        ? "cost confirmation"
+        : "transport order";
 
     if (failure.expected) {
-      this.logger.warn("Uploaded transport order could not be imported", {
+      this.logger.warn(`Uploaded ${document} could not be imported`, {
         originalFilename: file.originalname,
         errorCode: failure.code,
         reason: error instanceof Error ? error.message : String(error),
       });
     } else {
-      this.logger.error("Uploaded transport order failed unexpectedly", {
+      this.logger.error(`Uploaded ${document} failed unexpectedly`, {
         originalFilename: file.originalname,
         stack: error instanceof Error ? error.stack : undefined,
       });
     }
 
-    return refusedFileResult(file.originalname, failure);
+    return refusedFileResult(file.originalname, failure, kind);
   }
 
   /**

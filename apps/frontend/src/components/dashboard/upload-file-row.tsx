@@ -4,6 +4,7 @@ import Link from "next/link";
 import { Fragment } from "react";
 
 import { useTranslation } from "@/lib/i18n/language-provider";
+import type { ConfirmedCost } from "@/lib/api/imports";
 import { formatFileSize, type SelectedFile } from "./upload-file";
 
 /**
@@ -90,6 +91,15 @@ function Imported({
   const cancellations = result.cancellations ?? [];
 
   /*
+   * A Cost Confirmation attaches a confirmed amount to a Trip that already
+   * exists. Saying "imported" here, or showing the empty Trip list the way an
+   * order's would be shown, would report an import that never happened.
+   */
+  if (result.kind === "COST_CONFIRMATION") {
+    return <CostConfirmed confirmations={result.costConfirmations ?? []} />;
+  }
+
+  /*
    * A cancelled order was handled, not imported: it creates no Trip. Saying
    * "imported" here would tell the operator the opposite of what happened.
    */
@@ -120,6 +130,53 @@ function Imported({
           >
             {trip.bookingNumber}
           </Link>
+        </Fragment>
+      ))}
+    </span>
+  );
+}
+
+/**
+ * A Cost Confirmation that was applied.
+ *
+ * It names the Trip it was attached to, because that is the operator's next
+ * question — the confirmation is money against a transport they already know.
+ * The amount is shown exactly as the backend formatted it: nothing here parses
+ * or rounds a figure.
+ *
+ * `ALREADY_RECORDED` is reported separately rather than as a success or a
+ * failure: the same confirmation arriving twice changed nothing, and saying
+ * "processed" would suggest a second amount was added.
+ */
+function CostConfirmed({
+  confirmations,
+}: {
+  confirmations: readonly ConfirmedCost[];
+}) {
+  const t = useTranslation();
+
+  return (
+    <span className="text-success">
+      · ✓ {t("upload.costConfirmed")}{" "}
+      {confirmations.map((confirmation, index) => (
+        <Fragment key={confirmation.ccNumber}>
+          {index > 0 ? ", " : null}
+          <span className="text-secondary">
+            CC{confirmation.ccNumber} ·{" "}
+          </span>
+          <Link
+            href={`/trips/${confirmation.tripId}`}
+            className="font-medium text-primary hover:underline"
+          >
+            {confirmation.bookingNumber}
+          </Link>
+          <span className="text-secondary">
+            {" "}
+            · {confirmation.currency} {confirmation.amount}
+            {confirmation.outcome === "ALREADY_RECORDED"
+              ? ` · ${t("upload.costAlreadyRecorded")}`
+              : ""}
+          </span>
         </Fragment>
       ))}
     </span>

@@ -69,11 +69,21 @@ export const POSTCODE_LINE = /^([A-Za-z]{1,2})\s*-\s*(\d{4,5})\s+(.+)$/;
  * The trailing comma is part of a comma-separated address and belongs to the
  * punctuation, not to the name.
  *
+ * ── THE DUTCH FORM ──────────────────────────────────────────────────────────
+ * A Netherlands postcode carries two letters after its digits, printed with or
+ * without a space: `4704RG Roosendaal`, `4704 RG Roosendaal`. Without them the
+ * line matched no rule at all and the whole address was reported unreadable.
+ *
+ * The letters must be UPPERCASE, which is what a postcode is and what keeps the
+ * pattern from eating the start of a city name: `2040 An Twerpen` would
+ * otherwise lose its first word, while `BE-8730 Beernem` and `9940 Evergem` are
+ * unaffected because `Be` and `Ev` are not two capitals.
+ *
  * The number says nothing about WHICH country: 59554 is Raillencourt-Sainte-Olle
  * in France and Lippstadt in Germany. So this line yields a city, and the
  * country has to come from somewhere the document actually states it.
  */
-const BARE_POSTCODE_LINE = /^(\d{4,5})[\s,]+([A-Za-z].*)$/;
+const BARE_POSTCODE_LINE = /^(\d{4,5}(?:\s?[A-Z]{2})?)[\s,]+([A-Za-z].*)$/;
 
 /**
  * `[NNNNN]` — the customer reference the order prints above every address.
@@ -481,7 +491,8 @@ const POSTCODE_ONLY_LINE = /^\d{4,5}$/;
  * one: `416 Boulevard Ferdinand` has only three digits and does not match at
  * all.
  */
-const POSTCODE_THEN_CITY = /^(?:[A-Za-z]{1,2}\s*-\s*)?\d{4,8}[\s,]+([A-Za-z].*)$/;
+const POSTCODE_THEN_CITY =
+  /^(?:[A-Za-z]{1,2}\s*-\s*)?\d{4,8}(?:\s?[A-Z]{2})?[\s,]+([A-Za-z].*)$/;
 
 /**
  * VARIATION 2 — a bare postcode: `2040 Antwerpen`, with no `BE-` prefix.
@@ -556,7 +567,7 @@ function readBarePostcode(
  * a city:
  *
  *   * the block must OPEN with the bracketed postcode, as these orders do;
- *   * the last line must carry no digit. A street keeps its number
+ *   * a candidate line must carry no digit. A street keeps its number
  *     ("Transportstraat 6", "Rue de Kan 7"), a city does not, and refusing
  *     rather than guessing is what keeps a street out of the city field;
  *   * the block must hold a full address — the bracket, a company, a street and
@@ -564,6 +575,26 @@ function readBarePostcode(
  *     is as likely to be the street as the city, and a street read as a city
  *     would match no route and mislead an operator. Such a block is refused;
  *   * it runs last, so no document that any other rule can read ever reaches it.
+ *
+ * ── THE CITY IS NOT ALWAYS THE LAST LINE ────────────────────────────────────
+ * A real order prints a gate after it:
+ *
+ *   [2070]
+ *   BE01: Exxonmobil
+ *   CANADASTRAAT 20
+ *   ZWIJNDRECHT
+ *   Gate 3
+ *
+ * Taking the last line found `Gate 3`, which carries a digit, so the rule
+ * declined and a document naming its destination plainly was reported
+ * unreadable. The search therefore walks UPWARD, stepping over lines that carry
+ * a digit — a gate, a street, the bracket itself.
+ *
+ * What stops it walking into the company name is the POSITION it must reach: a
+ * city may not sit where the company does. With the bracket, a company and a
+ * street ahead of it, the earliest a city can appear is the fourth line, which
+ * is the same completeness rule the block length already expresses. So
+ * `[1234] / Acme BV / Somestreet 5` still yields nothing rather than "Acme BV".
  *
  * The country is absent, and is reported as absent: 59554 is
  * Raillencourt-Sainte-Olle in France and Lippstadt in Germany, so the number
@@ -577,30 +608,44 @@ function readBracketedPostcode(block: readonly Fragment[]): ReadPlace | null {
     return null;
   }
 
-  const lastIndex = block.length - 1;
-  const lastLine = block[lastIndex].text;
-  const candidate = toCityName(lastLine);
-
   /*
-   * A country is not a city, here as everywhere else. This rule is the last
-   * resort and takes the final line of the block, so without this a block
-   * ending in `France` would offer the country as the destination — which is
-   * exactly what the invariant at the top of this file then has to refuse.
+   * The earliest line a city may occupy: everything before it is the bracket,
+   * the company and the street that `MINIMUM_ADDRESS_LINES` requires.
    */
-  if (candidate.length === 0 || /\d/.test(candidate) || isCountryName(candidate)) {
-    return null;
+  const earliestCityIndex = MINIMUM_ADDRESS_LINES - 1;
+
+  for (let index = block.length - 1; index >= earliestCityIndex; index -= 1) {
+    const line = block[index].text;
+    const candidate = toCityName(line);
+
+    // A gate, a street, a reference: not a city, and not the end of the search.
+    if (candidate.length === 0 || /\d/.test(candidate)) {
+      continue;
+    }
+
+    /*
+     * A country is not a city, here as everywhere else. This rule is the last
+     * resort, so without this a block ending in `France` would offer the
+     * country as the destination — which is exactly what the invariant at the
+     * top of this file then has to refuse.
+     */
+    if (isCountryName(candidate)) {
+      return null;
+    }
+
+    /*
+     * `Kallo, Belgium` on one line is a city AND a country. The country is kept
+     * rather than discarded — the document stated it plainly, and this rule is
+     * the only one that would otherwise report the country as absent.
+     */
+    return {
+      city: candidate,
+      country: countryOnCityLine(line),
+      lastLineIndex: index,
+    };
   }
 
-  /*
-   * `Kallo, Belgium` on the final line is a city AND a country. The country is
-   * kept rather than discarded — the document stated it plainly, and this rule
-   * is the only one that would otherwise report the country as absent.
-   */
-  return {
-    city: candidate,
-    country: countryOnCityLine(lastLine),
-    lastLineIndex: lastIndex,
-  };
+  return null;
 }
 
 /**
@@ -809,8 +854,19 @@ function withRowContinuation(
  * The label is short and the colon is followed by a space, which is what the
  * form uses everywhere it names something — and what an address never does. A
  * street may hold a number, a comma or a slash; none of them holds a label.
+ *
+ * ── A LABEL IS WORDS, NOT A CODE ────────────────────────────────────────────
+ * The name before the colon carries NO DIGIT. Every label this form prints is
+ * made of words — `Remarks`, `Loading Ref`, `Opening times`, `Date/time`,
+ * `Cargo (stc)` — while a real address line begins with a customer's site code:
+ *
+ *     BE01: Exxonmobil
+ *
+ * Without the digit rule that company line looked like a label, the address
+ * block was cut off directly under the bracketed postcode, and a document
+ * naming its destination plainly was reported unreadable.
  */
-const LABELLED_LINE = /^[A-Za-z][^:]{0,30}:\s/;
+const LABELLED_LINE = /^[A-Za-z][^:\d]{0,30}:\s/;
 
 /**
  * The address, without the free text printed underneath it.

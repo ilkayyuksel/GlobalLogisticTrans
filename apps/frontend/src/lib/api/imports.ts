@@ -43,11 +43,40 @@ export interface CancelledBooking {
     | "NO_MATCHING_TRIP";
 }
 
+/**
+ * Which family of document an uploaded file turned out to be.
+ *
+ * A manual upload accepts both, and they produce entirely different outcomes: a
+ * transport order creates Trips, a cost confirmation attaches money to a Trip
+ * that already exists and creates none. Reporting a confirmation as "0 Trips
+ * imported" would tell an operator the opposite of what happened.
+ */
+export type UploadedDocumentKind = "TRANSPORT_ORDER" | "COST_CONFIRMATION";
+
+/** What a cost confirmation recorded, as the backend applied it. */
+export interface ConfirmedCost {
+  ccNumber: string;
+  bookingNumber: string;
+  tripId: string;
+  /** Fixed-2 decimal string, exactly as the document stated it. */
+  amount: string;
+  currency: string;
+  outcome: "RECORDED" | "ALREADY_RECORDED";
+}
+
 export interface PdfImportFileResult {
   filename: string;
   ok: boolean;
+  /** Present on a failure too, so a refusal reads in the right terms. */
+  kind: UploadedDocumentKind;
   trips?: Trip[];
   combination?: boolean;
+  /**
+   * What a COST_CONFIRMATION file recorded: the confirmation number, the
+   * booking it named, the Trip it was attached to and the amount. It creates no
+   * Trip, so `trips` is empty.
+   */
+  costConfirmations?: ConfirmedCost[];
   /**
    * Present when the document stamped itself CANCELLED. Such a file is handled
    * rather than imported: it cancels the Trips it names and creates none, so
