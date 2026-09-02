@@ -149,7 +149,12 @@ describe("Phase 1 — the exact booking number", () => {
       ).toMatchObject({ kind: "MATCHED", trip: { id: "trip-1" } });
     });
 
-    it("does not match a different container on the same booking and date", async () => {
+    /**
+     * Phase 1 declines — the containers differ — and the LAST phase catches it
+     * on the booking and the date. Which Trip the strict phase would have
+     * chosen among several is proved separately below.
+     */
+    it("declines a different container, leaving it to the last phase", async () => {
       const { service } = matcherOver([
         buildTrip({ containerNumber: "PVDU9999999" }),
       ]);
@@ -158,7 +163,7 @@ describe("Phase 1 — the exact booking number", () => {
         await service.findTripForCostConfirmation(
           confirmation({ containerReference: CONTAINER }),
         ),
-      ).toEqual({ kind: "NO_MATCHING_TRIP" });
+      ).toMatchObject({ kind: "MATCHED", trip: { id: "trip-1" } });
     });
 
     it("does not match the same container on a different date", async () => {
@@ -176,9 +181,13 @@ describe("Phase 1 — the exact booking number", () => {
       ).toEqual({ kind: "NO_MATCHING_TRIP" });
     });
 
-    /** It never widens to booking+date when the container finds nothing. */
-    it("does not fall back to the container-less rule", async () => {
-      const { service } = matcherOver([
+    /**
+     * A confirmation naming a container never uses the provenance rule: that is
+     * the container-less reading. It reaches this Trip through the last phase
+     * instead, so the original source is never read.
+     */
+    it("never consults provenance when it names a container", async () => {
+      const { service, pdfDocuments } = matcherOver([
         buildTrip({ containerNumber: null, sourceFixture: ORDER_WITHOUT_CONTAINER }),
       ]);
 
@@ -186,7 +195,8 @@ describe("Phase 1 — the exact booking number", () => {
         await service.findTripForCostConfirmation(
           confirmation({ containerReference: CONTAINER }),
         ),
-      ).toEqual({ kind: "NO_MATCHING_TRIP" });
+      ).toMatchObject({ kind: "MATCHED" });
+      expect(pdfDocuments.readContent).not.toHaveBeenCalled();
     });
 
     /** Only the exact container is eligible among several on one booking. */
@@ -215,7 +225,13 @@ describe("Phase 1 — the exact booking number", () => {
       );
     });
 
-    it("does not match a Trip whose original order printed one", async () => {
+    /**
+     * The provenance rule excludes this Trip from Phase 1 — its original order
+     * DID print a container — and the last phase, which ignores provenance
+     * entirely, then matches it. Phase 1's discrimination is proved by the pair
+     * test further down, where it decides WHICH of two Trips is eligible.
+     */
+    it("is excluded from Phase 1, then caught by the last phase", async () => {
       const { service } = matcherOver([
         buildTrip({
           bookingNumber: "DUBANR2598395",
@@ -231,7 +247,7 @@ describe("Phase 1 — the exact booking number", () => {
             transportDate: "2025-05-22",
           }),
         ),
-      ).toEqual({ kind: "NO_MATCHING_TRIP" });
+      ).toMatchObject({ kind: "MATCHED" });
     });
 
     /**
@@ -252,8 +268,8 @@ describe("Phase 1 — the exact booking number", () => {
       );
     });
 
-    /** And the mirror image: the order HAD one, the Trip's is now empty. */
-    it("does not match although the Trip's container is now empty", async () => {
+    /** The mirror image: the order HAD one, the Trip's is now empty. */
+    it("is likewise caught only by the last phase", async () => {
       const { service } = matcherOver([
         buildTrip({
           bookingNumber: "DUBANR2598395",
@@ -270,7 +286,7 @@ describe("Phase 1 — the exact booking number", () => {
             transportDate: "2025-05-22",
           }),
         ),
-      ).toEqual({ kind: "NO_MATCHING_TRIP" });
+      ).toMatchObject({ kind: "MATCHED" });
     });
 
     it("still requires the date", async () => {
@@ -402,7 +418,11 @@ describe("Phase 2 — the digit-normalized booking number", () => {
     });
   });
 
-  it("still requires the container when the confirmation names one", async () => {
+  /**
+   * The strict digit phase declines on the container; the last phase, which
+   * also compares the booking by digits, then matches on the date alone.
+   */
+  it("declines on the container, leaving it to the last phase", async () => {
     const { service } = matcherOver([
       buildTrip({ ...digitsOnly, containerNumber: "PVDU9999999" }),
     ]);
@@ -411,7 +431,7 @@ describe("Phase 2 — the digit-normalized booking number", () => {
       await service.findTripForCostConfirmation(
         confirmation({ containerReference: CONTAINER }),
       ),
-    ).toEqual({ kind: "NO_MATCHING_TRIP" });
+    ).toMatchObject({ kind: "MATCHED", trip: { id: "trip-1" } });
   });
 
   it("matches on booking digits, date and container together", async () => {
@@ -426,7 +446,8 @@ describe("Phase 2 — the digit-normalized booking number", () => {
     ).toMatchObject({ kind: "MATCHED" });
   });
 
-  it("still requires the original order to have had no container", async () => {
+  /** Provenance excludes it from the strict phase; the last phase ignores it. */
+  it("applies provenance in the strict phase, not in the last", async () => {
     const { service } = matcherOver([
       buildTrip({
         bookingNumber: "2598395",
@@ -442,7 +463,7 @@ describe("Phase 2 — the digit-normalized booking number", () => {
           transportDate: "2025-05-22",
         }),
       ),
-    ).toEqual({ kind: "NO_MATCHING_TRIP" });
+    ).toMatchObject({ kind: "MATCHED" });
   });
 
   it("reports an ambiguity of its own", async () => {
@@ -475,22 +496,49 @@ describe("Phase 2 — the digit-normalized booking number", () => {
  * a Trip because its provenance happened to be unavailable.
  */
 describe("a Trip whose original source cannot be established", () => {
-  it("refuses a Trip with no source document", async () => {
+  /**
+   * Unreadable provenance excludes a Trip from the STRICT phases — it is never
+   * assumed either way — and the last phase, which ignores provenance, may
+   * still reach it. The distinction shows when another Trip is eligible: the
+   * strict phase must prefer the one whose source it could actually read.
+   */
+  it("prefers the Trip whose provenance is known", async () => {
     const { service } = matcherOver([
-      buildTrip({ pdfDocumentId: null, sourceFixture: undefined }),
+      buildTrip({
+        id: "unknowable",
+        pdfDocumentId: null,
+        sourceFixture: undefined,
+      }),
+      buildTrip({
+        id: "known-containerless",
+        pdfDocumentId: "pdf-2",
+        sourceFixture: ORDER_WITHOUT_CONTAINER,
+      }),
     ]);
 
-    expect(await service.findTripForCostConfirmation(confirmation())).toEqual({
-      kind: "NO_MATCHING_TRIP",
-    });
+    expect(
+      await service.findTripForCostConfirmation(confirmation()),
+    ).toMatchObject({ kind: "MATCHED", trip: { id: "known-containerless" } });
   });
 
-  it("refuses a Trip whose stored file is gone", async () => {
-    const { service } = matcherOver([buildTrip({ sourceFixture: undefined })]);
+  it("never guesses that an unreadable source had no container", async () => {
+    const { service } = matcherOver([
+      buildTrip({
+        id: "unknowable",
+        pdfDocumentId: null,
+        sourceFixture: undefined,
+      }),
+      buildTrip({
+        id: "known-containerless",
+        pdfDocumentId: "pdf-2",
+        sourceFixture: ORDER_WITHOUT_CONTAINER,
+      }),
+    ]);
 
-    expect(await service.findTripForCostConfirmation(confirmation())).toEqual({
-      kind: "NO_MATCHING_TRIP",
-    });
+    // Had it guessed, both would be eligible and the answer would be ambiguous.
+    expect(
+      (await service.findTripForCostConfirmation(confirmation())).kind,
+    ).toBe("MATCHED");
   });
 
   /** It is only consulted when the confirmation names NO container. */
@@ -529,5 +577,184 @@ describe("a confirmation that states no transport date", () => {
 
     expect(trips.findByExactBookingNumber).not.toHaveBeenCalled();
     expect(trips.findByBookingDigits).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * ── PHASE 3, THE LAST ───────────────────────────────────────────────────────
+ * The booking and the date, with the container rule dropped entirely — both the
+ * container the confirmation names and the provenance test that stands in for
+ * it.
+ *
+ * It exists because a container printed on a confirmation does not reliably
+ * identify a Trip: an order placed without one is given a container by hand,
+ * and the confirmation that follows may carry exactly that value. It is LAST,
+ * so it can only ever be reached once both stricter readings found nothing.
+ */
+describe("Phase 3 — booking and date, container ignored", () => {
+  /** The strict phases cannot match: the containers disagree. */
+  it("matches when the confirmation's container is not the Trip's", async () => {
+    const { service } = matcherOver([
+      buildTrip({ containerNumber: "PVDU9999999" }),
+    ]);
+
+    expect(
+      await service.findTripForCostConfirmation(
+        confirmation({ containerReference: CONTAINER }),
+      ),
+    ).toMatchObject({ kind: "MATCHED", trip: { id: "trip-1" } });
+  });
+
+  /**
+   * The provenance rule refuses this Trip — its original order DID print a
+   * container — and Phase 3 matches it anyway, which is the whole point.
+   */
+  it("ignores original-container provenance", async () => {
+    const { service } = matcherOver([
+      buildTrip({
+        bookingNumber: "DUBANR2598395",
+        containerNumber: null,
+        originalPlanningDate: new Date("2025-05-22T00:00:00.000Z"),
+        sourceFixture: ORDER_WITH_CONTAINER,
+      }),
+    ]);
+
+    expect(
+      await service.findTripForCostConfirmation(
+        confirmation({
+          bookingNumber: "DUBANR2598395",
+          transportDate: "2025-05-22",
+        }),
+      ),
+    ).toMatchObject({ kind: "MATCHED" });
+  });
+
+  /** Even a Trip whose source cannot be read at all is reachable here. */
+  it("matches although the original source cannot be established", async () => {
+    const { service } = matcherOver([
+      buildTrip({ pdfDocumentId: null, sourceFixture: undefined }),
+    ]);
+
+    expect(
+      await service.findTripForCostConfirmation(confirmation()),
+    ).toMatchObject({ kind: "MATCHED" });
+  });
+
+  /** The date is NOT dropped with the container. */
+  it("still requires the ordered date", async () => {
+    const { service } = matcherOver([
+      buildTrip({
+        containerNumber: "PVDU9999999",
+        originalPlanningDate: new Date("2026-08-21T00:00:00.000Z"),
+      }),
+    ]);
+
+    expect(await service.findTripForCostConfirmation(
+      confirmation({ containerReference: CONTAINER }),
+    )).toEqual({ kind: "NO_MATCHING_TRIP" });
+  });
+
+  /** The two-phase booking strategy survives: exact first, then digits. */
+  it("reaches a digit-spelled booking too", async () => {
+    const { service } = matcherOver([
+      buildTrip({ bookingNumber: "2796277", containerNumber: "PVDU9999999" }),
+    ]);
+
+    expect(
+      await service.findTripForCostConfirmation(
+        confirmation({ containerReference: CONTAINER }),
+      ),
+    ).toMatchObject({ kind: "MATCHED" });
+  });
+
+  it("reports an ambiguity of its own", async () => {
+    const { service } = matcherOver([
+      buildTrip({ id: "a", containerNumber: "PVDU1111111", pdfDocumentId: "pdf-a" }),
+      buildTrip({ id: "b", containerNumber: "PVDU2222222", pdfDocumentId: "pdf-b" }),
+    ]);
+
+    expect(
+      (
+        await service.findTripForCostConfirmation(
+          confirmation({ containerReference: CONTAINER }),
+        )
+      ).kind,
+    ).toBe("AMBIGUOUS");
+  });
+
+  it("reports no match when nothing is held on that date", async () => {
+    const { service } = matcherOver([]);
+
+    expect(
+      await service.findTripForCostConfirmation(
+        confirmation({ containerReference: CONTAINER }),
+      ),
+    ).toEqual({ kind: "NO_MATCHING_TRIP" });
+  });
+
+  /** A DELETED Trip is out of reach in every phase, this one included. */
+  it("does not reach a DELETED Trip", async () => {
+    const { service } = matcherOver([
+      buildTrip({
+        containerNumber: "PVDU9999999",
+        status: TripStatus.DELETED,
+      }),
+    ]);
+
+    expect(
+      await service.findTripForCostConfirmation(
+        confirmation({ containerReference: CONTAINER }),
+      ),
+    ).toEqual({ kind: "NO_MATCHING_TRIP" });
+  });
+});
+
+/**
+ * ── A PHASE THAT ANSWERS STOPS THE SEARCH ───────────────────────────────────
+ * The looser phases exist for the case where the stricter ones found NOTHING.
+ * A hit, or an ambiguity, ends it.
+ */
+describe("the phases run in order and stop", () => {
+  it("does not reach Phase 3 when Phase 1 matched", async () => {
+    const { service, pdfDocuments } = matcherOver([
+      buildTrip({ containerNumber: CONTAINER }),
+    ]);
+
+    const match = await service.findTripForCostConfirmation(
+      confirmation({ containerReference: CONTAINER }),
+    );
+
+    expect(match).toMatchObject({ kind: "MATCHED", trip: { id: "trip-1" } });
+    // Phase 1 matched on the container, so provenance was never consulted.
+    expect(pdfDocuments.readContent).not.toHaveBeenCalled();
+  });
+
+  /**
+   * Two Trips share the container the confirmation names. That is an ambiguity,
+   * and Phase 3 must NOT be used to narrow it — it would only find the same two.
+   */
+  it("does not fall through from an ambiguous strict phase", async () => {
+    const { service } = matcherOver([
+      buildTrip({ id: "a", containerNumber: CONTAINER, pdfDocumentId: "pdf-a" }),
+      buildTrip({ id: "b", containerNumber: CONTAINER, pdfDocumentId: "pdf-b" }),
+    ]);
+
+    const match = await service.findTripForCostConfirmation(
+      confirmation({ containerReference: CONTAINER }),
+    );
+
+    expect(match.kind).toBe("AMBIGUOUS");
+  });
+
+  /** And an ambiguous container-less Phase 1 is equally final. */
+  it("does not fall through from an ambiguous provenance phase", async () => {
+    const { service } = matcherOver([
+      buildTrip({ id: "a", pdfDocumentId: "pdf-a" }),
+      buildTrip({ id: "b", pdfDocumentId: "pdf-b" }),
+    ]);
+
+    expect(
+      (await service.findTripForCostConfirmation(confirmation())).kind,
+    ).toBe("AMBIGUOUS");
   });
 });

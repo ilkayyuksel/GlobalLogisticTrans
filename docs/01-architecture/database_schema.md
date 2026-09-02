@@ -1047,7 +1047,7 @@ None.
 ### Application-enforced rules
 
 - Inactive components cannot be used for new calculations; historical `trip_pricing_item` rows keep referencing them.
-- The components required by `pricing_rules.md` (Base Price, Combination Surcharge, Fuel Surcharge, Waiting Time, Toll, Tunnel, Custom Property, Manual Adjustment) must be seeded.
+- The components required by `pricing_rules.md` (Base Price, Combination Surcharge, Fuel Surcharge, Waiting Time, Toll, Tunnel, Custom Property, Manual Adjustment, Cost Confirmation) are ensured by the Backend's pricing bootstrap, which runs at startup and creates only the codes that are absent. `prisma/seed.ts` holds the same list for developers seeding a database with no API running; the application's list is the authority. A component is never renamed, reordered, deactivated or deleted by that process — every stored `trip_pricing_item` classifies itself through one, and the classification of a historical breakdown must not change under it.
 
 ---
 

@@ -19,26 +19,34 @@ import { TripService } from "../trips/trip.service";
  * produced by another system, which prints the booking number in its own way
  * and sometimes cannot read the container at all.
  *
- * ── THE RULE, IN TWO PHASES ─────────────────────────────────────────────────
- * Phase 1 matches the booking number EXACTLY. Only when that finds nothing at
- * all does Phase 2 repeat the same rule with the booking numbers reduced to
- * their digits.
+ * ── THE RULE, IN THREE PHASES ──────────────────────────────────────────────
+ * 1. the booking EXACTLY, the date, and the container rule;
+ * 2. the same, with the booking numbers reduced to their digits;
+ * 3. the booking and the date alone, with the container rule dropped.
  *
- * The fallback relaxes the BOOKING COMPARISON and nothing else. The date and
- * the container rule apply identically in both phases, because a looser booking
- * match is a different spelling of the same reference — not a licence to attach
- * money to a different day's transport.
+ * A phase that finds ONE Trip answers. A phase that finds SEVERAL reports an
+ * ambiguity and STOPS — a looser phase could only ever find more, so a tie is
+ * never broken by relaxing the rule. Only a phase that finds NOTHING hands on.
  *
- * It is also not an ambiguity resolver. Phase 1 finding several Trips is an
- * ambiguity and stays one; retrying with a looser booking rule could only ever
- * find more.
+ * Each phase loosens exactly one thing. Phase 2 loosens how the booking number
+ * is spelled; Phase 3 loosens the container. The DATE is never loosened: a
+ * booking that comes round again on another day is a different transport, and
+ * no fallback may reach across it.
  *
- * ── THE CONTAINER RULE ──────────────────────────────────────────────────────
+ * ── THE CONTAINER RULE, AND WHY PHASE 3 ABANDONS IT ────────────────────────
  * A confirmation naming a usable container matches only the Trip holding that
  * container. One naming none matches only a Trip whose ORIGINAL transport order
  * printed none either — read from the document the Trip was created from, never
  * from the Trip's current container number, which an operator may have typed in
  * afterwards.
+ *
+ * That is right while it works, and it is why the rule is tried first. But the
+ * container printed on a confirmation does not reliably identify a Trip either:
+ * an order placed without one is given a container by hand, and the
+ * confirmation that follows may carry exactly that value — so the strict rule
+ * refuses money that plainly belongs to the Trip. Phase 3 is the safety net for
+ * that case, and it is last precisely because it can only be right once the
+ * stricter readings have found nothing at all.
  * ────────────────────────────────────────────────────────────────────────────
  */
 
@@ -92,31 +100,58 @@ export class CostConfirmationMatchingService {
       return { kind: "NO_MATCHING_TRIP" };
     }
 
-    const exact = await this.eligibleAmong(
-      await this.trips.findByExactBookingNumber(identity.bookingNumber),
-      identity,
+    const exact = await this.trips.findByExactBookingNumber(
+      identity.bookingNumber,
     );
 
-    if (exact.length > 0) {
-      return this.decide(exact);
+    /* PHASE 1 — the exact booking, the date, and the container rule. */
+    const strict = await this.eligibleAmong(exact, identity);
+
+    if (strict.length > 0) {
+      return this.decide(strict);
     }
 
     /*
-     * PHASE 2. Only reached because the exact booking found NOTHING — never to
-     * narrow or to resolve an ambiguity Phase 1 already reported.
+     * PHASE 2 — the same rule, with the booking numbers reduced to their
+     * digits. Reached only because Phase 1 found NOTHING.
      */
     const digits = bookingNumberDigits(identity.bookingNumber);
 
-    if (digits === null) {
-      return { kind: "NO_MATCHING_TRIP" };
+    const byDigits =
+      digits === null ? [] : await this.trips.findByBookingDigits(digits);
+
+    const relaxedBooking = await this.eligibleAmong(byDigits, identity);
+
+    if (relaxedBooking.length > 0) {
+      return this.decide(relaxedBooking);
     }
 
-    return this.decide(
-      await this.eligibleAmong(
-        await this.trips.findByBookingDigits(digits),
-        identity,
-      ),
-    );
+    /*
+     * ── PHASE 3, THE LAST: the booking and the date ──────────────────────────
+     * The container rule is dropped entirely — both the container the
+     * confirmation names and the provenance test that stands in for it.
+     *
+     * That is why it is last. A container printed on a confirmation does not
+     * reliably identify a Trip: an order placed without one is given a
+     * container by hand afterwards, and the confirmation that follows may carry
+     * exactly that value. Matching strictly on it refused money that plainly
+     * belonged to the Trip.
+     *
+     * The DATE is not dropped with it. A booking that comes round again on
+     * another day is a different transport, and no fallback may reach across
+     * it. The booking is still compared exactly first and by digits second, so
+     * this phase loosens one thing and one thing only.
+     */
+    const onDate = (candidates: readonly Trip[]) =>
+      candidates.filter((trip) => this.isOnTransportDate(trip, identity));
+
+    const lastByBooking = onDate(exact);
+
+    if (lastByBooking.length > 0) {
+      return this.decide(lastByBooking);
+    }
+
+    return this.decide(onDate(byDigits));
   }
 
   /** The count is the answer. Nothing is ever chosen from several. */
@@ -142,10 +177,8 @@ export class CostConfirmationMatchingService {
     candidates: readonly Trip[],
     identity: ConfirmationIdentity,
   ): Promise<Trip[]> {
-    const onThatDate = candidates.filter(
-      (trip) =>
-        trip.originalPlanningDate !== null &&
-        toIsoDate(trip.originalPlanningDate) === identity.transportDate,
+    const onThatDate = candidates.filter((trip) =>
+      this.isOnTransportDate(trip, identity),
     );
 
     if (identity.containerReference !== null) {
@@ -165,6 +198,17 @@ export class CostConfirmationMatchingService {
     }
 
     return eligible;
+  }
+
+  /** Whether this Trip was ordered for the date the confirmation states. */
+  private isOnTransportDate(
+    trip: Trip,
+    identity: ConfirmationIdentity,
+  ): boolean {
+    return (
+      trip.originalPlanningDate !== null &&
+      toIsoDate(trip.originalPlanningDate) === identity.transportDate
+    );
   }
 
   /**

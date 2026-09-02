@@ -507,15 +507,26 @@ describe("TripRevisionService", () => {
      * A document naming a DIFFERENT container therefore describes a different
      * transport, and revises nothing here.
      */
-    it("keeps the stored container when the document names another", async () => {
+    /**
+     * A document naming a container we do not hold now REACHES the Trip: the
+     * matcher's last phase drops the container, because an order placed without
+     * one may have been given a container by hand and the document that follows
+     * may carry it.
+     *
+     * Having reached it, the document's own container replaces what is stored.
+     * That is the sender correcting themselves, and it is the same rule as
+     * before — what a document may never do is ERASE a container by naming
+     * none, which the test above covers.
+     */
+    it("takes the container from a document that names one", async () => {
       stored.push(buildTrip({ containerNumber: "EUCU9999999" }));
 
       const result = await service.applyDocumentRevision(
         buildDocument({ containerNumber: CONTAINER }),
       );
 
-      expect(result.outcome).toBe("NO_MATCHING_TRIP");
-      expect(stored[0].containerNumber).toBe("EUCU9999999");
+      expect(result.outcome).toBe("UPDATED");
+      expect(stored[0].containerNumber).toBe(CONTAINER);
     });
 
     it("writes the same container back when the document repeats it", async () => {

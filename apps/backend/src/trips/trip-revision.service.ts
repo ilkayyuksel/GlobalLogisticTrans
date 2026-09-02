@@ -203,13 +203,10 @@ export class TripRevisionService {
          * A cancellation that names a container we do not hold still cancels
          * the transport: the order may have been placed without one and given
          * a container by hand afterwards, so OUR record and the customer's
-         * differ. Refusing would leave a real cancellation unapplied.
+         * differ. The matcher's last phase drops the container for exactly
+         * that reason.
          */
-        const match = await resolveTripForDocument(
-          repository,
-          identity,
-          "FALL_BACK_TO_BOOKING_AND_DATE",
-        );
+        const match = await resolveTripForDocument(repository, identity);
 
         if (match.kind === "AMBIGUOUS_BOOKING_MATCH") {
           this.logger.warn("Cancellation names an ambiguous booking number", {
@@ -307,14 +304,15 @@ export class TripRevisionService {
         customProperties,
       }): Promise<RevisionResult> => {
         /*
-         * A revision naming a container nothing holds describes a transport we
-         * do not have. It is refused here and the caller creates the Trip —
-         * never applied to a different container's Trip on the same booking.
+         * The container is tried first and dropped last: a revision naming a
+         * container we do not hold may still be the same transport, because the
+         * order was placed without one and given a container by hand. Only when
+         * the booking and the date find nothing either does the caller create
+         * the Trip.
          */
         const match = await resolveTripForDocument(
           repository,
           identityOf(document),
-          "REFUSE",
         );
 
         /*

@@ -99,6 +99,15 @@ describe("Flat through a Trip's revisions", () => {
               : null,
           ),
       ),
+      /**
+       * The matcher's last phase: the booking and the ordered date, with the
+       * container dropped. Reached whenever the identity lookup above finds
+       * nothing.
+       */
+      findManyByBookingNumberAndOriginalDate: jest.fn(
+        ({ bookingNumber }: { bookingNumber: string }) =>
+          Promise.resolve(bookingNumber === trip.bookingNumber ? [trip] : []),
+      ),
       update: jest.fn((_id: string, data: Partial<Trip>) => {
         trip = { ...trip, ...data };
         return Promise.resolve(trip);

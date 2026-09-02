@@ -7,7 +7,10 @@ import {
   PricingSettingKey,
 } from "../pricing-engine/pricing-settings";
 import { PricingBootstrapService } from "./pricing-bootstrap.service";
+import { PRICING_COMPONENT_CATALOG } from "./pricing-component.catalog";
+import { PricingComponentRepository } from "./pricing-component.repository";
 import {
+  AUTOMATIC_CUSTOM_PROPERTY_DEFAULT_PRICE,
   PRICING_CATEGORY,
   PRICING_SETTING_CATALOG,
 } from "./pricing-settings.catalog";
@@ -113,20 +116,51 @@ describe("the pricing settings catalog", () => {
 describe("PricingBootstrapService", () => {
   let settings: { upsert: jest.Mock };
   let repository: { findMany: jest.Mock };
-  let customProperties: { findActiveByName: jest.Mock };
+  let customProperties: { findActiveByName: jest.Mock; create: jest.Mock };
+  let components: { findActiveCodes: jest.Mock; createMany: jest.Mock };
   let service: PricingBootstrapService;
 
+  /*
+   * The two doubles below are STATEFUL on purpose. Bootstrapping re-reads the
+   * database between its steps — it has to, because creating the TAR property
+   * is what produces the id the last step must store — and a double that
+   * answered the same way before and after a write could not show that the
+   * sequence works.
+   */
+  let storedProperty: { id: string; name: string } | null;
+  let storedCodes: string[];
+
   beforeEach(() => {
+    // A fresh database: no property, no catalog, no settings.
+    storedProperty = null;
+    storedCodes = [];
+
     settings = { upsert: jest.fn().mockResolvedValue({}) };
     repository = { findMany: jest.fn().mockResolvedValue([]) };
+
     customProperties = {
-      findActiveByName: jest.fn().mockResolvedValue({ id: TAR_ID }),
+      findActiveByName: jest.fn(() => Promise.resolve(storedProperty)),
+      create: jest.fn((dto: { name: string }) => {
+        storedProperty = { id: TAR_ID, name: dto.name };
+
+        return Promise.resolve(storedProperty);
+      }),
+    };
+
+    components = {
+      findActiveCodes: jest.fn(() => Promise.resolve([...storedCodes])),
+      createMany: jest.fn((rows: readonly { code: string }[]) => {
+        storedCodes = [...storedCodes, ...rows.map((row) => row.code)];
+
+        return Promise.resolve({ count: rows.length });
+      }),
     };
 
     service = new PricingBootstrapService(
       settings as unknown as SettingsService,
       repository as unknown as SettingsRepository,
       customProperties as unknown as CustomPropertyService,
+      components as unknown as PricingComponentRepository,
       {
         setContext: jest.fn(),
         log: jest.fn(),
@@ -134,6 +168,17 @@ describe("PricingBootstrapService", () => {
       } as unknown as AppLoggerService,
     );
   });
+
+  /** Everything already there. Used by the "changes nothing" cases. */
+  function databaseIsFullyConfigured(): void {
+    storedProperty = { id: TAR_ID, name: "TAR" };
+    storedCodes = PRICING_COMPONENT_CATALOG.map((component) => component.code);
+    repository.findMany.mockResolvedValue(
+      PRICING_SETTING_CATALOG.map((setting) =>
+        storedSetting(setting.key, setting.defaultValue ?? TAR_ID),
+      ),
+    );
+  }
 
   describe("on a database with no pricing settings at all", () => {
     it("reports every required setting as missing", async () => {
@@ -197,11 +242,7 @@ describe("PricingBootstrapService", () => {
    */
   describe("on a database that is already configured", () => {
     beforeEach(() => {
-      repository.findMany.mockResolvedValue(
-        PRICING_SETTING_CATALOG.map((setting) =>
-          storedSetting(setting.key, setting.defaultValue ?? TAR_ID),
-        ),
-      );
+      databaseIsFullyConfigured();
     });
 
     it("reports nothing missing", async () => {
@@ -251,76 +292,274 @@ describe("PricingBootstrapService", () => {
     });
   });
 
-  /** Running it twice is running it once. */
-  it("is idempotent", async () => {
+  /**
+   * ── RUNNING IT TWICE IS RUNNING IT ONCE ───────────────────────────────────
+   * This is what makes it safe on every boot. The second pass sees the state
+   * the first one left and writes nothing at all — not a component, not the
+   * property, not a setting.
+   */
+  it("is idempotent across all three layers", async () => {
     await service.apply();
 
-    const firstPass = settings.upsert.mock.calls.length;
+    const componentsFirstPass = components.createMany.mock.calls.length;
+    const propertiesFirstPass = customProperties.create.mock.calls.length;
+    const settingsFirstPass = settings.upsert.mock.calls.length;
 
+    // The settings double is the one part that cannot update itself.
     repository.findMany.mockResolvedValue(
       PRICING_SETTING_CATALOG.map((setting) =>
         storedSetting(setting.key, setting.defaultValue ?? TAR_ID),
       ),
     );
+    components.createMany.mockClear();
+    customProperties.create.mockClear();
     settings.upsert.mockClear();
 
     await service.apply();
 
-    expect(firstPass).toBe(PRICING_SETTING_CATALOG.length);
+    expect(componentsFirstPass).toBe(1);
+    expect(propertiesFirstPass).toBe(1);
+    expect(settingsFirstPass).toBe(PRICING_SETTING_CATALOG.length);
+
+    expect(components.createMany).not.toHaveBeenCalled();
+    expect(customProperties.create).not.toHaveBeenCalled();
     expect(settings.upsert).not.toHaveBeenCalled();
   });
 
   /**
-   * ── AND IT NEVER INVENTS AN ID ────────────────────────────────────────────
-   * A database with no TAR property cannot have that setting filled in. The
-   * honest answer is to say so and create the other nine, not to write a UUID
-   * that points at nothing.
+   * ── THE CATALOG EVERY PRICING ITEM POINTS AT ──────────────────────────────
+   * A calculated breakdown cannot be STORED without it. This is the layer whose
+   * absence made a deployed database answer `pricing: null` for every Trip
+   * while the Engine was working perfectly.
    */
-  describe("when the automatic property does not exist", () => {
-    beforeEach(() => {
-      customProperties.findActiveByName.mockResolvedValue(null);
+  describe("the pricing component catalog", () => {
+    it("reports every component as absent on a fresh database", async () => {
+      const plan = await service.plan();
+
+      expect(plan.componentsMissingCount).toBe(
+        PRICING_COMPONENT_CATALOG.length,
+      );
+      expect(plan.components.every((component) => !component.isPresent)).toBe(
+        true,
+      );
     });
 
-    it("reports it as blocked, with a reason", async () => {
+    it("writes nothing while planning", async () => {
+      await service.plan();
+
+      expect(components.createMany).not.toHaveBeenCalled();
+    });
+
+    it("creates the whole catalog when applied", async () => {
+      const applied = await service.apply();
+
+      expect(components.createMany).toHaveBeenCalledTimes(1);
+      expect(storedCodes.sort()).toEqual(
+        PRICING_COMPONENT_CATALOG.map((component) => component.code).sort(),
+      );
+      expect(applied.componentsMissingCount).toBe(0);
+    });
+
+    it("gives each one its catalog name, description and position", async () => {
+      await service.apply();
+
+      expect(components.createMany).toHaveBeenCalledWith(
+        expect.arrayContaining([
+          {
+            code: "BASE_PRICE",
+            name: "Base Price",
+            description: expect.stringContaining("Base transport price"),
+            displayOrder: 1,
+          },
+        ]),
+      );
+    });
+
+    /** The state the real database was found in: one component, eight absent. */
+    it("creates only the components that are absent", async () => {
+      storedCodes = ["COST_CONFIRMATION"];
+
+      await service.apply();
+
+      const created = (
+        components.createMany.mock.calls[0]?.[0] as { code: string }[]
+      ).map((row) => row.code);
+
+      expect(created).toHaveLength(PRICING_COMPONENT_CATALOG.length - 1);
+      expect(created).not.toContain("COST_CONFIRMATION");
+    });
+
+    it("touches nothing when the catalog is already complete", async () => {
+      databaseIsFullyConfigured();
+
+      await service.apply();
+
+      expect(components.createMany).not.toHaveBeenCalled();
+    });
+
+    /**
+     * A deactivated component is somebody's decision. Reported as absent so an
+     * operator sees it, but never reactivated behind their back — and the code
+     * is recreated as a new active row, which is what the partial unique index
+     * on (code) WHERE is_active permits.
+     */
+    it("does not count an inactive component as present", async () => {
+      storedCodes = [];
+
+      const plan = await service.plan();
+
+      expect(
+        plan.components.find((component) => component.code === "TOLL")
+          ?.isPresent,
+      ).toBe(false);
+    });
+  });
+
+  /**
+   * ── THE PROPERTY NOTHING USED TO CREATE ───────────────────────────────────
+   * Not the seed, not a migration, not the API. `prisma/seed-dev.ts` makes one,
+   * but that is development-only fake data. So every fresh deployment had no
+   * TAR, `AUTOMATIC_CUSTOM_PROPERTY_ID` could not be resolved, and the Engine
+   * refused with PRICING_MISSING_SETTING.
+   */
+  describe("the automatic Custom Property", () => {
+    it("is reported as absent, and as something bootstrapping will create", async () => {
+      const plan = await service.plan();
+
+      expect(plan.automaticProperty).toEqual({
+        name: "TAR",
+        id: null,
+        isPresent: false,
+        willCreate: true,
+      });
+    });
+
+    it("writes nothing while planning", async () => {
+      await service.plan();
+
+      expect(customProperties.create).not.toHaveBeenCalled();
+    });
+
+    it("is created as an ordinary Custom Property, priced at the standing rate", async () => {
+      await service.apply();
+
+      expect(customProperties.create).toHaveBeenCalledTimes(1);
+      expect(customProperties.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          name: "TAR",
+          defaultPrice: AUTOMATIC_CUSTOM_PROPERTY_DEFAULT_PRICE,
+        }),
+      );
+      expect(AUTOMATIC_CUSTOM_PROPERTY_DEFAULT_PRICE).toBe(20);
+    });
+
+    /**
+     * The sequence that makes this one operation rather than three. The setting
+     * holds an id that does not exist until the step before it has run.
+     */
+    it("is created BEFORE the setting that points at it", async () => {
+      await service.apply();
+
+      expect(settings.upsert).toHaveBeenCalledWith(
+        PRICING_CATEGORY,
+        "AUTOMATIC_CUSTOM_PROPERTY_ID",
+        { value: TAR_ID },
+      );
+    });
+
+    it("leaves an existing one alone, whatever it is priced at", async () => {
+      storedProperty = { id: "an-existing-tar", name: "TAR" };
+
+      await service.apply();
+
+      expect(customProperties.create).not.toHaveBeenCalled();
+      expect(settings.upsert).toHaveBeenCalledWith(
+        PRICING_CATEGORY,
+        "AUTOMATIC_CUSTOM_PROPERTY_ID",
+        { value: "an-existing-tar" },
+      );
+    });
+
+    it("never creates a second one", async () => {
+      await service.apply();
+      await service.apply();
+
+      expect(customProperties.create).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  /**
+   * ── A FRESH DATABASE ENDS UP ABLE TO PRICE ────────────────────────────────
+   * The whole point, asserted as one statement: after a single run nothing the
+   * Engine requires is missing and nothing is blocked.
+   */
+  it("leaves a fresh database with a complete pricing foundation", async () => {
+    const applied = await service.apply();
+
+    // The settings double cannot update itself, so this is what was written.
+    expect(settings.upsert).toHaveBeenCalledTimes(
+      PRICING_SETTING_CATALOG.length,
+    );
+    expect(applied.componentsMissingCount).toBe(0);
+    expect(applied.automaticProperty.isPresent).toBe(true);
+    expect(applied.automaticProperty.id).toBe(TAR_ID);
+    expect(applied.blockedCount).toBe(0);
+  });
+
+  /**
+   * ── AND IT STILL NEVER INVENTS AN ID ──────────────────────────────────────
+   * The id is resolved from THIS database, never carried in the code. What
+   * changed is that a missing property is no longer a dead end: it is created
+   * first, and the id recorded is the one it was actually given.
+   */
+  describe("planning, before the property exists", () => {
+    it("proposes no value for the id it cannot yet know", async () => {
       const plan = await service.plan();
       const automatic = plan.settings.find(
         (setting) => setting.key === "AUTOMATIC_CUSTOM_PROPERTY_ID",
       );
 
       expect(automatic?.proposedValue).toBeNull();
-      expect(automatic?.blockedReason).toMatch(/TAR/);
-      expect(plan.blockedCount).toBe(1);
     });
 
-    it("creates the others anyway", async () => {
-      await service.apply();
+    /** Nothing blocks initialization any more: the run creates its own way out. */
+    it("reports nothing as blocked", async () => {
+      const plan = await service.plan();
 
-      expect(settings.upsert).toHaveBeenCalledTimes(
-        PRICING_SETTING_CATALOG.length - 1,
-      );
-      expect(settings.upsert).not.toHaveBeenCalledWith(
-        PRICING_CATEGORY,
-        "AUTOMATIC_CUSTOM_PROPERTY_ID",
-        expect.anything(),
-      );
-    });
-
-    it("still reports it as missing afterwards", async () => {
-      const applied = await service.apply();
-
-      expect(applied.blockedCount).toBe(1);
+      expect(plan.blockedCount).toBe(0);
     });
   });
 
   /**
+   * "Blocked" now means the one thing bootstrapping genuinely must not do:
+   * reverse somebody's decision to switch a setting off.
+   */
+  it("reports a deactivated setting as blocked", async () => {
+    repository.findMany.mockResolvedValue([
+      storedSetting("FUEL_PERCENTAGE", "15", false),
+    ]);
+
+    const plan = await service.plan();
+
+    expect(plan.blockedCount).toBe(1);
+    expect(
+      plan.settings.find((setting) => setting.key === "FUEL_PERCENTAGE")
+        ?.blockedReason,
+    ).toMatch(/switched off/);
+  });
+
+  /**
    * It holds no Engine, no Trip service and no snapshot writer, so no
-   * historical Trip can be repriced by bootstrapping configuration.
+   * historical Trip can be repriced by bootstrapping configuration. Creating a
+   * component, a property or a setting is configuration; producing a snapshot
+   * is a different operation, and this service cannot reach it.
    */
   it("has no route to a Trip or to the Pricing Engine", () => {
     expect(Object.keys(service as unknown as object)).toEqual([
       "settings",
       "repository",
       "customProperties",
+      "components",
       "logger",
     ]);
   });

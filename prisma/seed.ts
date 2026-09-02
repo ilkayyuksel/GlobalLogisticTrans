@@ -8,6 +8,27 @@ import { PrismaClient } from "@prisma/client";
  * Seeds only the reference data that database_schema.md explicitly requires to
  * exist. It is safe to run repeatedly: every step checks before it writes.
  *
+ * ── NO LONGER THE AUTHORITY ON THE PRICING CATALOG ──────────────────────────
+ * This file used to be the only place the `pricing_component` catalog existed,
+ * and that was the bug. The deployment never runs it: compose runs
+ * `migrate deploy`, and `prisma db seed` invokes `tsx prisma/seed.ts` while
+ * `tsx` is a devDependency that `pnpm install --prod` strips from the runtime
+ * image. A deployed database therefore had migrations, an empty catalog, and no
+ * way to price anything — the Engine calculated correctly and then failed to
+ * store the result against a missing foreign key.
+ *
+ * The Backend now ensures the catalog itself, at startup and through the
+ * pricing bootstrap endpoint:
+ *
+ *   apps/backend/src/settings/pricing-component.catalog.ts   the canonical list
+ *   apps/backend/src/settings/pricing-bootstrap.service.ts   what ensures it
+ *
+ * That list is the authority. This one is kept so `pnpm db:seed` still works on
+ * a development database without booting the API, and the two agree today. If
+ * they ever drift, the application's list wins on every boot — it creates what
+ * is absent and leaves everything else alone — so drift here delays a component
+ * rather than corrupting anything.
+ *
  * Deliberately NOT seeded — see the note at the bottom of this file:
  *   - Setting rows (pricing values are excluded from the documentation)
  *   - RoutePricing rows (route prices are customer data)
@@ -138,8 +159,8 @@ async function main(): Promise<void> {
 
   console.log("Seed completed.");
   console.log(
-    "Reminder: pricing Settings are not seeded and must be configured before " +
-      "the Pricing Engine can run. See the note in prisma/seed.ts.",
+    "Note: pricing Settings are not seeded here. The Backend creates them on " +
+      "startup from its own catalog, and leaves any existing value alone.",
   );
 }
 

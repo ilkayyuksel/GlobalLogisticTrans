@@ -419,13 +419,19 @@ describe("sequences of transport documents", () => {
    * ──────────────────────────────────────────────────────────────────────────
    */
   describe("a document naming a different container", () => {
-    it("matches no Trip, so the revision changes nothing here", async () => {
+    /**
+     * The container no longer decides on its own. A document naming one we do
+     * not hold reaches the Trip through the matcher's last phase — the booking
+     * and the ordered date — because the order was placed without a container
+     * and the document that follows may carry one entered by hand.
+     */
+    it("reaches the Trip through the booking and the date", async () => {
       const result = await service.applyDocumentRevision(
         buildDocument({ containerNumber: "EUCU4532322" }),
       );
 
-      expect(result.outcome).toBe("NO_MATCHING_TRIP");
-      expect(trip().containerNumber).toBeNull();
+      expect(result.outcome).toBe("UPDATED");
+      expect(trip().containerNumber).toBe("EUCU4532322");
       expect(trip().status).toBe(TripStatus.OPEN);
     });
 

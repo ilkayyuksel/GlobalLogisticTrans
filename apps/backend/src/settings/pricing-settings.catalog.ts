@@ -134,6 +134,27 @@ export const PRICING_SETTING_CATALOG: readonly PricingSettingDefinition[] = [
 /** The name the automatic Custom Property is known by in this business. */
 export const AUTOMATIC_CUSTOM_PROPERTY_NAME = "TAR";
 
+/**
+ * What TAR costs, for the case where the property has to be created.
+ *
+ * ── WHY A MONETARY VALUE IS WRITTEN DOWN HERE ───────────────────────────────
+ * `prisma/seed.ts` refuses to seed amounts, and its reasoning is sound: an
+ * invented number would look like a decision somebody made. This is not an
+ * invented number. €20 per standalone Trip is the established rule — one TAR on
+ * a standalone Trip, exactly one on the DELIVERY leg of a genuine Combination —
+ * and it is transcribed here for the same reason the settings above are: so a
+ * fresh database can reach a working state without anyone writing SQL.
+ *
+ * The alternative is worse than transcribing it. A TAR property created with no
+ * amount would price every Trip €20 short and look entirely healthy doing it,
+ * because a missing amount is not an error the Engine can report.
+ *
+ * It is a `default_price` on an ordinary Custom Property, editable from the
+ * Settings page the moment it exists, and it is written ONLY when no active
+ * property named TAR is there at all.
+ */
+export const AUTOMATIC_CUSTOM_PROPERTY_DEFAULT_PRICE = 20;
+
 /** The key whose value must be resolved from the database rather than typed. */
 export const AUTOMATIC_CUSTOM_PROPERTY_SETTING_KEY =
   "AUTOMATIC_CUSTOM_PROPERTY_ID";

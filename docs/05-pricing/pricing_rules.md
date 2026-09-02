@@ -618,28 +618,50 @@ migrated database therefore has no pricing Settings at all, and the Pricing
 Engine refuses every calculation until they exist — no snapshot is written and
 the Ritten pricing screen is empty.
 
-Two mechanisms close that gap, and they are deliberately separate:
+The Backend closes that gap itself. The pricing bootstrap ensures the whole
+foundation in one idempotent operation, and it runs automatically as the
+application starts, so a deployment is configured without anyone remembering a
+step. The same operation is available on demand from Settings → Prijzen, and
+through `POST /api/v1/settings/pricing/bootstrap`.
 
-- **Pricing components are system data.** `prisma db seed` creates the component
-  catalog. It is idempotent — an existing component is left untouched, so
-  re-running the seed never duplicates a row or reverts a local rename. Running
-  the seed is part of provisioning an environment.
-- **Pricing settings are operator configuration.** They are created from
-  Settings → Prijzen, which lists every setting the Engine reads together with
-  its current value, or the fact that it has none. Missing settings can be
-  created from that screen in one action; an existing value is never
-  overwritten, because a configured setting is somebody's decision.
+It has three layers, and the order is not arbitrary:
+
+1. **The `pricing_component` catalog.** Every `trip_pricing_item` carries a
+   foreign key into it, so a breakdown cannot be STORED without it however
+   correctly it was calculated. Absent rows are created; an existing component
+   is left untouched, including one somebody has renamed.
+2. **The TAR Custom Property.** An ordinary Custom Property, created only when
+   no ACTIVE property already bears that name, priced at the standing €20. It
+   is editable and deactivatable afterwards like any other.
+3. **The Setting rows.** Created only where no row exists — an existing value is
+   somebody's decision and is never overwritten.
+
+Layer 3 depends on layer 2: `AUTOMATIC_CUSTOM_PROPERTY_ID` holds the id of a
+Custom Property row in the database it lives in, so it is resolved from that
+database by name rather than carried in the application, where an id from
+another environment would point at nothing — or at some unrelated property,
+which would silently charge the wrong amount on every Trip. Running the layers
+the other way round leaves that setting with nothing to point at.
 
 The report always precedes the write: the screen shows what would be created
-before anything is created, and creating is idempotent — a second run finds
-nothing missing and writes nothing.
+before anything is created, and creating is idempotent — a second run, and every
+subsequent restart, finds nothing missing and writes nothing.
 
-One setting cannot be created from a stored value. `AUTOMATIC_CUSTOM_PROPERTY_ID`
-holds the id of a Custom Property row in the database it lives in, so it is
-resolved from that database by the property's name. Where no such property
-exists the screen reports it as blocked and says why, rather than writing an id
-that would point at nothing — or at some unrelated property, which would
-silently charge the wrong amount on every Trip.
+A setting that EXISTS but has been switched off is reported as blocked rather
+than repaired. The Engine treats it exactly as missing, but somebody disabled it
+deliberately and reactivating it is their decision.
+
+### Why the seed is no longer the mechanism
+
+`prisma/seed.ts` still creates the component catalog and is still idempotent,
+but the deployment never ran it: compose runs `migrate deploy`, and
+`prisma db seed` invokes `tsx prisma/seed.ts` while `tsx` is a devDependency
+that `pnpm install --prod` strips from the runtime image. A deployed database
+therefore had its schema, an empty catalog, and no way to price anything — the
+Engine calculated a Trip correctly and then failed to store the result against a
+missing foreign key. Whether the database holds what the Engine requires is a
+Backend invariant, so the Backend is where it is now ensured. The seed remains a
+developer convenience for a database with no API running.
 
 Route prices are configuration too, and have their own prerequisite: a pricing
 component may only carry route costs once a Custom Property links to it (see

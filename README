@@ -451,6 +451,29 @@ request is ever served against an unmigrated schema.
 never drops and never seeds. The development seeds are not part of this stack:
 a deployment starts from the data it already has.
 
+## Pricing initialization
+
+Migrations create the tables; they do not configure the business. The API does
+that itself, once, as it finishes starting: the pricing bootstrap ensures the
+`pricing_component` catalog, the TAR Custom Property and the pricing Settings,
+creating only what is absent. A configured database is untouched by it, so it is
+a no-op on every restart after the first, and it prices no Trip — a Trip closed
+before configuration existed still needs an explicit Reprocess Pricing.
+
+Look for one of these in the log after a start:
+
+    Pricing foundation verified at startup
+    Pricing configuration is still incomplete
+
+The second means something needs an operator — a setting that exists but has
+been switched off. Settings → Prijzen shows which, and can run the same
+operation on demand.
+
+This used to be `prisma db seed`, and it was never run by a deployment: the seed
+is executed through `tsx`, which `pnpm install --prod` strips from the runtime
+image. A deployed database ended up with an empty component catalog, and every
+Trip priced to `null` because a calculated breakdown has a foreign key into it.
+
 ## Volumes
 
 | Volume | Holds | Lost if deleted |

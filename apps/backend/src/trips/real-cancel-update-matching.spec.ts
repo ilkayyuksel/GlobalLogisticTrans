@@ -6,7 +6,6 @@ import { parse } from "@tms/parser";
 
 import {
   resolveTripForDocument,
-  type ContainerMissRule,
   type DocumentTripMatch,
 } from "./document-trip-matching";
 import type { TripRepository } from "./trip.repository";
@@ -28,15 +27,6 @@ import type { TripRepository } from "./trip.repository";
 
 const FIXTURES = join(process.cwd(), "..", "..", "docs", "06-pdf");
 
-/**
- * The one rule that differs between the two document kinds.
- *
- * A cancellation whose printed container matches nothing falls back to the
- * booking and the date; a revision refuses so the caller creates the Trip. Each
- * call below states which kind it is exercising.
- */
-const CANCEL_RULE: ContainerMissRule = "FALL_BACK_TO_BOOKING_AND_DATE";
-const UPDATE_RULE: ContainerMissRule = "REFUSE";
 
 function buildTrip(overrides: Partial<Trip>): Trip {
   return {
@@ -190,7 +180,7 @@ describe("the real CANCEL and UPDATE fixtures", () => {
 
         results.push({
           file: document.file,
-          match: await resolveTripForDocument(repository, document, CANCEL_RULE),
+          match: await resolveTripForDocument(repository, document),
         });
       }
 
@@ -211,7 +201,7 @@ describe("the real CANCEL and UPDATE fixtures", () => {
           }),
         ]);
 
-        expect(await resolveTripForDocument(repository, document, CANCEL_RULE)).toMatchObject(
+        expect(await resolveTripForDocument(repository, document)).toMatchObject(
           { kind: "MATCHED", method: "BOOKING_ONLY" },
         );
       }
@@ -228,7 +218,7 @@ describe("the real CANCEL and UPDATE fixtures", () => {
           }),
         ]);
 
-        expect(await resolveTripForDocument(repository, document, CANCEL_RULE)).toMatchObject(
+        expect(await resolveTripForDocument(repository, document)).toMatchObject(
           { kind: "MATCHED", method: "BOOKING_AND_CONTAINER" },
         );
       }
@@ -254,7 +244,7 @@ describe("the real CANCEL and UPDATE fixtures", () => {
           }),
         ]);
 
-        expect(await resolveTripForDocument(repository, document, CANCEL_RULE)).toMatchObject(
+        expect(await resolveTripForDocument(repository, document)).toMatchObject(
           { kind: "AMBIGUOUS_BOOKING_MATCH", tripCount: 2 },
         );
       }
@@ -263,7 +253,7 @@ describe("the real CANCEL and UPDATE fixtures", () => {
     it("finds nothing when the booking is genuinely unknown", async () => {
       for (const document of cancels) {
         expect(
-          await resolveTripForDocument(repositoryOf([]), document, CANCEL_RULE),
+          await resolveTripForDocument(repositoryOf([]), document),
         ).toMatchObject({ kind: "NO_MATCHING_TRIP" });
       }
     });
@@ -281,7 +271,7 @@ describe("the real CANCEL and UPDATE fixtures", () => {
           }),
         ]);
 
-        expect(await resolveTripForDocument(repository, document, UPDATE_RULE)).toMatchObject(
+        expect(await resolveTripForDocument(repository, document)).toMatchObject(
           { kind: "MATCHED" },
         );
       }
@@ -303,26 +293,50 @@ describe("the real CANCEL and UPDATE fixtures", () => {
         ]);
 
         expect(
-          (await resolveTripForDocument(repository, document, UPDATE_RULE)).kind,
+          (await resolveTripForDocument(repository, document)).kind,
         ).not.toBe("NO_MATCHING_TRIP");
       }
     });
 
-    it("matches strictly when the document prints a container", async () => {
+    /**
+     * A container we do not hold no longer refuses the document. The order may
+     * have been placed without one and given a container by hand, so the last
+     * phase drops the container and matches on the booking and the date — which
+     * is the only pair that reliably identifies the transport.
+     */
+    it("still reaches the Trip when the container differs", async () => {
       for (const document of updates.filter((d) => d.containerNumber !== null)) {
         const repository = repositoryOf([
           buildTrip({
             bookingNumber: document.bookingNumber,
-            // The date THIS document prints. Identity is scoped to it.
+            // The date THIS document prints. Matching is scoped to it.
             originalPlanningDate: document.originalPlanningDate,
             containerNumber: "PVDU0000000",
           }),
         ]);
 
-        // A different container on the same booking is a different transport.
-        expect(await resolveTripForDocument(repository, document, UPDATE_RULE)).toMatchObject(
-          { kind: "NO_MATCHING_TRIP" },
+        expect(await resolveTripForDocument(repository, document)).toMatchObject(
+          { kind: "MATCHED", method: "BOOKING_ONLY" },
         );
+      }
+    });
+
+    /** The date is still absolute: no fallback reaches across it. */
+    it("does not reach a Trip ordered for another date", async () => {
+      for (const document of updates.filter((d) => d.containerNumber !== null)) {
+        const repository = repositoryOf([
+          buildTrip({
+            bookingNumber: document.bookingNumber,
+            originalPlanningDate: new Date(
+              document.originalPlanningDate.getTime() - 7 * 24 * 60 * 60 * 1000,
+            ),
+            containerNumber: "PVDU0000000",
+          }),
+        ]);
+
+        expect(
+          (await resolveTripForDocument(repository, document)).kind,
+        ).toBe("NO_MATCHING_TRIP");
       }
     });
   });
@@ -349,7 +363,7 @@ describe("the real CANCEL and UPDATE fixtures", () => {
     ]);
 
     expect(
-      await resolveTripForDocument(repository, printed as DocumentTrip, CANCEL_RULE),
+      await resolveTripForDocument(repository, printed as DocumentTrip),
     ).toMatchObject({ kind: "MATCHED" });
   });
 
@@ -392,7 +406,6 @@ describe("the real CANCEL and UPDATE fixtures", () => {
         const match = await resolveTripForDocument(
           repository,
           { ...document, containerNumber: CUSTOMERS_CONTAINER },
-          CANCEL_RULE,
         );
 
         expect(match).toMatchObject({
@@ -404,10 +417,12 @@ describe("the real CANCEL and UPDATE fixtures", () => {
     });
 
     /** An UPDATE in the same position refuses, and the caller creates a Trip. */
-    it("is refused for a revision, which creates its own Trip instead", async () => {
+    /** A revision in the same position now reaches the Trip too. */
+    it("reaches the same Trip for a revision", async () => {
       for (const document of cancels.filter((d) => d.containerNumber === null)) {
         const repository = repositoryOf([
           buildTrip({
+            id: "typed-in",
             bookingNumber: document.bookingNumber,
             originalPlanningDate: document.originalPlanningDate,
             containerNumber: "EUCU9999999",
@@ -415,14 +430,11 @@ describe("the real CANCEL and UPDATE fixtures", () => {
         ]);
 
         expect(
-          (
-            await resolveTripForDocument(
-              repository,
-              { ...document, containerNumber: CUSTOMERS_CONTAINER },
-              UPDATE_RULE,
-            )
-          ).kind,
-        ).toBe("NO_MATCHING_TRIP");
+          await resolveTripForDocument(repository, {
+            ...document,
+            containerNumber: CUSTOMERS_CONTAINER,
+          }),
+        ).toMatchObject({ kind: "MATCHED", trip: { id: "typed-in" } });
       }
     });
 
@@ -450,7 +462,6 @@ describe("the real CANCEL and UPDATE fixtures", () => {
             await resolveTripForDocument(
               repository,
               { ...document, containerNumber: CUSTOMERS_CONTAINER },
-              CANCEL_RULE,
             )
           ).kind,
         ).toBe("NO_MATCHING_TRIP");
@@ -479,7 +490,6 @@ describe("the real CANCEL and UPDATE fixtures", () => {
           await resolveTripForDocument(
             repository,
             { ...document, containerNumber: CUSTOMERS_CONTAINER },
-            CANCEL_RULE,
           ),
         ).toMatchObject({ kind: "AMBIGUOUS_BOOKING_MATCH", tripCount: 2 });
       }
@@ -527,7 +537,7 @@ describe("the real CANCEL and UPDATE fixtures", () => {
           }),
         ]);
 
-        expect(await resolveTripForDocument(repository, document, UPDATE_RULE)).toMatchObject(
+        expect(await resolveTripForDocument(repository, document)).toMatchObject(
           { kind: "MATCHED", trip: { id: "this-week" } },
         );
       }
@@ -550,7 +560,7 @@ describe("the real CANCEL and UPDATE fixtures", () => {
           }),
         ]);
 
-        expect(await resolveTripForDocument(repository, document, UPDATE_RULE)).toMatchObject(
+        expect(await resolveTripForDocument(repository, document)).toMatchObject(
           { kind: "MATCHED" },
         );
       }
@@ -569,7 +579,7 @@ describe("the real CANCEL and UPDATE fixtures", () => {
           }),
         ]);
 
-        expect((await resolveTripForDocument(repository, document, UPDATE_RULE)).kind).toBe(
+        expect((await resolveTripForDocument(repository, document)).kind).toBe(
           "NO_MATCHING_TRIP",
         );
       }

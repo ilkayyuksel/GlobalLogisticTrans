@@ -13,36 +13,35 @@ import { BOOKING_NUMBER_HOLDING_STATUSES } from "./trip-status.rules";
  * service is its only caller. Nothing in a controller, a repository or the IMAP
  * path decides identity.
  *
- * ── THE RULE ────────────────────────────────────────────────────────────────
- * It is CONDITIONAL on what the document actually says:
+ * ── THE RULE, IN TWO PHASES ────────────────────────────────────────────────
+ * 1. the whole identity — booking, container and the document's own transport
+ *    date — tried only when the document states a container;
+ * 2. the booking and that date, with the container dropped entirely.
  *
- *   container printed      → booking AND container, exactly.
- *   container absent       → booking alone.
+ * A phase that finds ONE Trip answers. A phase that finds NOTHING hands on to
+ * the next. Phase 2 is the last, so its count is final.
  *
- * Both halves are scoped to the document's own transport date, which is the
- * third part of a Trip's identity. The same booking and container come round
- * again on a later date as a genuinely different transport, and an UPDATE for
- * one of them must never reach the other.
+ * ── WHY THE CONTAINER IS DROPPED, AND ONLY LAST ────────────────────────────
+ * A container printed on an incoming document does not reliably identify a
+ * Trip. A COLLECTION order is written before anyone knows which container will
+ * be picked up, so it prints none and an operator types one in later — and the
+ * next document for that transport may well carry it. Matching strictly on the
+ * container left real revisions and real cancellations unapplied.
  *
- * Why the asymmetry is right: a COLLECTION order is written before anyone knows
- * which container will be picked up, so it prints none — and the operator may
- * type one in later. A CANCEL for that transport still prints no container, so
- * requiring one to match would leave real cancellations unapplied, which is
- * what it did.
+ * So the container is used while it helps and abandoned when it does not. It is
+ * never abandoned FIRST: a document naming a container we hold must reach that
+ * Trip and no other.
  *
- * ── WHERE UPDATE AND CANCEL PART COMPANY ────────────────────────────────────
- * A document that PRINTS a container is matched strictly on it FIRST. What
- * happens when that finds nothing is the one place the two document kinds
- * disagree, and `ContainerMissRule` below is where that difference is named.
+ * The DATE is never dropped. The same booking comes round again a week later as
+ * a different transport, and no fallback may reach across it.
  *
- * An UPDATE refuses: booking A container Y naming no Trip means the transport
- * it describes is not here, and revising booking A container X instead would
- * rewrite a transport nobody sent an update for. The caller creates a Trip.
- *
- * A CANCEL falls back to the booking and the date, because a cancellation must
- * not fail over a container WE recorded differently — the order was placed
- * without one, an operator typed it in, and the customer cancels naming theirs.
- * A cancellation creates nothing, so the looser rule costs nothing.
+ * ── UPDATE AND CANCEL ANSWER ALIKE ─────────────────────────────────────────
+ * They once differed on what a container miss meant: a cancellation fell back
+ * to the booking and the date, a revision refused and let the caller create a
+ * Trip. Both now reach the same last phase, so the distinction no longer
+ * changes any outcome and the rule that expressed it is gone. What a caller
+ * DOES with the answer still differs — a revision may create, a cancellation
+ * never does.
  *
  * ── AMBIGUITY IS AN ANSWER ──────────────────────────────────────────────────
  * A booking legitimately carries several Trips, one per container. When a
@@ -61,31 +60,6 @@ export type DocumentTripMatch =
 /** How the Trip was found, for the log and for the audit trail. */
 export type MatchMethod = "BOOKING_AND_CONTAINER" | "BOOKING_ONLY";
 
-/**
- * What a document naming a container does when no Trip carries that container.
- *
- * ── THE ONE PLACE UPDATE AND CANCEL DISAGREE ────────────────────────────────
- * Everything else about matching is shared, and deliberately so. This is the
- * single difference, named rather than duplicated, so the two rules sit side by
- * side and can be compared.
- *
- * `REFUSE` — an UPDATE. A revision that names a container nothing holds
- * describes a transport this system does not have, and the caller creates it.
- * Falling back would let an UPDATE for container Y silently rewrite the Trip
- * carrying container X.
- *
- * `FALL_BACK_TO_BOOKING_AND_DATE` — a CANCEL. A cancellation is an instruction
- * from the party that placed the order, and it must not fail because our record
- * of the container differs from theirs. The case it exists for: the order was
- * placed without a container, the operator typed one in afterwards, and the
- * cancellation names the container the customer knows. The exact identity finds
- * nothing, and refusing would leave a real cancellation unapplied — the same
- * failure that made a container-less CANCEL fall back to the booking.
- *
- * A cancellation never creates anything, which is why the looser rule is safe
- * here and would not be safe for an UPDATE.
- */
-export type ContainerMissRule = "REFUSE" | "FALL_BACK_TO_BOOKING_AND_DATE";
 
 export interface DocumentIdentity {
   readonly bookingNumber: string;
@@ -134,11 +108,16 @@ export function toContainerIdentity(value: string | null | undefined): string | 
 export async function resolveTripForDocument(
   repository: TripRepository,
   identity: DocumentIdentity,
-  onContainerMiss: ContainerMissRule,
   statuses: readonly TripStatus[] = BOOKING_NUMBER_HOLDING_STATUSES,
 ): Promise<DocumentTripMatch> {
   const containerNumber = toContainerIdentity(identity.containerNumber);
 
+  /*
+   * ── PHASE 1: the whole identity ────────────────────────────────────────────
+   * Only when the document states a container. At most one live Trip can hold
+   * a given booking, container and date — the unique index guarantees it — so
+   * this phase answers with one Trip or with nothing, never with an ambiguity.
+   */
   if (containerNumber !== null) {
     const trip = await repository.findByIdentity({
       identity: {
@@ -152,29 +131,26 @@ export async function resolveTripForDocument(
     if (trip) {
       return { kind: "MATCHED", trip, method: "BOOKING_AND_CONTAINER" };
     }
-
-    if (onContainerMiss === "REFUSE") {
-      return { kind: "NO_MATCHING_TRIP" };
-    }
-
-    /*
-     * A cancellation whose container matches nothing falls through to the
-     * booking and the date — see `ContainerMissRule`. It is the SAME lookup a
-     * container-less document uses, including its ambiguity rule, so the two
-     * cannot answer differently.
-     */
   }
 
   /*
-   * The booking and the date are all there is to go on. Every Trip holding them
-   * is read — not the first one — because the COUNT is the answer: one is a
-   * match, several is an ambiguity nobody may resolve automatically.
+   * ── PHASE 2, THE LAST: the booking and the date ────────────────────────────
+   * Reached only because Phase 1 found NOTHING, and it drops the container
+   * entirely.
    *
-   * The date narrows the candidates but never picks between them. Two Trips on
-   * one booking and one date are still ambiguous, and still nobody's to choose.
-   * The Trip's CURRENT container number is not consulted here at all: it is the
-   * operator's to change, and letting it decide the lookup is exactly what left
+   * That is deliberate, and it is why this phase is last. A container printed
+   * on an incoming document does not reliably identify a Trip: an order placed
+   * without one is given a container by hand afterwards, and the document that
+   * follows may carry it. Refusing on that mismatch left real revisions and
    * real cancellations unapplied.
+   *
+   * The date is NOT dropped with it. A booking that comes round again a week
+   * later is a different transport, and no fallback may reach across it.
+   *
+   * The COUNT is the answer: one is a match, several is an ambiguity nobody may
+   * resolve automatically. The Trip's CURRENT container is not consulted at all
+   * — it is the operator's to change, and letting it decide is exactly what
+   * this phase exists to stop.
    */
   const candidates = await repository.findManyByBookingNumberAndOriginalDate({
     bookingNumber: identity.bookingNumber,
