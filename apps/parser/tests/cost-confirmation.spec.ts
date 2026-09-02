@@ -76,6 +76,28 @@ const EXPECTED: readonly ExpectedConfirmation[] = [
     costCode: "WAIT",
     containerReference: null,
   },
+  {
+    /* A clean container, and the case matching narrows strictly on it. */
+    file: "CC-met-container.pdf",
+    ccNumber: "4152218",
+    bookingNumber: "ANRDUB2796277",
+    amount: "41.25",
+    costCode: "WAIT",
+    containerReference: "EUCU4582658",
+  },
+  {
+    /*
+     * The header prints `1????` — the unreadable placeholder with a stray digit
+     * in front of it. It names no container, so this confirmation is matched by
+     * the container-less rule.
+     */
+    file: "CC-zonder-container.pdf",
+    ccNumber: "4152206",
+    bookingNumber: "ANRDUB2796313",
+    amount: "165.00",
+    costCode: "WAIT",
+    containerReference: null,
+  },
 ];
 
 function readFixture(relativePath: string): Uint8Array {
@@ -204,19 +226,28 @@ describe("what a cost confirmation is not", () => {
 });
 
 describe("the amounts across the fixtures", () => {
-  /** Four different amounts: none of them is a constant in the reader. */
-  it("differ from one another", async () => {
+  /**
+   * Each document's own amount, and several different ones across them: no
+   * amount is a constant baked into the reader.
+   *
+   * NOT one distinct amount per file — two real confirmations legitimately
+   * confirm the same €41.25, which is a quarter-hour of waiting at the
+   * configured rate and says nothing about the parser.
+   */
+  it("are the ones the documents state", async () => {
     const amounts: string[] = [];
 
     for (const expected of EXPECTED) {
       const result = await parseConfirmation(expected.file);
 
       if (!result.ok) throw new Error("expected a parse");
+
+      expect(result.confirmation.amount).toBe(expected.amount);
       amounts.push(result.confirmation.amount);
     }
 
-    expect(new Set(amounts).size).toBe(EXPECTED.length);
-    expect(amounts).toEqual(["25.00", "41.25", "55.00", "96.25"]);
+    expect(new Set(amounts).size).toBeGreaterThan(1);
+    expect(amounts).toEqual(EXPECTED.map((entry) => entry.amount));
   });
 
   it("keeps the cents of a quarter-hour amount", async () => {
@@ -225,5 +256,81 @@ describe("the amounts across the fixtures", () => {
     if (!result.ok) throw new Error("expected a parse");
     // 41.25, not 41.3 and not 41.
     expect(result.confirmation.amount).toBe("41.25");
+  });
+});
+
+/**
+ * ── THE ORDERED TRANSPORT DATE, AND WHAT COUNTS AS A CONTAINER ──────────────
+ * Both are read from the real documents, and both decide which Trip a
+ * confirmation belongs to: the date separates two transports on one booking,
+ * and a confirmation naming a usable container is matched strictly on it.
+ *
+ * The two files added for this rule are the interesting ones. One prints a
+ * clean container; the other prints `1????`, which is the unreadable
+ * placeholder with a stray digit in front of it and names no container at all.
+ */
+describe("the fields Cost Confirmation matching depends on", () => {
+  it.each([
+    ["CC-met-container.pdf", "4152218", "2026-08-28", "EUCU4582658"],
+    ["CC-zonder-container.pdf", "4152206", "2026-08-28", null],
+    [
+      "COST_CONFIRMATION_NR_4132482__ANRDUB2789089__EUCU4530818.pdf",
+      "4132482",
+      "2026-08-14",
+      "EUCU4530818",
+    ],
+    [
+      "COST_CONFIRMATION_NR_4139511__ANRDUB2790211__XXXXXXXXXXXX.pdf",
+      "4139511",
+      "2026-08-20",
+      null,
+    ],
+  ])("reads %s", async (file, ccNumber, transportDate, container) => {
+    const result = await parseConfirmation(file);
+
+    if (!result.ok) throw new Error(`expected a parse: ${result.reason}`);
+
+    expect(result.confirmation.ccNumber).toBe(ccNumber);
+    expect(result.confirmation.transportDate).toBe(transportDate);
+    expect(result.confirmation.containerReference).toBe(container);
+  });
+
+  /**
+   * The date comes from the confirmation's own LOADING / DELIVERY section, not
+   * from its print date — which is a different day on these documents, and
+   * would silently match the wrong transport.
+   */
+  it("reads the transport date, never the print date", async () => {
+    const result = await parseConfirmation("CC-met-container.pdf");
+
+    if (!result.ok) throw new Error(result.reason);
+
+    expect(result.confirmation.transportDate).toBe("2026-08-28");
+    expect(result.confirmation.raw).not.toContain("2026-08-28");
+  });
+
+  /** Every confirmation we hold states a readable transport date. */
+  it("reads a date from every real confirmation", async () => {
+    for (const expected of EXPECTED) {
+      const result = await parseConfirmation(expected.file);
+
+      if (!result.ok) throw new Error(`${expected.file}: ${result.reason}`);
+
+      expect(result.confirmation.transportDate).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    }
+  });
+
+  /**
+   * A reference that is not a container is not a container. `1????` slipped
+   * through the placeholder rule because it is not made ENTIRELY of question
+   * marks, and a reference that names nothing must never take part in matching.
+   */
+  it("treats an unreadable reference as no container", async () => {
+    const result = await parseConfirmation("CC-zonder-container.pdf");
+
+    if (!result.ok) throw new Error(result.reason);
+
+    expect(result.confirmation.raw).toContain("1????");
+    expect(result.confirmation.containerReference).toBeNull();
   });
 });

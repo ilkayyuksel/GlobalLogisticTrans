@@ -20,6 +20,7 @@ import { TripRepository } from "../trips/trip.repository";
 import { TripRevisionService } from "../trips/trip-revision.service";
 import { TripService } from "../trips/trip.service";
 import { VehicleService } from "../vehicles/vehicle.service";
+import { CostConfirmationMatchingService } from "./cost-confirmation-matching.service";
 import { PdfTripImporter } from "./pdf-trip-importer.service";
 import { stubPricingRecalculation } from "../pricing-engine/pricing-recalculation.double";
 
@@ -513,6 +514,13 @@ export function buildHarness(storageDirectory: string) {
       new TripRevisionService(tripRepository, automaticFlat, logger),
       pdfDocumentService,
       costConfirmationService,
+      // The REAL matcher: which Trip a confirmation belongs to is business
+      // logic, and a double here would prove nothing about it.
+      new CostConfirmationMatchingService(
+        tripService,
+        pdfDocumentService,
+        logger,
+      ),
       logger,
     ),
     tripService,

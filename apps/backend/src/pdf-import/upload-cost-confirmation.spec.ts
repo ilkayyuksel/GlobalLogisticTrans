@@ -50,6 +50,9 @@ const CONFIRMATION = join(
 const TRANSPORT_ORDER = join("NEW", "1page.pdf");
 
 const CONFIRMATION_BOOKING = "ANRDUB2794719";
+/** The ordered transport date and container this confirmation itself prints. */
+const CONFIRMATION_DATE = "2026-08-31";
+const CONFIRMATION_CONTAINER = "CNEU4597558";
 const ORDER_BOOKING = "ANRDUB2602247";
 
 function uploaded(fixture: string): UploadedPdfFile {
@@ -95,19 +98,24 @@ describe("uploading a Cost Confirmation by hand", () => {
     await rm(storageDirectory, { recursive: true, force: true });
   });
 
-  /** The Trip the confirmation names, so the existing matching can find it. */
+  /**
+   * The Trip the confirmation names, carrying what matching requires: the
+   * booking, the ORDERED date the confirmation prints, and the container it
+   * names. This confirmation names a usable container, so its original source
+   * is never consulted.
+   */
   function seedTrip(bookingNumber: string) {
     const trip = {
       id: `trip-${harness.trips.length + 1}`,
       bookingNumber,
       status: TripStatus.OPEN,
-      containerNumber: null,
+      containerNumber: CONFIRMATION_CONTAINER,
       containerType: "45PH",
       terminal: "PSA Quay 869",
       destinationCity: "Dendermonde",
       destinationCountry: "Belgium",
-      planningDate: new Date("2026-08-31T00:00:00.000Z"),
-      originalPlanningDate: new Date("2026-08-31T00:00:00.000Z"),
+      planningDate: new Date(`${CONFIRMATION_DATE}T00:00:00.000Z`),
+      originalPlanningDate: new Date(`${CONFIRMATION_DATE}T00:00:00.000Z`),
       waitingTimeMinutes: 150,
       tripGroupId: null,
       pdfDocumentId: null,

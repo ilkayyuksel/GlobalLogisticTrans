@@ -3,6 +3,7 @@ import {
   extractCostConfirmation,
   findCostConfirmationHeader,
 } from "./fields/cost-confirmation";
+import { extractDateTime } from "./fields/date-time";
 import { extractDocumentStatus } from "./fields/document-status";
 import { detectLayout } from "./layout/detect";
 import { detectedSections } from "./layout/page-trip";
@@ -10,6 +11,7 @@ import { parseCombination } from "./layout/combination";
 import { parseSingle } from "./layout/single";
 import {
   ExtractedDocument,
+  Fragment,
   UnreadablePdfError,
   extractDocument,
 } from "./text/extract";
@@ -243,7 +245,50 @@ export async function parseCostConfirmation(
   return {
     ok: true,
     parserVersion: PARSER_VERSION,
-    confirmation: read.value,
+    confirmation: {
+      ...read.value,
+      transportDate: transportDateOf(document.fragments),
+    },
     metadata,
   };
+}
+
+/** `LOADING 1:` / `DELIVERY 1:` — the section that states the ordered date. */
+const CONFIRMATION_SECTION = /^(LOADING|DELIVERY)\s+\d+:$/;
+
+/**
+ * The ordered transport date a confirmation prints in its own address section.
+ *
+ * ── WHY IT IS READ AT ALL ───────────────────────────────────────────────────
+ * A confirmation names its Trip by booking number, and one booking can hold
+ * several Trips ordered for different days. The date is what tells them apart,
+ * and this is the only date on the document that describes the TRANSPORT — the
+ * print date, the sailing date and the closing date all describe something else.
+ *
+ * ── AND WHY THROUGH THE SAME EXTRACTOR ──────────────────────────────────────
+ * `extractDateTime` is the rule that already reads this exact line on a
+ * transport order: the labelled `Date/time:` under a section header, never a
+ * date found by scanning. A confirmation carries a copy of an order, so it
+ * prints the same line in the same place, and reading it with a second rule
+ * would be two definitions of one thing.
+ *
+ * Absent rather than fatal: a confirmation whose section date cannot be read is
+ * still a valid confirmation, and the caller decides what a missing date means
+ * for matching.
+ */
+function transportDateOf(fragments: readonly Fragment[]): string | null {
+  const section = fragments.find((fragment) =>
+    CONFIRMATION_SECTION.test(fragment.text.trim()),
+  );
+
+  if (!section) {
+    return null;
+  }
+
+  try {
+    return extractDateTime(fragments, section).date;
+  } catch {
+    // The section states no readable `Date/time:` line. Reported as absent.
+    return null;
+  }
 }

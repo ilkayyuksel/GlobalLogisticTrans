@@ -11,6 +11,7 @@ import { AppLoggerService } from "../logger/app-logger.service";
 import { PdfDocumentRepository } from "../pdf-documents/pdf-document.repository";
 import { CostConfirmationService } from "../cost-confirmations/cost-confirmation.service";
 import { PdfDocumentService } from "../pdf-documents/pdf-document.service";
+import { CostConfirmationMatchingService } from "../pdf-import/cost-confirmation-matching.service";
 import { PdfTripImporter } from "../pdf-import/pdf-trip-importer.service";
 import { TripRepository } from "../trips/trip.repository";
 import { TripCustomPropertyRepository } from "../trip-custom-properties/trip-custom-property.repository";
@@ -374,7 +375,12 @@ describe("IMAP import, end to end with a real transport order", () => {
         }),
         findForTrips: jest.fn().mockResolvedValue(new Map()),
       } as unknown as CostConfirmationService,
-      logger,
+      new CostConfirmationMatchingService(
+        tripService,
+        pdfDocumentService,
+        logger,
+      ),
+      logger
     );
 
     const importedEmailService = {
@@ -940,12 +946,20 @@ describe("IMAP import, end to end with a real transport order", () => {
         "Cost-Combination/COST_CONFIRMATION_NR_4132482__ANRDUB2789089__EUCU4530818.pdf";
       const BOOKING = "ANRDUB2789089";
 
-      /** The Trip the confirmation names, as an ordinary order would create it. */
+      /**
+       * The Trip the confirmation names, as an ordinary order would create it.
+       *
+       * It carries the ORDERED date and the container the confirmation itself
+       * prints, which is what matching now compares against.
+       */
       function existingTrip() {
         createdTrips.push({
           id: "trip-existing",
           bookingNumber: BOOKING,
           status: TripStatus.OPEN,
+          containerNumber: "EUCU4530818",
+          originalPlanningDate: new Date("2026-08-14T00:00:00.000Z"),
+          planningDate: new Date("2026-08-14T00:00:00.000Z"),
           waitingTimeStart: null,
           waitingTimeEnd: null,
           waitingTimeMinutes: 150,
@@ -1103,6 +1117,10 @@ describe("IMAP import, end to end with a real transport order", () => {
           id: "trip-existing",
           bookingNumber: "ANRDUB2789089",
           status: TripStatus.OPEN,
+          // What the confirmation states: its ordered date and its container.
+          containerNumber: "EUCU4530818",
+          originalPlanningDate: new Date("2026-08-14T00:00:00.000Z"),
+          planningDate: new Date("2026-08-14T00:00:00.000Z"),
           waitingTimeStart: null,
           waitingTimeEnd: null,
           waitingTimeMinutes: 150,

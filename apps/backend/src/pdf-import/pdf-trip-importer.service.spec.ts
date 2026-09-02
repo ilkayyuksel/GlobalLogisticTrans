@@ -11,6 +11,7 @@ import {
   NoTripsFoundException,
   UnreadablePdfException,
 } from "./exceptions/pdf-import.exceptions";
+import { CostConfirmationMatchingService } from "./cost-confirmation-matching.service";
 import { PdfTripImporter } from "./pdf-trip-importer.service";
 
 /**
@@ -137,7 +138,12 @@ describe("PdfTripImporter", () => {
         }),
         findForTrips: jest.fn().mockResolvedValue(new Map()),
       } as unknown as CostConfirmationService,
-      logger as unknown as AppLoggerService,
+      new CostConfirmationMatchingService(
+        tripService as unknown as TripService,
+        pdfDocumentService as unknown as PdfDocumentService,
+        logger as unknown as AppLoggerService,
+      ),
+      logger as unknown as AppLoggerService
     );
   });
 

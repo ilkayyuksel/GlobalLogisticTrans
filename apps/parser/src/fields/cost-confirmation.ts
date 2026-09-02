@@ -1,3 +1,4 @@
+import { normalizeContainerNumber } from "./container";
 import { Fragment } from "../text/extract";
 
 /**
@@ -47,6 +48,40 @@ const AMOUNT_LINE = /^Amount:\s*([A-Z]{3})\s*(-?\d+(?:[.,]\d{1,2})?)\s*$/i;
  * only of question marks or asterisks is that same "unknown", not a reference.
  */
 const UNREADABLE = /^[?*]+$/;
+
+/**
+ * A real container reference: four letters and seven digits, as ISO 6346 sets
+ * out and as every readable confirmation prints — `EUCU4582658`, `CNEU4597558`.
+ *
+ * ── WHY THE SHAPE AND NOT JUST THE PLACEHOLDER RULE ─────────────────────────
+ * A real confirmation prints `1????`: the placeholder above with a stray digit
+ * in front of it. `UNREADABLE` matches only a string made ENTIRELY of question
+ * marks, so that value came through as if it were a container reference — and a
+ * reference that names no container must never take part in matching, because a
+ * confirmation that HAS a container is matched strictly on it.
+ *
+ * Requiring the shape settles both cases with one rule, and it fails SAFE: a
+ * reference that is dropped leaves the confirmation container-less, which
+ * matches more strictly rather than less.
+ */
+const CONTAINER_REFERENCE = /^[A-Z]{4}\d{7}$/;
+
+/** The reference this confirmation names, or null when it names none usable. */
+function usableContainerReference(printed: string | null): string | null {
+  if (printed === null) {
+    return null;
+  }
+
+  const normalized = normalizeContainerNumber(printed);
+
+  if (normalized === null || UNREADABLE.test(normalized)) {
+    return null;
+  }
+
+  return CONTAINER_REFERENCE.test(normalized.toUpperCase())
+    ? normalized.toUpperCase()
+    : null;
+}
 
 export interface ExtractedCostConfirmation {
   /** The Eucon number, digits only. The `CC` prefix is presentation. */
@@ -118,8 +153,7 @@ export function extractCostConfirmation(
       currency: amount.currency,
       costCode: costCode.code,
       costDescription: costCode.description,
-      containerReference:
-        container && !UNREADABLE.test(container) ? container : null,
+      containerReference: usableContainerReference(container ?? null),
       remarks: readRemarks(block),
       raw: [header, ...block].map((fragment) => fragment.text).join("\n"),
     },

@@ -157,6 +157,17 @@ export interface ParsedCostConfirmation {
   readonly costDescription: string | null;
   /** Null when the document prints an unreadable reference such as `????`. */
   readonly containerReference: string | null;
+  /**
+   * The ORDERED transport date, as this confirmation's own LOADING / DELIVERY
+   * section prints it on its `Date/time:` line. ISO `YYYY-MM-DD`.
+   *
+   * It is the date the transport was ordered for, which is what a Trip stores
+   * as `original_planning_date` — never the confirmation's print date, and
+   * never the operational planning date, which an operator may have moved.
+   *
+   * Null when the document states no readable section date.
+   */
+  readonly transportDate: string | null;
   readonly remarks: string | null;
   /** The confirmation block, kept as evidence for what was read. */
   readonly raw: string;

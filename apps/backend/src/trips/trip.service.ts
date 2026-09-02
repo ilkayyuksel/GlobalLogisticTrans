@@ -1,7 +1,6 @@
 import { Injectable } from "@nestjs/common";
 import { Prisma, Trip, TripStatus } from "@prisma/client";
 
-import { bookingNumberDigits } from "../common/booking-digits";
 import { changedFieldNames } from "../common/changed-fields";
 import { toUtcDate } from "../common/dates";
 import { DomainEventBus } from "../common/events/domain-event-bus";
@@ -453,37 +452,30 @@ export class TripService {
    * put money on a transport nobody checked. The caller refuses instead — see
    * `CostConfirmationAmbiguousException`.
    */
-  async findAllByBookingNumber(bookingNumber: string): Promise<Trip[]> {
-    const exact = await this.repository.findManyByBookingNumber({
+  /**
+   * Every Trip holding a booking number EXACTLY, whatever their containers.
+   *
+   * Phase 1 of Cost Confirmation matching. It applies no date and no container
+   * rule: those belong to `CostConfirmationMatchingService`, which owns the
+   * whole rule and would be split in two if this narrowed anything itself.
+   */
+  async findByExactBookingNumber(bookingNumber: string): Promise<Trip[]> {
+    return this.repository.findManyByBookingNumber({
       bookingNumber,
       statuses: BOOKING_NUMBER_HOLDING_STATUSES,
     });
+  }
 
-    if (exact.length > 0) {
-      return exact;
-    }
-
-    /*
-     * ── THE FALLBACK, AND WHY IT IS SECOND ────────────────────────────────
-     * A Cost Confirmation is produced by a different system, and it does not
-     * always print the booking number in full: `ANRDUB2793554` on the transport
-     * order can arrive as `DUB2793554` or as `2793554`. Compared as strings
-     * those name no Trip, and real money went unrecorded.
-     *
-     * The digits are what the two systems agree on, so they are what is
-     * compared — by EXACT equality, never as a substring. It runs only when the
-     * exact lookup found nothing, so a confirmation that names a booking
-     * properly is never decided by anything looser.
-     *
-     * The COUNT is still the answer: the caller refuses an ambiguous booking
-     * rather than choosing a Trip, and that is unchanged here.
-     */
-    const digits = bookingNumberDigits(bookingNumber);
-
-    if (digits === null) {
-      return exact;
-    }
-
+  /**
+   * Every Trip whose booking number has the same DIGITS as the one given.
+   *
+   * Phase 2 of Cost Confirmation matching, reached only when the exact lookup
+   * above yielded no eligible Trip at all. A confirmation is produced by
+   * another system, which prints `ANRDUB2793554` as `DUB2793554` or `2793554`;
+   * the digits are what the two systems agree on, and they are compared by
+   * exact equality.
+   */
+  async findByBookingDigits(digits: string): Promise<Trip[]> {
     return this.repository.findManyByBookingDigits({
       digits,
       statuses: BOOKING_NUMBER_HOLDING_STATUSES,

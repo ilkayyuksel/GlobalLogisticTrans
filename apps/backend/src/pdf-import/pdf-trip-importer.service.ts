@@ -1,5 +1,5 @@
 import { Injectable } from "@nestjs/common";
-import { Prisma } from "@prisma/client";
+import { Prisma, Trip } from "@prisma/client";
 import {
   ParseResult,
   ParseSuccess,
@@ -26,6 +26,10 @@ import {
   identityOf,
 } from "../trips/trip-revision.service";
 import { CostConfirmationService } from "../cost-confirmations/cost-confirmation.service";
+import {
+  CostConfirmationMatchingService,
+  identityOfConfirmation,
+} from "./cost-confirmation-matching.service";
 import { DuplicateBookingNumberException } from "../trips/exceptions/trip.exceptions";
 import { TripService } from "../trips/trip.service";
 import {
@@ -180,6 +184,7 @@ export class PdfTripImporter {
     private readonly tripRevision: TripRevisionService,
     private readonly pdfDocumentService: PdfDocumentService,
     private readonly costConfirmations: CostConfirmationService,
+    private readonly matching: CostConfirmationMatchingService,
     private readonly logger: AppLoggerService,
   ) {
     this.logger.setContext(PdfTripImporter.name);
@@ -585,8 +590,15 @@ export class PdfTripImporter {
 
     this.assertSubjectAgrees(options.subject, confirmation, originalFilename);
 
-    const candidates = await this.tripService.findAllByBookingNumber(
-      confirmation.bookingNumber,
+    /*
+     * ── WHICH TRIP THIS CONFIRMATION IS ABOUT ───────────────────────────────
+     * Booking number, the ordered transport date the confirmation itself
+     * prints, and its container — or, when it names none usable, only a Trip
+     * whose ORIGINAL order printed none either. The whole rule, including the
+     * digit-booking fallback, belongs to the matching service.
+     */
+    const match = await this.matching.findTripForCostConfirmation(
+      identityOfConfirmation(confirmation),
     );
 
     /*
@@ -594,40 +606,40 @@ export class PdfTripImporter {
      * Trip to record the arrival against, so a stored document would reference
      * nothing — and the message is retried, which would store it again.
      */
-    if (candidates.length === 0) {
+    if (match.kind === "NO_MATCHING_TRIP") {
       throw new CostConfirmationRefusedException(
         confirmation.ccNumber,
-        `No Trip holds booking number ${confirmation.bookingNumber}.`,
+        `No Trip matches booking number ${confirmation.bookingNumber} on ${confirmation.transportDate ?? "an unstated date"}${
+          confirmation.containerReference === null
+            ? " that was ordered without a container"
+            : ` with container ${confirmation.containerReference}`
+        }.`,
       );
     }
 
     /*
-     * ── WHY A CONFIRMATION CAN BE AMBIGUOUS ─────────────────────────────────
-     * A Trip is identified by its booking number AND its container number, so
-     * one booking may hold several Trips. A confirmation names only the
-     * booking: its own container reference is printed in a different format
-     * from a transport order's — `EUCU4530818` against `EUCU 453232/2` — and
-     * some confirmations print none at all, so it cannot be matched on.
-     *
-     * With more than one candidate this REFUSES rather than choosing. The
-     * document carries money, and attaching it to the wrong leg of a booking is
-     * a silent invoicing error nobody would find. A person decides.
+     * ── WHY A CONFIRMATION CAN STILL BE AMBIGUOUS ───────────────────────────
+     * The date and the container narrow the candidates; they cannot always
+     * separate them. Two Trips ordered on one booking, for one date, both
+     * without a container are indistinguishable to a confirmation that names
+     * none — and the document carries money, so attaching it to the wrong one
+     * is a silent invoicing error nobody would find. A person decides.
      * ────────────────────────────────────────────────────────────────────────
      */
-    if (candidates.length > 1) {
+    if (match.kind === "AMBIGUOUS") {
       this.logger.warn("Cost confirmation refused: the booking is ambiguous", {
         originalFilename,
         ccNumber: confirmation.ccNumber,
-        candidateTripIds: candidates.map((candidate) => candidate.id),
+        candidateTripIds: match.trips.map((candidate: Trip) => candidate.id),
       });
 
       throw new CostConfirmationRefusedException(
         confirmation.ccNumber,
-        `Booking number ${confirmation.bookingNumber} is held by ${candidates.length} Trips with different containers, and the confirmation names no container that can tell them apart.`,
+        `Booking number ${confirmation.bookingNumber} matches ${match.trips.length} Trips on ${confirmation.transportDate}, and the confirmation names nothing that can tell them apart.`,
       );
     }
 
-    const [trip] = candidates;
+    const trip = match.trip;
 
     const document = await this.storeDocument(
       content,

@@ -32,6 +32,10 @@ interface ExpectedConfirmation {
   readonly ccNumber: string;
   readonly bookingNumber: string;
   readonly amount: string;
+  /** The ordered transport date the confirmation prints, ISO. */
+  readonly transportDate: string;
+  /** The container it names, or null when it names none usable. */
+  readonly containerReference: string | null;
 }
 
 /** Pinned from the documents, not from their filenames. */
@@ -41,24 +45,50 @@ const EXPECTED: readonly ExpectedConfirmation[] = [
     ccNumber: "4132482",
     bookingNumber: "ANRDUB2789089",
     amount: "25.00",
+    transportDate: "2026-08-14",
+    containerReference: "EUCU4530818",
   },
   {
     file: "COST_CONFIRMATION_NR_4133634__ANRDUB2791468__PVDU1139156.pdf",
     ccNumber: "4133634",
     bookingNumber: "ANRDUB2791468",
     amount: "41.25",
+    transportDate: "2026-08-18",
+    containerReference: "PVDU1139156",
   },
   {
     file: "COST_CONFIRMATION_NR_4139509__ANRDUB2792284__EUCU4583166.pdf",
     ccNumber: "4139509",
     bookingNumber: "ANRDUB2792284",
     amount: "55.00",
+    transportDate: "2026-08-20",
+    containerReference: "EUCU4583166",
   },
   {
     file: "COST_CONFIRMATION_NR_4139511__ANRDUB2790211__XXXXXXXXXXXX.pdf",
     ccNumber: "4139511",
     bookingNumber: "ANRDUB2790211",
     amount: "96.25",
+    transportDate: "2026-08-20",
+    containerReference: null,
+  },
+  {
+    /* A clean container: matched strictly on it. */
+    file: "CC-met-container.pdf",
+    ccNumber: "4152218",
+    bookingNumber: "ANRDUB2796277",
+    amount: "41.25",
+    transportDate: "2026-08-28",
+    containerReference: "EUCU4582658",
+  },
+  {
+    /* Prints `1????`, which names no container: the container-less rule. */
+    file: "CC-zonder-container.pdf",
+    ccNumber: "4152206",
+    bookingNumber: "ANRDUB2796313",
+    amount: "165.00",
+    transportDate: "2026-08-28",
+    containerReference: null,
   },
 ];
 
@@ -80,18 +110,55 @@ describe("every real Cost Confirmation, through the real workflow", () => {
   });
 
   /** A Trip the confirmation can name, carrying operator work to protect. */
-  function seedTrip(bookingNumber: string) {
+  /**
+   * A real transport order that prints NO container — the source a Trip needs
+   * for a container-less confirmation to be able to reach it. Stored through
+   * the real document service, so the matcher genuinely re-reads it.
+   */
+  const CONTAINERLESS_ORDER = join(FIXTURES, "NEW", "1page.pdf");
+
+  /**
+   * The Trip a confirmation names, carrying what matching now requires.
+   *
+   * The ORDERED date and the container come from the confirmation itself: a
+   * Trip on another day, or holding another container, is no longer a
+   * candidate. Its source document is a real order printing no container, so a
+   * container-less confirmation is eligible to reach it — and a Trip's CURRENT
+   * container is set independently, which is exactly the mismatch the
+   * provenance rule exists to survive.
+   */
+  async function seedTrip(expected: ExpectedConfirmation) {
+    /*
+     * `store` writes the file and PREPARES the row; the importer is what
+     * normally creates it. Both halves are done here so the matcher can read
+     * the document back exactly as it does in production.
+     */
+    const prepared = await harness.pdfDocumentService.store(
+      new Uint8Array(readFileSync(CONTAINERLESS_ORDER)),
+      "source-order.pdf",
+      "test",
+    );
+
+    const source = {
+      document: {
+        id: `pdf-source-${harness.pdfDocuments.length + 1}`,
+        ...prepared.document,
+      },
+    };
+
+    harness.pdfDocuments.push(source.document);
+
     const trip = {
       id: `trip-${harness.trips.length + 1}`,
-      bookingNumber,
+      bookingNumber: expected.bookingNumber,
       status: TripStatus.OPEN,
-      containerNumber: "EUCU 453081/8",
+      containerNumber: expected.containerReference ?? "EUCU 453081/8",
       containerType: "45PH",
       terminal: "PSA Quay 869",
       destinationCity: "Aalter",
       destinationCountry: "Belgium",
-      planningDate: new Date("2026-08-14T00:00:00.000Z"),
-      originalPlanningDate: new Date("2026-08-14T00:00:00.000Z"),
+      planningDate: new Date(`${expected.transportDate}T00:00:00.000Z`),
+      originalPlanningDate: new Date(`${expected.transportDate}T00:00:00.000Z`),
       vehicleId: "vehicle-1",
       driverId: null,
       waitingTimeStart: null,
@@ -99,12 +166,30 @@ describe("every real Cost Confirmation, through the real workflow", () => {
       waitingTimeMinutes: 150,
       internalNotes: "Bel de klant",
       tripGroupId: null,
-      pdfDocumentId: null,
+      pdfDocumentId: source.document.id,
     };
 
     harness.trips.push(trip);
 
     return trip;
+  }
+
+  /**
+   * Points a seeded Trip at another confirmation's transport.
+   *
+   * Matching now needs all three — booking, ordered date and container — so a
+   * test that wants a second confirmation to reach the SAME Trip has to move
+   * all three rather than the booking number alone.
+   */
+  function retarget(
+    trip: Record<string, unknown>,
+    expected: ExpectedConfirmation,
+  ): void {
+    trip.bookingNumber = expected.bookingNumber;
+    trip.originalPlanningDate = new Date(
+      `${expected.transportDate}T00:00:00.000Z`,
+    );
+    trip.containerNumber = expected.containerReference ?? trip.containerNumber;
   }
 
   it("covers every document in the folder", () => {
@@ -138,7 +223,7 @@ describe("every real Cost Confirmation, through the real workflow", () => {
 
   describe.each(EXPECTED)("$file", (expected) => {
     it("records the confirmed amount against the Trip it names", async () => {
-      const trip = seedTrip(expected.bookingNumber);
+      const trip = await seedTrip(expected);
 
       const result = await harness.importer.confirmCost(
         readConfirmation(expected.file),
@@ -158,7 +243,7 @@ describe("every real Cost Confirmation, through the real workflow", () => {
     });
 
     it("creates no Trip", async () => {
-      seedTrip(expected.bookingNumber);
+      await seedTrip(expected);
 
       await harness.importer.confirmCost(
         readConfirmation(expected.file),
@@ -171,23 +256,31 @@ describe("every real Cost Confirmation, through the real workflow", () => {
     });
 
     it("stores the document and links it to the confirmation", async () => {
-      seedTrip(expected.bookingNumber);
+      await seedTrip(expected);
 
       await harness.importer.confirmCost(
         readConfirmation(expected.file),
         expected.file,
       );
 
-      expect(harness.pdfDocuments).toHaveLength(1);
-      expect(harness.pdfDocuments[0].originalFilename).toBe(expected.file);
+      /*
+       * Two documents: the Trip's own source order, seeded so its original
+       * container can be established, and the confirmation itself. The
+       * confirmation is the LATEST, and it is the one the record points at.
+       */
+      const confirmationDocument = harness.pdfDocuments.at(
+        -1,
+      ) as Record<string, unknown>;
+
+      expect(confirmationDocument.originalFilename).toBe(expected.file);
       expect(harness.costConfirmations[0].pdfDocumentId).toBe(
-        harness.pdfDocuments[0].id,
+        confirmationDocument.id,
       );
-      expect(readdirSync(storageDirectory)).toHaveLength(1);
+      expect(readdirSync(storageDirectory)).toHaveLength(2);
     });
 
     it("changes nothing about the Trip itself", async () => {
-      const trip = seedTrip(expected.bookingNumber);
+      const trip = await seedTrip(expected);
       const before = { ...trip };
 
       await harness.importer.confirmCost(
@@ -201,7 +294,7 @@ describe("every real Cost Confirmation, through the real workflow", () => {
     });
 
     it("appears in the Trip's document history", async () => {
-      const trip = seedTrip(expected.bookingNumber);
+      const trip = await seedTrip(expected);
 
       await harness.importer.confirmCost(
         readConfirmation(expected.file),
@@ -210,7 +303,12 @@ describe("every real Cost Confirmation, through the real workflow", () => {
 
       const { items } = await harness.documents.findForTrip(trip.id);
 
-      expect(items).toHaveLength(1);
+      /*
+       * Two: the confirmation that just arrived, and the order the Trip was
+       * created from. The confirmation is the most recent, and it is the one
+       * this test is about.
+       */
+      expect(items).toHaveLength(2);
       expect(items[0]).toMatchObject({
         action: "COST_CONFIRMATION",
         originalFilename: expected.file,
@@ -220,15 +318,17 @@ describe("every real Cost Confirmation, through the real workflow", () => {
     });
 
     it("keeps the document readable afterwards", async () => {
-      seedTrip(expected.bookingNumber);
+      await seedTrip(expected);
 
       await harness.importer.confirmCost(
         readConfirmation(expected.file),
         expected.file,
       );
 
+      // The confirmation is the latest document; the first is the Trip's own
+      // source order, seeded so its original container can be established.
       const content = await harness.pdfDocumentService.readContent(
-        harness.pdfDocuments[0].id as string,
+        harness.pdfDocuments.at(-1)?.id as string,
       );
 
       expect(content.originalFilename).toBe(expected.file);
@@ -239,11 +339,11 @@ describe("every real Cost Confirmation, through the real workflow", () => {
   });
 
   describe("the amounts", () => {
-    it("are the four different amounts the documents state", async () => {
+    it("are the amounts the documents state", async () => {
       const recorded: string[] = [];
 
       for (const expected of EXPECTED) {
-        const trip = seedTrip(expected.bookingNumber);
+        const trip = await seedTrip(expected);
         const result = await harness.importer.confirmCost(
           readConfirmation(expected.file),
           expected.file,
@@ -253,12 +353,12 @@ describe("every real Cost Confirmation, through the real workflow", () => {
         expect(result.costConfirmations[0].tripId).toBe(trip.id);
       }
 
-      expect(recorded).toEqual(["25.00", "41.25", "55.00", "96.25"]);
+      expect(recorded).toEqual(EXPECTED.map((entry) => entry.amount));
     });
 
     /** Money is a fixed-2 string from the page to the row. Never a float. */
     it("are stored as fixed-2 strings", async () => {
-      seedTrip(EXPECTED[1].bookingNumber);
+      await seedTrip(EXPECTED[1]);
 
       const result = await harness.importer.confirmCost(
         readConfirmation(EXPECTED[1].file),
@@ -304,25 +404,29 @@ describe("every real Cost Confirmation, through the real workflow", () => {
   describe("a booking held by more than one Trip", () => {
     const { file, bookingNumber } = EXPECTED[0];
 
-    function twoTripsOnOneBooking(): void {
+    /**
+     * Two Trips the confirmation cannot tell apart: same booking, same ordered
+     * date, and both holding the container it names. The date and the container
+     * have already narrowed as far as they can.
+     */
+    function twoIndistinguishableTrips(): void {
+      const shared = {
+        bookingNumber,
+        containerNumber: EXPECTED[0].containerReference,
+        originalPlanningDate: new Date(
+          `${EXPECTED[0].transportDate}T00:00:00.000Z`,
+        ),
+        status: TripStatus.OPEN,
+      };
+
       harness.trips.push(
-        {
-          id: "trip-container-1",
-          bookingNumber,
-          containerNumber: "EUCU4532322",
-          status: TripStatus.OPEN,
-        },
-        {
-          id: "trip-container-2",
-          bookingNumber,
-          containerNumber: "PVDU3013260",
-          status: TripStatus.OPEN,
-        },
+        { id: "trip-container-1", ...shared },
+        { id: "trip-container-2", ...shared },
       );
     }
 
     it("is refused rather than attached to one of them", async () => {
-      twoTripsOnOneBooking();
+      twoIndistinguishableTrips();
 
       await expect(
         harness.importer.confirmCost(readConfirmation(file), file),
@@ -332,7 +436,7 @@ describe("every real Cost Confirmation, through the real workflow", () => {
     });
 
     it("says which booking is ambiguous and how many Trips hold it", async () => {
-      twoTripsOnOneBooking();
+      twoIndistinguishableTrips();
 
       await expect(
         harness.importer.confirmCost(readConfirmation(file), file),
@@ -340,7 +444,7 @@ describe("every real Cost Confirmation, through the real workflow", () => {
     });
 
     it("stores nothing, because the message will be retried", async () => {
-      twoTripsOnOneBooking();
+      twoIndistinguishableTrips();
 
       await expect(
         harness.importer.confirmCost(readConfirmation(file), file),
@@ -350,12 +454,15 @@ describe("every real Cost Confirmation, through the real workflow", () => {
       expect(readdirSync(storageDirectory)).toEqual([]);
     });
 
-    /** One Trip on the booking is unambiguous, and still works. */
-    it("records it normally when the booking holds one Trip", async () => {
+    /** One eligible Trip is unambiguous, and still works. */
+    it("records it normally when only one Trip matches", async () => {
       harness.trips.push({
         id: "trip-only",
         bookingNumber,
-        containerNumber: null,
+        containerNumber: EXPECTED[0].containerReference,
+        originalPlanningDate: new Date(
+          `${EXPECTED[0].transportDate}T00:00:00.000Z`,
+        ),
         status: TripStatus.OPEN,
       });
 
@@ -378,18 +485,59 @@ describe("every real Cost Confirmation, through the real workflow", () => {
    * exist because the two lookups sit beside each other in the repository, and
    * a date added to the wrong one would fail silently and only in production.
    */
+  /**
+   * ── THE DATE IS PART OF THE RULE ──────────────────────────────────────────
+   * A confirmation prints the ordered transport date of the transport it is
+   * paying for, and one booking can hold several Trips ordered for different
+   * days. It is matched against the Trip's ORIGINAL planning date — never the
+   * operational one, which an operator may have moved since.
+   */
   describe("a booking whose Trips were ordered for different dates", () => {
     const { file, bookingNumber } = EXPECTED[0];
 
-    it("finds the Trip whatever its original planning date", async () => {
-      harness.trips.push({
-        id: "trip-far-future",
+    function tripOrderedOn(id: string, isoDate: string) {
+      return {
+        id,
         bookingNumber,
-        containerNumber: null,
-        // Deliberately unrelated to anything the confirmation states.
-        originalPlanningDate: new Date("2027-03-01T00:00:00.000Z"),
-        planningDate: new Date("2027-03-05T00:00:00.000Z"),
+        containerNumber: EXPECTED[0].containerReference,
+        originalPlanningDate: new Date(`${isoDate}T00:00:00.000Z`),
+        planningDate: new Date(`${isoDate}T00:00:00.000Z`),
         status: TripStatus.OPEN,
+      };
+    }
+
+    it("reaches only the Trip ordered for the date it states", async () => {
+      harness.trips.push(
+        tripOrderedOn("trip-other-week", "2026-08-07"),
+        tripOrderedOn("trip-this-one", EXPECTED[0].transportDate),
+      );
+
+      await harness.importer.confirmCost(readConfirmation(file), file);
+
+      expect(harness.costConfirmations).toHaveLength(1);
+      expect(harness.costConfirmations[0]).toMatchObject({
+        tripId: "trip-this-one",
+      });
+    });
+
+    it("finds nothing when only another date is held", async () => {
+      harness.trips.push(tripOrderedOn("trip-other-week", "2027-03-01"));
+
+      await expect(
+        harness.importer.confirmCost(readConfirmation(file), file),
+      ).rejects.toThrow(/was not recorded/);
+
+      expect(harness.costConfirmations).toEqual([]);
+    });
+
+    /**
+     * The operator's date is not consulted. A Trip re-planned to another day is
+     * still the transport that was ORDERED for the confirmation's date.
+     */
+    it("ignores a planning date the operator has moved", async () => {
+      harness.trips.push({
+        ...tripOrderedOn("trip-replanned", EXPECTED[0].transportDate),
+        planningDate: new Date("2026-09-30T00:00:00.000Z"),
       });
 
       await harness.importer.confirmCost(readConfirmation(file), file);
@@ -397,61 +545,28 @@ describe("every real Cost Confirmation, through the real workflow", () => {
       expect(harness.costConfirmations).toHaveLength(1);
     });
 
-    /**
-     * Two Trips on one booking are ambiguous even when their dates differ. The
-     * date does not disambiguate a confirmation, because the confirmation never
-     * named one — so it still refuses rather than choosing.
-     */
-    it("is still ambiguous when only the date separates the Trips", async () => {
+    /** Matching starts from the booking number, exactly as it always has. */
+    it("starts from the exact booking number", async () => {
       harness.trips.push(
-        {
-          id: "trip-week-1",
-          bookingNumber,
-          containerNumber: "EUCU4532322",
-          originalPlanningDate: new Date("2026-08-24T00:00:00.000Z"),
-          status: TripStatus.OPEN,
-        },
-        {
-          id: "trip-week-2",
-          bookingNumber,
-          containerNumber: "EUCU4532322",
-          originalPlanningDate: new Date("2026-08-31T00:00:00.000Z"),
-          status: TripStatus.OPEN,
-        },
+        tripOrderedOn("trip-only", EXPECTED[0].transportDate),
       );
-
-      await expect(
-        harness.importer.confirmCost(readConfirmation(file), file),
-      ).rejects.toThrow(/2 Trips/);
-
-      expect(harness.costConfirmations).toEqual([]);
-    });
-
-    /** The date-blind lookup is the one a confirmation reaches for. */
-    it("uses the booking-only lookup, never the identity one", async () => {
-      harness.trips.push({
-        id: "trip-only",
-        bookingNumber,
-        containerNumber: null,
-        originalPlanningDate: new Date("2027-03-01T00:00:00.000Z"),
-        status: TripStatus.OPEN,
-      });
 
       await harness.importer.confirmCost(readConfirmation(file), file);
 
       expect(harness.tripRepository.findManyByBookingNumber).toHaveBeenCalled();
+      // Trip identity is a different rule and is never consulted here.
+      expect(harness.tripRepository.findByIdentity).not.toHaveBeenCalled();
       expect(
         harness.tripRepository.findManyByBookingNumberAndOriginalDate,
       ).not.toHaveBeenCalled();
-      expect(harness.tripRepository.findByIdentity).not.toHaveBeenCalled();
     });
   });
 
   describe("the same confirmation twice", () => {
-    const { file, bookingNumber, ccNumber } = EXPECTED[0];
+    const { file, ccNumber } = EXPECTED[0];
 
     it("records it once, under any filename", async () => {
-      const trip = seedTrip(bookingNumber);
+      const trip = await seedTrip(EXPECTED[0]);
 
       await harness.importer.confirmCost(readConfirmation(file), file);
       const second = await harness.importer.confirmCost(
@@ -468,7 +583,7 @@ describe("every real Cost Confirmation, through the real workflow", () => {
 
     /** Content-addressed storage keeps one file for identical bytes. */
     it("writes one file for both arrivals", async () => {
-      seedTrip(bookingNumber);
+      await seedTrip(EXPECTED[0]);
 
       await harness.importer.confirmCost(readConfirmation(file), file);
       await harness.importer.confirmCost(
@@ -476,7 +591,12 @@ describe("every real Cost Confirmation, through the real workflow", () => {
         "a-different-name.pdf",
       );
 
-      expect(readdirSync(storageDirectory)).toHaveLength(1);
+      /*
+       * Two files: the Trip's seeded source order, and ONE copy of the
+       * confirmation. Storage is content-addressed, so the same bytes under a
+       * different name are written once — which is what this asserts.
+       */
+      expect(readdirSync(storageDirectory)).toHaveLength(2);
     });
   });
 
@@ -487,16 +607,17 @@ describe("every real Cost Confirmation, through the real workflow", () => {
      * with another number is refused rather than added, overwritten or summed.
      */
     it("is refused, and the first one stands", async () => {
-      const trip = seedTrip(EXPECTED[0].bookingNumber);
+      const trip = await seedTrip(EXPECTED[0]);
 
       await harness.importer.confirmCost(
         readConfirmation(EXPECTED[0].file),
         EXPECTED[0].file,
       );
 
-      // The second document names another booking, so the Trip is given that
-      // booking number: the workflow that follows is exactly the same.
-      trip.bookingNumber = EXPECTED[2].bookingNumber;
+      // The second document names another transport, so the Trip is given that
+      // document's identity — booking, ordered date and container. The workflow
+      // that follows is exactly the same, and the Trip already has a cost.
+      retarget(trip, EXPECTED[2]);
 
       await expect(
         harness.importer.confirmCost(
@@ -511,14 +632,14 @@ describe("every real Cost Confirmation, through the real workflow", () => {
     });
 
     it("changes nothing at all about the Trip", async () => {
-      const trip = seedTrip(EXPECTED[0].bookingNumber);
+      const trip = await seedTrip(EXPECTED[0]);
 
       await harness.importer.confirmCost(
         readConfirmation(EXPECTED[0].file),
         EXPECTED[0].file,
       );
 
-      trip.bookingNumber = EXPECTED[2].bookingNumber;
+      retarget(trip, EXPECTED[2]);
       const before = { ...trip };
 
       await expect(
@@ -539,14 +660,14 @@ describe("every real Cost Confirmation, through the real workflow", () => {
      * document belong together.
      */
     it("records the refusal against the Trip and keeps the document", async () => {
-      const trip = seedTrip(EXPECTED[0].bookingNumber);
+      const trip = await seedTrip(EXPECTED[0]);
 
       await harness.importer.confirmCost(
         readConfirmation(EXPECTED[0].file),
         EXPECTED[0].file,
       );
 
-      trip.bookingNumber = EXPECTED[2].bookingNumber;
+      retarget(trip, EXPECTED[2]);
 
       await expect(
         harness.importer.confirmCost(
@@ -562,20 +683,23 @@ describe("every real Cost Confirmation, through the real workflow", () => {
       expect(refusal).toHaveLength(1);
       expect(refusal[0].description).toContain("CC4139509");
       expect(refusal[0].description).toContain("CC4132482");
-      // Two documents: the confirmation that counted, and the one that did not.
-      expect(harness.pdfDocuments).toHaveLength(2);
-      expect(refusal[0].pdfDocumentId).toBe(harness.pdfDocuments[1].id);
+      /*
+       * Three: the Trip's seeded source order, the confirmation that counted,
+       * and the one that did not. The refusal points at the last.
+       */
+      expect(harness.pdfDocuments).toHaveLength(3);
+      expect(refusal[0].pdfDocumentId).toBe(harness.pdfDocuments.at(-1)?.id);
     });
 
     it("shows both documents in the history, one of them not applied", async () => {
-      const trip = seedTrip(EXPECTED[0].bookingNumber);
+      const trip = await seedTrip(EXPECTED[0]);
 
       await harness.importer.confirmCost(
         readConfirmation(EXPECTED[0].file),
         EXPECTED[0].file,
       );
 
-      trip.bookingNumber = EXPECTED[2].bookingNumber;
+      retarget(trip, EXPECTED[2]);
       await expect(
         harness.importer.confirmCost(
           readConfirmation(EXPECTED[2].file),
@@ -585,17 +709,24 @@ describe("every real Cost Confirmation, through the real workflow", () => {
 
       const { items } = await harness.documents.findForTrip(trip.id);
 
-      expect(items).toHaveLength(2);
-      expect(items.every((item) => item.action === "COST_CONFIRMATION")).toBe(
-        true,
+      /*
+       * Three documents, of which TWO are confirmations: the one that counted
+       * and the one that did not. The third is the order the Trip was created
+       * from, which was there before either arrived.
+       */
+      const confirmations = items.filter(
+        (item) => item.action === "COST_CONFIRMATION",
       );
-      expect(items.filter((item) => item.applied)).toHaveLength(1);
+
+      expect(items).toHaveLength(3);
+      expect(confirmations).toHaveLength(2);
+      expect(confirmations.filter((item) => item.applied)).toHaveLength(1);
     });
   });
 
   describe("what is refused", () => {
     it("refuses a transport order sent as a confirmation", async () => {
-      seedTrip("ANRDUB2602247");
+      await seedTrip({ ...EXPECTED[0], bookingNumber: "ANRDUB2602247" });
 
       await expect(
         harness.importer.confirmCost(
@@ -608,7 +739,7 @@ describe("every real Cost Confirmation, through the real workflow", () => {
     });
 
     it("refuses a subject that contradicts its document", async () => {
-      seedTrip(EXPECTED[0].bookingNumber);
+      await seedTrip(EXPECTED[0]);
 
       await expect(
         harness.importer.confirmCost(
@@ -618,12 +749,18 @@ describe("every real Cost Confirmation, through the real workflow", () => {
         ),
       ).rejects.toThrow(/subject names/);
 
+      // Nothing of the CONFIRMATION was written; the seeded source order, which
+      // existed before the attempt, is untouched.
       expect(harness.costConfirmations).toEqual([]);
-      expect(harness.pdfDocuments).toEqual([]);
+      expect(
+        harness.pdfDocuments.filter(
+          (document) => document.originalFilename !== "source-order.pdf",
+        ),
+      ).toEqual([]);
     });
 
     it("accepts a subject that agrees with its document", async () => {
-      seedTrip(EXPECTED[0].bookingNumber);
+      await seedTrip(EXPECTED[0]);
 
       const result = await harness.importer.confirmCost(
         readConfirmation(EXPECTED[0].file),
