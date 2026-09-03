@@ -343,3 +343,137 @@ describe("no layout ever yields a country as the city", () => {
     );
   });
 });
+
+/**
+ * ── AN INSTRUCTION IS NOT AN ADDRESS ────────────────────────────────────────
+ * A real order printed an operational instruction inside the address column:
+ *
+ *   Ks Project Logistics
+ *   Graanweg 17,
+ *   Moerdijk, 4782 PP ,
+ *   Netherlands
+ *   ADD DELIVERY TO REMARKS
+ *
+ * It carries no label, so the rule that ends an address at the sender's notes
+ * did not see it, and it is printed at the SAME column as the company and the
+ * country, so no boundary excluded it. It became the destination city.
+ *
+ * The shape below is the real one: the value column at x98, which is where
+ * `addressBlock` puts every line.
+ */
+describe("an operational instruction inside the address column", () => {
+  const REAL_BLOCK = [
+    "[4782]",
+    "Ks Project Logistics",
+    "Graanweg 17,",
+    "Moerdijk, 4782 PP ,",
+    "Netherlands",
+    "ADD DELIVERY TO REMARKS",
+  ];
+
+  it("does not become the city", () => {
+    expect(cityOf(REAL_BLOCK)).toBe("Moerdijk");
+  });
+
+  it("does not prevent the country from being read", () => {
+    expect(extractAddress(addressBlock(REAL_BLOCK), header).destinationCountry).toBe(
+      "Netherlands",
+    );
+  });
+
+  /** Not in the city, not in the country, not in the raw address text. */
+  it("appears in no address field at all", () => {
+    const address = extractAddress(addressBlock(REAL_BLOCK), header);
+
+    for (const value of [
+      address.destinationCity,
+      address.destinationCountry ?? "",
+      address.rawAddress,
+    ]) {
+      expect(value.toUpperCase()).not.toContain("ADD DELIVERY TO REMARKS");
+      expect(value.toUpperCase()).not.toContain("REMARKS");
+    }
+  });
+
+  /** The same instruction about the other leg is the same instruction. */
+  it("is excluded for the collection leg too", () => {
+    expect(
+      cityOf([
+        "[4782]",
+        "Ks Project Logistics",
+        "Graanweg 17,",
+        "Moerdijk, 4782 PP ,",
+        "Netherlands",
+        "ADD COLLECTION TO REMARKS",
+      ]),
+    ).toBe("Moerdijk");
+  });
+
+  /** Case and spacing are the printer's business, not the rule's. */
+  it("is recognised however it is spaced or cased", () => {
+    expect(
+      cityOf([
+        "[4782]",
+        "Ks Project Logistics",
+        "Graanweg 17,",
+        "Moerdijk, 4782 PP ,",
+        "Netherlands",
+        "  Add   Delivery   To   Remarks  ",
+      ]),
+    ).toBe("Moerdijk");
+  });
+
+  /**
+   * Dropped rather than treated as the end of the address: an instruction
+   * printed above the city must not truncate the block.
+   */
+  it("does not truncate the address when it comes first", () => {
+    expect(
+      cityOf([
+        "[4782]",
+        "ADD DELIVERY TO REMARKS",
+        "Ks Project Logistics",
+        "Graanweg 17,",
+        "Moerdijk, 4782 PP ,",
+        "Netherlands",
+      ]),
+    ).toBe("Moerdijk");
+  });
+});
+
+/**
+ * ── THE CITY MAY CARRY ITS POSTCODE ON EITHER SIDE ──────────────────────────
+ * `9940 Evergem,` was already read. `Moerdijk, 4782 PP ,` is the same two facts
+ * in the other order, and matched no rule at all — the digit guard that keeps a
+ * street out refused it, and it fell through to the last resort.
+ */
+describe("a city line carrying its own postcode", () => {
+  it.each([
+    [["[4782]", "Company", "Street 1", "Moerdijk, 4782 PP ,", "Netherlands"], "Moerdijk"],
+    [["[9940]", "Company", "Street 1", "Evergem, 9940,", "Belgium"], "Evergem"],
+    [["[9940]", "Company", "Street 1", "9940 Evergem,", "Belgium"], "Evergem"],
+    [["[2040]", "Company", "Street 1", "2040 Antwerpen", "Belgium"], "Antwerpen"],
+    [
+      ["[4782]", "Company", "Street 1", "Saint Laurent Blangy, 62223", "France"],
+      "Saint Laurent Blangy",
+    ],
+  ])("reads %p as %s", (lines, expected) => {
+    expect(cityOf(lines)).toBe(expected);
+  });
+
+  /**
+   * The guard that keeps a street out must survive the new form. A house number
+   * is not a postcode, so the line is still refused and the address with it.
+   */
+  it("still refuses a street above the country", () => {
+    expect(() =>
+      cityOf(["[62110]", "AMD", "Zone Industrielle", "Rue de Kan 7,", "France"]),
+    ).toThrow(ExtractionError);
+  });
+
+  it("still refuses a city line that is only a country", () => {
+    expect(() =>
+      cityOf(["[9130]", "DP World", "Ketenislaan 1", "Belgium", "Netherlands"]),
+    ).toThrow(ExtractionError);
+  });
+});

@@ -551,6 +551,48 @@ const PARSED_DOCUMENTS: readonly ExpectedDocument[] = [
   },
   {
     /*
+     * BUG — an operational instruction printed INSIDE the address column, and a
+     * city carrying its postcode after the name rather than before it:
+     *
+     *   Ks Project Logistics
+     *   Graanweg 17,
+     *   Moerdijk, 4782 PP ,
+     *   Netherlands
+     *   ADD DELIVERY TO REMARKS
+     *
+     * Two separate assumptions broke here. The instruction has no label, so the
+     * rule that ends an address at the sender's notes did not see it, and it is
+     * printed at the SAME x as the company and the country — measured, not
+     * assumed — so no column boundary excluded it either. It became the city.
+     *
+     * Underneath that, `Moerdijk, 4782 PP ,` matched no rule: every reader
+     * expected the postcode FIRST. With the instruction removed the address
+     * would simply have been refused instead, so both had to be read.
+     */
+    file: "BUG-CITY/ANRDUB2797806.pdf",
+    pageCount: 2,
+    layout: "SINGLE_TWO_PAGE",
+    documentStatus: "PLANNED",
+    trips: [
+      {
+        bookingNumber: "ANRDUB2797806",
+        direction: "COLLECTION",
+        containerType: "45PH",
+        containerNumber: null,
+        terminal: "PSA Quay 869",
+        destinationCity: "Moerdijk",
+        destinationCountry: "Netherlands",
+        date: "2026-09-03",
+        startTime: "10:00",
+        endTime: "16:00",
+        groupKey: null,
+        page: 1,
+        addressSection: "LOADING 1",
+      },
+    ],
+  },
+  {
+    /*
      * BUG — the postcode and the city are one printed line, emitted as TWO
      * fragments because of the gap between them:
      *

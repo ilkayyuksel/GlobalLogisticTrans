@@ -82,19 +82,11 @@ export class TollCalculator implements PricingCalculationStep {
   private findTollCost(
     context: PricingCalculationContext,
   ): PricingRouteCostInput | null {
-    const tollCost = context.routeCosts.find(
-      (routeCost) => routeCost.componentCode === PricingComponentCode.TOLL,
+    return (
+      context.routeCosts.find(
+        (routeCost) => routeCost.componentCode === PricingComponentCode.TOLL,
+      ) ?? null
     );
-
-    if (!tollCost) {
-      return null;
-    }
-
-    const applies = context.assignedCustomProperties.some(
-      (property) => property.pricingComponentId === tollCost.pricingComponentId,
-    );
-
-    return applies ? tollCost : null;
   }
 
   /**

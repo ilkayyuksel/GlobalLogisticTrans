@@ -324,16 +324,16 @@ function readCountryLine(block: readonly Fragment[]): ReadPlace | null {
     /*
      * It MAY carry its own postcode, and real orders do:
      *
-     *   9940 Evergem,        4880 Aubel
-     *   Belgium              Belgium
+     *   9940 Evergem,        4880 Aubel        Moerdijk, 4782 PP ,
+     *   Belgium              Belgium           Netherlands
      *
      * The postcode is dropped rather than kept — a city is a name, and
      * "9940 Evergem" as a destination would match no configured route and read
      * as nonsense in an export. The country still comes from the word below,
-     * never from the number.
+     * never from the number. Either order of the two is read; see
+     * `cityWithoutPostcode`.
      */
-    const withPostcode = POSTCODE_THEN_CITY.exec(cityLine);
-    const city = toCityName(withPostcode ? withPostcode[1] : cityLine);
+    const city = toCityName(cityWithoutPostcode(cityLine));
 
     /*
      * A city carries no digits; a street does — `Ketenislaan 1`, `Rue de Kan
@@ -445,7 +445,9 @@ function cityAbove(
   postcodeLineIndex: number,
 ): string | null {
   for (let index = postcodeLineIndex - 1; index >= 0; index -= 1) {
-    const line = toCityName(block[index].text);
+    // The same two layouts `readCountryLine` accepts: the city may carry its
+    // postcode on either side of the name. The two readers must agree.
+    const line = toCityName(cityWithoutPostcode(block[index].text));
 
     // The same postcode printed on a line of its own says nothing new.
     if (POSTCODE_ONLY_LINE.test(line)) {
@@ -493,6 +495,43 @@ const POSTCODE_ONLY_LINE = /^\d{4,5}$/;
  */
 const POSTCODE_THEN_CITY =
   /^(?:[A-Za-z]{1,2}\s*-\s*)?\d{4,8}(?:\s?[A-Z]{2})?[\s,]+([A-Za-z].*)$/;
+
+/**
+ * The mirror layout: the city first, its postcode after it.
+ *
+ *     Moerdijk, 4782 PP ,
+ *
+ * Real orders print both orders of the same two facts, and only the
+ * postcode-first form was read. The city-first form fell through every rule —
+ * the digit guard refused it as a possible street — down to the bracketed
+ * last resort, which then took whatever digit-free line came after it.
+ *
+ * ── DELIBERATELY NARROW ─────────────────────────────────────────────────────
+ * The postcode must be the WHOLE of what follows the comma, so a street keeps
+ * being refused: `Graanweg 17,` has a two-digit number, not a postcode, and
+ * `Kallo, Belgium` has no digits at all. The trailing comma the form prints is
+ * optional, and the captured name is trimmed by `toCityName` as everywhere.
+ */
+const CITY_THEN_POSTCODE =
+  /^(.+?)\s*,\s*(?:[A-Za-z]{1,2}\s*-\s*)?\d{4,5}(?:\s?[A-Z]{2})?\s*,?\s*$/;
+
+/**
+ * The city a line names, with its postcode removed whichever side it sits on.
+ *
+ * One helper for both layouts, so the two readers that need it cannot disagree
+ * about what counts as a city line.
+ */
+function cityWithoutPostcode(line: string): string {
+  const postcodeFirst = POSTCODE_THEN_CITY.exec(line);
+
+  if (postcodeFirst) {
+    return postcodeFirst[1];
+  }
+
+  const postcodeLast = CITY_THEN_POSTCODE.exec(line);
+
+  return postcodeLast ? postcodeLast[1] : line;
+}
 
 /**
  * VARIATION 2 — a bare postcode: `2040 Antwerpen`, with no `BE-` prefix.
@@ -869,6 +908,47 @@ function withRowContinuation(
 const LABELLED_LINE = /^[A-Za-z][^:\d]{0,30}:\s/;
 
 /**
+ * Operational instructions the form prints INSIDE the address column.
+ *
+ * ── WHY THE LABEL RULE DOES NOT CATCH THESE ─────────────────────────────────
+ * `untilRemarks` ends the address at the first labelled line, which is how
+ * every note the sender adds is normally excluded. This one carries no label
+ * and no colon:
+ *
+ *     Ks Project Logistics
+ *     Graanweg 17,
+ *     Moerdijk, 4782 PP ,
+ *     Netherlands
+ *     ADD DELIVERY TO REMARKS      <- an instruction, not part of the address
+ *
+ * ── AND WHY GEOMETRY DOES NOT EITHER ────────────────────────────────────────
+ * Measured on the real document rather than assumed: the instruction is at
+ * x=97.5, the SAME column as the company, the street and the country. It is not
+ * in the Remarks column, so `nextColumnX` cannot bound it away. It is separated
+ * only by a blank line, and treating a wider line gap as "the address ended"
+ * would silently drop real lines from any layout that spaces its rows
+ * differently.
+ *
+ * So it is excluded by what it SAYS. The pattern is a family rather than one
+ * literal — `ADD COLLECTION TO REMARKS` is the same instruction about the other
+ * leg — and it can match no address line: no company, street, city or country
+ * is an instruction to put something in the remarks.
+ *
+ * A line matching this is DROPPED rather than ending the block, so an
+ * instruction printed between two address lines cannot truncate the address.
+ */
+const OPERATIONAL_INSTRUCTIONS: readonly RegExp[] = [
+  /^ADD\s+[A-Z]+\s+TO\s+REMARKS$/,
+];
+
+/** Whether this line is an instruction to the operator rather than an address. */
+function isOperationalInstruction(text: string): boolean {
+  const normalized = text.trim().replace(/\s+/g, " ").toUpperCase();
+
+  return OPERATIONAL_INSTRUCTIONS.some((pattern) => pattern.test(normalized));
+}
+
+/**
  * The address, without the free text printed underneath it.
  *
  * ── WHY THIS EXISTS ─────────────────────────────────────────────────────────
@@ -894,7 +974,11 @@ function untilRemarks(lines: readonly Fragment[]): Fragment[] {
     LABELLED_LINE.test(fragment.text.trim()),
   );
 
-  return firstRemark === -1 ? [...lines] : lines.slice(0, firstRemark);
+  const address = firstRemark === -1 ? [...lines] : lines.slice(0, firstRemark);
+
+  return address.filter(
+    (fragment) => !isOperationalInstruction(fragment.text),
+  );
 }
 
 /**
