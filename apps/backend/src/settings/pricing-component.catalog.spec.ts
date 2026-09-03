@@ -1,7 +1,9 @@
 import { PricingComponentCode } from "../pricing-engine/pricing-line";
+import { ROUTE_CONFIGURED_COMPONENT_CODES } from "../route-configuration/route-configuration.service";
 import {
   displayOrderOf,
   PRICING_COMPONENT_CATALOG,
+  ROUTE_PRICED_PROPERTY_CATALOG,
 } from "./pricing-component.catalog";
 
 /**
@@ -76,6 +78,53 @@ describe("the pricing component catalog", () => {
     const codes = PRICING_COMPONENT_CATALOG.map((component) => component.code);
 
     expect(new Set(codes).size).toBe(codes.length);
+  });
+
+  /**
+   * ── THE BINDING THAT KEEPS A ROUTE SAVEABLE ───────────────────────────────
+   * A `route_cost` may only exist for a component some Custom Property links
+   * to — `RouteCostService` enforces it, because `TollCalculator` charges toll
+   * only when a Trip carries such a property. The route configuration screen
+   * writes a cost for each code below, so every one of them needs a property
+   * the bootstrap provisions.
+   *
+   * Without this test, adding a third column to that screen would reproduce the
+   * original failure exactly:
+   *
+   *   Pricing component "TOLL" is not route-priced, so it cannot have a route cost
+   *
+   * and only an operator typing an amount into the live application would find
+   * out.
+   */
+  describe("the route-priced Custom Properties", () => {
+    it("covers every component the route configuration screen writes a cost for", () => {
+      expect(
+        ROUTE_PRICED_PROPERTY_CATALOG.map((p) => p.componentCode).sort(),
+      ).toEqual([...ROUTE_CONFIGURED_COMPONENT_CODES].sort());
+    });
+
+    it("links each one to a component that is actually in the catalog", () => {
+      const codes = PRICING_COMPONENT_CATALOG.map((c) => c.code);
+
+      for (const property of ROUTE_PRICED_PROPERTY_CATALOG) {
+        expect(codes).toContain(property.componentCode);
+      }
+    });
+
+    /** The Engine reads these as route-priced, so a price here would never apply. */
+    it("carries no amount of its own", () => {
+      for (const property of ROUTE_PRICED_PROPERTY_CATALOG) {
+        expect(property).not.toHaveProperty("defaultPrice");
+        expect(property.name.length).toBeGreaterThan(0);
+        expect(property.description.length).toBeGreaterThan(0);
+      }
+    });
+
+    it("names no property twice", () => {
+      const names = ROUTE_PRICED_PROPERTY_CATALOG.map((p) => p.name);
+
+      expect(new Set(names).size).toBe(names.length);
+    });
   });
 
   /**

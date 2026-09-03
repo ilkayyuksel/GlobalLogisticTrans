@@ -5,6 +5,7 @@ import { AppLoggerService } from "../logger/app-logger.service";
 import {
   displayOrderOf,
   PRICING_COMPONENT_CATALOG,
+  ROUTE_PRICED_PROPERTY_CATALOG,
 } from "./pricing-component.catalog";
 import { PricingComponentRepository } from "./pricing-component.repository";
 import {
@@ -70,6 +71,22 @@ export interface AutomaticPropertyStatus {
   readonly willCreate: boolean;
 }
 
+/**
+ * A Custom Property that makes a route-priced component applicable.
+ *
+ * Reported separately from the automatic property because it is a different
+ * kind of thing: it carries no amount of its own, and it exists so a route cost
+ * for its component can be stored and read at all.
+ */
+export interface RoutePricedPropertyStatus {
+  readonly name: string;
+  readonly componentCode: string;
+  readonly isPresent: boolean;
+  readonly willCreate: boolean;
+  /** Set when the component itself is absent, which blocks the link. */
+  readonly blockedReason: string | null;
+}
+
 /** Everything bootstrapping would do, before it does any of it. */
 export interface PricingBootstrapPlan {
   /**
@@ -83,6 +100,13 @@ export interface PricingBootstrapPlan {
   readonly components: readonly PricingComponentStatus[];
   readonly componentsMissingCount: number;
   readonly automaticProperty: AutomaticPropertyStatus;
+  /**
+   * The per-Trip switches for the route-priced components.
+   *
+   * After the catalog, because a property cannot link to a component that does
+   * not exist yet.
+   */
+  readonly routePricedProperties: readonly RoutePricedPropertyStatus[];
   readonly settings: readonly PricingSettingStatus[];
   readonly missingCount: number;
   readonly creatableCount: number;
@@ -165,6 +189,10 @@ export class PricingBootstrapService {
       isPresent: presentCodes.has(component.code),
     }));
 
+    const routePricedProperties = await this.planRoutePricedProperties(
+      presentCodes,
+    );
+
     const settings = PRICING_SETTING_CATALOG.map((definition) => {
       const existing = configured.get(definition.key);
 
@@ -227,6 +255,7 @@ export class PricingBootstrapService {
         isPresent: automaticPropertyId !== null,
         willCreate: automaticPropertyId === null,
       },
+      routePricedProperties,
       settings,
       missingCount: settings.filter((setting) => !setting.isConfigured).length,
       creatableCount: settings.filter(
@@ -262,6 +291,15 @@ export class PricingBootstrapService {
     await this.ensureAutomaticProperty(before);
 
     /*
+     * Re-planned before the route-priced properties: they link to components
+     * the step above may have just created, and the stale plan still reports
+     * those as absent.
+     */
+    const withCatalog = await this.plan();
+
+    await this.ensureRoutePricedProperties(withCatalog);
+
+    /*
      * Re-planned rather than reused: creating the property above produced the
      * id that AUTOMATIC_CUSTOM_PROPERTY_ID must hold, and the stale plan still
      * says it is null. Everything written below comes from THIS reading.
@@ -285,6 +323,9 @@ export class PricingBootstrapService {
     this.logger.log("Pricing configuration bootstrapped", {
       componentsCreated: before.componentsMissingCount,
       automaticPropertyCreated: before.automaticProperty.willCreate,
+      routePricedPropertiesCreated: withCatalog.routePricedProperties.filter(
+        (property) => property.willCreate,
+      ).length,
       settingsCreated: current.creatableCount,
       stillMissing: applied.missingCount,
       blocked: applied.blockedCount,
@@ -324,6 +365,103 @@ export class PricingBootstrapService {
     this.logger.log("Pricing component catalog completed", {
       createdCodes: [...codes],
     });
+  }
+
+  /**
+   * What each route-priced property looks like now.
+   *
+   * Presence is decided by NAME among active properties, the same way the
+   * automatic property is found — not by "some property links to this
+   * component", because that is the question the RouteCost validation asks and
+   * answering it here would make the plan agree with itself rather than with
+   * the database.
+   */
+  private async planRoutePricedProperties(
+    presentComponentCodes: ReadonlySet<string>,
+  ): Promise<RoutePricedPropertyStatus[]> {
+    const statuses: RoutePricedPropertyStatus[] = [];
+
+    for (const definition of ROUTE_PRICED_PROPERTY_CATALOG) {
+      const existing = await this.customProperties.findActiveByName(
+        definition.name,
+      );
+
+      /*
+       * The component must exist first: a property linking to a component that
+       * is not in the catalog cannot be created. Applying creates the catalog
+       * before it reaches this step, so this only reports a component somebody
+       * has deactivated.
+       */
+      const componentPresent = presentComponentCodes.has(
+        definition.componentCode,
+      );
+
+      statuses.push({
+        name: definition.name,
+        componentCode: definition.componentCode,
+        isPresent: existing !== null,
+        willCreate: existing === null && componentPresent,
+        blockedReason: componentPresent
+          ? null
+          : `Pricing component "${definition.componentCode}" is not in the catalog, so a property cannot link to it.`,
+      });
+    }
+
+    return statuses;
+  }
+
+  /**
+   * Creates the per-Trip switches for the route-priced components.
+   *
+   * ── WHY THE BOOTSTRAP OWNS THESE ──────────────────────────────────────────
+   * Without them a route cannot be configured at all. `RouteCostService`
+   * refuses a route cost for a component no property links to, and it is right
+   * to: `TollCalculator` charges toll only when a Trip carries a property
+   * linked to TOLL, so a route cost without one would be an amount nothing ever
+   * reads. Only the DEVELOPMENT seed created them, so every real deployment hit
+   *
+   *   Pricing component "TOLL" is not route-priced, so it cannot have a route cost
+   *
+   * the first time an operator typed a Toll amount on the route screen.
+   *
+   * ── IT CREATES A SWITCH, NOT A CHARGE ─────────────────────────────────────
+   * The property carries no default price — a database CHECK forbids it,
+   * because the amount is the route's. Creating it prices nothing and assigns
+   * nothing: a Trip owes toll only once an operator assigns the property to
+   * that Trip, exactly as before.
+   */
+  private async ensureRoutePricedProperties(
+    plan: PricingBootstrapPlan,
+  ): Promise<void> {
+    for (const property of plan.routePricedProperties) {
+      if (!property.willCreate) {
+        continue;
+      }
+
+      const definition = ROUTE_PRICED_PROPERTY_CATALOG.find(
+        (candidate) => candidate.name === property.name,
+      );
+
+      const component = await this.components.findActiveByCode(
+        property.componentCode,
+      );
+
+      if (!definition || !component) {
+        continue;
+      }
+
+      const created = await this.customProperties.create({
+        name: definition.name,
+        description: definition.description,
+        pricingComponentId: component.id,
+      });
+
+      this.logger.log("Route-priced Custom Property created", {
+        customPropertyId: created.id,
+        name: created.name,
+        componentCode: property.componentCode,
+      });
+    }
   }
 
   /**

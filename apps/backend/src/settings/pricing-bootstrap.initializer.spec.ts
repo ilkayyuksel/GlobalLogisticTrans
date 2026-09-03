@@ -28,6 +28,15 @@ function completePlan(
       isPresent: true,
       willCreate: false,
     },
+    routePricedProperties: [
+      {
+        name: "Toll",
+        componentCode: "TOLL",
+        isPresent: true,
+        willCreate: false,
+        blockedReason: null,
+      },
+    ],
     settings: [],
     missingCount: 0,
     creatableCount: 0,

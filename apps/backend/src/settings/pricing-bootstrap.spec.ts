@@ -117,7 +117,11 @@ describe("PricingBootstrapService", () => {
   let settings: { upsert: jest.Mock };
   let repository: { findMany: jest.Mock };
   let customProperties: { findActiveByName: jest.Mock; create: jest.Mock };
-  let components: { findActiveCodes: jest.Mock; createMany: jest.Mock };
+  let components: {
+    findActiveCodes: jest.Mock;
+    createMany: jest.Mock;
+    findActiveByCode: jest.Mock;
+  };
   let service: PricingBootstrapService;
 
   /*
@@ -127,23 +131,39 @@ describe("PricingBootstrapService", () => {
    * answered the same way before and after a write could not show that the
    * sequence works.
    */
-  let storedProperty: { id: string; name: string } | null;
+  let existingPropertyNames: Set<string>;
   let storedCodes: string[];
+
+  /** Only the TAR creations. Toll and Tunnel go through the same method. */
+  const tarCreations = () =>
+    customProperties.create.mock.calls.filter(
+      (call) => (call[0] as { name: string }).name === "TAR",
+    );
+
+  /** TAR keeps its fixed id so the settings assertions can name it. */
+  const idOfProperty = (name: string) =>
+    name === "TAR" ? TAR_ID : `property-${name}`;
 
   beforeEach(() => {
     // A fresh database: no property, no catalog, no settings.
-    storedProperty = null;
+    existingPropertyNames = new Set<string>();
     storedCodes = [];
 
     settings = { upsert: jest.fn().mockResolvedValue({}) };
     repository = { findMany: jest.fn().mockResolvedValue([]) };
 
     customProperties = {
-      findActiveByName: jest.fn(() => Promise.resolve(storedProperty)),
+      findActiveByName: jest.fn((name: string) =>
+        Promise.resolve(
+          existingPropertyNames.has(name)
+            ? { id: idOfProperty(name), name }
+            : null,
+        ),
+      ),
       create: jest.fn((dto: { name: string }) => {
-        storedProperty = { id: TAR_ID, name: dto.name };
+        existingPropertyNames.add(dto.name);
 
-        return Promise.resolve(storedProperty);
+        return Promise.resolve({ id: idOfProperty(dto.name), name: dto.name });
       }),
     };
 
@@ -154,6 +174,11 @@ describe("PricingBootstrapService", () => {
 
         return Promise.resolve({ count: rows.length });
       }),
+      findActiveByCode: jest.fn((code: string) =>
+        Promise.resolve(
+          storedCodes.includes(code) ? { id: `component-${code}`, code } : null,
+        ),
+      ),
     };
 
     service = new PricingBootstrapService(
@@ -171,7 +196,7 @@ describe("PricingBootstrapService", () => {
 
   /** Everything already there. Used by the "changes nothing" cases. */
   function databaseIsFullyConfigured(): void {
-    storedProperty = { id: TAR_ID, name: "TAR" };
+    existingPropertyNames = new Set(["TAR", "Toll", "Tunnel"]);
     storedCodes = PRICING_COMPONENT_CATALOG.map((component) => component.code);
     repository.findMany.mockResolvedValue(
       PRICING_SETTING_CATALOG.map((setting) =>
@@ -302,6 +327,7 @@ describe("PricingBootstrapService", () => {
     await service.apply();
 
     const componentsFirstPass = components.createMany.mock.calls.length;
+    // TAR, Toll and Tunnel — every property layer, in one pass.
     const propertiesFirstPass = customProperties.create.mock.calls.length;
     const settingsFirstPass = settings.upsert.mock.calls.length;
 
@@ -318,7 +344,7 @@ describe("PricingBootstrapService", () => {
     await service.apply();
 
     expect(componentsFirstPass).toBe(1);
-    expect(propertiesFirstPass).toBe(1);
+    expect(propertiesFirstPass).toBe(3);
     expect(settingsFirstPass).toBe(PRICING_SETTING_CATALOG.length);
 
     expect(components.createMany).not.toHaveBeenCalled();
@@ -443,7 +469,7 @@ describe("PricingBootstrapService", () => {
     it("is created as an ordinary Custom Property, priced at the standing rate", async () => {
       await service.apply();
 
-      expect(customProperties.create).toHaveBeenCalledTimes(1);
+      expect(tarCreations()).toHaveLength(1);
       expect(customProperties.create).toHaveBeenCalledWith(
         expect.objectContaining({
           name: "TAR",
@@ -468,15 +494,15 @@ describe("PricingBootstrapService", () => {
     });
 
     it("leaves an existing one alone, whatever it is priced at", async () => {
-      storedProperty = { id: "an-existing-tar", name: "TAR" };
+      existingPropertyNames.add("TAR");
 
       await service.apply();
 
-      expect(customProperties.create).not.toHaveBeenCalled();
+      expect(tarCreations()).toHaveLength(0);
       expect(settings.upsert).toHaveBeenCalledWith(
         PRICING_CATEGORY,
         "AUTOMATIC_CUSTOM_PROPERTY_ID",
-        { value: "an-existing-tar" },
+        { value: TAR_ID },
       );
     });
 
@@ -484,7 +510,114 @@ describe("PricingBootstrapService", () => {
       await service.apply();
       await service.apply();
 
-      expect(customProperties.create).toHaveBeenCalledTimes(1);
+      expect(tarCreations()).toHaveLength(1);
+    });
+  });
+
+  /**
+   * ── THE SWITCHES THAT MAKE A ROUTE CONFIGURABLE AT ALL ────────────────────
+   * `RouteCostService` refuses a route cost for a component no Custom Property
+   * links to, because `TollCalculator` charges toll only when a Trip carries
+   * such a property. Only the DEVELOPMENT seed ever created them, so a real
+   * deployment could not save a route with a Toll or Tunnel amount:
+   *
+   *   Pricing component "TOLL" is not route-priced, so it cannot have a route cost
+   */
+  describe("the route-priced Custom Properties", () => {
+    it("reports both as absent on a fresh database", async () => {
+      const plan = await service.plan();
+
+      expect(plan.routePricedProperties.map((p) => p.name)).toEqual([
+        "Toll",
+        "Tunnel",
+      ]);
+      expect(plan.routePricedProperties.every((p) => !p.isPresent)).toBe(true);
+    });
+
+    it("writes nothing while planning", async () => {
+      await service.plan();
+
+      expect(customProperties.create).not.toHaveBeenCalled();
+    });
+
+    it("creates both, each linked to its own component", async () => {
+      await service.apply();
+
+      expect(customProperties.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          name: "Toll",
+          pricingComponentId: "component-TOLL",
+        }),
+      );
+      expect(customProperties.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          name: "Tunnel",
+          pricingComponentId: "component-TUNNEL",
+        }),
+      );
+    });
+
+    /**
+     * A database CHECK forbids a price on a linked property: the amount is the
+     * route's. Sending one would be rejected, and would also be a monetary
+     * value nobody decided.
+     */
+    it("gives them no default price", async () => {
+      await service.apply();
+
+      for (const call of customProperties.create.mock.calls) {
+        const dto = call[0] as { name: string; defaultPrice?: number };
+
+        if (dto.name === "Toll" || dto.name === "Tunnel") {
+          expect(dto.defaultPrice).toBeUndefined();
+        }
+      }
+    });
+
+    it("leaves an existing one alone", async () => {
+      existingPropertyNames.add("Toll");
+
+      await service.apply();
+
+      const created = customProperties.create.mock.calls.map(
+        (call) => (call[0] as { name: string }).name,
+      );
+
+      expect(created).not.toContain("Toll");
+      expect(created).toContain("Tunnel");
+    });
+
+    it("creates neither a second time", async () => {
+      await service.apply();
+      await service.apply();
+
+      const created = customProperties.create.mock.calls.filter((call) =>
+        ["Toll", "Tunnel"].includes((call[0] as { name: string }).name),
+      );
+
+      expect(created).toHaveLength(2);
+    });
+
+    /**
+     * The property links to a component, so the component has to exist first.
+     * Applying creates the catalog before this step, so this only happens when
+     * somebody has deactivated the component deliberately.
+     */
+    it("reports a missing component as the reason it cannot link", async () => {
+      storedCodes = PRICING_COMPONENT_CATALOG.map((c) => c.code).filter(
+        (code) => code !== "TOLL",
+      );
+
+      const plan = await service.plan();
+      const toll = plan.routePricedProperties.find((p) => p.name === "Toll");
+
+      expect(toll?.willCreate).toBe(false);
+      expect(toll?.blockedReason).toMatch(/TOLL/);
+    });
+
+    /** Creating a switch is not creating a charge. */
+    it("assigns them to no Trip and prices nothing", () => {
+      expect(Object.keys(service as unknown as object)).not.toContain("trips");
     });
   });
 

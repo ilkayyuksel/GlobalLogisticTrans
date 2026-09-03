@@ -31,6 +31,20 @@ import {
 const TOLL_CODE = "TOLL";
 const TUNNEL_CODE = "TUNNEL";
 
+/**
+ * The same pair, exported for one binding test.
+ *
+ * A route cost may only exist for a component some Custom Property links to,
+ * and the pricing bootstrap is what provisions those properties. If a third
+ * column were added here without a matching entry in that catalog, saving a
+ * route would fail again with "is not route-priced" — so
+ * `pricing-component.catalog.spec.ts` asserts the two lists agree.
+ */
+export const ROUTE_CONFIGURED_COMPONENT_CODES = [
+  TOLL_CODE,
+  TUNNEL_CODE,
+] as const;
+
 /** Money leaves as exact decimal text, never as a JSON number. */
 const ZERO_AMOUNT = (0).toFixed(MONEY_DECIMAL_PLACES);
 

@@ -104,6 +104,65 @@ export const PRICING_COMPONENT_CATALOG: readonly PricingComponentDefinition[] = 
 ];
 
 /**
+ * The Custom Properties that make a route-priced component APPLICABLE.
+ *
+ * ── WHY THESE ARE NOT OPTIONAL CONFIGURATION ────────────────────────────────
+ * database_model.md §4.12 gives a Custom Property an optional link to one
+ * Pricing Component, and that link is the model's whole expression of "this
+ * component applies per Trip and is priced per route". Toll and Tunnel are the
+ * two components built that way:
+ *
+ *   whether a Trip owes toll  → an assigned Custom Property linked to TOLL
+ *   how much it owes          → the active RouteCost for TOLL on its route
+ *
+ * `TollCalculator` reads exactly that pair, and `RouteCostService` refuses to
+ * store a route cost for a component no property links to — correctly, since
+ * the Engine would never read it.
+ *
+ * The consequence was that a real deployment could not configure a route at
+ * all. Only `prisma/seed-dev.ts` — development-only fake data that must never
+ * reach a real database — ever created these two properties, so saving a route
+ * with a Toll or Tunnel amount failed with
+ *
+ *   Pricing component "TOLL" is not route-priced, so it cannot have a route cost
+ *
+ * and the operator had no way to get past it.
+ *
+ * ── WHAT THIS IS NOT ────────────────────────────────────────────────────────
+ * It does not turn Toll into "just a Custom Property", and it changes no Engine
+ * semantics. TOLL and TUNNEL remain first-class pricing components with their
+ * own calculators and their own position in the sequence; the property is only
+ * the per-Trip switch the model already required. Nothing here charges anything
+ * — a Trip owes toll only once an operator assigns the property to it.
+ *
+ * ── NO PRICE, DELIBERATELY ──────────────────────────────────────────────────
+ * A linked property must carry no `default_price`: a database CHECK enforces
+ * it, because the amount comes from the route. So there is no monetary value to
+ * transcribe here, and none is.
+ */
+export interface RoutePricedPropertyDefinition {
+  readonly name: string;
+  readonly componentCode: string;
+  readonly description: string;
+}
+
+export const ROUTE_PRICED_PROPERTY_CATALOG: readonly RoutePricedPropertyDefinition[] =
+  [
+    {
+      name: "Toll",
+      componentCode: "TOLL",
+      description:
+        "Marks a Trip as owing the toll configured for its route. The amount comes from the route configuration, never from this property.",
+    },
+    {
+      name: "Tunnel",
+      componentCode: "TUNNEL",
+      description:
+        "Marks a Trip as owing the tunnel charge configured for its route. The amount comes from the route configuration, never from this property.",
+    },
+  ];
+
+/**
  * Positions start at 1, so the stored order reads the same as the numbered list
  * in pricing_rules.md. Derived rather than typed out, so the two can never
  * disagree.
