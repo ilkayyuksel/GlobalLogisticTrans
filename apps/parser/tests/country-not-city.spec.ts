@@ -477,3 +477,131 @@ describe("a city line carrying its own postcode", () => {
     ).toThrow(ExtractionError);
   });
 });
+
+/**
+ * ── A COUNTRY-PREFIXED POSTCODE WITH THE CITY BESIDE IT ─────────────────────
+ * The prefixed form and the Dutch letter pair, on one line:
+ *
+ *   NL-4612PS Bergen op Zoom
+ *
+ * Each half was already understood, by a different rule. The prefixed rule
+ * required whitespace straight after the digits, so `PS` stopped it; the bare
+ * rule required the line to begin with a digit, so `NL-` stopped it. Both now
+ * build their pattern from the same postcode fragment.
+ *
+ * The country comes from the PREFIX, which is what makes this line sufficient
+ * on its own — no country line follows it in the real document.
+ */
+describe("a country-prefixed postcode followed by the city", () => {
+  const block = (line: string) => [
+    "[4612]",
+    "Sabic IP - BoZ site",
+    "C/O DSV - DSV Logistics",
+    line,
+  ];
+
+  it.each([
+    ["NL-4612PS Bergen op Zoom", "Bergen Op Zoom"],
+    ["NL-4704RG Roosendaal", "Roosendaal"],
+    ["NL-4704 RG Roosendaal", "Roosendaal"],
+    // Multi-word, and the separators a real form prints.
+    ["NL-1011AB Den Haag", "Den Haag"],
+    ["NL-2596 HV 's-Gravenhage Zuid", "'S-Gravenhage Zuid"],
+  ])("reads %p as %p", (line, expected) => {
+    expect(cityOf(block(line))).toBe(expected);
+  });
+
+  it("takes the country from the prefix, not from a country line", () => {
+    const address = extractAddress(
+      addressBlock(block("NL-4612PS Bergen op Zoom")),
+      header,
+    );
+
+    expect(address.destinationCountry).toBe("Netherlands");
+  });
+
+  it.each([
+    ["BE-8730AB Beernem", "Belgium"],
+    ["F-62119 DOURGES", "France"],
+  ])("still resolves %p to %s", (line, country) => {
+    expect(
+      extractAddress(addressBlock(block(line)), header).destinationCountry,
+    ).toBe(country);
+  });
+
+  /**
+   * The letter pair is optional, so the forms that never carried one must read
+   * exactly as they did before. `62119 DO` in `F-62119 DOURGES` looks like a
+   * postcode suffix until the separator that must follow is missing, and the
+   * regex backtracks out of it.
+   */
+  it.each([
+    ["F-62119 DOURGES", "Dourges"],
+    ["FR-59166 Bousbecque", "Bousbecque"],
+    ["BE-9130 Kallo", "Kallo"],
+    ["be-8580 Avelgem", "Avelgem"],
+    ["BE-8730 Beernem", "Beernem"],
+    ["F - 62126 Wimille", "Wimille"],
+  ])("leaves the un-suffixed form %p reading as %p", (line, expected) => {
+    expect(cityOf(block(line))).toBe(expected);
+  });
+
+  /** A city of exactly two capitals is a city, not a postcode suffix. */
+  it("does not swallow a two-letter city", () => {
+    expect(cityOf(block("BE-9130 KA"))).toBe("Ka");
+  });
+
+  /**
+   * The forbidden-country validation is untouched by the wider postcode.
+   *
+   * `NL-4612PS Netherlands` is a postcode and a COUNTRY, not a postcode and a
+   * city, so the prefixed rule declines it and its sibling reads the city from
+   * the line above — the pre-existing behaviour for `62110 France`, unchanged
+   * here. What matters either way is that the country never becomes the city.
+   */
+  it("reads a postcode-and-country line as the country, city above", () => {
+    const address = extractAddress(
+      addressBlock([
+        "[4612]",
+        "Sabic IP - BoZ site",
+        "Lelyweg 30",
+        "Bergen op Zoom",
+        "NL-4612PS Netherlands",
+      ]),
+      header,
+    );
+
+    expect(address.destinationCity).toBe("Bergen Op Zoom");
+    expect(address.destinationCountry).toBe("Netherlands");
+  });
+
+  it("never yields the country as the city on this layout", () => {
+    for (const line of ["NL-4612PS Netherlands", "BE-8730 Belgium"]) {
+      const city = cityOf([
+        "[4612]",
+        "Company",
+        "Street 1",
+        "Bergen op Zoom",
+        line,
+      ]);
+
+      expect(isCountryName(city)).toBe(false);
+    }
+  });
+});
+
+/**
+ * The layouts that do NOT put the postcode and the city on one line keep
+ * working: the widened pattern must not start claiming lines it never read.
+ */
+describe("the separate postcode and city layouts are unchanged", () => {
+  it.each([
+    [["[9130]", "DP World", "Ketenislaan 1", "Kallo", "Belgium"], "Kallo"],
+    [["[4704]", "Company", "Street 1", "4704RG Roosendaal", "Netherlands"], "Roosendaal"],
+    [["[4704]", "Company", "Street 1", "4704 RG Roosendaal", "Netherlands"], "Roosendaal"],
+    [["[2040]", "Company", "Street 1", "2040 Antwerpen", "Belgium"], "Antwerpen"],
+    [["[2070]", "Company", "Street 1", "Zwijndrecht"], "Zwijndrecht"],
+  ])("reads %p as %p", (lines, expected) => {
+    expect(cityOf(lines)).toBe(expected);
+  });
+});

@@ -551,6 +551,44 @@ const PARSED_DOCUMENTS: readonly ExpectedDocument[] = [
   },
   {
     /*
+     * BUG — a country-prefixed postcode carrying the Dutch letter pair, with
+     * the city on the SAME line:
+     *
+     *   NL-4612PS Bergen op Zoom
+     *
+     * Two rules each knew half of it. The prefixed-postcode rule understood
+     * `NL-` but demanded whitespace immediately after the digits, so `PS`
+     * stopped it; the bare-postcode rule understood `4612PS` but required the
+     * line to start with a digit, so `NL-` stopped it. Every rule declined and
+     * the order was refused outright.
+     *
+     * The city is multi-word, which is what makes "everything after the
+     * postcode" the right reading rather than "the last word".
+     */
+    file: "BUG-CITY/transportorder1375819.pdf",
+    pageCount: 2,
+    layout: "SINGLE_TWO_PAGE",
+    documentStatus: "PLANNED",
+    trips: [
+      {
+        bookingNumber: "ANRDUB2797526",
+        direction: "COLLECTION",
+        containerType: "45PH",
+        containerNumber: null,
+        terminal: "PSA Quay 869",
+        destinationCity: "Bergen Op Zoom",
+        destinationCountry: "Netherlands",
+        date: "2026-09-07",
+        startTime: "06:00",
+        endTime: "06:00",
+        groupKey: null,
+        page: 1,
+        addressSection: "LOADING 1",
+      },
+    ],
+  },
+  {
+    /*
      * BUG — an operational instruction printed INSIDE the address column, and a
      * city carrying its postcode after the name rather than before it:
      *

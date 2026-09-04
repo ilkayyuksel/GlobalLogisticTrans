@@ -36,6 +36,31 @@ const STARTPOINT_LABEL = "Startpoint:";
  */
 
 /**
+ * The postcode itself, shared by the prefixed and the bare form.
+ *
+ * ── WHY ONE FRAGMENT ────────────────────────────────────────────────────────
+ * The two rules each knew half of what a postcode can look like, and a real
+ * order needed both halves at once:
+ *
+ *     NL-4612PS Bergen op Zoom
+ *
+ * The prefixed rule understood `NL-` but demanded whitespace straight after the
+ * digits, so `PS` stopped it. The bare rule understood `4612PS` but required the
+ * line to START with a digit, so `NL-` stopped it. Every rule declined and a
+ * document naming its destination plainly was reported unreadable.
+ *
+ * Written once here, both forms are now understood by both rules, and neither
+ * can learn about a postcode shape the other does not.
+ *
+ * ── THE TWO LETTERS MUST BE CAPITALS ────────────────────────────────────────
+ * That is what a Netherlands postcode is, and it is what stops the pattern from
+ * eating the first word of a city: `2040 An Twerpen` keeps its `An`, while the
+ * regex engine backtracks out of `62119 DO` in `F-62119 DOURGES` the moment the
+ * separator that must follow is missing.
+ */
+const POSTCODE = String.raw`\d{4,5}(?:\s?[A-Z]{2})?`;
+
+/**
  * `CC-NNNNN City` — the one line that identifies where a trip actually goes.
  *
  * ── THE PREFIX IS CASE-INSENSITIVE, AND HAS TO BE ───────────────────────────
@@ -60,7 +85,9 @@ const STARTPOINT_LABEL = "Startpoint:";
  * table, so `be` and `BE` resolve identically.
  * ────────────────────────────────────────────────────────────────────────────
  */
-export const POSTCODE_LINE = /^([A-Za-z]{1,2})\s*-\s*(\d{4,5})\s+(.+)$/;
+export const POSTCODE_LINE = new RegExp(
+  String.raw`^([A-Za-z]{1,2})\s*-\s*(${POSTCODE})\s+(.+)$`,
+);
 
 /**
  * `NNNN City` — the same line without its country prefix.
@@ -83,7 +110,9 @@ export const POSTCODE_LINE = /^([A-Za-z]{1,2})\s*-\s*(\d{4,5})\s+(.+)$/;
  * in France and Lippstadt in Germany. So this line yields a city, and the
  * country has to come from somewhere the document actually states it.
  */
-const BARE_POSTCODE_LINE = /^(\d{4,5}(?:\s?[A-Z]{2})?)[\s,]+([A-Za-z].*)$/;
+const BARE_POSTCODE_LINE = new RegExp(
+  String.raw`^(${POSTCODE})[\s,]+([A-Za-z].*)$`,
+);
 
 /**
  * `[NNNNN]` — the customer reference the order prints above every address.
