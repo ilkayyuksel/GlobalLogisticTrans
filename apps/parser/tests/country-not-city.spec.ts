@@ -1,4 +1,8 @@
-import { extractAddress } from "../src/fields/address";
+import {
+  extractAddress,
+  extractAddressFromLines,
+  extractStartpointAddress,
+} from "../src/fields/address";
 import { isCountryName, splitTrailingCountry } from "../src/fields/country";
 import { ExtractionError } from "../src/errors";
 import { Fragment } from "../src/text/extract";
@@ -603,5 +607,181 @@ describe("the separate postcode and city layouts are unchanged", () => {
     [["[2070]", "Company", "Street 1", "Zwijndrecht"], "Zwijndrecht"],
   ])("reads %p as %p", (lines, expected) => {
     expect(cityOf(lines)).toBe(expected);
+  });
+});
+
+/**
+ * ── A DOCUMENT THAT NAMES NO CUSTOMER ADDRESS ───────────────────────────────
+ * A terminal-to-terminal move — "container weer oppakken" — carries no
+ * `LOADING n:` or `DELIVERY n:` section, an empty `Address:` column and a
+ * `Startpoint:` label with nothing beside it. The only place it names is its
+ * own terminal.
+ *
+ * The Startpoint rule required a value to the RIGHT of its label, found none,
+ * and the whole order was refused: an absent field read as a broken one.
+ *
+ * These exercise the reader directly on positioned lines, in the shape the real
+ * document prints. The layout-level wiring — which rule is tried in which order
+ * — is covered by the real-document fixture.
+ */
+describe("reading a place out of a terminal block", () => {
+  const terminalBlock = (lines: readonly string[]): Fragment[] =>
+    lines.map((text, index) => ({
+      page: 1,
+      // The Return-to-Terminal column, which is NOT the address column.
+      x: 331.6,
+      y: 551 - index * 12,
+      text,
+    }));
+
+  const REAL_BLOCK = [
+    "PSA Quay 869",
+    "Europaterminal",
+    "Scheldelaan 495",
+    "BE-2040 Antwerp",
+  ];
+
+  it("reads the city and country from the terminal's own address", () => {
+    const address = extractAddressFromLines(
+      terminalBlock(REAL_BLOCK),
+      terminalBlock(REAL_BLOCK),
+      "Return to Terminal",
+    );
+
+    expect(address).toMatchObject({
+      destinationCity: "Antwerp",
+      destinationCountry: "Belgium",
+      section: "Return to Terminal",
+    });
+  });
+
+  it("keeps the block as it was printed", () => {
+    const address = extractAddressFromLines(
+      terminalBlock(REAL_BLOCK),
+      terminalBlock(REAL_BLOCK),
+      "Return to Terminal",
+    );
+
+    expect(address?.rawAddress).toBe(
+      "PSA Quay 869 Europaterminal Scheldelaan 495 BE-2040 Antwerp",
+    );
+  });
+
+  /** The same address rules as everywhere else — nothing is loosened. */
+  it.each([
+    [["Depot", "Street 1", "NL-4612PS Bergen op Zoom"], "Bergen Op Zoom", "Netherlands"],
+    [["Depot", "Street 1", "4704RG Roosendaal", "Netherlands"], "Roosendaal", "Netherlands"],
+    [["Depot", "Street 1", "Kallo", "Belgium"], "Kallo", "Belgium"],
+  ])("reads %p as %s / %s", (lines, city, country) => {
+    const address = extractAddressFromLines(
+      terminalBlock(lines),
+      terminalBlock(lines),
+      "Return to Terminal",
+    );
+
+    expect(address?.destinationCity).toBe(city);
+    expect(address?.destinationCountry).toBe(country);
+  });
+
+  describe("what it refuses", () => {
+    it("declines an empty block", () => {
+      expect(extractAddressFromLines([], [], "Return to Terminal")).toBeNull();
+    });
+
+    /** A bare terminal name is not an address, so no city can be read. */
+    it("declines a block with no readable place", () => {
+      const lines = terminalBlock(["Quay 869"]);
+
+      expect(
+        extractAddressFromLines(lines, lines, "Return to Terminal"),
+      ).toBeNull();
+    });
+
+    /** The invariant every rule answers to: a country is never a city. */
+    it("declines a block whose only candidate is a country", () => {
+      const lines = terminalBlock(["Depot", "Street 1", "Belgium"]);
+
+      expect(
+        extractAddressFromLines(lines, lines, "Return to Terminal"),
+      ).toBeNull();
+    });
+  });
+});
+
+/**
+ * ── THE STARTPOINT VARIATION, WHICH MUST KEEP WORKING ───────────────────────
+ * One real order prints its pickup address beside the label:
+ *
+ *   Startpoint:  Baxter Distribution Center Europe
+ *                Chemin de Papignies 17B
+ *                BE-7860 Lessines
+ *
+ * That path is untouched by the terminal fallback, which is reached only after
+ * this one has been tried and found nothing.
+ */
+describe("an address stated after the Startpoint label", () => {
+  /** The label, then its value column to the right and below it. */
+  function startpointFragments(lines: readonly string[]): Fragment[] {
+    const fragments: Fragment[] = [
+      { page: 1, x: 31, y: 500, text: "Startpoint:" },
+    ];
+
+    lines.forEach((text, index) =>
+      fragments.push({ page: 1, x: 120, y: 500 - index * 12, text }),
+    );
+
+    return fragments;
+  }
+
+  it("reads the city and country beside the label", () => {
+    const address = extractStartpointAddress(
+      startpointFragments([
+        "Baxter Distribution Center Europe",
+        "Chemin de Papignies 17B",
+        "BE-7860 Lessines",
+      ]),
+    );
+
+    expect(address).toMatchObject({
+      destinationCity: "Lessines",
+      destinationCountry: "Belgium",
+      section: "Startpoint",
+    });
+  });
+
+  it("reads the Dutch and country-line forms there too", () => {
+    expect(
+      extractStartpointAddress(
+        startpointFragments(["Depot", "Lelyweg 30", "NL-4612PS Bergen op Zoom"]),
+      )?.destinationCity,
+    ).toBe("Bergen Op Zoom");
+  });
+
+  describe("when the Startpoint states nothing readable", () => {
+    /** The layout that used to refuse the whole order. */
+    it("declines a label with nothing beside it", () => {
+      expect(
+        extractStartpointAddress([
+          { page: 1, x: 31, y: 500, text: "Startpoint:" },
+          { page: 1, x: 292, y: 460, text: "Collection Remarks:" },
+          { page: 1, x: 31, y: 420, text: "Opening times:" },
+        ]),
+      ).toBeNull();
+    });
+
+    it("declines when there is no Startpoint label at all", () => {
+      expect(
+        extractStartpointAddress([
+          { page: 1, x: 31, y: 500, text: "Opening times:" },
+        ]),
+      ).toBeNull();
+    });
+
+    /** Present but unreadable is still declined — no city can be invented. */
+    it("declines a value that is not an address", () => {
+      expect(
+        extractStartpointAddress(startpointFragments(["see remarks"])),
+      ).toBeNull();
+    });
   });
 });

@@ -37,6 +37,16 @@ export interface ExtractedTerminal {
   /** The first line: the terminal's own name, e.g. `PSA Quay 869`. */
   readonly terminalKey: string;
   readonly matchedLabel: string;
+  /**
+   * The block's own fragments, in the order they were printed.
+   *
+   * Exposed because a terminal block IS an address — `PSA Quay 869 /
+   * Europaterminal / Scheldelaan 495 / BE-2040 Antwerp` — and one Eucon layout
+   * states no other. The caller reads a city out of these with the ordinary
+   * address rules rather than re-finding the block, so the two can never
+   * disagree about where the terminal's address begins and ends.
+   */
+  readonly lines: readonly Fragment[];
 }
 
 export function extractTerminal(
@@ -56,6 +66,7 @@ export function extractTerminal(
         rawTerminal: joinText(lines),
         terminalKey: lines[0].text,
         matchedLabel: label,
+        lines,
       };
     }
   }

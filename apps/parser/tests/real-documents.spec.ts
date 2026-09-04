@@ -551,6 +551,45 @@ const PARSED_DOCUMENTS: readonly ExpectedDocument[] = [
   },
   {
     /*
+     * BUG — a terminal-to-terminal move, which states no customer address at
+     * all: no `LOADING n:` or `DELIVERY n:` section, an `Address:` label whose
+     * value column is empty, and a `Startpoint:` label with nothing beside it.
+     * The remark is `container weer oppakken`, and the only place named
+     * anywhere on the page is the terminal — printed under `Return to
+     * Terminal:` and again under `Redelivery Depot:`.
+     *
+     * The Startpoint rule required a value to the RIGHT of its label, found
+     * none, and the order was refused. An absent field was being read as a
+     * broken one.
+     *
+     * The destination is now the terminal's own address, which is what the
+     * document actually says. `rawAddress` and `rawTerminal` are identical
+     * here, and that is the point rather than a coincidence.
+     */
+    file: "BUG-CITY/transportorder1376033.pdf",
+    pageCount: 1,
+    layout: "SINGLE_ONE_PAGE",
+    documentStatus: "PLANNED",
+    trips: [
+      {
+        bookingNumber: "ANRDUB2790203",
+        direction: "COLLECTION",
+        containerType: "45PH",
+        containerNumber: "PVDU1110511",
+        terminal: "PSA Quay 869",
+        destinationCity: "Antwerp",
+        destinationCountry: "Belgium",
+        date: "2026-09-04",
+        startTime: "12:00",
+        endTime: "14:00",
+        groupKey: null,
+        page: 1,
+        addressSection: "Return to Terminal",
+      },
+    ],
+  },
+  {
+    /*
      * BUG — a country-prefixed postcode carrying the Dutch letter pair, with
      * the city on the SAME line:
      *

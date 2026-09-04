@@ -796,6 +796,74 @@ export function extractStartpointAddress(
 }
 
 /**
+ * VARIATION 4 — the document states no customer address at all.
+ *
+ * ── THE LAYOUT ──────────────────────────────────────────────────────────────
+ * One real order carries no `LOADING n:` or `DELIVERY n:` section, an `Address:`
+ * label with an empty value column, and a `Startpoint:` label with nothing
+ * beside it. Its remark is `container weer oppakken` — pick the container up
+ * again — and the only place it names anywhere is the terminal, printed twice:
+ * once under `Return to Terminal:` and once under `Redelivery Depot:`.
+ *
+ *   Return to Terminal:            Startpoint:        <- empty
+ *     PSA Quay 869                 Collection Remarks:
+ *     Europaterminal               Opening times:
+ *     Scheldelaan 495
+ *     BE-2040 Antwerp
+ *
+ * A move that begins and ends at the terminal HAS no customer address, so
+ * refusing the document was reading an absent field as a broken one.
+ *
+ * ── WHY THE TERMINAL BLOCK, AND NOT "THE LINES ABOVE THE LABEL" ─────────────
+ * By eye the address sits directly above `Startpoint:`. By coordinate it does
+ * not: the block is at x=331.6 under `Return to Terminal:`, while `Startpoint:`
+ * is at x=30.8 in another column entirely. Taking "whatever is printed above
+ * the label" would cross a column boundary and, on a different form, consume
+ * text belonging to neither.
+ *
+ * So the block is named by ITS OWN label. `extractTerminal` already finds it,
+ * already stops it at the `CC-postcode City` line, and already refuses the
+ * neighbouring fields that share the column — this reads a place out of exactly
+ * those lines with exactly the rules a numbered section uses. Nothing is
+ * loosened, and no new way of finding an address is introduced.
+ *
+ * ── IT CANNOT REPLACE A REAL DESTINATION ────────────────────────────────────
+ * The caller reaches it only after a numbered section and a `Startpoint:` value
+ * have both been looked for and neither exists. In that state the document
+ * states no other location, so there is nothing for this to override — which is
+ * the danger the `Startpoint:` doctrine above warns about.
+ */
+export function extractAddressFromLines(
+  lines: readonly Fragment[],
+  fragments: readonly Fragment[],
+  section: string,
+): ExtractedAddress | null {
+  if (lines.length === 0) {
+    return null;
+  }
+
+  const place = readPlace(lines, fragments);
+
+  if (!place) {
+    return null;
+  }
+
+  const city = toCityName(place.city);
+
+  // The same invariant every other rule answers to: a country is never a city.
+  if (isCountryName(city)) {
+    return null;
+  }
+
+  return {
+    destinationCity: toTitleCase(city),
+    destinationCountry: place.country ?? countryOnCityLine(place.city),
+    rawAddress: joinText(lines.slice(0, place.lastLineIndex + 1)),
+    section,
+  };
+}
+
+/**
  * The address lines under a section header, in the address value column.
  *
  * The column is taken from the `Address:` label's own value rather than

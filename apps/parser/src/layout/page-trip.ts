@@ -1,6 +1,7 @@
 import {
   ExtractedAddress,
   extractAddress,
+  extractAddressFromLines,
   extractStartpointAddress,
 } from "../fields/address";
 import { extractBookingAndDirection } from "../fields/booking";
@@ -164,9 +165,51 @@ function readDestination(
     };
   }
 
+  /*
+   * ── THE TERMINAL IS THE ONLY PLACE THE DOCUMENT NAMES ────────────────────
+   * A terminal-to-terminal move states no customer address: no numbered
+   * section, an empty `Address:` column and a `Startpoint:` label with nothing
+   * beside it. Its own terminal block is then the only location on the page,
+   * and reading it is the honest answer — refusing the order treated an absent
+   * field as a broken one.
+   *
+   * LAST of the four, and deliberately so. It is reached only once a numbered
+   * section on this page, a section on another page, and a `Startpoint:` value
+   * have each been looked for and found missing, so it can never override a
+   * destination the document actually states.
+   *
+   * The times still come from the labelled `Date/time:` line, never from a date
+   * found by scanning — the page also carries sailing and closing dates, which
+   * are not when a truck drives.
+   */
+  const terminal = extractTerminal(pageFragments);
+  const terminalAddress = terminal
+    ? extractAddressFromLines(
+        terminal.lines,
+        pageFragments,
+        terminal.matchedLabel.replace(/:$/, ""),
+      )
+    : null;
+
+  /*
+   * Anchored on `Startpoint:` exactly as the variation above is, not on the
+   * terminal block: `extractDateTime` looks for the labelled line BELOW its
+   * anchor, and on this form the terminal block sits below `Date/time:` while
+   * `Startpoint:` sits above it.
+   */
+  const startpointLabel = findLabel(pageFragments, "Startpoint:");
+
+  if (terminalAddress && startpointLabel) {
+    return {
+      address: terminalAddress,
+      dateTime: extractDateTime(pageFragments, startpointLabel),
+      sectionLabel: terminal!.matchedLabel,
+    };
+  }
+
   throw missingField(
     "destinationCity",
-    `Page ${page} has no 'LOADING n:' or 'DELIVERY n:' section and no readable 'Startpoint:' address, so it states no destination.`,
+    `Page ${page} has no 'LOADING n:' or 'DELIVERY n:' section, no readable 'Startpoint:' address and no terminal address, so it states no destination.`,
   );
 }
 
