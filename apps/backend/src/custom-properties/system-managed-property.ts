@@ -47,10 +47,17 @@ import { FLAT_CUSTOM_PROPERTY_NAME } from "../trips/flat-container-rule";
  * ────────────────────────────────────────────────────────────────────────────
  */
 
-/** The minimum a property must expose to be classified. */
+/**
+ * The minimum a property must expose to be classified.
+ *
+ * `pricingComponentId` is optional as well as nullable: an ABSENT link and an
+ * explicitly null one both mean the same thing — no component — and treating a
+ * missing field as "linked" would classify an ordinary property as
+ * system-managed and refuse an assignment that should be allowed.
+ */
 export interface ClassifiableCustomProperty {
   readonly name: string;
-  readonly pricingComponentId: string | null;
+  readonly pricingComponentId?: string | null;
 }
 
 /** Why a property is system-managed, for the message an operator reads. */
@@ -66,7 +73,8 @@ export type SystemManagedReason =
 export function systemManagedReasonFor(
   property: ClassifiableCustomProperty,
 ): SystemManagedReason | null {
-  if (property.pricingComponentId !== null) {
+  // Null and undefined alike mean "no component link".
+  if (property.pricingComponentId != null) {
     return "ROUTE_PRICED";
   }
 
@@ -100,7 +108,11 @@ export const SYSTEM_MANAGED_EXPLANATION: Record<SystemManagedReason, string> = {
 /**
  * Names are compared the way the catalog enforces uniqueness: trimmed and
  * case-insensitively. A property called `tar` is the same property.
+ *
+ * A missing name matches nothing rather than throwing. The two name-based
+ * reasons are the narrow ones, and a property whose name cannot be read is
+ * better treated as ordinary than as un-assignable.
  */
-function matchesName(candidate: string, name: string): boolean {
-  return candidate.trim().toLowerCase() === name.trim().toLowerCase();
+function matchesName(candidate: string | null | undefined, name: string): boolean {
+  return (candidate ?? "").trim().toLowerCase() === name.trim().toLowerCase();
 }

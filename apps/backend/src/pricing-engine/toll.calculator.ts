@@ -22,26 +22,26 @@ const TOLL_DESCRIPTION = "Toll";
 /**
  * Calculates the Toll — step 5 of the pricing sequence.
  *
- * Toll is route-dependent, so two independent facts decide it. Whether it
- * APPLIES comes from the Trip: an assigned Custom Property linked to the TOLL
- * component. How MUCH comes from the route: the active RouteCost for that
- * component on this Trip's route. Neither half can answer for the other, which
- * is why the two live in different tables.
+ * ── THE ROUTE DECIDES, END TO END ───────────────────────────────────────────
+ * A toll is a property of the road, not of the load. If the route a Trip drives
+ * has a toll configured, that Trip pays it — there is nothing for an operator
+ * to decide, and nothing for them to remember.
  *
- * A Trip that was never assigned the property produces NO line, rather than a
- * line of zero — the same distinction the Combination Surcharge makes. A zero
- * line would claim the toll was considered and priced at nothing; no line says
- * the component does not apply to this transport.
+ * This used to take two facts: the route supplied the AMOUNT, while an assigned
+ * Custom Property linked to the TOLL component supplied APPLICABILITY. That
+ * made a real charge depend on somebody ticking a box, so a Trip on a tolled
+ * route was silently priced without its toll whenever the box was missed. The
+ * property is gone from this decision; the route answers both halves.
  *
- * The opposite case — the property assigned but the route cost missing — is a
- * configuration error and never reaches this calculator: the Engine validates
- * it while building the context and refuses the calculation there. That check
- * is deliberately component-agnostic, so it covers every route-priced component
- * rather than only this one.
+ * A route with NO toll configured produces no line, rather than a line of
+ * zero — the same distinction the Combination Surcharge makes. A zero line
+ * would claim the toll was considered and priced at nothing; no line says the
+ * road carries none. A route configured AS zero is a different statement and
+ * does produce a line, because somebody decided it.
  *
- * The amount comes exclusively from the RouteCost. A property linked to a
- * component carries no price of its own — the database enforces that its
- * default price is null — so there is nothing else it could come from.
+ * The amount comes exclusively from the RouteCost, unchanged, and an operator
+ * who disagrees with it corrects the Toll column on the Ritten row — which is
+ * exactly what that override is for.
  *
  * The calculator is pure: it reads the validated context and returns a line. It
  * performs no lookup, no validation and no write.
@@ -69,15 +69,11 @@ export class TollCalculator implements PricingCalculationStep {
   }
 
   /**
-   * The route's toll cost, but only when this Trip actually carries the toll.
+   * The toll configured for this Trip's route, if the route has one.
    *
-   * The two are matched on the component id rather than on a name: the route
-   * cost names the component it prices, and the assigned property names the
-   * component it makes applicable. When those are the same component, the Trip
-   * owes that cost.
-   *
-   * Both lists are already resolved for this Trip and this route, so the match
-   * is a comparison in memory and never a query.
+   * Selected by component CODE rather than by id, so a toll cost can never be
+   * mistaken for a tunnel one, and the costs are already resolved for this
+   * route — the match is a comparison in memory and never a query.
    */
   private findTollCost(
     context: PricingCalculationContext,

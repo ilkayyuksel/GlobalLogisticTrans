@@ -113,15 +113,24 @@ describe("TunnelCalculator", () => {
       expect(lines[0].component).toBe(PricingComponentCode.TUNNEL);
     });
 
-    it("produces no line when the Trip carries no properties at all", () => {
-      expect(calculator.calculate(buildContext([], [TUNNEL_COST]))).toEqual([]);
+    /* The road decides: a tunnelled route charges every Trip that drives it. */
+    it("produces a line from the route cost alone", () => {
+      const lines = calculator.calculate(buildContext([], [TUNNEL_COST]));
+
+      expect(lines).toHaveLength(1);
+      expect(lines[0].component).toBe(PricingComponentCode.TUNNEL);
     });
 
-    it("produces no line when a cost exists but the property is not assigned", () => {
-      // The route has a tunnel configured; this Trip simply does not use it.
+    it("needs no assigned Tunnel property", () => {
+      expect(calculator.calculate(buildContext([], [TUNNEL_COST]))).toEqual(
+        calculator.calculate(buildContext([TUNNEL_PROPERTY], [TUNNEL_COST])),
+      );
+    });
+
+    it("charges a Trip that carries only unrelated properties", () => {
       expect(
         calculator.calculate(buildContext([FLAT_PROPERTY], [TUNNEL_COST])),
-      ).toEqual([]);
+      ).toHaveLength(1);
     });
 
     it("produces no line when the route has no costs configured", () => {
@@ -136,12 +145,14 @@ describe("TunnelCalculator", () => {
       ).toEqual([]);
     });
 
-    it("produces no tunnel line for a Trip assigned only the toll", () => {
-      expect(
-        calculator.calculate(
-          buildContext([TOLL_PROPERTY], [TOLL_COST, TUNNEL_COST]),
-        ),
-      ).toEqual([]);
+    /* A route priced for both charges both, whatever the Trip carries. */
+    it("charges the tunnel on a route that also has a toll", () => {
+      const lines = calculator.calculate(
+        buildContext([TOLL_PROPERTY], [TOLL_COST, TUNNEL_COST]),
+      );
+
+      expect(lines).toHaveLength(1);
+      expect(lines[0].component).toBe(PricingComponentCode.TUNNEL);
     });
 
     it("picks the tunnel out of a route that also has a toll", () => {
@@ -179,15 +190,18 @@ describe("TunnelCalculator", () => {
       expect(lines).toHaveLength(1);
     });
 
-    it("produces no line when the ids differ despite both being route-priced", () => {
+    /* What the Trip carries no longer changes the answer: the road does. */
+    it("is unaffected by what the Trip carries", () => {
       const otherComponent = {
         ...TUNNEL_PROPERTY,
         pricingComponentId: "some-other-component",
       };
 
-      expect(
-        calculator.calculate(buildContext([otherComponent], [TUNNEL_COST])),
-      ).toEqual([]);
+      for (const properties of [[], [otherComponent], [FLAT_PROPERTY]]) {
+        expect(
+          calculator.calculate(buildContext(properties, [TUNNEL_COST])),
+        ).toHaveLength(1);
+      }
     });
 
     it("produces at most one line even if the property is listed twice", () => {

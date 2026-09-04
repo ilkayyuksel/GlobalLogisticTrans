@@ -1,4 +1,11 @@
-import { mkdtemp, readFile, writeFile, readdir } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  stat,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -367,6 +374,66 @@ describe("the WhatsApp connection lifecycle", () => {
 
       expect(connection.status()).toBe(WhatsAppStatus.PAIRING_REQUIRED);
       expect(await readdir(directory)).not.toContain("creds.json");
+    });
+
+    /**
+     * ── THE SESSION DIRECTORY ITSELF IS NEVER REMOVED ─────────────────────────
+     * In production it is a Docker VOLUME mounted at `/app/session`, and a
+     * recursive remove finishes by unlinking the directory it was given. The
+     * kernel refuses to unlink a mount point:
+     *
+     *     EBUSY: resource busy or locked, rmdir '/app/session'
+     *
+     * The clear then threw, the dead credentials survived, no fresh socket was
+     * opened and no QR was ever produced — with `error.name` reported as the
+     * uninformative `Error`. Every test passed throughout, because a test
+     * session directory is an ordinary `mkdtemp` folder that removes happily.
+     *
+     * A bind mount cannot be created inside a test, so this asserts the property
+     * that makes the code mount-safe instead: the contents go, the directory
+     * stays. Verified against a real Docker volume separately.
+     */
+    it("empties the session directory without removing it", async () => {
+      await writeFile(join(directory, "creds.json"), "{}");
+      await mkdir(join(directory, "keys"), { recursive: true });
+      await writeFile(join(directory, "keys", "app-state.json"), "{}");
+
+      /*
+       * The identity of the directory, not merely its existence. Removing and
+       * recreating it leaves a directory at the same PATH, so `stat` alone
+       * cannot tell the two apart — but the inode changes, and on a mount point
+       * the remove would not have been permitted at all.
+       */
+      const before = await stat(directory);
+
+      connect();
+      sockets[0].emitCredsUpdate();
+      drop(0, DisconnectCode.LOGGED_OUT);
+
+      await waitUntil(
+        () => sockets.length > 1,
+        "the invalid session to be cleared and a fresh socket opened",
+      );
+
+      const after = await stat(directory);
+
+      expect(after.ino).toBe(before.ino);
+
+      // And genuinely emptied, nested content included.
+      expect(await readdir(directory)).toEqual([]);
+    });
+
+    /** A directory that is already empty is not an error to clear. */
+    it("clears an empty session directory without complaint", async () => {
+      connect();
+      drop(0, DisconnectCode.LOGGED_OUT);
+
+      await waitUntil(
+        () => sockets.length > 1,
+        "a fresh socket after clearing an already-empty directory",
+      );
+
+      expect(connection.status()).toBe(WhatsAppStatus.PAIRING_REQUIRED);
     });
 
     /**

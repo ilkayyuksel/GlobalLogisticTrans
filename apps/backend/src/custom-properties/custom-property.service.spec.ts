@@ -125,6 +125,9 @@ describe("CustomPropertyService", () => {
         "displayOrder",
         "id",
         "isActive",
+        // Derived rather than stored: whether the SYSTEM decides this property,
+        // which is what tells a client not to offer it for manual assignment.
+        "isSystemManaged",
         "name",
         "pricingComponentId",
         "updatedAt",

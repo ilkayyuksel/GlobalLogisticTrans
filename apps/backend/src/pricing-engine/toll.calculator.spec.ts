@@ -101,35 +101,46 @@ describe("TollCalculator", () => {
    * the route's cost says how much. Both are required.
    */
   describe("applicability", () => {
-    it("produces a line when the property is assigned and the cost exists", () => {
-      const lines = calculator.calculate(
-        buildContext([TOLL_PROPERTY], [TOLL_COST]),
-      );
+    /*
+     * ── THE ROUTE DECIDES, NOT AN ASSIGNMENT ────────────────────────────────
+     * A toll is a property of the road. Whether a Trip pays it used to depend
+     * on an assigned Custom Property linked to TOLL, which meant a real charge
+     * was lost whenever nobody ticked the box.
+     */
+    it("produces a line from the route cost alone", () => {
+      const lines = calculator.calculate(buildContext([], [TOLL_COST]));
 
       expect(lines).toHaveLength(1);
       expect(lines[0].component).toBe(PricingComponentCode.TOLL);
     });
 
-    it("produces no line when the Trip carries no properties at all", () => {
-      expect(calculator.calculate(buildContext([], [TOLL_COST]))).toEqual([]);
+    it("needs no assigned Toll property", () => {
+      const withProperty = calculator.calculate(
+        buildContext([TOLL_PROPERTY], [TOLL_COST]),
+      );
+      const withoutAnyProperty = calculator.calculate(
+        buildContext([], [TOLL_COST]),
+      );
+
+      expect(withoutAnyProperty).toEqual(withProperty);
     });
 
-    it("produces no line when a cost exists but the property is not assigned", () => {
-      // The route has a toll configured; this Trip simply does not owe it.
+    it("charges a Trip that carries only unrelated properties", () => {
       expect(
         calculator.calculate(buildContext([FLAT_PROPERTY], [TOLL_COST])),
-      ).toEqual([]);
+      ).toHaveLength(1);
     });
 
+    /* No cost configured is the road having no toll — not a toll of zero. */
     it("produces no line when the route has no costs configured", () => {
       expect(calculator.calculate(buildContext([FLAT_PROPERTY], []))).toEqual(
         [],
       );
     });
 
-    it("ignores a property linked to a different component", () => {
+    it("still produces no line when only another component is priced", () => {
       const lines = calculator.calculate(
-        buildContext([TUNNEL_PROPERTY], [TOLL_COST, TUNNEL_COST]),
+        buildContext([TUNNEL_PROPERTY], [TUNNEL_COST]),
       );
 
       expect(lines).toEqual([]);
@@ -155,25 +166,22 @@ describe("TollCalculator", () => {
       expect(lines[0].amount.toFixed(2)).toBe("9.75");
     });
 
-    it("matches on the component id, not on the property's name", () => {
-      // A property named something else entirely still makes the toll apply if
-      // it links to the TOLL component; the name is presentation only.
+    /*
+     * Whatever the Trip carries is irrelevant now: the toll follows the road.
+     * Both of these used to change the answer.
+     */
+    it("is unaffected by what the Trip carries", () => {
       const renamed = { ...TOLL_PROPERTY, name: "Péage" };
-
-      expect(
-        calculator.calculate(buildContext([renamed], [TOLL_COST])),
-      ).toHaveLength(1);
-    });
-
-    it("produces no line when the ids differ despite both being route-priced", () => {
       const otherComponent = {
         ...TOLL_PROPERTY,
         pricingComponentId: "some-other-component",
       };
 
-      expect(
-        calculator.calculate(buildContext([otherComponent], [TOLL_COST])),
-      ).toEqual([]);
+      for (const properties of [[], [renamed], [otherComponent], [FLAT_PROPERTY]]) {
+        expect(
+          calculator.calculate(buildContext(properties, [TOLL_COST])),
+        ).toHaveLength(1);
+      }
     });
 
     it("produces at most one line even if the property is somehow listed twice", () => {

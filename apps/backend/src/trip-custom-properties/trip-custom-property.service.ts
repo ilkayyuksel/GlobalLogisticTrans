@@ -3,6 +3,10 @@ import { Prisma } from "@prisma/client";
 
 import { CustomPropertyService } from "../custom-properties/custom-property.service";
 import { AppLoggerService } from "../logger/app-logger.service";
+import {
+  SYSTEM_MANAGED_EXPLANATION,
+  systemManagedReasonFor,
+} from "../custom-properties/system-managed-property";
 import { PricingRecalculationService } from "../pricing-engine/pricing-recalculation.service";
 import {
   FLAT_CUSTOM_PROPERTY_NAME,
@@ -19,6 +23,7 @@ import {
 import {
   DuplicateTripCustomPropertyException,
   InactiveCustomPropertyException,
+  SystemManagedCustomPropertyException,
   RequiredCustomPropertyException,
   TripCustomPropertyNotFoundException,
 } from "./exceptions/trip-custom-property.exceptions";
@@ -251,6 +256,29 @@ export class TripCustomPropertyService {
       });
 
       throw new InactiveCustomPropertyException(customPropertyId);
+    }
+
+    /*
+     * A system-managed property is not the operator's to assign: the route, the
+     * container type or the Engine has already decided it. The picker does not
+     * offer them, and this is the same rule enforced where it cannot be
+     * bypassed — a stale browser tab, a script, or a client written later.
+     *
+     * Deliberately only on the way IN. Removing an assignment made before this
+     * rule existed stays possible, and no stored row is touched.
+     */
+    const reason = systemManagedReasonFor(customProperty);
+
+    if (reason !== null) {
+      this.logger.warn("Rejected manual assignment of a system-managed property", {
+        customPropertyId,
+        reason,
+      });
+
+      throw new SystemManagedCustomPropertyException(
+        customProperty.name,
+        SYSTEM_MANAGED_EXPLANATION[reason],
+      );
     }
   }
 

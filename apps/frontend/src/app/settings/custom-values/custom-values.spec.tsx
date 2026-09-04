@@ -21,6 +21,7 @@ const TAR: CustomProperty = {
   pricingComponentId: null,
   defaultPrice: "35.00",
   isActive: true,
+    isSystemManaged: true,
 };
 
 const FLAT: CustomProperty = {
@@ -30,6 +31,7 @@ const FLAT: CustomProperty = {
   pricingComponentId: null,
   defaultPrice: "50.00",
   isActive: true,
+    isSystemManaged: true,
 };
 
 const OVER_SINT_NIKLAAS: CustomProperty = {
@@ -39,6 +41,7 @@ const OVER_SINT_NIKLAAS: CustomProperty = {
   pricingComponentId: null,
   defaultPrice: "27.50",
   isActive: true,
+    isSystemManaged: true,
 };
 
 /** Linked to a pricing component: the amount comes from the route config. */
@@ -49,6 +52,7 @@ const TOLL: CustomProperty = {
   pricingComponentId: "component-toll",
   defaultPrice: null,
   isActive: true,
+    isSystemManaged: true,
 };
 
 function page(items: CustomProperty[]): Paginated<CustomProperty> {

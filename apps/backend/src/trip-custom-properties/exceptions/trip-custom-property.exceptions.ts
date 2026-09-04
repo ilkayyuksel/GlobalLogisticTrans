@@ -43,6 +43,29 @@ export class InactiveCustomPropertyException extends ConflictException {
 }
 
 /**
+ * The system decides this property, so an operator may not assign it by hand.
+ *
+ * Toll and Tunnel come from the route configuration, TAR from the Pricing
+ * Engine, Flat from the container type. Each already has an answer, and a
+ * manual assignment could only agree with it redundantly or contradict it — so
+ * the picker does not offer them and this refuses the request that bypasses the
+ * picker.
+ *
+ * It governs what may be assigned NEXT. An assignment already recorded stays
+ * exactly as it is, and a historical breakdown that used one keeps its amounts.
+ *
+ * The reason is named because it is also the way to change the outcome: edit
+ * the route, the container type, or the configured amount. No price appears.
+ */
+export class SystemManagedCustomPropertyException extends ConflictException {
+  constructor(name: string, explanation: string) {
+    super(
+      `Custom property "${name}" is managed by the system and cannot be assigned by hand: ${explanation}.`,
+    );
+  }
+}
+
+/**
  * The container type requires this property, so it may not be unassigned.
  *
  * A 20FL and a 20ST always carry Flat. The rule assigns it, and while the type

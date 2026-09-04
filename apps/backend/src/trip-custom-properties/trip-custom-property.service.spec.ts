@@ -464,3 +464,83 @@ describe("TripCustomPropertyService", () => {
     });
   });
 });
+
+/**
+ * ── SYSTEM-MANAGED PROPERTIES ARE NOT THE OPERATOR'S TO ASSIGN ──────────────
+ * The picker does not offer them, and this is the same rule where it cannot be
+ * bypassed — a stale browser tab, a script, a client written later.
+ *
+ * Refused on the way IN only. Nothing stored is touched, and an assignment made
+ * before this rule existed can still be removed.
+ */
+describe("TripCustomPropertyService — manual assignment of a system property", () => {
+  const TRIP_ID = "9a5e0a3f-6a1a-4e4a-9e21-6b2d4a0a1c11";
+
+  function serviceRefusing(property: {
+    name: string;
+    pricingComponentId: string | null;
+  }) {
+    const repository = {
+      findByTripId: jest.fn().mockResolvedValue([]),
+      findById: jest.fn().mockResolvedValue(null),
+      findByTripAndProperty: jest.fn().mockResolvedValue(null),
+      create: jest.fn(),
+      delete: jest.fn(),
+    } as unknown as jest.Mocked<TripCustomPropertyRepository>;
+
+    const service = new TripCustomPropertyService(
+      repository,
+      {
+        findById: jest.fn().mockResolvedValue({ id: TRIP_ID, containerType: "45PH" }),
+      } as never,
+      {
+        findById: jest.fn().mockResolvedValue({ ...property, isActive: true }),
+      } as never,
+      stubPricingRecalculation() as never,
+      { setContext: jest.fn(), log: jest.fn(), warn: jest.fn() } as never,
+    );
+
+    return { service, repository };
+  }
+
+  it.each([
+    ["a route-priced property", { name: "Toll", pricingComponentId: "toll-component" }],
+    ["the automatic property", { name: "TAR", pricingComponentId: null }],
+    ["the container-type property", { name: "Flat", pricingComponentId: null }],
+  ])("refuses %s", async (_label, property) => {
+    const { service, repository } = serviceRefusing(property);
+
+    await expect(
+      service.assign({ tripId: TRIP_ID, customPropertyId: "property-id" }),
+    ).rejects.toThrow(/managed by the system/);
+
+    // Nothing was written.
+    expect(repository.create).not.toHaveBeenCalled();
+  });
+
+  it("says why, so an operator knows where the value comes from", async () => {
+    const { service } = serviceRefusing({
+      name: "Toll",
+      pricingComponentId: "toll-component",
+    });
+
+    await expect(
+      service.assign({ tripId: TRIP_ID, customPropertyId: "property-id" }),
+    ).rejects.toThrow(/route configuration/);
+  });
+
+  /** The manual side is untouched: a genuine per-Trip property still assigns. */
+  it("still assigns a genuine per-Trip property", async () => {
+    const { service, repository } = serviceRefusing({
+      name: "Aan/Afkoppelen",
+      pricingComponentId: null,
+    });
+
+    repository.create = jest.fn().mockResolvedValue(buildAssignment());
+
+    await expect(
+      service.assign({ tripId: TRIP_ID, customPropertyId: "property-id" }),
+    ).resolves.toBeDefined();
+    expect(repository.create).toHaveBeenCalled();
+  });
+});

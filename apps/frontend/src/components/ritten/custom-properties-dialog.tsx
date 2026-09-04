@@ -127,8 +127,17 @@ export function CustomPropertiesDialog({
     assignments.map((item) => item.customPropertyId),
   );
   const hasRequired = assignments.some((assignment) => assignment.isRequired);
+  /*
+   * Already assigned, or not the operator's to assign at all. The second is the
+   * backend's classification, read rather than recomputed: Toll and Tunnel come
+   * from the route configuration, TAR from the Pricing Engine and Flat from the
+   * container type, so offering them would invite a choice the API refuses.
+   *
+   * Waiting time is deliberately unaffected — it is a Trip field with its own
+   * editor on the row, not a property in this list.
+   */
   const available = (assignable.data ?? []).filter(
-    (property) => !assignedIds.has(property.id),
+    (property) => !assignedIds.has(property.id) && !property.isSystemManaged,
   );
 
   /**

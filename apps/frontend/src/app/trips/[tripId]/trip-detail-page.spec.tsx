@@ -211,6 +211,7 @@ function buildCustomProperty(): TripCustomProperty {
       pricingComponentId: "component-9",
       defaultPrice: "35.00",
       isActive: true,
+    isSystemManaged: true,
     },
     assignedAt: "2026-08-01T00:00:00.000Z",
   };

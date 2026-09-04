@@ -357,22 +357,17 @@ Toll and Tunnel are **route-dependent** costs.
 They share one rule, stated once here rather than twice, because they differ
 only in which Pricing Component they use.
 
-Whether they apply is decided per Trip.
-
-How much they cost is decided by the route.
-
-These two decisions are configured separately, and the Pricing Engine combines
-them:
+**The route decides both** whether they apply and how much they cost:
 
 Trip
 
 ↓
 
-TripCustomProperty — whether the cost applies
+Route (Terminal → Destination City)
 
 ↓
 
-RouteCost — how much it costs on this route
+RouteCost — the configured amount for that component
 
 ↓
 
@@ -380,15 +375,26 @@ TripPricingItem
 
 ## Applicability
 
-A route-dependent cost applies to a Trip when the corresponding Custom Property
-is assigned to that Trip.
+A route-dependent cost applies to every Trip whose route has that cost
+configured and active. A toll is a property of the road, not of the load: if the
+route is tolled, the Trip driving it pays.
 
-Assignment uses the same mechanism as every other optional Trip feature. The
-Administrator ticks Toll or Tunnel on the Trip exactly as they would tick TAR or
-Flat.
+Nothing is assigned, ticked or selected per Trip. This changed: applicability
+used to come from a Custom Property linked to the component, so a real charge
+depended on somebody remembering to tick a box, and a Trip on a tolled route was
+silently priced without its toll whenever the box was missed.
 
-A Custom Property that represents a route-dependent cost references a Pricing
-Component and defines no price of its own. See `database_model.md` §4.12.
+A route with NO cost configured for a component produces no line at all —
+different from a route configured AS zero, which is somebody's decision and does
+produce a line of zero.
+
+An operator who disagrees with the amount corrects the Tol or Tunnel column on
+the Ritten row; those overrides are unchanged.
+
+The Custom Properties that link to the TOLL and TUNNEL components still exist,
+because `route_cost` may only be stored for a component some property links to.
+They are no longer applicability switches, and they are no longer offered for
+manual assignment — see "Automatic and manual properties" below.
 
 ## Amount
 
@@ -398,6 +404,37 @@ Pricing Component.
 The route is the Trip's Terminal and Destination City, resolved the same way
 whichever Pricing Strategy is active. A route-dependent cost is incurred
 regardless of how the base price was calculated.
+
+# Automatic and manual properties
+
+Two different things share the `custom_property` table, and the system tells
+them apart from the model rather than from a list of names.
+
+A property is **system-managed** when any of these holds:
+
+| Reason | Which | Who decides |
+|---|---|---|
+| It references a Pricing Component | Toll, Tunnel | the route configuration |
+| It is the configured automatic property | TAR | the Pricing Engine |
+| It is the container-type property | Flat | the Trip's container type |
+
+System-managed properties are not offered in "Custom waarden beheren", and the
+API refuses an attempt to assign one by hand. Existing assignments are
+untouched: the rule governs what may be assigned NEXT, and a historical
+breakdown keeps every amount it was priced with.
+
+Everything else is **manual** — a genuine per-Trip decision such as
+Aan/Afkoppelen, Over/EX or Ashcco. Carrying a price does not make a property
+automatic; all of these have one.
+
+Tarief, Brandstof, Backload and the Cost Confirmation appear nowhere in that
+table because they are not Custom Properties at all. Each is a Pricing Component
+with its own calculator, so there is nothing for an operator to select.
+
+Waiting time is the one that looks like both and is neither: it is a Trip FIELD
+the operator types in, and the Engine prices it from the configured free period,
+threshold, block size and block price. **Manual input, automatic amount.** It is
+edited on the Ritten row and is not part of the property picker.
 
 The amount is never taken from the Custom Property, which carries none.
 

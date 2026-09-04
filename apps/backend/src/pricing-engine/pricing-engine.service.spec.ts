@@ -991,7 +991,12 @@ describe("PricingEngineService", () => {
         routeCostResolver.resolve.mockResolvedValue(costs);
       }
 
-      it("produces no Tunnel line without the assignment", async () => {
+      /*
+       * The whole point of the change: a Trip on a route with a tunnel pays it
+       * without anybody assigning a property. Previously this produced only the
+       * base price and the fuel.
+       */
+      it("produces a Tunnel line with no assignment at all", async () => {
         assign([], [TUNNEL_ROUTE_COST]);
 
         const { lines } = await engine.calculate(TRIP_ID);
@@ -999,7 +1004,19 @@ describe("PricingEngineService", () => {
         expect(lines.map((line) => line.component)).toEqual([
           PricingComponentCode.BASE_PRICE,
           PricingComponentCode.FUEL_SURCHARGE,
+          PricingComponentCode.TUNNEL,
         ]);
+      });
+
+      /* A route with nothing configured still charges nothing. */
+      it("produces no Tunnel line when the route has no tunnel cost", async () => {
+        assign([], []);
+
+        const { lines } = await engine.calculate(TRIP_ID);
+
+        expect(lines.map((line) => line.component)).not.toContain(
+          PricingComponentCode.TUNNEL,
+        );
       });
 
       it("produces exactly one Tunnel line when both halves are present", async () => {
@@ -1044,8 +1061,13 @@ describe("PricingEngineService", () => {
         );
       });
 
+      /*
+       * Each component is selected by its own CODE, so a route priced for both
+       * produces one line of each — and a route priced for only one produces
+       * only that one.
+       */
       it("never mistakes the Toll cost for the Tunnel", async () => {
-        assign([TOLL_PROPERTY], [TOLL_ROUTE_COST, TUNNEL_ROUTE_COST]);
+        assign([], [TOLL_ROUTE_COST]);
 
         const { lines } = await engine.calculate(TRIP_ID);
 

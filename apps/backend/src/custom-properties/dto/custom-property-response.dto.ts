@@ -3,6 +3,7 @@ import { CustomProperty } from "@prisma/client";
 
 import { MONEY_DECIMAL_PLACES } from "../../common/dto/money";
 import { PaginationMetaDto } from "../../common/dto/pagination-meta.dto";
+import { isSystemManagedProperty } from "../system-managed-property";
 
 /**
  * Public shape of a CustomProperty.
@@ -50,6 +51,12 @@ export class CustomPropertyResponseDto {
   })
   isActive!: boolean;
 
+  @ApiProperty({
+    description:
+      "True when the SYSTEM decides this property rather than an operator, so it is never offered for manual assignment: a route-priced one (Toll, Tunnel) whose applicability and amount both come from the route, the automatic pricing property (TAR) the Engine applies itself, and the container-type property (Flat) the Trip's own container decides. Existing assignments are unaffected — this governs what may be assigned NEXT.",
+  })
+  isSystemManaged!: boolean;
+
   @ApiProperty({ format: "date-time" })
   createdAt!: Date;
 
@@ -81,6 +88,7 @@ export function toCustomPropertyResponse(
     displayOrder: property.displayOrder,
     color: property.color,
     isActive: property.isActive,
+    isSystemManaged: isSystemManagedProperty(property),
     createdAt: property.createdAt,
     updatedAt: property.updatedAt,
   };

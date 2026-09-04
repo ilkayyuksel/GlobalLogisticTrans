@@ -448,6 +448,16 @@ export interface CustomProperty {
   /** Two decimals, as a string. Null when no price is configured. */
   defaultPrice: string | null;
   isActive: boolean;
+  /**
+   * True when the SYSTEM decides this property rather than an operator — Toll
+   * and Tunnel from the route, TAR from the Pricing Engine, Flat from the
+   * container type.
+   *
+   * The backend classifies it and also refuses such an assignment, so this is
+   * only what the picker reads to avoid offering a choice that does not exist.
+   * No rule is duplicated here.
+   */
+  isSystemManaged: boolean;
 }
 
 export interface TripCustomProperty {

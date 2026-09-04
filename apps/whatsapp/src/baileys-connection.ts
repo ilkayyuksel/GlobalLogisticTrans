@@ -1,4 +1,5 @@
-import { mkdir, rm } from "node:fs/promises";
+import { mkdir, readdir, rm } from "node:fs/promises";
+import { join } from "node:path";
 
 import type makeWASocket from "@whiskeysockets/baileys";
 import type { useMultiFileAuthState, WASocket } from "@whiskeysockets/baileys";
@@ -310,6 +311,46 @@ export async function createBaileysConnection(
    * is opened, which is what makes the new QR appear WITHOUT anybody having to
    * restart the container.
    */
+  /**
+   * Empties the session directory WITHOUT removing the directory itself.
+   *
+   * ── WHY NOT `rm(sessionDirectory, { recursive: true })` ────────────────────
+   * That is what this used to do, and in production it never once succeeded.
+   * `/app/session` is a Docker VOLUME mounted at that exact path, and a
+   * recursive remove finishes by unlinking the directory it was given. Removing
+   * a mount point is refused by the kernel:
+   *
+   *     EBUSY: resource busy or locked, rmdir '/app/session'
+   *
+   * Reproduced in a disposable container: the call throws, the credentials
+   * survive untouched, and `error.name` is plainly `Error` — which is exactly
+   * what the log said, and exactly why it explained nothing. It is not a
+   * permission problem: it fails the same way as root.
+   *
+   * The consequence was the whole outage. A session WhatsApp had already
+   * invalidated could never be cleared, so a fresh socket was never opened, no
+   * QR was ever produced, and the only visible symptom was an unexplained
+   * ERROR.
+   *
+   * Removing the CONTENTS leaves the mount point alone and works identically on
+   * an ordinary directory, which is what every test and every local run uses.
+   * `force` still swallows a file that vanishes between the listing and the
+   * removal — a concurrent save losing the race is not an error here.
+   */
+  async function clearSessionContents(): Promise<void> {
+    // `recursive` covers the directory not existing at all: a first run, or a
+    // volume that was replaced while the service was stopped.
+    await mkdir(sessionDirectory, { recursive: true });
+
+    const entries = await readdir(sessionDirectory);
+
+    await Promise.all(
+      entries.map((entry) =>
+        rm(join(sessionDirectory, entry), { recursive: true, force: true }),
+      ),
+    );
+  }
+
   async function startFreshPairing(statusCode: number | null): Promise<void> {
     pendingQr = null;
     report(
@@ -317,13 +358,17 @@ export async function createBaileysConnection(
       `WhatsApp reported the session invalid (${statusCode ?? "unknown"}); a new pairing is needed`,
     );
 
+    let stage: FreshPairingStage = "flushing the pending save";
+
     try {
       // Wait for any in-flight write, so a save cannot recreate what is about
       // to be removed.
       await credentials.flush();
-      await rm(sessionDirectory, { recursive: true, force: true });
-      await mkdir(sessionDirectory, { recursive: true });
 
+      stage = "clearing the session directory";
+      await clearSessionContents();
+
+      stage = "reloading the empty auth state";
       auth = await loadAuthState(sessionDirectory);
       credentials = createCredentialWriter(() => auth.saveCreds(), {
         onError: (errorName) =>
@@ -333,9 +378,19 @@ export async function createBaileysConnection(
           ),
       });
     } catch (error: unknown) {
+      /*
+       * The stage is named because the four steps fail for entirely different
+       * reasons and used to produce one indistinguishable sentence — a reload
+       * failure was reported as a failure to clear.
+       *
+       * The `code` is included because on a filesystem error it is the whole
+       * diagnosis: EACCES is a permission problem, EROFS a read-only mount,
+       * EBUSY the mount point itself. `name` alone was "Error" for every one of
+       * them. The MESSAGE is still withheld — it can carry a path or a URL.
+       */
       report(
         WhatsAppStatus.ERROR,
-        `the invalid session could not be cleared (${error instanceof Error ? error.name : "UnknownError"})`,
+        `${stage} failed (${describeFailure(error)}); a new pairing cannot start`,
       );
 
       return;
@@ -402,6 +457,36 @@ export async function createBaileysConnection(
       await credentials.flush();
     },
   };
+}
+
+/**
+ * The four steps of starting a fresh pairing, named so a failure says which.
+ *
+ * They fail for unrelated reasons — a stuck write, a filesystem the process may
+ * not empty, a session Baileys cannot read back — and one shared sentence made
+ * every one of them look like the same problem.
+ */
+type FreshPairingStage =
+  | "flushing the pending save"
+  | "clearing the session directory"
+  | "reloading the empty auth state";
+
+/**
+ * A failure in the terms that identify it, and nothing more.
+ *
+ * `code` is what actually distinguishes one filesystem failure from another —
+ * EACCES, EROFS, EBUSY, ENOSPC — while `name` is `Error` for all of them. The
+ * message and the stack are deliberately left out: they carry paths, and this
+ * string is published on the status endpoint.
+ */
+function describeFailure(error: unknown): string {
+  if (!(error instanceof Error)) {
+    return "UnknownError";
+  }
+
+  const code = (error as NodeJS.ErrnoException).code;
+
+  return code ? `${error.name}: ${code}` : error.name;
 }
 
 /** The disconnect code Baileys wraps in a Boom error, when there is one. */
