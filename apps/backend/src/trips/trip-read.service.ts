@@ -50,6 +50,13 @@ export interface TripReadView {
   readonly distanceKm: string | null;
   /** Null means no waiting time was recorded, which is not the same as zero. */
   readonly waitingTimeMinutes: number | null;
+  /**
+   * The operator's TAR-nummer, exactly as stored.
+   *
+   * Not trimmed here: `hasTarNummer` owns what "stated" means, and a view that
+   * pre-judged it would be a second opinion.
+   */
+  readonly tarNummer: string | null;
   readonly tripGroupId: string | null;
   readonly pdfDocumentId: string | null;
 }
@@ -107,6 +114,7 @@ function toTripReadView(row: EngineTripRow): TripReadView {
         ? null
         : row.distanceKm.toFixed(DISTANCE_DECIMAL_PLACES),
     waitingTimeMinutes: row.waitingTimeMinutes,
+    tarNummer: row.tarNummer,
     tripGroupId: row.tripGroupId,
     pdfDocumentId: row.pdfDocumentId,
   };

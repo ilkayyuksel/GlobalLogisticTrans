@@ -2,6 +2,7 @@ import { Inject, Injectable } from "@nestjs/common";
 import { TripStatus } from "@prisma/client";
 
 import { AppLoggerService } from "../logger/app-logger.service";
+import { meaningfulTarNummer } from "../trips/tar-nummer";
 import { PdfDocumentService } from "../pdf-documents/pdf-document.service";
 import { PdfContentMissingException } from "../pdf-documents/exceptions/pdf-document.exceptions";
 import { TripDocumentsService } from "../trips/trip-documents.service";
@@ -136,7 +137,7 @@ export class TripWhatsAppService {
     const result = await this.sender.sendDocument({
       phoneNumber,
       filename: document.originalFilename,
-      caption: captionFor(trip.bookingNumber),
+      caption: captionFor(trip.bookingNumber, trip.tarNummer),
       content: document.content,
     });
 
@@ -287,9 +288,36 @@ const EXPLANATIONS: Record<WhatsAppStatus, string> = {
  * WhatsApp message is not a secure channel, it is read on a lock screen, and the
  * booking number is the one identifier a driver needs to match it to their day.
  * No address, no customer, no price and no container contents.
+ *
+ * ── THE TAR-NUMMER RIDES ALONG, IT IS NOT A SECOND MESSAGE ──────────────────
+ * The document already carries a caption, so the number goes on a second line
+ * of it. That keeps the send a SINGLE operation: one call, one delivery, one
+ * failure mode. A separate text message would have introduced a half-sent state
+ * — document delivered, number lost — that this flow has no semantics for and
+ * would have needed retry rules nobody has decided on.
+ *
+ * It belongs here on the same grounds as the booking number: a reference the
+ * driver quotes back, not a description of the load. It is still no address, no
+ * customer, no price and no contents.
+ *
+ * ── EMPTY IS EMPTY ──────────────────────────────────────────────────────────
+ * Absent, blank and whitespace-only all produce the caption exactly as it was
+ * before, with no trailing line and no empty label. The DTO already stores a
+ * whitespace-only entry as null, and this trims again rather than trusting
+ * that: the value also reaches here from rows written before that rule existed,
+ * and a caption reading "TAR nummer:" with nothing after it would be worse than
+ * no line at all.
  */
-export function captionFor(bookingNumber: string | null): string {
-  return bookingNumber
+export function captionFor(
+  bookingNumber: string | null,
+  tarNummer: string | null = null,
+): string {
+  const order = bookingNumber
     ? `TRANO – Transportorder ${bookingNumber}`
     : "TRANO – Transportorder";
+
+  const stated = meaningfulTarNummer(tarNummer);
+
+  return stated === null ? order : `${order}
+TAR nummer: ${stated}`;
 }

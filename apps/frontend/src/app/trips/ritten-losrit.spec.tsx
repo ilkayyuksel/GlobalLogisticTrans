@@ -414,7 +414,7 @@ describe("LOSRIT", () => {
         // No literal colour, and no lifecycle fill: it is not a state.
         expect(badge.className).not.toMatch(/#[0-9a-f]{3,8}/i);
         expect(badge.className).not.toMatch(/bg-(success|danger|info|warning)/);
-        expect(badge.className).toMatch(/border-border/);
+        expect(badge.className).toMatch(/bg-hover/);
       },
     );
   });

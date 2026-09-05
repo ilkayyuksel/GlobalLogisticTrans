@@ -57,6 +57,7 @@ function trip(overrides: Partial<Trip> = {}): Trip {
     waitingTimeEnd: null,
     waitingTimeMinutes: null,
     distanceKm: null,
+    tarNummer: null,
     internalNotes: null,
     parserMetadata: null,
     createdAt: new Date("2026-08-01T00:00:00.000Z"),

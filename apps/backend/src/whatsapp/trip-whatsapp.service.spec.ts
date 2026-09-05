@@ -431,6 +431,129 @@ describe("sending a Trip's transport order over WhatsApp", () => {
   });
 });
 
+/**
+ * ── THE TAR-NUMMER TRAVELS ON THE DOCUMENT ITSELF ───────────────────────────
+ * On the caption the PDF already carries, never as a second message: the send
+ * stays ONE call with one failure mode, so there is no half-sent state to
+ * invent retry rules for.
+ *
+ * These drive the real service through a fake sender and assert the exact
+ * command it received.
+ */
+describe("sending a Trip that states a TAR-nummer", () => {
+  let tripService: { findById: jest.Mock };
+  let sender: FakeSender;
+  let service: TripWhatsAppService;
+
+  /** The same collaborators the flow above uses, so only the Trip differs. */
+  beforeEach(() => {
+    tripService = { findById: jest.fn() };
+    sender = new FakeSender();
+
+    service = new TripWhatsAppService(
+      tripService as never,
+      {
+        findById: jest
+          .fn()
+          .mockResolvedValue({ id: "driver-1", phoneNumber: "+32 470 11 22 33" }),
+      } as never,
+      { findForTrip: jest.fn().mockResolvedValue({ items: [] }) } as never,
+      {
+        readContent: jest.fn().mockResolvedValue({
+          content: PDF_BYTES,
+          originalFilename: "transport-order.pdf",
+        }),
+      } as never,
+      sender,
+      {
+        setContext: jest.fn(),
+        log: jest.fn(),
+        warn: jest.fn(),
+        error: jest.fn(),
+      } as unknown as AppLoggerService,
+    );
+  });
+
+  async function sendWith(
+    tarNummer: string | null,
+    overrides: Record<string, unknown> = {},
+  ) {
+    tripService.findById.mockResolvedValue({
+      id: TRIP_ID,
+      status: TripStatus.OPEN,
+      bookingNumber: "ANRDUB2602247",
+      pdfDocumentId: "pdf-original",
+      tarNummer,
+      effectiveDriver: {
+        id: "driver-1",
+        name: "Jan Peeters",
+        isActive: true,
+        source: "OVERRIDE",
+      },
+      ...overrides,
+    });
+
+    await service.sendTransportDocument(TRIP_ID);
+
+    return sender.commands;
+  }
+
+  const PLAIN = "TRANO – Transportorder ANRDUB2602247";
+
+  it("sends the PDF and the number in one command", async () => {
+    const commands = await sendWith("TAR123");
+
+    expect(commands).toHaveLength(1);
+    expect(commands[0].caption).toBe(PLAIN + "\nTAR nummer: TAR123");
+  });
+
+  /** The document is unchanged: same file, same content, same recipient. */
+  it("still sends the PDF exactly as before", async () => {
+    const commands = await sendWith("TAR123");
+
+    // The number is normalised by the flow, exactly as it was before.
+    expect(commands[0]).toMatchObject({
+      phoneNumber: "32470112233",
+      filename: "transport-order.pdf",
+      content: PDF_BYTES,
+    });
+  });
+
+  it("sends only the PDF when the Trip states none", async () => {
+    const commands = await sendWith(null);
+
+    expect(commands).toHaveLength(1);
+    expect(commands[0].caption).toBe(PLAIN);
+  });
+
+  /** Whitespace-only is empty: no line, and certainly no empty label. */
+  it.each([
+    ["an empty string", ""],
+    ["spaces", "   "],
+    ["a tab", "\t"],
+    ["a newline", "\n"],
+  ])("sends only the PDF for %s", async (_label, value) => {
+    const commands = await sendWith(value);
+
+    expect(commands[0].caption).toBe(PLAIN);
+    expect(commands[0].caption).not.toMatch(/TAR nummer/);
+  });
+
+  /**
+   * A leg of a group carries the number the group shares. Nothing special
+   * happens here — by the time this reads it, it is an ordinary column.
+   */
+  it("sends the number a grouped Trip inherited", async () => {
+    const commands = await sendWith("TAR123", { tripGroupId: "group-1" });
+
+    expect(commands[0].caption).toContain("TAR nummer: TAR123");
+  });
+
+  it("never sends a second message", async () => {
+    expect(await sendWith("TAR123")).toHaveLength(1);
+  });
+});
+
 describe("the caption a driver receives", () => {
   /** Enough to match the message to their day, and nothing else. */
   it("names the booking number", () => {
@@ -453,5 +576,41 @@ describe("the caption a driver receives", () => {
     expect(captionFor("ANRDUB2602247")).toBe(
       "TRANO – Transportorder ANRDUB2602247",
     );
+  });
+
+  describe("with a TAR-nummer", () => {
+    it("adds it on a second line", () => {
+      expect(captionFor("ANRDUB2602247", "TAR123")).toBe(
+        "TRANO – Transportorder ANRDUB2602247\nTAR nummer: TAR123",
+      );
+    });
+
+    it("trims the padding around it", () => {
+      expect(captionFor("ANRDUB2602247", "  TAR123  ")).toBe(
+        "TRANO – Transportorder ANRDUB2602247\nTAR nummer: TAR123",
+      );
+    });
+
+    it("still works without a booking number", () => {
+      expect(captionFor(null, "TAR123")).toBe(
+        "TRANO – Transportorder\nTAR nummer: TAR123",
+      );
+    });
+
+    it.each([null, "", "   ", "\t", "\n", " \t "])(
+      "adds no line for %p",
+      (value) => {
+        expect(captionFor("ANRDUB2602247", value)).toBe(
+          "TRANO – Transportorder ANRDUB2602247",
+        );
+      },
+    );
+
+    /** Omitting the argument is the same as stating none. */
+    it("is unchanged when the argument is left off", () => {
+      expect(captionFor("ANRDUB2602247")).toBe(
+        captionFor("ANRDUB2602247", null),
+      );
+    });
   });
 });

@@ -185,7 +185,8 @@ describe("an UPDATE document with no Trip to revise", () => {
           waitingTimeMinutes: null,
           distanceKm: null,
           executionDatetime: null,
-          internalNotes: null,
+          tarNummer: null,
+    internalNotes: null,
         });
       }
     });

@@ -337,7 +337,7 @@ model Trip {
   /// existed before this column is NIET BETAALD — nothing is backfilled and
   /// nothing is inferred from a Cost Confirmation, which is a third party's
   /// promise to pay rather than a record that payment arrived.
-  isPaid      Boolean @default(false) @map("is_paid")
+  isPaid Boolean @default(false) @map("is_paid")
 
   /// COLLECTION fetches a container, DELIVERY brings one. Null on a manually
   /// created Trip: it is what the DOCUMENT said, and a manual Trip has none.
@@ -408,6 +408,21 @@ model Trip {
   waitingTimeMinutes Int?      @map("waiting_time_minutes")
   /// Manually entered. Used only by the Distance-Based pricing strategy.
   distanceKm         Decimal?  @map("distance_km") @db.Decimal(8, 2)
+
+  /// TAR-nummer: a free-text reference the operator types in.
+  ///
+  /// Deliberately NOT part of the Trip's identity, and deliberately not unique:
+  /// several Trips may legitimately carry the same one, and nothing looks a
+  /// Trip up by it. No format is enforced — the business writes whatever their
+  /// counterparty gave them, and inventing a pattern would reject real values.
+  ///
+  /// Whitespace-only is stored as NULL rather than as a blank string, so
+  /// "absent" has exactly one representation. The Backend's `trimToNull`
+  /// transform is what guarantees it, the same one `internal_notes` uses.
+  ///
+  /// Null on every Trip that existed before this column: nothing is backfilled
+  /// and nothing is inferred.
+  tarNummer String? @map("tar_nummer") @db.Text
 
   internalNotes String? @map("internal_notes") @db.Text
 

@@ -28,6 +28,15 @@ export const CONTAINER_TYPE_MAX_LENGTH = 50;
 export const TERMINAL_MAX_LENGTH = 200;
 export const DESTINATION_MAX_LENGTH = 200;
 export const INTERNAL_NOTES_MAX_LENGTH = 2000;
+/**
+ * A generous ceiling, not a format.
+ *
+ * The business types whatever their counterparty gave them, so no pattern is
+ * enforced — a regex here would reject real values. The length exists only so a
+ * malformed or hostile request cannot write an unbounded string into a TEXT
+ * column, exactly as every other free-text field on a Trip is bounded.
+ */
+export const TAR_NUMMER_MAX_LENGTH = 100;
 
 /** A planned wait is measured in minutes and cannot exceed a long working day. */
 export const WAITING_TIME_MAX_MINUTES = 10_080;
@@ -265,6 +274,19 @@ export class CreateTripDto {
   @Min(0)
   @Max(DISTANCE_KM_MAX)
   distanceKm?: number | null;
+
+  @ApiPropertyOptional({
+    description:
+      "TAR-nummer: free text, optional, NOT unique. Several Trips may carry the same one and nothing is looked up by it. Whitespace-only is stored as null, so \"absent\" has exactly one representation.",
+    maxLength: TAR_NUMMER_MAX_LENGTH,
+    nullable: true,
+    example: "TAR-2026-0042",
+  })
+  @Transform(trimToNull)
+  @IsOptional()
+  @IsString()
+  @MaxLength(TAR_NUMMER_MAX_LENGTH)
+  tarNummer?: string | null;
 
   @ApiPropertyOptional({
     description:

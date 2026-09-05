@@ -96,7 +96,8 @@ describe("Manual Trip creation", () => {
           waitingTimeEnd: null,
           waitingTimeMinutes: null,
           distanceKm: null,
-          internalNotes: null,
+          tarNummer: null,
+    internalNotes: null,
           parserMetadata: null,
           createdAt: new Date(),
           updatedAt: new Date(),
@@ -240,7 +241,8 @@ describe("Manual Trip creation", () => {
         waitingTimeEnd: null,
         waitingTimeMinutes: null,
         distanceKm: null,
-        internalNotes: null,
+        tarNummer: null,
+    internalNotes: null,
       });
     });
 

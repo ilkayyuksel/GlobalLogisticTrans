@@ -77,6 +77,7 @@ function buildTrip(overrides: Partial<Trip> = {}): Trip {
     waitingTimeMinutes: null,
     distanceKm: null,
     executionDatetime: null,
+    tarNummer: null,
     internalNotes: null,
     tripGroupId: null,
     pdfDocumentId: "pdf-1",

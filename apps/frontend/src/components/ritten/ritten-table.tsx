@@ -10,6 +10,7 @@ import { HoverNote } from "@/components/ui/hover-note";
 import { ApiError } from "@/lib/api/client";
 import type { UpdateTripPayload } from "@/lib/api/trips";
 import type { Trip, Vehicle } from "@/lib/api/types";
+import { CopyButton } from "@/components/ui/copy-button";
 import { PricingCells } from "@/components/ritten/pricing-cells";
 import { toClockLabel } from "@/lib/calendar/clock";
 import { formatCalendarDate } from "@/lib/calendar/calendar-dates";
@@ -58,6 +59,8 @@ import { RowLifecycleActions } from "./row-lifecycle-actions";
 
 /** From the backend's create-trip.dto.ts, to catch a mistake before a round trip. */
 const CONTAINER_NUMBER_MAX_LENGTH = 100;
+/** Likewise TAR_NUMMER_MAX_LENGTH there. A ceiling, never a format. */
+const TAR_NUMMER_MAX_LENGTH = 100;
 /** City and country are 200 each there; this field carries both with a comma. */
 const DESTINATION_FIELD_MAX_LENGTH = 401;
 
@@ -415,6 +418,22 @@ function RittenRow({
             }
           />
         </UpdatedValue>
+        {/*
+          UNDERNEATH the number rather than in front of it, so the value still
+          begins where the eye scans down the column. Absent when there is no
+          container: a copy button for nothing would copy an empty string.
+
+          It sits OUTSIDE `InlineCell`, so opening the editor and copying stay
+          separate actions — the cell keeps its own click behaviour untouched.
+        */}
+        {trip.containerNumber ? (
+          <span className="mt-0.5 flex">
+            <CopyButton
+              value={trip.containerNumber}
+              label={t("ritten.copy.containerNumber")}
+            />
+          </span>
+        ) : null}
       </td>
 
       <td className="px-3 py-2 text-secondary">
@@ -447,6 +466,45 @@ function RittenRow({
             {trip.bookingNumber}
           </Link>
         </HoverNote>
+        {/*
+          A SIBLING of the link, not a child of it: a button inside an anchor is
+          not something a browser or a screen reader can make sense of, and the
+          navigation must keep working exactly as it did.
+        */}
+        {trip.bookingNumber ? (
+          <span className="mt-0.5 flex">
+            <CopyButton
+              value={trip.bookingNumber}
+              label={t("ritten.copy.bookingNumber")}
+            />
+          </span>
+        ) : null}
+
+        {/*
+          TAR-nummer, directly under the booking number it belongs beside.
+
+          An ordinary editable cell — the same `InlineCell` every other free-text
+          field on this row uses, so it opens, saves and cancels identically. It
+          carries no format and no uniqueness check: the backend accepts whatever
+          is typed, and turns a whitespace-only entry into null so "empty" has
+          one meaning. Clearing the box is therefore how a TAR-nummer is removed.
+
+          Below the link and the copy button rather than inside them, so the
+          navigation and the copy action keep working exactly as they did.
+        */}
+        <span className="mt-0.5 flex">
+          <InlineCell
+            label={t("ritten.edit.tarNummer")}
+            displayValue={trip.tarNummer ?? empty}
+            editValue={trip.tarNummer ?? ""}
+            maxLength={TAR_NUMMER_MAX_LENGTH}
+            isDisabled={!isEditable || isBusy}
+            // Empty means "clear it", which the backend spells null.
+            onSave={(value) =>
+              save({ tarNummer: value.trim() === "" ? null : value.trim() })
+            }
+          />
+        </span>
       </td>
 
       <td className="px-3 py-2 text-secondary">

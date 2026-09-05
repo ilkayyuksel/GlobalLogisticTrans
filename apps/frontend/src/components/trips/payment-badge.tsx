@@ -1,6 +1,7 @@
 "use client";
 
-import { Badge } from "@/components/ui/badge";
+import { Badge, TONE_CLASSES } from "@/components/ui/badge";
+import type { BadgeTone } from "@/components/ui/badge";
 import type { Trip } from "@/lib/api/types";
 import { useTranslation } from "@/lib/i18n/language-provider";
 
@@ -14,12 +15,22 @@ import { useTranslation } from "@/lib/i18n/language-provider";
  * arrived. A Trip is BETAALD or NIET BETAALD whether it is OPEN, CLOSED or
  * CANCELLED.
  *
- * So it borrows no lifecycle colour. In this design system `info` means OPEN,
- * `success` means CLOSED, `danger` means CANCELLED and `neutral` means DELETED
- * — a paid badge in green would read as "finished", an unpaid one in red as
- * "cancelled". Both states therefore use `outline`, the tone this system
- * reserves for markers that are not states, and the WORDS carry the meaning.
- * The difference between them is weight, never hue.
+ * ── AND YET IT NOW CARRIES A COLOUR ─────────────────────────────────────────
+ * Both states used `outline` for the reason above: `success` already means
+ * CLOSED and `danger` already means CANCELLED, so a coloured payment marker can
+ * be misread as a lifecycle one.
+ *
+ * That was overruled deliberately. Payment is what an operator scans a long
+ * list for, and a row of identically outlined markers makes them read every
+ * word. The tones come from the same semantic set as everywhere else — no new
+ * palette — and the risk of confusion is reduced rather than ignored:
+ *
+ *   BETAALD       success, the settled state
+ *   NIET BETAALD  warning, not danger — danger is CANCELLED, and an unpaid
+ *                 Trip is something to chase, not something that went wrong
+ *
+ * The lifecycle badge still sits beside this one, so the two are read together
+ * and the colour is a second signal rather than the only one.
  *
  * ── WHY BOTH STATES ARE SHOWN ───────────────────────────────────────────────
  * Unlike LOSRIT, where an absent badge is the statement, "not paid yet" is
@@ -55,11 +66,11 @@ export function PaymentBadge({
   const t = useTranslation();
 
   const label = t(trip.isPaid ? "ritten.payment.paid" : "ritten.payment.unpaid");
-  const tone = trip.isPaid ? "font-semibold text-foreground" : "text-muted";
+  const tone: BadgeTone = trip.isPaid ? "success" : "warning";
 
   if (!onToggle) {
     return (
-      <Badge tone="outline" className={tone}>
+      <Badge tone={tone} className="font-semibold">
         {label}
       </Badge>
     );
@@ -86,7 +97,12 @@ export function PaymentBadge({
       }}
       title={actionLabel}
       aria-label={`${actionLabel} ${trip.bookingNumber ?? trip.id}`}
-      className={`inline-flex items-center rounded-full border border-border px-2.5 py-0.5 text-xs font-medium hover:bg-hover hover:text-foreground disabled:opacity-50 ${tone}`}
+      /*
+       * The same tone the badge wears, from the same table, so the display and
+       * the control cannot end up different colours. Only the hover and the
+       * disabled state are the button's own.
+       */
+      className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold hover:opacity-80 disabled:opacity-50 ${TONE_CLASSES[tone]}`}
     >
       {label}
     </button>

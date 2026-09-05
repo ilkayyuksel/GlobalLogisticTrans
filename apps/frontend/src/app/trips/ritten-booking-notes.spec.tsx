@@ -51,6 +51,7 @@ const WITH_NOTE = buildTrip({
 const WITHOUT_NOTE = buildTrip({
   id: "trip-without-note",
   bookingNumber: "ANRBEL2768902",
+  tarNummer: null,
   internalNotes: null,
 });
 

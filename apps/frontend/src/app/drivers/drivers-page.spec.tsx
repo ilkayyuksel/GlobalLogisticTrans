@@ -394,9 +394,93 @@ describe("DriversPage", () => {
     function vehicleCell(name: string): HTMLElement {
       const row = screen.getByText(name).closest("tr") as HTMLElement;
 
-      // Second column: name, then vehicle.
-      return row.querySelectorAll("td")[1] as HTMLElement;
+      // FIRST column: the plate leads, then the driver's own details.
+      return row.querySelectorAll("td")[0] as HTMLElement;
     }
+
+    /**
+     * ── THE PLATE LEADS, AND ORDERS THE LIST ────────────────────────────────
+     * Planning is done by truck, so the identifier an operator arrives with is
+     * the one they scan down. `GET /drivers` has no sort parameter and orders
+     * by name, and a driver's plate lives on the current VehicleAssignment
+     * rather than on the driver — so the ordering is applied to the page the
+     * backend returned.
+     */
+    function plateOrder(): string[] {
+      return Array.from(document.querySelectorAll("tbody tr")).map((row) =>
+        (row.querySelector("td") as HTMLElement).textContent!.trim(),
+      );
+    }
+
+    function driverWithPlate(
+      id: string,
+      name: string,
+      licensePlate: string | null,
+    ) {
+      return buildDriver({
+        id,
+        name,
+        currentVehicle:
+          licensePlate === null
+            ? null
+            : { ...TRUCK, id: `vehicle-${id}`, licensePlate },
+      });
+    }
+
+    it("puts the plate in the first column", async () => {
+      respondWith(buildPage([buildDriver({ currentVehicle: TRUCK })]));
+      renderDrivers();
+      await screen.findByText("Piet Janssens");
+
+      const headers = Array.from(
+        document.querySelectorAll("thead th"),
+      ).map((cell) => cell.textContent!.trim());
+
+      expect(headers[0]).toBe("Nummerplaat");
+    });
+
+    it("orders the drivers by plate, ascending", async () => {
+      respondWith(
+        buildPage([
+          driverWithPlate("d1", "Zoe", "1-CCC-333"),
+          driverWithPlate("d2", "Ann", "1-AAA-111"),
+          driverWithPlate("d3", "Bob", "1-BBB-222"),
+        ]),
+      );
+      renderDrivers();
+      await screen.findByText("Ann");
+
+      expect(plateOrder()).toEqual(["1-AAA-111", "1-BBB-222", "1-CCC-333"]);
+    });
+
+    /** Numeric-aware, so 10 follows 9 rather than preceding it. */
+    it("orders plate numbers naturally", async () => {
+      respondWith(
+        buildPage([
+          driverWithPlate("d1", "Zoe", "1-ABC-10"),
+          driverWithPlate("d2", "Ann", "1-ABC-9"),
+        ]),
+      );
+      renderDrivers();
+      await screen.findByText("Ann");
+
+      expect(plateOrder()).toEqual(["1-ABC-9", "1-ABC-10"]);
+    });
+
+    /** An absent plate is not the smallest plate. */
+    it("puts a driver without a vehicle last", async () => {
+      respondWith(
+        buildPage([
+          driverWithPlate("d1", "Zoe", null),
+          driverWithPlate("d2", "Ann", "1-AAA-111"),
+        ]),
+      );
+      renderDrivers();
+      await screen.findByText("Ann");
+
+      expect(plateOrder()[0]).toBe("1-AAA-111");
+      expect(plateOrder()[1]).toBe("—");
+    });
 
     it("names the vehicle the driver is assigned to today", async () => {
       respondWith(buildPage([buildDriver({ currentVehicle: TRUCK })]));
@@ -496,7 +580,7 @@ describe("DriversPage", () => {
         await screen.findByText("Piet Janssens");
 
         expect(
-          screen.getByRole("columnheader", { name: "Voertuig" }),
+          screen.getByRole("columnheader", { name: "Nummerplaat" }),
         ).toBeInTheDocument();
       });
 
@@ -508,7 +592,7 @@ describe("DriversPage", () => {
         await screen.findByText("Piet Janssens");
 
         expect(
-          screen.getByRole("columnheader", { name: "Araç" }),
+          screen.getByRole("columnheader", { name: "Plaka" }),
         ).toBeInTheDocument();
       });
 

@@ -20,7 +20,12 @@ export type BadgeTone =
   | "danger"
   | "outline";
 
-const TONE_CLASSES: Record<BadgeTone, string> = {
+/**
+ * Exported so a marker that is a BUTTON wears the same colours as one that is
+ * a badge. `PaymentBadge` and `LosritBadge` each render both shapes, and
+ * writing the tone twice is how the two drift apart.
+ */
+export const TONE_CLASSES: Record<BadgeTone, string> = {
   neutral: "bg-hover text-secondary",
   info: "bg-info/10 text-info",
   success: "bg-success/10 text-success",

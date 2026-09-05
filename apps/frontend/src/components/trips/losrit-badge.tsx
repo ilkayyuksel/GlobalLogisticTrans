@@ -1,4 +1,4 @@
-import { Badge } from "@/components/ui/badge";
+import { Badge, TONE_CLASSES } from "@/components/ui/badge";
 import { useTranslation } from "@/lib/i18n/language-provider";
 import type { Trip } from "@/lib/api/types";
 
@@ -11,9 +11,10 @@ import type { Trip } from "@/lib/api/types";
  * other says what kind of transport it is. A LOSRIT is OPEN, CLOSED or
  * CANCELLED like any other Trip, and it is offered exactly the same actions.
  *
- * So it carries no lifecycle colour. Filling it green would read as finished
- * and red as cancelled; the outline tone exists for markers that are not
- * states. See `Badge`.
+ * So it carries no LIFECYCLE colour: green would read as finished and red as
+ * cancelled. It wears `neutral` instead — the quiet grey this system uses for
+ * a marker that classifies rather than progresses. Enough to pick out of a
+ * long list, and not enough to compete with the status badge beside it.
  * ────────────────────────────────────────────────────────────────────────────
  *
  * Nothing renders for an ordinary Trip — an absent badge is the statement, and
@@ -39,7 +40,7 @@ export function LosritBadge({
   }
 
   if (!onRemove) {
-    return <Badge tone="outline">{t("ritten.losrit.badge")}</Badge>;
+    return <Badge tone="neutral">{t("ritten.losrit.badge")}</Badge>;
   }
 
   /*
@@ -63,7 +64,8 @@ export function LosritBadge({
       }}
       title={t("ritten.losrit.remove")}
       aria-label={`${t("ritten.losrit.remove")} ${trip.bookingNumber ?? trip.id}`}
-      className="inline-flex items-center gap-1 rounded-full border border-border px-2.5 py-0.5 text-xs font-medium text-secondary hover:bg-hover hover:text-foreground"
+      /* The same tone the badge wears, from the same table. */
+      className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium hover:opacity-80 ${TONE_CLASSES.neutral}`}
     >
       {t("ritten.losrit.badge")}
       <span aria-hidden="true" className="text-muted">

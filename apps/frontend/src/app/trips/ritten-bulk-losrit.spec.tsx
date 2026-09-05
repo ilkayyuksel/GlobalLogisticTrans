@@ -469,7 +469,7 @@ describe("marking a selection as LOSRIT", () => {
         const button = losritButton() as HTMLElement;
 
         // A classification is a quiet control, not the primary action.
-        expect(button.className).toMatch(/border-border/);
+        expect(button.className).toMatch(/bg-hover/);
         expect(button.className).not.toMatch(/bg-primary\b/);
         expect(button.className).not.toMatch(/#[0-9a-f]{3,8}/i);
       },

@@ -28,6 +28,10 @@ function buildTrip(overrides: Partial<TripReadView> = {}): TripReadView {
   return {
     id: TRIP_ID,
     pdfDocumentId: "pdf-1",
+    // A stated TAR-nummer, because eligibility now depends on it. These
+    // fixtures are about ALLOCATION — which leg owes the charge — so they must
+    // clear the new precondition to keep testing what they were written for.
+    tarNummer: "TAR-2026-0042",
     tripGroupId: null,
     status: TripStatus.CLOSED,
     direction: null,
@@ -332,6 +336,76 @@ describe("PricingComponentResolver", () => {
       expect(await resolve()).toEqual([AUTOMATIC]);
     });
 
+    /**
+     * ── THE TAR-NUMMER IS THE TRIGGER ───────────────────────────────────────
+     * The charge used to follow from the Trip existing. It now follows from the
+     * operator having written the number down, because that number is what the
+     * charge refers to: a TAR line nobody recorded a number for is a line no
+     * invoice can be checked against.
+     *
+     * Whitespace is absence — `hasTarNummer` owns that definition, shared with
+     * the DTO, the group rule and the WhatsApp caption.
+     */
+    describe("only when the Trip states a TAR-nummer", () => {
+      it.each([
+        ["null", null],
+        ["an empty string", ""],
+        ["spaces", "   "],
+        ["a tab", "\t"],
+        ["a newline", "\n"],
+        ["mixed whitespace", " \t "],
+      ])("charges nothing for %s", async (_label, tarNummer) => {
+        expect(await resolve(buildTrip({ tarNummer }))).toEqual([]);
+      });
+
+      it("charges when a number is stated", async () => {
+        expect(await resolve(buildTrip({ tarNummer: "TAR123" }))).toEqual([
+          AUTOMATIC,
+        ]);
+      });
+
+      /** No format is enforced here either: any non-blank text is stated. */
+      it.each(["TAR123", "12345", "tar/2026 nr 7", "  padded  "])(
+        "accepts %p as stated",
+        async (tarNummer) => {
+          expect(await resolve(buildTrip({ tarNummer }))).toEqual([AUTOMATIC]);
+        },
+      );
+
+      /**
+       * A stale tick from before this rule existed must not resurrect the
+       * charge: the assignments are overruled, not trusted.
+       */
+      it("ignores a manual assignment when no number is stated", async () => {
+        tripCustomProperties.findByTripId.mockResolvedValue([
+          {
+            customPropertyId: AUTOMATIC_PROPERTY_ID,
+            name: "TAR",
+            pricingComponentId: null,
+            defaultPrice: "20.00",
+          },
+        ]);
+
+        expect(await resolve(buildTrip({ tarNummer: null }))).toEqual([]);
+      });
+
+      /** Other properties are untouched by the TAR precondition. */
+      it("still prices the Trip's own properties", async () => {
+        tripCustomProperties.findByTripId.mockResolvedValue([
+          {
+            customPropertyId: "property-flat",
+            name: "Flat",
+            pricingComponentId: null,
+            defaultPrice: "20.00",
+          },
+        ]);
+
+        const resolved = await resolve(buildTrip({ tarNummer: null }));
+
+        expect(resolved.map((property) => property.name)).toEqual(["Flat"]);
+      });
+    });
+
     it("takes its amount from the configured property, never from a literal", async () => {
       customPropertyService.findById.mockResolvedValue({
         id: AUTOMATIC_PROPERTY_ID,
@@ -466,6 +540,44 @@ describe("PricingComponentResolver", () => {
   });
 
   /**
+   * ── CHANGING THE RULE CHANGES NO STORED SNAPSHOT ──────────────────────────
+   * A snapshot is a record of what WAS charged. This resolver only ever answers
+   * a question the Engine asks while calculating, and it holds nothing it could
+   * write with: no snapshot repository, no pricing-item repository, no Prisma.
+   *
+   * So a Trip closed under the old rule keeps its TAR line until an
+   * administrator asks for a reprocess, which is the one path that applies the
+   * current rules. That is asserted structurally here, because the alternative
+   * — a background job quietly restating finished work — is exactly what must
+   * never exist.
+   */
+  describe("stored pricing", () => {
+    it("has no way to write anything", () => {
+      const collaborators = Object.keys(resolver as unknown as object);
+
+      expect(collaborators).toEqual([
+        "routePricingService",
+        "tripCustomProperties",
+        "customPropertyService",
+        "trips",
+        "ruleResolver",
+        "logger",
+      ]);
+    });
+
+    /** Resolving is a read: the same Trip resolved twice writes nothing. */
+    it("only reads when it answers", async () => {
+      const trip = buildTrip({ tarNummer: "TAR123" });
+
+      await resolver.resolveAssignedCustomProperties(trip, buildRules());
+      await resolver.resolveAssignedCustomProperties(trip, buildRules());
+
+      expect(tripCustomProperties.findByTripId).toHaveBeenCalled();
+      expect(customPropertyService.findById).toHaveBeenCalled();
+    });
+  });
+
+  /**
    * ── A GENUINE COMBINATION PAYS IT ONCE, ON THE COLLECTION ─────────────────
    * The two legs of one transport order are one movement. The collection leg
    * carries the charge; the delivery leg does not.
@@ -510,6 +622,73 @@ describe("PricingComponentResolver", () => {
       groupOf(DELIVERY_LEG, COLLECTION_LEG);
 
       expect(hasAutomatic(await resolve(DELIVERY_LEG))).toBe(true);
+    });
+
+    /**
+     * ── THE PAIR MUST STATE A NUMBER TOO ────────────────────────────────────
+     * The allocation rule is untouched — the delivery leg is still the one that
+     * owes it, and still only once. What changed is that there has to be
+     * something to allocate.
+     *
+     * The group rule copies one TAR-nummer onto both legs, so in practice they
+     * agree; these assert the outcome for each leg independently rather than
+     * relying on that.
+     */
+    describe("and the group states a TAR-nummer", () => {
+      const withNumber = (trip: TripReadView, tarNummer: string | null) => ({
+        ...trip,
+        tarNummer,
+      });
+
+      it("charges the pair exactly once when both legs carry it", async () => {
+        const delivery = withNumber(DELIVERY_LEG, "TAR123");
+        const collection = withNumber(COLLECTION_LEG, "TAR123");
+
+        groupOf(delivery, collection);
+
+        const charges = [
+          ...(await resolve(delivery)),
+          ...(await resolve(collection)),
+        ].filter(
+          (property) => property.customPropertyId === AUTOMATIC_PROPERTY_ID,
+        );
+
+        expect(charges).toHaveLength(1);
+      });
+
+      it("charges neither leg when the group states none", async () => {
+        const delivery = withNumber(DELIVERY_LEG, null);
+        const collection = withNumber(COLLECTION_LEG, null);
+
+        groupOf(delivery, collection);
+
+        expect(hasAutomatic(await resolve(delivery))).toBe(false);
+        expect(hasAutomatic(await resolve(collection))).toBe(false);
+      });
+
+      it.each([
+        ["an empty string", ""],
+        ["spaces", "   "],
+        ["a tab", "\t"],
+      ])("charges neither leg for %s", async (_label, tarNummer) => {
+        const delivery = withNumber(DELIVERY_LEG, tarNummer);
+        const collection = withNumber(COLLECTION_LEG, tarNummer);
+
+        groupOf(delivery, collection);
+
+        expect(hasAutomatic(await resolve(delivery))).toBe(false);
+        expect(hasAutomatic(await resolve(collection))).toBe(false);
+      });
+
+      /* The collection leg is refused by allocation, not by the number. */
+      it("still refuses the collection leg even when it states one", async () => {
+        const delivery = withNumber(DELIVERY_LEG, "TAR123");
+        const collection = withNumber(COLLECTION_LEG, "TAR123");
+
+        groupOf(delivery, collection);
+
+        expect(hasAutomatic(await resolve(collection))).toBe(false);
+      });
     });
 
     it("does not charge it on the collection leg", async () => {

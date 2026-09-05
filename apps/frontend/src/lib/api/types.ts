@@ -293,6 +293,13 @@ export interface Trip {
   waitingTimeMinutes: number | null;
   /** Kilometres, two decimals, as a string. */
   distanceKm: string | null;
+  /**
+   * TAR-nummer: free text, optional, NOT unique.
+   *
+   * Null when the Trip carries none — which is also what the backend stores for
+   * a whitespace-only value, so "absent" has one representation here too.
+   */
+  tarNummer: string | null;
   internalNotes: string | null;
   createdAt: string;
   updatedAt: string;

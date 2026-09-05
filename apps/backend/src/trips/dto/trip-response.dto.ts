@@ -341,6 +341,14 @@ export class TripResponseDto {
   })
   distanceKm!: string | null;
 
+  @ApiPropertyOptional({
+    nullable: true,
+    description:
+      "TAR-nummer: free text, optional, NOT unique. Null when the Trip carries none — which is also what a whitespace-only value is stored as.",
+    example: "TAR-2026-0042",
+  })
+  tarNummer!: string | null;
+
   @ApiPropertyOptional({ nullable: true })
   internalNotes!: string | null;
 
@@ -457,6 +465,7 @@ export function toTripResponse(
       trip.distanceKm === null
         ? null
         : trip.distanceKm.toFixed(DISTANCE_DECIMAL_PLACES),
+    tarNummer: trip.tarNummer,
     internalNotes: trip.internalNotes,
     vehicle: planning.vehicle,
     effectiveDriver: planning.effectiveDriver,

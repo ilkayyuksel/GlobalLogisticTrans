@@ -572,6 +572,39 @@ export class TripRepository {
     return this.prisma.trip.findMany({ where: { id: { in: [...ids] } } });
   }
 
+  /**
+   * Writes one TAR-nummer onto every OTHER member of a group.
+   *
+   * ── ONE STATEMENT, NEVER A LOOP ─────────────────────────────────────────
+   * Scoped by `tripGroupId`, so the database finds the members — the caller
+   * never reads them first and never writes them one by one. A group of two
+   * costs the same single UPDATE as a group of ten, and no query grows with the
+   * number of Trips.
+   *
+   * `excludeTripId` is the Trip the operator actually edited: it already holds
+   * the value, and rewriting it would touch `updated_at` for no reason.
+   *
+   * DELETED members are left out. A deleted Trip keeps the data it had when it
+   * was deleted, and quietly editing a row nobody can see is not something a
+   * group rule should do.
+   */
+  async shareTarNummerWithinGroup(
+    tripGroupId: string,
+    tarNummer: string | null,
+    excludeTripId: string,
+  ): Promise<number> {
+    const { count } = await this.prisma.trip.updateMany({
+      where: {
+        tripGroupId,
+        id: { not: excludeTripId },
+        status: { not: TripStatus.DELETED },
+      },
+      data: { tarNummer },
+    });
+
+    return count;
+  }
+
   /** Puts every named Trip in one group, in a single statement. */
   async assignToGroup(
     ids: readonly string[],

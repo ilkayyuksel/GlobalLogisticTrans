@@ -55,6 +55,7 @@ function buildTrip(overrides: Partial<Trip> = {}): Trip {
     waitingTimeEnd: null,
     waitingTimeMinutes: null,
     distanceKm: null,
+    tarNummer: null,
     internalNotes: null,
     parserMetadata: null,
     createdAt: new Date("2026-08-01T00:00:00.000Z"),
@@ -270,7 +271,8 @@ describe("TripService", () => {
           waitingTimeEnd: null,
           waitingTimeMinutes: null,
           distanceKm: null,
-          internalNotes: null,
+          tarNummer: null,
+        internalNotes: null,
         }),
       );
     });
@@ -439,12 +441,39 @@ describe("TripService", () => {
       });
     });
 
+    /**
+     * TAR-nummer is an ordinary optional column: written when given, left alone
+     * when omitted, cleared by an explicit null. The DTO has already turned
+     * whitespace-only into null before the service sees it, which is why there
+     * is no trimming here — one rule, in one place.
+     */
+    it("writes a TAR-nummer that was given", async () => {
+      await service.update(TRIP_ID, { tarNummer: "TAR-2026-0042" });
+
+      expect(repository.update).toHaveBeenCalledWith(
+        TRIP_ID,
+        expect.objectContaining({ tarNummer: "TAR-2026-0042" }),
+      );
+    });
+
+    it("leaves the column alone when the field is omitted", async () => {
+      await service.update(TRIP_ID, { containerNumber: "MSKU1234567" });
+
+      const [, data] = repository.update.mock.calls[0] as [
+        string,
+        Record<string, unknown>,
+      ];
+
+      expect(data.tarNummer).toBeUndefined();
+    });
+
     it("passes an explicit null through so the column is cleared", async () => {
       await service.update(TRIP_ID, {
         containerNumber: null,
         waitingTimeStart: null,
         waitingTimeEnd: null,
         distanceKm: null,
+        tarNummer: null,
         internalNotes: null,
         executionDatetime: null,
         vehicleId: null,
@@ -459,7 +488,8 @@ describe("TripService", () => {
           waitingTimeEnd: null,
           waitingTimeMinutes: null,
           distanceKm: null,
-          internalNotes: null,
+          tarNummer: null,
+        internalNotes: null,
           executionDatetime: null,
           vehicleId: null,
           driverId: null,

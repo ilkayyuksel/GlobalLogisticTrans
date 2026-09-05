@@ -63,6 +63,103 @@ describe("Ritten editing", () => {
     );
   }
 
+  /**
+   * ── TAR-NUMMER ────────────────────────────────────────────────────────────
+   * Free text, optional, not unique, and edited with the same inline cell as
+   * every other text field on the row. It sits under the booking number, whose
+   * link, hover note and copy button must all keep working.
+   *
+   * Clearing the box is how a TAR-nummer is removed: an empty field is sent as
+   * null, the same rule the rest of this file is about.
+   */
+  describe("the TAR-nummer", () => {
+    it("shows the empty marker when the Trip has none", async () => {
+      await showTrip({ tarNummer: null });
+
+      expect(
+        screen.getByRole("button", { name: "Tar nummer" }),
+      ).toHaveTextContent("—");
+    });
+
+    it("opens for editing with the current value", async () => {
+      await showTrip({ tarNummer: "TAR-2026-0042" });
+      await openCell("Tar nummer");
+
+      expect(screen.getByLabelText("Tar nummer")).toHaveValue("TAR-2026-0042");
+    });
+
+    it("saves what was typed", async () => {
+      await showTrip({ tarNummer: null });
+      await openCell("Tar nummer");
+
+      const input = screen.getByLabelText("Tar nummer");
+
+      await userEvent.type(input, "TAR-2026-0042");
+      await userEvent.click(screen.getByRole("button", { name: "Opslaan" }));
+
+      await waitFor(() => expect(patchCalls()).toHaveLength(1));
+      expect(patchCalls()[0][1]?.body).toEqual({ tarNummer: "TAR-2026-0042" });
+    });
+
+    /** No format is enforced: whatever the counterparty wrote is valid. */
+    it.each(["12345", "tar/2026 nr 7", "AB-99/x"])(
+      "accepts %p without complaint",
+      async (value) => {
+        await showTrip({ tarNummer: null });
+        await openCell("Tar nummer");
+
+        const input = screen.getByLabelText("Tar nummer");
+
+        await userEvent.type(input, value);
+        await userEvent.click(screen.getByRole("button", { name: "Opslaan" }));
+
+        await waitFor(() => expect(patchCalls()).toHaveLength(1));
+        expect(patchCalls()[0][1]?.body).toEqual({ tarNummer: value });
+      },
+    );
+
+    it("sends null when the field is cleared", async () => {
+      await showTrip({ tarNummer: "TAR-2026-0042" });
+      await openCell("Tar nummer");
+
+      const input = screen.getByLabelText("Tar nummer");
+
+      await userEvent.clear(input);
+      await userEvent.click(screen.getByRole("button", { name: "Opslaan" }));
+
+      await waitFor(() => expect(patchCalls()).toHaveLength(1));
+      expect(patchCalls()[0][1]?.body).toEqual({ tarNummer: null });
+    });
+
+    /** Whitespace-only is empty. The browser sends null rather than "   ". */
+    it.each(["   ", "	"])("sends null for whitespace-only %p", async (value) => {
+      await showTrip({ tarNummer: "TAR-2026-0042" });
+      await openCell("Tar nummer");
+
+      const input = screen.getByLabelText("Tar nummer");
+
+      await userEvent.clear(input);
+      await userEvent.type(input, value);
+      await userEvent.click(screen.getByRole("button", { name: "Opslaan" }));
+
+      await waitFor(() => expect(patchCalls()).toHaveLength(1));
+      expect(patchCalls()[0][1]?.body).toEqual({ tarNummer: null });
+    });
+
+    it("leaves the booking number's own behaviour intact", async () => {
+      await showTrip({ tarNummer: "TAR-1" });
+
+      const row = screen.getByText("ANRDUB2602247").closest("tr") as HTMLElement;
+
+      expect(
+        within(row).getByRole("link", { name: "ANRDUB2602247" }),
+      ).toBeInTheDocument();
+      expect(
+        within(row).getByRole("button", { name: "Boekingsnummer kopiëren" }),
+      ).toBeInTheDocument();
+    });
+  });
+
   describe("a text cell", () => {
     it("opens for editing with the current value", async () => {
       await showTrip();

@@ -42,6 +42,7 @@ function buildTrip(direction: TripDirection | null) {
     waitingTimeEnd: null,
     waitingTimeMinutes: null,
     distanceKm: null,
+    tarNummer: null,
     internalNotes: null,
     parserMetadata: null,
     createdAt: new Date(),

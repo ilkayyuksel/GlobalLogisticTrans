@@ -4,6 +4,7 @@ import { CustomPropertyService } from "../custom-properties/custom-property.serv
 import { AppLoggerService } from "../logger/app-logger.service";
 import { RoutePricingService } from "../route-pricing/route-pricing.service";
 import { TripCustomPropertyReadService } from "../trip-custom-properties/trip-custom-property-read.service";
+import { hasTarNummer } from "../trips/tar-nummer";
 import { TripReadService, TripReadView } from "../trips/trip-read.service";
 import {
   CombinationLeg,
@@ -173,6 +174,27 @@ export class PricingComponentResolver {
     }
 
     if (leg === CombinationLeg.COLLECTION) {
+      return withoutIt;
+    }
+
+    /*
+     * ── THE TRIP MUST STATE A TAR-NUMMER ────────────────────────────────────
+     * The charge used to follow from the Trip existing: every Trip owed it
+     * except a Combination's collection leg. It now follows from the operator
+     * having written the number down, because that number is what the charge
+     * refers to — charging for a TAR nobody recorded produced a line no invoice
+     * could be checked against.
+     *
+     * `hasTarNummer` is the single definition of "stated", shared with the DTO
+     * that stores it, the group rule that copies it and the WhatsApp caption
+     * that prints it. Whitespace is absence.
+     *
+     * The ALLOCATION rule above is untouched: which leg owes it, and that a
+     * genuine Combination owes it once, are decided exactly as before. This
+     * only decides whether there is anything to allocate — so a pair sharing
+     * one number still produces one charge, on the same leg as it always did.
+     */
+    if (!hasTarNummer(trip.tarNummer)) {
       return withoutIt;
     }
 

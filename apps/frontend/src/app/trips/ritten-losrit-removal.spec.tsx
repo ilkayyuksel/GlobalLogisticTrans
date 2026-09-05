@@ -234,7 +234,7 @@ describe("removing the LOSRIT classification", () => {
 
         const control = removeButton() as HTMLElement;
 
-        expect(control.className).toMatch(/border-border/);
+        expect(control.className).toMatch(/bg-hover/);
         expect(control.className).not.toMatch(/#[0-9a-f]{3,8}/i);
         // Still not a lifecycle colour: it is a classification, not a state.
         expect(control.className).not.toMatch(/bg-(success|danger|info)/);

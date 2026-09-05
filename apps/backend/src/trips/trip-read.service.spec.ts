@@ -35,6 +35,8 @@ const ENGINE_COLUMNS = [
   "pdfDocumentId",
   "planningDate",
   "status",
+  // Whether TAR may be charged at all is decided from this column.
+  "tarNummer",
   "terminal",
   "tripGroupId",
   "waitingTimeMinutes",
@@ -51,6 +53,7 @@ function buildRow(overrides: Record<string, unknown> = {}) {
     planningDate: new Date("2026-08-17T00:00:00Z"),
     distanceKm: new Prisma.Decimal("132.50"),
     waitingTimeMinutes: 135,
+    tarNummer: "TAR-2026-0042",
     tripGroupId: null,
     pdfDocumentId: "pdf-1",
     ...overrides,
@@ -137,6 +140,15 @@ describe("TripReadService", () => {
     expect(Object.keys(trip as object).sort()).toEqual(ENGINE_COLUMNS);
   });
 
+  /**
+   * Passed through untrimmed: `hasTarNummer` owns what "stated" means, and a
+   * view that pre-judged it would be a second opinion on the rule that decides
+   * whether TAR is charged.
+   */
+  it("carries the TAR-nummer exactly as stored", async () => {
+    expect((await service.findById(TRIP_ID))?.tarNummer).toBe("TAR-2026-0042");
+  });
+
   /** A DATE column has no time and no timezone; it leaves as the day it holds. */
   it("renders the planning date as a calendar day", async () => {
     expect((await service.findById(TRIP_ID))?.planningDate).toBe("2026-08-17");
@@ -170,6 +182,7 @@ describe("TripReadService", () => {
         terminal: null,
         destinationCity: null,
         direction: null,
+        tarNummer: null,
       }),
     );
 
@@ -185,6 +198,7 @@ describe("TripReadService", () => {
       planningDate: null,
       distanceKm: null,
       waitingTimeMinutes: null,
+      tarNummer: null,
       tripGroupId: null,
       pdfDocumentId: "pdf-1",
     });

@@ -158,6 +158,7 @@ function buildTrip(overrides: Partial<Trip> = {}): Trip {
     waitingTimeEnd: null,
     waitingTimeMinutes: 45,
     distanceKm: "198.00",
+    tarNummer: null,
     internalNotes: "Customer confirmed by phone.",
     createdAt: "2026-08-01T00:00:00.000Z",
     updatedAt: "2026-08-01T00:00:00.000Z",

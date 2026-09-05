@@ -152,6 +152,8 @@ export interface CreateTripPayload {
   waitingTimeStart?: string | null;
   waitingTimeEnd?: string | null;
   distanceKm?: number | null;
+  /** Free text, optional, not unique. Whitespace-only is stored as null. */
+  tarNummer?: string | null;
   internalNotes?: string | null;
   /** LOSRIT. Omitted means an ordinary Trip; the backend defaults it to false. */
   isLooseTrip?: boolean;
@@ -196,6 +198,11 @@ export interface UpdateTripPayload {
   waitingTimeEnd?: string | null;
   distanceKm?: number | null;
   executionDatetime?: string | null;
+  /**
+   * Free text, optional, not unique. Send null to clear; the backend turns a
+   * whitespace-only value into null, so the browser does not have to.
+   */
+  tarNummer?: string | null;
   internalNotes?: string | null;
   /**
    * Accepted only on a Trip created by hand. On an imported Trip the document

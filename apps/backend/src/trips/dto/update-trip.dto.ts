@@ -21,6 +21,7 @@ import {
   DISTANCE_DECIMAL_PLACES,
   DISTANCE_KM_MAX,
   INTERNAL_NOTES_MAX_LENGTH,
+  TAR_NUMMER_MAX_LENGTH,
   toRawNumber,
 } from "./create-trip.dto";
 
@@ -162,6 +163,18 @@ export class UpdateTripDto {
   @IsOptional()
   @IsDateString()
   executionDatetime?: string | null;
+
+  @ApiPropertyOptional({
+    description:
+      "TAR-nummer: free text, optional, NOT unique. Whitespace-only is stored as null. Send null to clear.",
+    maxLength: TAR_NUMMER_MAX_LENGTH,
+    nullable: true,
+  })
+  @Transform(trimToNull)
+  @IsOptional()
+  @IsString()
+  @MaxLength(TAR_NUMMER_MAX_LENGTH)
+  tarNummer?: string | null;
 
   @ApiPropertyOptional({
     description: "Administrator notes. Send null to clear.",

@@ -21,6 +21,8 @@ const ENGINE_TRIP_COLUMNS = {
   planningDate: true,
   distanceKm: true,
   waitingTimeMinutes: true,
+  // Whether TAR may be charged at all is decided from this column.
+  tarNummer: true,
   tripGroupId: true,
   pdfDocumentId: true,
 } as const;

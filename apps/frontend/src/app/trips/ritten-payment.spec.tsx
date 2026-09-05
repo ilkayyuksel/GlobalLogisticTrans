@@ -114,11 +114,16 @@ describe("the payment badge", () => {
   });
 
   /**
-   * Payment is a separate classification, so it must not borrow a lifecycle
-   * colour: `success` is CLOSED and `danger` is CANCELLED in this design
-   * system. `outline` is the tone reserved for markers that are not states.
+   * ── PAYMENT NOW CARRIES A COLOUR ──────────────────────────────────────────
+   * It used `outline` so it could not be mistaken for a lifecycle badge. That
+   * was overruled: payment is what an operator scans a long list for, and a row
+   * of identical outlines makes them read every word.
+   *
+   * The tones come from the same semantic set as everywhere else, and the one
+   * genuinely dangerous confusion is still avoided — an unpaid Trip is
+   * `warning`, never `danger`, because `danger` means CANCELLED.
    */
-  it("does not dress itself as a status", async () => {
+  it("shows a paid Trip in the settled tone", async () => {
     await showRows();
 
     const badge = await paymentToggle(
@@ -126,8 +131,16 @@ describe("the payment badge", () => {
       "Markeer als niet betaald",
     );
 
-    expect(badge.className).toContain("border-border");
-    expect(badge.className).not.toMatch(/bg-(success|danger|info)/);
+    expect(badge.className).toContain("bg-success/10");
+  });
+
+  it("shows an unpaid Trip as a warning, never as a cancellation", async () => {
+    await showRows([buildTrip({ isPaid: false })]);
+
+    const badge = await paymentToggle("ANRDUB2602247", "Markeer als betaald");
+
+    expect(badge.className).toContain("bg-warning/10");
+    expect(badge.className).not.toMatch(/bg-danger/);
   });
 
   it("sits beside the lifecycle badge rather than replacing it", async () => {
@@ -512,8 +525,8 @@ describe("in the other language and theme", () => {
 
     const badge = within(await rowOf("ANRBEL2768902")).getByText("Betaald");
 
-    expect(badge.className).toContain("border-border");
-    expect(badge.className).toContain("text-foreground");
+    expect(badge.className).toContain("bg-success/10");
+    expect(badge.className).toContain("text-success");
     expect(badge.className).not.toMatch(/#|rgb\(/);
   });
 });
