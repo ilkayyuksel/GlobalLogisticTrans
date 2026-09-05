@@ -56,6 +56,14 @@ export interface RittenActions {
   downloadPdf: (trip: Trip) => Promise<void>;
   openCustomProperties: (trip: Trip) => void;
   /**
+   * Opens the Trip's internal notes for editing, beside the booking number.
+   *
+   * The SAME `internalNotes` the Trip detail page edits, through the same
+   * endpoint — a second entry point, not a second field. The note is already on
+   * the row for the hover panel, so opening this costs no request.
+   */
+  openNotes: (trip: Trip) => void;
+  /**
    * The Cost Confirmation's OWN document — never the transport order.
    *
    * A Trip's `pdfDocumentId` is the order it came from; the confirmation is a

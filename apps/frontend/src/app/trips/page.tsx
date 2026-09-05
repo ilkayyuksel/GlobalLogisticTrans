@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { CombinationDialog } from "@/components/ritten/combination-dialog";
 import { CustomPropertiesDialog } from "@/components/ritten/custom-properties-dialog";
+import { NotesDialog } from "@/components/ritten/notes-dialog";
 import { DateSection } from "@/components/ritten/date-section";
 import { ExportButton } from "@/components/ritten/export-button";
 import { GroupConfirmDialog } from "@/components/ritten/group-confirm-dialog";
@@ -172,24 +173,33 @@ function fill(text: string, values: Readonly<Record<string, string>> = {}): stri
 const NO_ROW_UPDATES: ReadonlyMap<string, Partial<Trip>> = new Map();
 
 /**
- * The fields that describe a waiting-time window, and nothing else.
+ * The fields whose change cannot possibly move a row.
  *
- * An update touching only these cannot move a row: it changes no planning date,
- * no vehicle and no status, so nothing about the page's ordering, its sections
- * or its filters can have changed. That is exactly the case where the mutation
- * response is the whole truth about the row and the list must be left alone.
+ * An update touching only these changes no planning date, no vehicle and no
+ * status, so nothing about the page's ordering, its sections or its filters can
+ * have changed. That is exactly the case where the mutation response is the
+ * whole truth about the row and the list must be left alone.
+ *
+ * The waiting-time window is here because it only ever changes a duration and
+ * the money derived from it.
+ *
+ * `internalNotes` is here for a stronger reason: the backend deliberately
+ * EXCLUDES it from the search filter — see `buildSearchWhere`, and the
+ * repository test that pins it — so a note can never move a Trip in or out of a
+ * filtered list, and nothing sorts by it. Refetching after a note would move
+ * every other row on the page for a field nobody can order or find by.
  */
-const WAITING_TIME_FIELDS: readonly (keyof UpdateTripPayload)[] = [
+const ROW_LOCAL_FIELDS: readonly (keyof UpdateTripPayload)[] = [
   "waitingTimeStart",
   "waitingTimeEnd",
+  "internalNotes",
 ];
 
-function isWaitingTimeOnly(payload: UpdateTripPayload): boolean {
+function isRowLocalOnly(payload: UpdateTripPayload): boolean {
   const sent = Object.keys(payload) as (keyof UpdateTripPayload)[];
 
   return (
-    sent.length > 0 &&
-    sent.every((field) => WAITING_TIME_FIELDS.includes(field))
+    sent.length > 0 && sent.every((field) => ROW_LOCAL_FIELDS.includes(field))
   );
 }
 
@@ -234,6 +244,7 @@ export default function RittenPage() {
   const [viewing, setViewing] = useState<ViewedDocument | null>(null);
   const [openCombinationId, setOpenCombinationId] = useState<string | null>(null);
   const [customPropertiesTrip, setCustomPropertiesTrip] = useState<Trip | null>(null);
+  const [notesTrip, setNotesTrip] = useState<Trip | null>(null);
   const [isCreating, setIsCreating] = useState(false);
 
   const [busyTripId, setBusyTripId] = useState<string | null>(null);
@@ -527,7 +538,11 @@ export default function RittenPage() {
   }
 
   /**
-   * A waiting-time edit: one request, one authoritative answer, one row.
+   * A row-local edit: one request, one authoritative answer, one row.
+   *
+   * Used for the fields in `ROW_LOCAL_FIELDS` — a waiting-time window and the
+   * internal notes. Neither can move a row, so the response IS the whole truth
+   * about it and the list is deliberately left where it is.
    *
    * The backend keeps the write whatever pricing does. When it could not price
    * the Trip the response carries `pricing: null` with a reason code, and that
@@ -536,10 +551,10 @@ export default function RittenPage() {
    * window that no longer exists. The Trip stays CLOSED either way; nothing
    * here reopens anything.
    *
-   * The error is rethrown so the cell can keep its editor open with the times
-   * the operator typed and show the backend's own wording beside them.
+   * The error is rethrown so the caller can keep its editor open with what the
+   * operator typed and show the backend's own wording beside it.
    */
-  async function saveWaitingTime(
+  async function saveRowLocal(
     tripId: string,
     payload: UpdateTripPayload,
   ): Promise<void> {
@@ -756,8 +771,8 @@ export default function RittenPage() {
     saveTrip: async (tripId, payload: UpdateTripPayload) => {
       const trip = trips.data?.items.find((item) => item.id === tripId);
 
-      if (isWaitingTimeOnly(payload)) {
-        await saveWaitingTime(tripId, payload);
+      if (isRowLocalOnly(payload)) {
+        await saveRowLocal(tripId, payload);
 
         return;
       }
@@ -948,6 +963,7 @@ export default function RittenPage() {
       ),
     openCombination: setOpenCombinationId,
     openCustomProperties: setCustomPropertiesTrip,
+    openNotes: setNotesTrip,
   };
 
   return (
@@ -1254,6 +1270,25 @@ export default function RittenPage() {
             })
           }
           onClose={() => setCustomPropertiesTrip(null)}
+        />
+      ) : null}
+
+      {/*
+        The internal notes, from the list.
+
+        Saved through `saveTrip` like every other row edit, so it is the SAME
+        endpoint, the same validation and the same feedback the detail page and
+        the inline cells already use. Because the payload touches only
+        `internalNotes`, `isRowLocalOnly` routes it to the row patch: the row
+        takes the note from the backend's own answer and the list stays exactly
+        where the operator left it — which is what makes the hover panel show
+        the new note immediately, with no refetch.
+      */}
+      {notesTrip ? (
+        <NotesDialog
+          trip={notesTrip}
+          onSave={(notes) => actions.saveTrip(notesTrip.id, { internalNotes: notes })}
+          onClose={() => setNotesTrip(null)}
         />
       ) : null}
     </div>

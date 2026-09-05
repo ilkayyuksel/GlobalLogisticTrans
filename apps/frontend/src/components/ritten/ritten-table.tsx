@@ -467,18 +467,39 @@ function RittenRow({
           </Link>
         </HoverNote>
         {/*
-          A SIBLING of the link, not a child of it: a button inside an anchor is
+          SIBLINGS of the link, not children of it: a button inside an anchor is
           not something a browser or a screen reader can make sense of, and the
           navigation must keep working exactly as it did.
+
+          Copy stays exactly where it was; the notes pencil sits beside it. The
+          pencil is offered even on a row with no booking number — a Trip always
+          has notes — which is why only the copy button is conditional.
         */}
-        {trip.bookingNumber ? (
-          <span className="mt-0.5 flex">
+        <span className="mt-0.5 flex items-center gap-1">
+          {trip.bookingNumber ? (
             <CopyButton
               value={trip.bookingNumber}
               label={t("ritten.copy.bookingNumber")}
             />
-          </span>
-        ) : null}
+          ) : null}
+
+          {/*
+            Opens the SAME `internalNotes` the detail page edits. It is the note
+            the hover panel above already shows, so this needs no request of its
+            own — and after a save the row is patched from the response, which
+            is what makes the hover current immediately.
+          */}
+          <button
+            type="button"
+            onClick={() => actions.openNotes(trip)}
+            disabled={!isEditable || isBusy}
+            title={t("ritten.notes.edit")}
+            aria-label={`${t("ritten.notes.edit")} ${trip.bookingNumber ?? ""}`.trim()}
+            className="inline-flex items-center rounded p-0.5 text-muted hover:bg-hover hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
+          >
+            <PencilIcon />
+          </button>
+        </span>
 
         {/*
           TAR-nummer, directly under the booking number it belongs beside.
@@ -1139,4 +1160,29 @@ function requireValue(value: string, t: (key: "ritten.edit.required") => string)
   }
 
   return value;
+}
+
+/**
+ * A pencil over a line: the shape every application uses for "edit".
+ *
+ * Sized and stroked to match `CopyButton`, which sits directly beside it — two
+ * controls of visibly different weight on one line read as two different kinds
+ * of thing, and these are the same kind.
+ */
+function PencilIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 20 20"
+      className="h-3.5 w-3.5"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M13.5 3.5a1.77 1.77 0 0 1 2.5 2.5L7.5 14.5 4 16l1.5-3.5Z" />
+      <path d="M12 5 15 8" />
+    </svg>
+  );
 }

@@ -97,9 +97,65 @@ describe("deciding what a closed socket means", () => {
     });
   });
 
-  /** A blocked account. Neither retrying nor re-pairing would help. */
-  it("stops when WhatsApp refuses the account", () => {
-    expect(decideAfterClose(DisconnectCode.FORBIDDEN)).toBe(CloseAction.FATAL);
+  /**
+   * A blocked account, which used to stop the service permanently.
+   *
+   * It retries on the ordinary ladder now: a 403 can be a temporary
+   * restriction, and a state only a container restart can leave is worse than
+   * a retry every half minute.
+   */
+  it("keeps retrying when WhatsApp refuses the account", () => {
+    expect(decideAfterClose(DisconnectCode.FORBIDDEN)).toBe(
+      CloseAction.RECONNECT,
+    );
+  });
+
+  /**
+   * The QR window, which closes with the SAME 408 a dead network produces.
+   *
+   * The only thing that separates them is whether the socket got as far as
+   * issuing a code, so that is the one fact the policy is given.
+   */
+  describe("an expired QR window", () => {
+    it("reopens pairing when the socket had a QR on offer", () => {
+      expect(
+        decideAfterClose(DisconnectCode.TIMED_OUT, { qrOffered: true }),
+      ).toBe(CloseAction.PAIRING_EXPIRED);
+    });
+
+    /** No code was ever shown, so this is a failure to connect. */
+    it("keeps the ordinary backoff when no QR was offered", () => {
+      expect(
+        decideAfterClose(DisconnectCode.TIMED_OUT, { qrOffered: false }),
+      ).toBe(CloseAction.RECONNECT);
+    });
+
+    /** Absent context means no QR, which is what a connected socket has. */
+    it("keeps the ordinary backoff when nothing is known", () => {
+      expect(decideAfterClose(DisconnectCode.TIMED_OUT)).toBe(
+        CloseAction.RECONNECT,
+      );
+    });
+
+    /**
+     * A pending QR does not turn every close into a pairing rotation. A session
+     * WhatsApp has invalidated still has to be cleared, even mid-pairing.
+     */
+    it.each([
+      ["the phone unlinked this device", DisconnectCode.LOGGED_OUT],
+      ["the stored session no longer decrypts", DisconnectCode.BAD_SESSION],
+    ])("still demands pairing when %s", (_name, code) => {
+      expect(decideAfterClose(code, { qrOffered: true })).toBe(
+        CloseAction.PAIRING_REQUIRED,
+      );
+    });
+
+    /** And a restart is still a restart, QR or no QR. */
+    it("still reopens at once when a restart is required", () => {
+      expect(
+        decideAfterClose(DisconnectCode.RESTART_REQUIRED, { qrOffered: true }),
+      ).toBe(CloseAction.RECONNECT_NOW);
+    });
   });
 });
 

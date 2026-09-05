@@ -331,6 +331,7 @@ const nl = {
   "ritten.filter.paymentAll": "Alle",
 
   "ritten.notes.label": "Extra notities",
+  "ritten.notes.edit": "Interne notities bewerken",
 
   "ritten.custom.title": "Custom waarden",
   "ritten.custom.assigned": "Toegewezen",
@@ -1200,6 +1201,7 @@ const tr: Translations = {
   "ritten.filter.paymentAll": "Tümü",
 
   "ritten.notes.label": "Ek notlar",
+  "ritten.notes.edit": "İç notları düzenle",
 
   "ritten.custom.title": "Özel değerler",
   "ritten.custom.assigned": "Atanmış",

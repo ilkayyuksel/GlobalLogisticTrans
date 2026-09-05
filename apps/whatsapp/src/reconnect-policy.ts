@@ -2,8 +2,9 @@
  * What to do when the WhatsApp socket closes.
  *
  * ── WHY THIS IS A PURE MODULE ───────────────────────────────────────────────
- * It decides from a disconnect code and an attempt count, so every branch is
- * testable without a socket, a network or a WhatsApp account. Baileys is not
+ * It decides from a disconnect code, an attempt count and one fact about the
+ * socket that closed, so every branch is testable without a socket, a network
+ * or a WhatsApp account. Baileys is not
  * imported here — the numeric codes are duplicated as named constants below, so
  * this file stays loadable in a CommonJS test runner that cannot require an ESM
  * package. The duplicate is pinned to the real library at build time; see
@@ -72,13 +73,26 @@ export const CloseAction = {
    */
   PAIRING_REQUIRED: "PAIRING_REQUIRED",
   /**
-   * Something a reconnect cannot fix and a QR would not fix either.
+   * The QR window ran out. Reopen at once for a fresh code.
    *
-   * A blocked account, for instance. Retrying would hammer WhatsApp and
-   * re-pairing would fail, so this stops and says so rather than pretending
-   * either would help.
+   * ── WHY THIS IS NOT AN ORDINARY 408 ─────────────────────────────────────
+   * Baileys offers a fixed number of QR refs — one for 60 seconds, then five
+   * more for 20 seconds each — and when the last one expires unscanned it ends
+   * the socket with `timedOut`, the SAME 408 a dead network produces:
+   *
+   *     if (!refNode) end(new Boom('QR refs attempts ended',
+   *                                { statusCode: DisconnectReason.timedOut }))
+   *
+   * Treating that as a failure was measurably wrong. The running service spent
+   * two days on the backoff ladder it never left, because the counter is reset
+   * only by a successful open and pairing never opens: 160 seconds of QR, then
+   * a THIRTY-SECOND window with no code on screen at all, forever.
+   *
+   * So this reopens immediately and does not count as a failure. Nothing else
+   * changes — the session is not touched and nobody is logged out, because
+   * an unscanned QR says nothing whatsoever about the stored credentials.
    */
-  FATAL: "FATAL",
+  PAIRING_EXPIRED: "PAIRING_EXPIRED",
 } as const;
 
 export type CloseAction = (typeof CloseAction)[keyof typeof CloseAction];
@@ -95,14 +109,35 @@ const PAIRING_CODES: readonly number[] = [
   DisconnectCode.MULTIDEVICE_MISMATCH,
 ];
 
+/**
+ * What the socket was doing when it closed.
+ *
+ * Only one fact is needed, and only because Baileys cannot express it in the
+ * status code: an expired QR and a dead network both close with 408.
+ */
+export interface CloseContext {
+  /**
+   * Whether the socket that just closed had a QR code on offer.
+   *
+   * True only for a socket that reached the pairing stage and issued at least
+   * one code. A socket that closed before producing one has NOT run out of QR
+   * refs — it failed to connect — and must keep the ordinary backoff, which is
+   * what stops an unreachable WhatsApp from being retried in a tight loop.
+   */
+  readonly qrOffered: boolean;
+}
+
 /** Decides what a close means. `null` covers a plain network error. */
-export function decideAfterClose(statusCode: number | null): CloseAction {
+export function decideAfterClose(
+  statusCode: number | null,
+  context: CloseContext = { qrOffered: false },
+): CloseAction {
   if (statusCode === DisconnectCode.RESTART_REQUIRED) {
     return CloseAction.RECONNECT_NOW;
   }
 
-  if (statusCode === DisconnectCode.FORBIDDEN) {
-    return CloseAction.FATAL;
+  if (statusCode === DisconnectCode.TIMED_OUT && context.qrOffered) {
+    return CloseAction.PAIRING_EXPIRED;
   }
 
   if (statusCode !== null && PAIRING_CODES.includes(statusCode)) {
@@ -116,6 +151,14 @@ export function decideAfterClose(statusCode: number | null): CloseAction {
    * over the session — the session itself is still valid, so it is not a
    * pairing problem. The backoff keeps a reconnect from turning into a fight
    * between two sockets.
+   *
+   * `forbidden` is here too, and it used to be a FATAL that stopped the service
+   * for good. That was the wrong trade: a 403 can be a temporary restriction,
+   * and a service that has decided it will never work again needs somebody to
+   * notice and restart the container before it will even try. It now retries on
+   * the same ladder as everything else, which caps at half a minute — the code
+   * still appears in the status detail, so a genuinely blocked account is
+   * visible in the log rather than silent.
    */
   return CloseAction.RECONNECT;
 }

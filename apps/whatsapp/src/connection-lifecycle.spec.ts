@@ -485,15 +485,260 @@ describe("the WhatsApp connection lifecycle", () => {
     });
   });
 
-  /** A blocked account: neither retrying nor re-pairing would help. */
-  it("stops and reports an error when WhatsApp refuses the account", () => {
-    connect();
+  /**
+   * A fresh pairing that cannot get started, which used to be fatal.
+   *
+   * The catch reported the failure and returned, so no socket was ever opened
+   * again and no QR could appear. The EBUSY cause is fixed, but a full disk, a
+   * read-only mount or a permission change would dead-end the service in
+   * exactly the same way — and unlike a dead session, those recover by
+   * themselves. So it retries, and it retries the CLEAR rather than the socket:
+   * the credentials WhatsApp rejected are still on disk.
+   */
+  describe("a session that cannot be cleared", () => {
+    function readOnlyFilesystem(): NodeJS.ErrnoException {
+      const failure: NodeJS.ErrnoException = new Error(
+        "EROFS: read-only file system, open '/app/session/creds.json'",
+      );
 
-    drop(0, DisconnectCode.FORBIDDEN);
+      failure.code = "EROFS";
 
-    expect(connection.status()).toBe(WhatsAppStatus.ERROR);
-    expect(scheduler.active()).toBe(0);
-    expect(connection.pendingQrCode()).toBeNull();
+      return failure;
+    }
+
+    /** Lets the clear fail exactly once, then waits for it to be reported. */
+    async function failOnce(): Promise<void> {
+      auth.loadAuthState.mockRejectedValueOnce(readOnlyFilesystem());
+
+      connect();
+      drop(0, DisconnectCode.LOGGED_OUT);
+
+      await waitUntil(
+        () => connection.status() === WhatsAppStatus.ERROR,
+        "the failed clear to be reported",
+      );
+    }
+
+    it("says which stage failed and with which errno", async () => {
+      await failOnce();
+
+      const { detail } = statuses[statuses.length - 1];
+
+      expect(detail).toContain("reloading the empty auth state");
+      expect(detail).toContain("Error: EROFS");
+    });
+
+    /** The message carries the session path, so it is still withheld. */
+    it("keeps the path out of the reported status", async () => {
+      await failOnce();
+
+      expect(statuses[statuses.length - 1].detail).not.toContain("/app/session");
+    });
+
+    it("arms a retry instead of stopping for good", async () => {
+      await failOnce();
+
+      expect(scheduler.active()).toBe(1);
+    });
+
+    it("retries the clear rather than opening a socket on dead credentials", async () => {
+      await failOnce();
+      const before = sockets.length;
+
+      scheduler.runLatest();
+
+      await waitUntil(
+        () => sockets.length > before,
+        "the retried pairing to open a fresh socket",
+      );
+      expect(connection.status()).toBe(WhatsAppStatus.PAIRING_REQUIRED);
+      // Start, the attempt that failed, and the one that succeeded.
+      expect(auth.loadAuthState).toHaveBeenCalledTimes(3);
+    });
+
+    it("climbs the ladder while the filesystem stays broken", async () => {
+      auth.loadAuthState.mockRejectedValueOnce(readOnlyFilesystem());
+      await failOnce();
+
+      expect(scheduler.pending[0].delayMs).toBe(1_000);
+
+      scheduler.runLatest();
+
+      await waitUntil(
+        () => scheduler.pending.length === 2,
+        "the second retry to be armed",
+      );
+      expect(scheduler.pending[1].delayMs).toBe(2_000);
+    });
+
+    /** Shutdown still wins: a retry armed here must not outlive the service. */
+    it("cancels the retry on shutdown", async () => {
+      await failOnce();
+
+      await connection.close();
+
+      expect(scheduler.active()).toBe(0);
+    });
+  });
+
+  /**
+   * A refused account, which used to be the end of the service.
+   *
+   * It reported ERROR, armed nothing, and stayed that way until somebody
+   * restarted the container. A 403 is not always permanent, so it now retries
+   * like any other drop — and, crucially, keeps the session, because being
+   * refused is not being logged out.
+   */
+  describe("an account WhatsApp refuses", () => {
+    it("retries instead of stopping for good", async () => {
+      await writeFile(join(directory, "creds.json"), "{}");
+      connect();
+
+      drop(0, DisconnectCode.FORBIDDEN);
+
+      expect(connection.status()).toBe(WhatsAppStatus.DISCONNECTED);
+      expect(scheduler.active()).toBe(1);
+      expect(await readdir(directory)).toEqual(["creds.json"]);
+    });
+
+    it("names the code so a blocked account is visible in the log", () => {
+      connect();
+
+      drop(0, DisconnectCode.FORBIDDEN);
+
+      expect(statuses[statuses.length - 1].detail).toContain("403");
+    });
+
+    it("comes back if WhatsApp lifts the restriction", () => {
+      connect();
+
+      drop(0, DisconnectCode.FORBIDDEN);
+      scheduler.runLatest();
+      connect(1);
+
+      expect(connection.status()).toBe(WhatsAppStatus.CONNECTED);
+    });
+  });
+
+  /**
+   * The QR window running out, which is NOT a failed connection.
+   *
+   * ── WHAT WENT WRONG BEFORE ──────────────────────────────────────────────
+   * Baileys hands out a fixed number of QR refs and then ends the socket with
+   * 408 — the same code a dead network gives. That was read as a failure, so it
+   * climbed the backoff ladder, and because the counter only resets on a
+   * successful open and pairing never opens, it pinned at thirty seconds. The
+   * running service showed 160 seconds of QR followed by a blank half-minute,
+   * 569 times over two days, and never paired.
+   *
+   * The socket having issued a code is what tells the two apart.
+   */
+  describe("the QR window expiring", () => {
+    /** Puts the connection where an operator waiting to scan actually is. */
+    function offerQr(index: number, qr: string): void {
+      sockets[index].emitConnectionUpdate({ qr });
+    }
+
+    it("reopens at once rather than waiting out a backoff", () => {
+      offerQr(0, "qr-1");
+
+      drop(0, DisconnectCode.TIMED_OUT);
+
+      expect(sockets).toHaveLength(2);
+      expect(scheduler.active()).toBe(0);
+    });
+
+    it("does not count as a failure", () => {
+      offerQr(0, "qr-1");
+      drop(0, DisconnectCode.TIMED_OUT);
+      offerQr(1, "qr-2");
+      drop(1, DisconnectCode.TIMED_OUT);
+      offerQr(2, "qr-3");
+      drop(2, DisconnectCode.TIMED_OUT);
+
+      /*
+       * Three expired windows, and then a genuine drop. The ladder must still
+       * be at its first rung: had the rotations counted, this would be 10s.
+       */
+      connect(3);
+      drop(3, DisconnectCode.CONNECTION_CLOSED);
+
+      expect(scheduler.pending[scheduler.pending.length - 1].delayMs).toBe(
+        1_000,
+      );
+    });
+
+    it("makes a new QR available", () => {
+      offerQr(0, "qr-1");
+      drop(0, DisconnectCode.TIMED_OUT);
+
+      offerQr(1, "qr-2");
+
+      expect(connection.pendingQrCode()).toBe("qr-2");
+    });
+
+    /** The spent code is dead the moment its socket closes. */
+    it("stops offering the expired code while the next one is on its way", () => {
+      offerQr(0, "qr-1");
+
+      drop(0, DisconnectCode.TIMED_OUT);
+
+      expect(connection.pendingQrCode()).toBeNull();
+    });
+
+    /** Somebody still has to scan, so the notice stays on screen. */
+    it("keeps saying that pairing is required", () => {
+      offerQr(0, "qr-1");
+
+      drop(0, DisconnectCode.TIMED_OUT);
+
+      expect(connection.status()).toBe(WhatsAppStatus.PAIRING_REQUIRED);
+    });
+
+    it("touches no credentials", async () => {
+      await writeFile(join(directory, "creds.json"), "{}");
+      offerQr(0, "qr-1");
+
+      drop(0, DisconnectCode.TIMED_OUT);
+
+      expect(await readdir(directory)).toEqual(["creds.json"]);
+      expect(auth.loadAuthState).toHaveBeenCalledTimes(1);
+    });
+
+    /**
+     * The throttle that keeps this from becoming a tight loop. A socket that
+     * never got as far as a QR did not run out of them — WhatsApp is
+     * unreachable — and that must still back off.
+     */
+    it("keeps the ordinary backoff when the socket never showed a QR", () => {
+      drop(0, DisconnectCode.TIMED_OUT);
+
+      expect(scheduler.active()).toBe(1);
+      expect(scheduler.pending[0].delayMs).toBe(1_000);
+      expect(connection.status()).toBe(WhatsAppStatus.DISCONNECTED);
+    });
+
+    /** A connected session that times out is a network problem, as before. */
+    it("keeps the ordinary backoff after a connected socket times out", () => {
+      connect();
+
+      drop(0, DisconnectCode.TIMED_OUT);
+
+      expect(scheduler.active()).toBe(1);
+      expect(connection.status()).toBe(WhatsAppStatus.DISCONNECTED);
+    });
+
+    /** One socket at a time still holds when the rotation is immediate. */
+    it("leaves exactly one live socket per rotation", () => {
+      offerQr(0, "qr-1");
+      drop(0, DisconnectCode.TIMED_OUT);
+
+      // The abandoned socket reports its own close afterwards, as they do.
+      drop(0, DisconnectCode.TIMED_OUT);
+
+      expect(sockets).toHaveLength(2);
+      expect(scheduler.active()).toBe(0);
+    });
   });
 
   describe("the QR is only offered when pairing is genuinely required", () => {

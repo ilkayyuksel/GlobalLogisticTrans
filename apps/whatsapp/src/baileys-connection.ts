@@ -167,6 +167,14 @@ export async function createBaileysConnection(
 
     cancelReconnect();
 
+    /*
+     * Any QR the previous socket issued died with it: its ref has been spent,
+     * and scanning it now does nothing. Dropping it here is also what lets
+     * `handleClose` tell an expired pairing window from a network timeout —
+     * both close with 408, and only the former leaves a code behind.
+     */
+    pendingQr = null;
+
     const thisGeneration = ++generation;
 
     /*
@@ -247,17 +255,34 @@ export async function createBaileysConnection(
    * mere fact that the socket closed.
    */
   function handleClose(statusCode: number | null): void {
+    // Read before anything resets it: a code still on offer is what marks this
+    // socket as one that reached pairing and ran out of QR refs.
+    const qrOffered = pendingQr !== null;
+
     socket = null;
 
     if (shuttingDown) {
       return;
     }
 
-    switch (decideAfterClose(statusCode)) {
+    switch (decideAfterClose(statusCode, { qrOffered })) {
       case CloseAction.RECONNECT_NOW:
         // Part of the login handshake rather than a failure, so it does not
         // count against the backoff and does not wait.
         report(WhatsAppStatus.CONNECTING, "completing the login");
+        open();
+
+        return;
+
+      case CloseAction.PAIRING_EXPIRED:
+        /*
+         * The codes ran out, not the connection. Reopening at once is the whole
+         * point: it replaces a thirty-second blank screen with the next QR.
+         *
+         * The status is deliberately left at PAIRING_REQUIRED — somebody still
+         * has to scan, and that has not changed — so this rotates quietly
+         * instead of writing three log lines every two and a half minutes.
+         */
         open();
 
         return;
@@ -267,36 +292,46 @@ export async function createBaileysConnection(
 
         return;
 
-      case CloseAction.FATAL:
-        pendingQr = null;
-        report(
-          WhatsAppStatus.ERROR,
-          "WhatsApp refused this account; reconnecting will not help",
-        );
-
-        return;
-
       case CloseAction.RECONNECT:
       default:
         scheduleReconnect(statusCode);
     }
   }
 
-  function scheduleReconnect(statusCode: number | null): void {
+  /**
+   * Takes the next step on the backoff ladder and counts it as a failure.
+   *
+   * Separate from arming the timer because the two callers announce themselves
+   * differently — a dropped connection and a session that could not be cleared
+   * are not the same event — but they must share one ladder, or a failure in
+   * one would not slow the other down.
+   */
+  function nextBackoffMs(): number {
     const delayMs = backoffDelayMs(consecutiveFailures);
 
     consecutiveFailures += 1;
+
+    return delayMs;
+  }
+
+  /** Arms the one retry timer, replacing whatever was armed before. */
+  function armRetry(delayMs: number, attempt: () => void): void {
+    cancelReconnect();
+    reconnectTimer = schedule(() => {
+      reconnectTimer = null;
+      attempt();
+    }, delayMs);
+  }
+
+  function scheduleReconnect(statusCode: number | null): void {
+    const delayMs = nextBackoffMs();
 
     report(
       WhatsAppStatus.DISCONNECTED,
       `the connection dropped (${statusCode ?? "network"}); retrying in ${Math.round(delayMs / 1000)}s`,
     );
 
-    cancelReconnect();
-    reconnectTimer = schedule(() => {
-      reconnectTimer = null;
-      open();
-    }, delayMs);
+    armRetry(delayMs, open);
   }
 
   /**
@@ -388,10 +423,25 @@ export async function createBaileysConnection(
        * EBUSY the mount point itself. `name` alone was "Error" for every one of
        * them. The MESSAGE is still withheld — it can carry a path or a URL.
        */
+      /*
+       * Retried rather than given up on, and retried as THIS operation rather
+       * than as a plain reconnect.
+       *
+       * The distinction matters: WhatsApp has said these credentials are dead,
+       * so the dead files are still on disk. Opening a socket would present
+       * them, be refused, and arrive back here — while a filesystem that was
+       * briefly full or briefly read-only recovers on its own. So the ladder
+       * carries the same operation forward, and the stage and errno are
+       * reported on every attempt rather than only on the first.
+       */
+      const delayMs = nextBackoffMs();
+
       report(
         WhatsAppStatus.ERROR,
-        `${stage} failed (${describeFailure(error)}); a new pairing cannot start`,
+        `${stage} failed (${describeFailure(error)}); retrying in ${Math.round(delayMs / 1000)}s`,
       );
+
+      armRetry(delayMs, () => void startFreshPairing(statusCode));
 
       return;
     }
