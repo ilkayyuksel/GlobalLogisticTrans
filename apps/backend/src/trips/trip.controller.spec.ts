@@ -540,14 +540,33 @@ describe("TripController (integration)", () => {
       expect(response.body.data.status).toBe(TripStatus.CLOSED);
     });
 
-    it("returns 409 for CLOSED back to OPEN", async () => {
+    /** CLOSED used to be terminal; reopening it is a 200 now. */
+    it("reopens a CLOSED Trip through the same status endpoint", async () => {
+      repository.findById.mockResolvedValue(
+        buildTrip({ status: TripStatus.CLOSED }),
+      );
+      repository.setStatus.mockResolvedValue(
+        buildTrip({ status: TripStatus.OPEN }),
+      );
+
+      const response = await request(app.getHttpServer())
+        .patch(`${BASE}/${TRIP_ID}/status`)
+        .send({ status: "OPEN" })
+        .expect(200);
+
+      expect(response.body.data.status).toBe(TripStatus.OPEN);
+      expect(response.body.data.id).toBe(TRIP_ID);
+    });
+
+    /** Reopening is the only way out of CLOSED; cancelling is still refused. */
+    it("returns 409 for CLOSED straight to CANCELLED", async () => {
       repository.findById.mockResolvedValue(
         buildTrip({ status: TripStatus.CLOSED }),
       );
 
       await request(app.getHttpServer())
         .patch(`${BASE}/${TRIP_ID}/status`)
-        .send({ status: "OPEN" })
+        .send({ status: "CANCELLED" })
         .expect(409);
     });
 
@@ -697,14 +716,20 @@ describe("TripController (integration)", () => {
       expect(response.body.data.status).toBe(TripStatus.DELETED);
     });
 
-    it("returns 409 for a CLOSED Trip", async () => {
+    /** A CLOSED Trip is soft-deleted like any other; it used to be a 409. */
+    it("soft-deletes a CLOSED Trip", async () => {
       repository.findById.mockResolvedValue(
         buildTrip({ status: TripStatus.CLOSED }),
       );
+      repository.setStatus.mockResolvedValue(
+        buildTrip({ status: TripStatus.DELETED }),
+      );
 
-      await request(app.getHttpServer())
+      const response = await request(app.getHttpServer())
         .patch(`${BASE}/${TRIP_ID}/deletion`)
-        .expect(409);
+        .expect(200);
+
+      expect(response.body.data.status).toBe(TripStatus.DELETED);
     });
 
     it("returns 404 for an unknown Trip", async () => {

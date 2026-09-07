@@ -35,9 +35,10 @@ import { canDelete, primaryRowAction } from "@/lib/trip-actions";
  * Trip, and a CANCELLED one — which no longer has to be reopened first, a
  * detour that moved it through a state it was never in.
  *
- * REOPENING A CANCELLATION ASKS TOO. Completing does not: it is routine and the
- * row says so a moment later. Putting a called-off transport back in the
- * planning says it is happening after all, which is worth a sentence.
+ * REOPENING ASKS TOO, whether the Trip was cancelled or closed. Completing does
+ * not: it is routine and the row says so a moment later. Putting a called-off or
+ * finished transport back in the planning says it is happening after all, which
+ * is worth a sentence.
  *
  * AND NOTHING ELSE BELONGS HERE. No edit button, no "more", no second menu by
  * another name. Editing a Trip's less common fields is the Trip detail page's
@@ -59,9 +60,9 @@ export function RowLifecycleActions({
   /** Opens the confirmation. The row never deletes anything itself. */
   onDelete: (trip: Trip) => void;
   /**
-   * Opens the reopen confirmation. Only CANCELLED reaches it — a cancelled
-   * transport was called off, and putting it back says it is happening after
-   * all, which is worth a sentence before it takes effect.
+   * Opens the reopen confirmation. Reached by CANCELLED and by CLOSED: one was
+   * called off and one was finished, and saying either is happening after all
+   * is worth a sentence before it takes effect.
    */
   onReopen: (trip: Trip) => void;
 }) {
@@ -85,7 +86,8 @@ export function RowLifecycleActions({
           type="button"
           disabled={isBusy}
           onClick={() => {
-            // Reopening a cancellation asks first; completing does not.
+            // Reopening asks first — from CANCELLED or CLOSED alike;
+            // completing does not.
             if (action.target === "OPEN") {
               onReopen(trip);
 

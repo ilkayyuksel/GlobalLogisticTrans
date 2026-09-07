@@ -8,11 +8,20 @@ import { TripStatus } from "@prisma/client";
  *
  * Sources — database_model.md §4.1 "Trip Status" and "Lifecycle":
  *   - OPEN is the entry state.
- *   - CLOSED → OPEN is explicitly not allowed.
  *   - CANCELLED is a business cancellation; DELETED is an administrative soft
  *     delete, and the two must never be treated as the same value.
- *   - "Trip reopened" is a recorded event, and the only reopening the document
- *     leaves room for is undoing a cancellation.
+ *   - "Trip reopened" is a recorded event.
+ *
+ * ── CLOSED IS NO LONGER TERMINAL ────────────────────────────────────────────
+ * It used to be, on the reasoning that a pricing snapshot exists from that
+ * point on and reopening would invalidate it. That reasoning does not hold:
+ * reopening writes ONE column and touches no pricing at all. The snapshot
+ * stays exactly as it was — `announceIfClosed` fires only when a Trip becomes
+ * CLOSED, so no recalculation is triggered on the way out, and the amounts a
+ * Trip was charged remain readable and unchanged.
+ *
+ * A closed transport that turns out to be unfinished is an ordinary operational
+ * fact, and the alternative was to leave the record permanently wrong.
  */
 
 /**
@@ -32,13 +41,16 @@ export type ChangeableTripStatus = (typeof CHANGEABLE_TRIP_STATUSES)[number];
 /**
  * Allowed transitions, keyed by current status.
  *
- * CLOSED is terminal: a pricing result exists from that point on, and reopening
- * would invalidate it. DELETED is left only through restore.
+ * CLOSED reopens to OPEN and nothing else: a finished transport that turns out
+ * to be unfinished goes back into the planning, and cancelling it afterwards is
+ * a second, separate decision made from OPEN.
+ *
+ * DELETED is left only through restore.
  */
 const ALLOWED_TRANSITIONS: Readonly<Record<TripStatus, readonly TripStatus[]>> =
   {
     [TripStatus.OPEN]: [TripStatus.CLOSED, TripStatus.CANCELLED],
-    [TripStatus.CLOSED]: [],
+    [TripStatus.CLOSED]: [TripStatus.OPEN],
     [TripStatus.CANCELLED]: [TripStatus.OPEN],
     [TripStatus.DELETED]: [],
   };
@@ -59,12 +71,21 @@ const ALLOWED_TRANSITIONS: Readonly<Record<TripStatus, readonly TripStatus[]>> =
  * hidden: restoring is an administrator recovering a record, not an undo of the
  * cancellation, and the Trip can be cancelled again in one step.
  *
- * CLOSED is still absent. A closed Trip has been carried out and priced;
- * making it disappear from the planning is not an operational tidy-up.
+ * ── AND WHY CLOSED IS HERE NOW ──────────────────────────────────────────────
+ * It used to be excluded, on the reasoning that a Trip carried out and priced
+ * is not tidied away. But a Trip created in error can be discovered after it
+ * was closed, and the exclusion left no way to remove it at all — the record
+ * stayed in every list permanently.
+ *
+ * The same soft delete applies, and it is exactly as reversible: the row is
+ * kept, its pricing snapshot is kept, and restore brings it back. It comes back
+ * OPEN rather than CLOSED, for the same reason a cancelled one does — the
+ * previous status is recorded nowhere — and it can be closed again in one step.
  */
 export const DELETABLE_FROM_STATUSES: readonly TripStatus[] = [
   TripStatus.OPEN,
   TripStatus.CANCELLED,
+  TripStatus.CLOSED,
 ];
 
 /**

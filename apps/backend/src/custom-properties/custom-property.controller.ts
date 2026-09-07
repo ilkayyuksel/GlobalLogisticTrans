@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   HttpCode,
   HttpStatus,
@@ -37,9 +38,12 @@ import { UpdateCustomPropertyDto } from "./dto/update-custom-property.dto";
  * assigns a property to a Trip — those belong to the Pricing Engine and the
  * Trip module respectively.
  *
- * There is no DELETE endpoint by design — properties are never physically
- * removed, so historical Trips keep resolving the properties they carry.
- * Withdrawing a property from use is expressed as deactivation.
+ * There are TWO ways to withdraw a property, and they are not alternatives:
+ * deactivation retains the record so historical Trips keep resolving it, while
+ * DELETE physically removes the row and is refused whenever anything — an
+ * assignment, a frozen pricing line, or the system itself — still depends on
+ * it. Deactivation is the ordinary answer; DELETE is for a property that was
+ * never really used.
  */
 @ApiTags("Custom properties")
 @Controller("custom-properties")
@@ -149,5 +153,39 @@ export class CustomPropertyController {
     @Param() params: CustomPropertyIdParamDto,
   ): Promise<CustomPropertyResponseDto> {
     return this.customPropertyService.deactivate(params.id);
+  }
+
+  /**
+   * Returns 200 with the deleted property rather than 204.
+   *
+   * The same convention the Trip-assignment DELETE follows: every response in
+   * this API carries the standard envelope, and a 204 may not have a body.
+   * Answering with the row that disappeared also lets the caller confirm which
+   * property left, by name, without a second request.
+   */
+  @Delete(":id")
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: "Permanently delete a custom property",
+    description:
+      "PHYSICALLY removes the record from the database; this is not a soft delete. Refused with 409 while the property is still assigned to any Trip, while it appears in any frozen pricing line, or when it is system-managed (TAR, Flat, Toll, Tunnel) — the message names the dependency and its count. Nothing is cleaned up as a side effect: no assignment is withdrawn, no pricing history is altered and no Trip is repriced. Deactivate instead when the property has been used.",
+  })
+  @ApiOkResponse({
+    type: CustomPropertyResponseDto,
+    description: "The property that was deleted.",
+  })
+  @ApiBadRequestResponse({ description: "The id is not a valid UUID." })
+  @ApiNotFoundResponse({
+    description:
+      "No custom property with that id, including one already deleted.",
+  })
+  @ApiConflictResponse({
+    description:
+      "The property is still assigned to Trips, appears in frozen pricing history, or is system-managed.",
+  })
+  remove(
+    @Param() params: CustomPropertyIdParamDto,
+  ): Promise<CustomPropertyResponseDto> {
+    return this.customPropertyService.remove(params.id);
   }
 }

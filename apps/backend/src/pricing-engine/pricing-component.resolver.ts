@@ -186,13 +186,20 @@ export class PricingComponentResolver {
      * could be checked against.
      *
      * `hasTarNummer` is the single definition of "stated", shared with the DTO
-     * that stores it, the group rule that copies it and the WhatsApp caption
-     * that prints it. Whitespace is absence.
+     * that stores it and the WhatsApp caption that prints it. Whitespace is
+     * absence.
+     *
+     * It reads THIS Trip's own column and nothing else. A TAR-nummer is not
+     * shared across a group, a Combination or a container — each Trip states
+     * its own — so a number on the delivery leg says nothing about the
+     * collection leg, and never did anything to it.
      *
      * The ALLOCATION rule above is untouched: which leg owes it, and that a
-     * genuine Combination owes it once, are decided exactly as before. This
-     * only decides whether there is anything to allocate — so a pair sharing
-     * one number still produces one charge, on the same leg as it always did.
+     * genuine Combination owes it at most once, are decided exactly as before.
+     * This only decides whether there is anything to allocate. So a Combination
+     * whose delivery leg states a number still produces exactly one charge, on
+     * the same leg as always — and one whose delivery leg states none produces
+     * no TAR charge at all, however the collection leg is filled in.
      */
     if (!hasTarNummer(trip.tarNummer)) {
       return withoutIt;

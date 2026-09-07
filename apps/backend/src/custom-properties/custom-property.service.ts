@@ -14,12 +14,19 @@ import {
 import { ListCustomPropertiesQueryDto } from "./dto/list-custom-properties-query.dto";
 import { UpdateCustomPropertyDto } from "./dto/update-custom-property.dto";
 import {
+  CustomPropertyHasPricingHistoryException,
+  CustomPropertyInUseException,
   CustomPropertyNotFoundException,
   DuplicateComponentLinkException,
   DuplicateCustomPropertyNameException,
   LinkedPropertyMustHaveNoPriceException,
+  SystemManagedCustomPropertyDeletionException,
   UnknownPricingComponentException,
 } from "./exceptions/custom-property.exceptions";
+import {
+  SYSTEM_MANAGED_EXPLANATION,
+  systemManagedReasonFor,
+} from "./system-managed-property";
 
 /** Prisma's unique-constraint violation code. */
 const PRISMA_UNIQUE_VIOLATION = "P2002";
@@ -31,8 +38,9 @@ const FIRST_DISPLAY_ORDER = 1;
  * Stores configurable Trip properties. It never calculates anything — the
  * configured amount is read later by the Pricing Engine.
  *
- * Deactivated properties are retained rather than deleted, so historical Trips
- * keep resolving the properties they were assigned.
+ * Deactivating RETAINS the record, so historical Trips keep resolving the
+ * properties they were assigned. `remove` is the other option: it physically
+ * deletes the row, and refuses whenever anything still depends on it.
  */
 @Injectable()
 export class CustomPropertyService {
@@ -230,6 +238,135 @@ export class CustomPropertyService {
     this.logger.log("Custom property deactivated", { customPropertyId: id });
 
     return toCustomPropertyResponse(deactivated);
+  }
+
+  /**
+   * PHYSICALLY deletes the property. The row leaves the database.
+   *
+   * ── WHY THIS IS NOT THE DEFAULT WAY TO GET RID OF ONE ───────────────────────
+   * `deactivate` remains the ordinary answer: it keeps every Trip and every
+   * frozen pricing line explainable. This exists for the case deactivating does
+   * not cover — a property created by mistake, or one that was never used —
+   * where leaving a row nobody wants in a picker's history is simply clutter.
+   *
+   * ── EVERY REFUSAL BELOW IS A REAL REFERENCE, NOT A POLICY ──────────────────
+   * Exactly two foreign keys point at `custom_property`, and BOTH are ON DELETE
+   * RESTRICT, so the database would refuse anyway. Checking first turns a raw
+   * P2003 into a sentence that says which dependency stands in the way and how
+   * many of them there are.
+   *
+   * The checks and the delete run in ONE transaction, so an assignment or a
+   * pricing line created between the count and the delete cannot slip through —
+   * and if one somehow did, RESTRICT still stops it and the transaction rolls
+   * back whole. There is no state in which a property is half-removed.
+   *
+   * ── WHAT IS DELIBERATELY NOT DONE ──────────────────────────────────────────
+   * Nothing is cleaned up on the way. Assignments are not withdrawn, pricing
+   * lines are not unlinked, and no Trip is repriced. Each of those would change
+   * what real Trips are worth as a side effect of tidying a settings page.
+   */
+  async remove(id: string): Promise<CustomPropertyResponseDto> {
+    const deleted = await this.repository.runInTransaction(
+      async (repository) => {
+        const property = await repository.findById(id);
+
+        if (!property) {
+          // Also the answer to a second delete of the same property, which is
+          // what a double-clicked button produces.
+          throw new CustomPropertyNotFoundException(id);
+        }
+
+        this.assertNotSystemManaged(property);
+        await this.assertUnused(repository, property);
+
+        return repository.delete(id);
+      },
+    );
+
+    this.logger.log("Custom property deleted", {
+      customPropertyId: id,
+      name: deleted.name,
+    });
+
+    return toCustomPropertyResponse(deleted);
+  }
+
+  /**
+   * A property the system owns is not the operator's to delete.
+   *
+   * ── THIS EXTENDS AN EXISTING CLASSIFICATION TO A NEW BOUNDARY ──────────────
+   * `systemManagedReasonFor` was written to stop a MANUAL ASSIGNMENT, and its
+   * call site says so outright. It protected no row, because until now no row
+   * could be deleted. The classification is reused rather than restated so the
+   * two boundaries cannot drift, and each of its three reasons is independently
+   * fatal to a delete:
+   *
+   *   ROUTE_PRICED       Toll and Tunnel are how route_cost reaches its pricing
+   *                      component. Delete one and the route configuration
+   *                      still holds costs that nothing applies any more.
+   *   AUTOMATIC_PRICING  TAR is what the `AUTOMATIC_CUSTOM_PROPERTY_ID` setting
+   *                      points at — as TEXT, with no foreign key, so the
+   *                      database would not stop this and the setting would be
+   *                      left pointing at nothing.
+   *   CONTAINER_TYPE     Flat is resolved BY NAME by the container-type rule,
+   *                      again with nothing in the database to protect it.
+   *
+   * Two of the three are invisible to the schema, which is exactly why this
+   * check cannot be left to the foreign keys.
+   */
+  private assertNotSystemManaged(property: CustomProperty): void {
+    const reason = systemManagedReasonFor(property);
+
+    if (reason === null) {
+      return;
+    }
+
+    this.logger.warn("Rejected deletion of a system-managed custom property", {
+      customPropertyId: property.id,
+      reason,
+    });
+
+    throw new SystemManagedCustomPropertyDeletionException(
+      property.name,
+      SYSTEM_MANAGED_EXPLANATION[reason],
+    );
+  }
+
+  /**
+   * Refuses while anything still points at the property.
+   *
+   * Assignments are reported first because they are the fixable one: an
+   * operator can withdraw them. Pricing history is not fixable and not meant to
+   * be — those lines are what Trips were charged.
+   */
+  private async assertUnused(
+    repository: CustomPropertyRepository,
+    property: CustomProperty,
+  ): Promise<void> {
+    const assignments = await repository.countAssignments(property.id);
+
+    if (assignments > 0) {
+      this.logger.warn("Rejected deletion of a custom property still in use", {
+        customPropertyId: property.id,
+        assignments,
+      });
+
+      throw new CustomPropertyInUseException(property.name, assignments);
+    }
+
+    const pricingItems = await repository.countPricingItems(property.id);
+
+    if (pricingItems > 0) {
+      this.logger.warn("Rejected deletion of a priced-in-history property", {
+        customPropertyId: property.id,
+        pricingItems,
+      });
+
+      throw new CustomPropertyHasPricingHistoryException(
+        property.name,
+        pricingItems,
+      );
+    }
   }
 
   private async requireCustomProperty(id: string): Promise<CustomProperty> {

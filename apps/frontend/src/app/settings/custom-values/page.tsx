@@ -2,6 +2,7 @@
 
 import { useCallback, useState } from "react";
 
+import { ConfirmDialog } from "@/components/ritten/confirm-dialog";
 import { RittenDialog } from "@/components/ritten/ritten-dialog";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState, ErrorState, LoadingState } from "@/components/ui/states";
@@ -11,6 +12,7 @@ import {
   activateCustomProperty,
   createCustomProperty,
   deactivateCustomProperty,
+  deleteCustomProperty,
   isRoutePriced,
   listCustomProperties,
   updateCustomProperty,
@@ -53,6 +55,8 @@ export default function CustomValuesPage() {
 
   const [editing, setEditing] = useState<CustomProperty | null>(null);
   const [isCreating, setIsCreating] = useState(false);
+  /** The property a permanent deletion is being confirmed for. */
+  const [deleting, setDeleting] = useState<CustomProperty | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<Feedback | null>(null);
 
@@ -123,6 +127,24 @@ export default function CustomValuesPage() {
         ? "settings.custom.deactivated"
         : "settings.custom.activated",
     ).catch(() => undefined);
+  }
+
+  /**
+   * PERMANENT deletion, which is a different act from deactivating.
+   *
+   * The backend decides whether it is allowed: it refuses while any Trip still
+   * carries the property, while frozen pricing names it, or when the system
+   * owns it. Nothing is pre-checked here — a browser cannot know how many Trips
+   * hold a property, and a second opinion that disagreed would be worse than no
+   * opinion. The refusal arrives as the backend's own sentence, which names the
+   * dependency and its count, and `runMutation` shows it.
+   */
+  function confirmDelete(property: CustomProperty): Promise<void> {
+    return runMutation(
+      property.id,
+      () => deleteCustomProperty(property.id),
+      "settings.custom.deleted",
+    );
   }
 
   const isFirstLoad = properties.isLoading && !properties.data;
@@ -207,6 +229,7 @@ export default function CustomValuesPage() {
                       setIsCreating(false);
                     }}
                     onToggleActivation={() => toggleActivation(property)}
+                    onDelete={() => setDeleting(property)}
                   />
                 ))}
               </tbody>
@@ -225,6 +248,26 @@ export default function CustomValuesPage() {
           }}
         />
       ) : null}
+
+      {/*
+        The application's own confirmation, not `window.confirm`: this one can
+        name the property that is about to go and mark the confirming button
+        destructive. It closes itself once the backend has accepted, and keeps
+        the refusal on screen when it has not.
+      */}
+      {deleting ? (
+        <ConfirmDialog
+          titleKey="settings.custom.deleteTitle"
+          descriptionKey="settings.custom.deleteDescription"
+          consequenceKey="settings.custom.deleteConsequence"
+          confirmKey="settings.custom.delete"
+          tone="danger"
+          onConfirm={() => confirmDelete(deleting)}
+          onClose={() => setDeleting(null)}
+        >
+          <span className="font-medium text-foreground">{deleting.name}</span>
+        </ConfirmDialog>
+      ) : null}
     </div>
   );
 }
@@ -234,11 +277,13 @@ function PropertyRow({
   isBusy,
   onEdit,
   onToggleActivation,
+  onDelete,
 }: {
   property: CustomProperty;
   isBusy: boolean;
   onEdit: () => void;
   onToggleActivation: () => void;
+  onDelete: () => void;
 }) {
   const t = useTranslation();
 
@@ -290,6 +335,22 @@ function PropertyRow({
               ? t("settings.custom.deactivate")
               : t("settings.custom.activate")}
           </button>
+          {/*
+            Offered on every property the SYSTEM does not own. The remaining
+            reasons a delete can fail — Trips still carrying it, frozen pricing
+            naming it — are counts this page does not have, so those are the
+            backend's to refuse rather than this button's to predict.
+          */}
+          {property.isSystemManaged ? null : (
+            <button
+              type="button"
+              onClick={onDelete}
+              disabled={isBusy}
+              className="text-sm font-medium text-danger hover:underline disabled:opacity-50"
+            >
+              {t("settings.custom.delete")}
+            </button>
+          )}
         </span>
       </td>
     </tr>

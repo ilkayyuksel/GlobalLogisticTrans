@@ -680,9 +680,11 @@ describe("sequences of transport documents", () => {
      * consequence a document can have. Both go through the same transition,
      * which is why the state machine still has to allow it.
      */
-    it("is allowed from CANCELLED and from nowhere else", () => {
+    it("is allowed from CANCELLED and from CLOSED, but never from DELETED", () => {
       expect(canTransition(TripStatus.CANCELLED, TripStatus.OPEN)).toBe(true);
-      expect(canTransition(TripStatus.CLOSED, TripStatus.OPEN)).toBe(false);
+      expect(canTransition(TripStatus.CLOSED, TripStatus.OPEN)).toBe(true);
+      // A deleted Trip comes back through restore, which is a separate
+      // operation with its own preconditions — never through a transition.
       expect(canTransition(TripStatus.DELETED, TripStatus.OPEN)).toBe(false);
     });
 

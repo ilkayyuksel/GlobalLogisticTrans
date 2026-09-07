@@ -15,7 +15,11 @@ describe("CustomPropertyRepository", () => {
       count: jest.Mock;
       create: jest.Mock;
       update: jest.Mock;
+      delete: jest.Mock;
+      deleteMany: jest.Mock;
     };
+    tripCustomProperty: { count: jest.Mock };
+    tripPricingItem: { count: jest.Mock };
     $transaction: jest.Mock;
   };
   let repository: CustomPropertyRepository;
@@ -29,7 +33,11 @@ describe("CustomPropertyRepository", () => {
         count: jest.fn().mockResolvedValue(0),
         create: jest.fn().mockResolvedValue({}),
         update: jest.fn().mockResolvedValue({}),
+        delete: jest.fn().mockResolvedValue({}),
+        deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
       },
+      tripCustomProperty: { count: jest.fn().mockResolvedValue(0) },
+      tripPricingItem: { count: jest.fn().mockResolvedValue(0) },
       $transaction: jest.fn().mockResolvedValue([[], 0]),
     };
 
@@ -202,21 +210,67 @@ describe("CustomPropertyRepository", () => {
     );
   });
 
-  it("exposes no delete operation, because properties are never removed", () => {
-    const methods = Object.getOwnPropertyNames(
-      CustomPropertyRepository.prototype,
-    );
+  /**
+   * Deleting for real.
+   *
+   * This used to assert that no delete operation existed at all, on the premise
+   * that "properties are never removed". That premise no longer holds: a
+   * property created by mistake can now be deleted outright. What still holds —
+   * and what these assert instead — is that a delete removes ONE property row
+   * and touches nothing else.
+   */
+  describe("delete", () => {
+    it("removes exactly the one property, by id", async () => {
+      await repository.delete("property-1");
 
-    expect(methods).not.toContain("delete");
-    expect(methods).not.toContain("deleteMany");
-    expect(methods).not.toContain("remove");
+      expect(prisma.customProperty.delete).toHaveBeenCalledWith({
+        where: { id: "property-1" },
+      });
+    });
+
+    it("never deletes in bulk", () => {
+      expect(prisma.customProperty.deleteMany).not.toHaveBeenCalled();
+    });
   });
 
-  it("never touches Trip or pricing tables", () => {
-    // Trip assignment and pricing results belong to other domains.
-    const source = CustomPropertyRepository.prototype.constructor.toString();
+  /**
+   * The dependency counts read two other domains' tables, and that is
+   * deliberate — for the same reason `pricingComponentExists` reads the pricing
+   * catalog: the foreign keys are the real guard, and this is the narrow
+   * read-only lookup that turns a raw constraint violation into a sentence
+   * naming what blocks it. Pulling in two modules for two counts would be
+   * heavier coupling than the read it replaces.
+   */
+  describe("counting what depends on a property", () => {
+    it("counts Trip assignments without writing to them", async () => {
+      await repository.countAssignments("property-1");
 
-    expect(source).not.toContain("tripCustomProperty");
-    expect(source).not.toContain("tripPricingItem");
+      expect(prisma.tripCustomProperty.count).toHaveBeenCalledWith({
+        where: { customPropertyId: "property-1" },
+      });
+    });
+
+    it("counts frozen pricing lines without writing to them", async () => {
+      await repository.countPricingItems("property-1");
+
+      expect(prisma.tripPricingItem.count).toHaveBeenCalledWith({
+        where: { customPropertyId: "property-1" },
+      });
+    });
+
+    /**
+     * The boundary that actually matters, and the one this file has always
+     * been protecting: those tables are READ. A create, update or delete
+     * against either would make this module an owner of another domain's data.
+     */
+    it("only ever reads them", () => {
+      const source = CustomPropertyRepository.prototype.constructor.toString();
+
+      for (const table of ["tripCustomProperty", "tripPricingItem"]) {
+        for (const write of ["create", "update", "delete", "upsert"]) {
+          expect(source).not.toContain(`${table}.${write}`);
+        }
+      }
+    });
   });
 });

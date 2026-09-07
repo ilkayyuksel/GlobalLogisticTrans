@@ -725,9 +725,10 @@ CLOSED
 
 ↓
 
-OPEN
+CANCELLED
 
-is not allowed.
+is not allowed. A closed Trip is reopened first; cancelling it afterwards is a
+second, separate decision made from OPEN.
 
 The supported transitions are exactly:
 
@@ -737,8 +738,27 @@ OPEN → CANCELLED
 
 CANCELLED → OPEN
 
-CLOSED and DELETED have no outgoing transition through the status endpoint.
-A DELETED Trip returns through restoration, which is its own operation.
+CLOSED → OPEN
+
+CLOSED is NOT terminal. It was, on the reasoning that a pricing snapshot exists
+from that point on and reopening would invalidate it. That reasoning does not
+hold: reopening writes the status column and nothing else. The snapshot is
+neither read, rewritten nor recalculated — the Pricing Engine is notified only
+when a Trip BECOMES closed — so the amounts a Trip was charged stay exactly as
+they were. A closed transport that turns out to be unfinished is an ordinary
+operational fact, and the alternative was to leave the record permanently wrong.
+
+DELETED has no outgoing transition through the status endpoint. A DELETED Trip
+returns through restoration, which is its own operation.
+
+A Trip may be soft-deleted from OPEN, CANCELLED and CLOSED. Restoration always
+returns it to OPEN, because the status it held before deletion is recorded
+nowhere — so a Trip deleted from CLOSED comes back OPEN and can be closed again
+in one step.
+
+The document revision rules are SEPARATE from this state machine and unchanged:
+a transport document arriving later never reopens or rewrites a CLOSED Trip.
+Reopening is an operator action, not a consequence of a document.
 
 ---
 

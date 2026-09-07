@@ -53,6 +53,9 @@ describe("CustomPropertyService", () => {
       create: jest.fn().mockResolvedValue(buildProperty()),
       update: jest.fn().mockResolvedValue(buildProperty()),
       setActive: jest.fn().mockResolvedValue(buildProperty()),
+      countAssignments: jest.fn().mockResolvedValue(0),
+      countPricingItems: jest.fn().mockResolvedValue(0),
+      delete: jest.fn().mockResolvedValue(buildProperty()),
       runInTransaction: jest.fn(),
     } as unknown as jest.Mocked<CustomPropertyRepository>;
 
@@ -465,11 +468,29 @@ describe("CustomPropertyService", () => {
     });
   });
 
-  it("exposes no delete operation", () => {
+  /**
+   * `remove` exists now, and it is a PHYSICAL delete.
+   *
+   * This used to assert the opposite — that the service exposed no delete at
+   * all. Its behaviour is covered in `custom-property-deletion.spec.ts`; what
+   * belongs here is the distinction that replaced the old assertion:
+   * deactivation and deletion are different operations, and neither may
+   * quietly become the other.
+   */
+  it("keeps deactivating and deleting as separate operations", () => {
     const methods = Object.getOwnPropertyNames(CustomPropertyService.prototype);
 
-    expect(methods).not.toContain("delete");
-    expect(methods).not.toContain("remove");
+    expect(methods).toContain("deactivate");
+    expect(methods).toContain("remove");
+  });
+
+  it("never deletes when asked to deactivate", async () => {
+    repository.findById.mockResolvedValue(buildProperty({ isActive: true }));
+
+    await service.deactivate(PROPERTY_ID);
+
+    expect(repository.setActive).toHaveBeenCalledWith(PROPERTY_ID, false);
+    expect(repository.delete).not.toHaveBeenCalled();
   });
 
   it("performs no price arithmetic", () => {

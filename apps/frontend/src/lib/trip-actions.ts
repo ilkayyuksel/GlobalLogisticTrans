@@ -28,9 +28,10 @@ import type { ChangeableTripStatus, Trip, TripStatus } from "@/lib/api/types";
 const OFFERED_TRANSITIONS: Readonly<
   Record<TripStatus, readonly ChangeableTripStatus[]>
 > = {
-  // CLOSED is terminal: a pricing snapshot exists from that point on.
   OPEN: ["CLOSED", "CANCELLED"],
-  CLOSED: [],
+  // Reopening only. Cancelling a reopened Trip is a second decision, made
+  // from OPEN, exactly as the backend's matrix has it.
+  CLOSED: ["OPEN"],
   CANCELLED: ["OPEN"],
   // A DELETED Trip leaves only through restoration.
   DELETED: [],
@@ -41,10 +42,11 @@ const OFFERED_TRANSITIONS: Readonly<
  *
  * A cancelled transport is exactly the kind an operator wants out of the way,
  * and CANCELLED → OPEN → DELETED moved it through a state it was never in on
- * the way past. CLOSED stays absent: a Trip that has been carried out and
- * priced is not tidied away.
+ * the way past. CLOSED is here for the same reason: a Trip created in error can
+ * be discovered after it was closed, and excluding it left no way to remove the
+ * record at all. The delete is the same soft delete, and restore brings it back.
  */
-const DELETABLE_FROM: readonly TripStatus[] = ["OPEN", "CANCELLED"];
+const DELETABLE_FROM: readonly TripStatus[] = ["OPEN", "CANCELLED", "CLOSED"];
 
 /**
  * An offered transition.
@@ -61,8 +63,8 @@ export interface StatusAction {
 }
 
 const ACTION_BY_TARGET: Record<ChangeableTripStatus, StatusAction> = {
-  // Closing is permanent: CLOSED is terminal and pricing is snapshotted there.
-  CLOSED: { target: "CLOSED", isIrreversible: true },
+  // Closing prices the Trip, but it is no longer permanent: CLOSED reopens.
+  CLOSED: { target: "CLOSED", isIrreversible: false },
   CANCELLED: { target: "CANCELLED", isIrreversible: false },
   OPEN: { target: "OPEN", isIrreversible: false },
 };
@@ -83,9 +85,9 @@ export function statusActionsFor(trip: Trip): StatusAction[] {
  *
  *   OPEN       → Afwerken   (CLOSED)
  *   CANCELLED  → Openen     (OPEN)
- *   CLOSED     → nothing. CLOSED is terminal in the backend's state machine;
- *                see `allowedTransitionsFrom` there. Offering "Heropenen" would
- *                be a button that can only ever fail.
+ *   CLOSED     → Heropenen  (OPEN). Reopening writes one column and leaves the
+ *                pricing snapshot untouched, so a transport that turns out to
+ *                be unfinished goes back into the planning.
  *   DELETED    → nothing. A deleted Trip leaves only through restore.
  *
  * Cancelling is deliberately NOT here. It is the one transition an operator
@@ -99,7 +101,7 @@ const PRIMARY_ROW_ACTION: Readonly<
   Record<TripStatus, ChangeableTripStatus | null>
 > = {
   OPEN: "CLOSED",
-  CLOSED: null,
+  CLOSED: "OPEN",
   CANCELLED: "OPEN",
   DELETED: null,
 };
@@ -123,11 +125,7 @@ export function primaryRowAction(trip: Trip): StatusAction | null {
   );
 }
 
-/**
- * Soft delete is offered only where the backend accepts it.
- *
- * Offering it on a CLOSED Trip would be a button that can only ever 409.
- */
+/** Soft delete is offered only where the backend accepts it. */
 export function canDelete(trip: Trip): boolean {
   return DELETABLE_FROM.includes(trip.status);
 }

@@ -55,6 +55,9 @@ describe("CustomPropertyController (integration)", () => {
       create: jest.fn().mockResolvedValue(buildProperty()),
       update: jest.fn().mockResolvedValue(buildProperty()),
       setActive: jest.fn().mockResolvedValue(buildProperty()),
+      countAssignments: jest.fn().mockResolvedValue(0),
+      countPricingItems: jest.fn().mockResolvedValue(0),
+      delete: jest.fn().mockResolvedValue(buildProperty()),
       runInTransaction: jest.fn(),
     } as unknown as jest.Mocked<CustomPropertyRepository>;
 
@@ -418,11 +421,84 @@ describe("CustomPropertyController (integration)", () => {
     });
   });
 
-  it("exposes no DELETE route", async () => {
-    repository.findById.mockResolvedValue(buildProperty());
+  /**
+   * DELETE, which physically removes the row.
+   *
+   * This route used to be asserted ABSENT — properties could only be
+   * deactivated. It exists now, and the tests below pin the two things that
+   * makes worth checking through the whole stack: the status codes the refusals
+   * produce, and the fact that a refusal reaches the caller as the envelope's
+   * own error rather than as an unhandled 500.
+   */
+  describe(`DELETE ${BASE}/:id`, () => {
+    /** An ordinary property nothing points at. */
+    const ORDINARY = buildProperty({
+      name: "Aan/Afkoppelen",
+      defaultPrice: new Prisma.Decimal("25.00"),
+    });
 
-    await request(app.getHttpServer())
-      .delete(`${BASE}/${PROPERTY_ID}`)
-      .expect(404);
+    it("deletes an unused property and answers with it", async () => {
+      repository.findById.mockResolvedValue(ORDINARY);
+      repository.delete.mockResolvedValue(ORDINARY);
+
+      const response = await request(app.getHttpServer())
+        .delete(`${BASE}/${PROPERTY_ID}`)
+        .expect(200);
+
+      expect(response.body.data.name).toBe("Aan/Afkoppelen");
+      expect(repository.delete).toHaveBeenCalledWith(PROPERTY_ID);
+    });
+
+    it("returns 404 for a property that is not there", async () => {
+      repository.findById.mockResolvedValue(null);
+
+      await request(app.getHttpServer())
+        .delete(`${BASE}/${PROPERTY_ID}`)
+        .expect(404);
+    });
+
+    it("returns 400 for an id that is not a UUID", async () => {
+      await request(app.getHttpServer())
+        .delete(`${BASE}/not-a-uuid`)
+        .expect(400);
+    });
+
+    it("returns 409 while Trips still carry it", async () => {
+      repository.findById.mockResolvedValue(ORDINARY);
+      repository.countAssignments.mockResolvedValue(2);
+
+      const response = await request(app.getHttpServer())
+        .delete(`${BASE}/${PROPERTY_ID}`)
+        .expect(409);
+
+      expect(response.body.error.message).toMatch(/still assigned to 2 Trips/);
+      expect(repository.delete).not.toHaveBeenCalled();
+    });
+
+    it("returns 409 while frozen pricing names it", async () => {
+      repository.findById.mockResolvedValue(ORDINARY);
+      repository.countPricingItems.mockResolvedValue(4);
+
+      const response = await request(app.getHttpServer())
+        .delete(`${BASE}/${PROPERTY_ID}`)
+        .expect(409);
+
+      expect(response.body.error.message).toMatch(
+        /appears in 4 frozen pricing lines/,
+      );
+      expect(repository.delete).not.toHaveBeenCalled();
+    });
+
+    /** The default fixture IS TAR, which is the automatic property. */
+    it("returns 409 for a system-managed property", async () => {
+      repository.findById.mockResolvedValue(buildProperty());
+
+      const response = await request(app.getHttpServer())
+        .delete(`${BASE}/${PROPERTY_ID}`)
+        .expect(409);
+
+      expect(response.body.error.message).toMatch(/managed by the system/);
+      expect(repository.delete).not.toHaveBeenCalled();
+    });
   });
 });

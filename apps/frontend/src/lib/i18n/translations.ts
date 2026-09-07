@@ -349,7 +349,7 @@ const nl = {
 
   "ritten.menu.label": "Acties",
   "ritten.menu.close": "Afwerken",
-  "ritten.menu.reopen": "Openen",
+  "ritten.menu.reopen": "Heropenen",
   "ritten.menu.cancel": "Annuleren",
   "ritten.menu.viewPdf": "PDF bekijken",
   "ritten.menu.downloadPdf": "PDF downloaden",
@@ -449,7 +449,7 @@ const nl = {
   "ritten.new.dateHint": "Zonder datum verschijnt de rit onder “Zonder datum”.",
   "ritten.losrit.badge": "LOSRIT",
   "ritten.feedback.markedLoose": "Als losrit gemarkeerd",
-  "ritten.reopen.title": "Geannuleerde rit openen?",
+  "ritten.reopen.title": "Rit heropenen?",
   "ritten.reopen.description":
     "Deze rit wordt opnieuw geopend en verschijnt weer als open in de planning.",
   "ritten.delete.title": "Rit verwijderen?",
@@ -788,6 +788,13 @@ const nl = {
   "settings.custom.updated": "Custom waarde bijgewerkt",
   "settings.custom.activated": "Custom waarde geactiveerd",
   "settings.custom.deactivated": "Custom waarde gedeactiveerd",
+  "settings.custom.delete": "Verwijderen",
+  "settings.custom.deleted": "Custom waarde definitief verwijderd",
+  "settings.custom.deleteTitle": "Custom waarde verwijderen",
+  "settings.custom.deleteDescription":
+    "Deze custom waarde wordt definitief uit de database verwijderd. Dit kan niet ongedaan worden gemaakt.",
+  "settings.custom.deleteConsequence":
+    "Lukt dit niet, dan wordt de waarde nog gebruikt door ritten of door bevroren prijshistoriek. Deactiveer hem in dat geval in plaats daarvan; bestaande prijzen blijven altijd ongewijzigd.",
   "settings.custom.failed": "Actie mislukt",
   "settings.custom.loading": "Custom waarden laden",
   "settings.custom.empty": "Nog geen custom waarden",
@@ -1219,7 +1226,7 @@ const tr: Translations = {
 
   "ritten.menu.label": "İşlemler",
   "ritten.menu.close": "Tamamla",
-  "ritten.menu.reopen": "Aç",
+  "ritten.menu.reopen": "Yeniden aç",
   "ritten.menu.cancel": "İptal et",
   "ritten.menu.viewPdf": "PDF'i görüntüle",
   "ritten.menu.downloadPdf": "PDF'i indir",
@@ -1310,7 +1317,7 @@ const tr: Translations = {
   "ritten.new.dateHint": "Tarihsiz sefer “Tarihsiz” başlığı altında görünür.",
   "ritten.losrit.badge": "LOSRIT",
   "ritten.feedback.markedLoose": "Tekil sefer olarak işaretlendi",
-  "ritten.reopen.title": "İptal edilen sefer açılsın mı?",
+  "ritten.reopen.title": "Sefer yeniden açılsın mı?",
   "ritten.reopen.description":
     "Bu sefer yeniden açılır ve planlamada tekrar açık olarak görünür.",
   "ritten.delete.title": "Sefer silinsin mi?",
@@ -1641,6 +1648,13 @@ const tr: Translations = {
   "settings.custom.updated": "Özel değer güncellendi",
   "settings.custom.activated": "Özel değer aktifleştirildi",
   "settings.custom.deactivated": "Özel değer pasifleştirildi",
+  "settings.custom.delete": "Sil",
+  "settings.custom.deleted": "Özel değer kalıcı olarak silindi",
+  "settings.custom.deleteTitle": "Özel değeri sil",
+  "settings.custom.deleteDescription":
+    "Bu özel değer veritabanından kalıcı olarak silinecek. Bu işlem geri alınamaz.",
+  "settings.custom.deleteConsequence":
+    "Silme başarısız olursa, değer hâlâ seferler veya dondurulmuş fiyat geçmişi tarafından kullanılıyordur. O durumda bunun yerine pasifleştirin; mevcut fiyatlar her zaman değişmeden kalır.",
   "settings.custom.failed": "İşlem başarısız",
   "settings.custom.loading": "Özel değerler yükleniyor",
   "settings.custom.empty": "Henüz özel değer yok",

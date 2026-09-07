@@ -133,13 +133,13 @@ describe("Ritten row actions", () => {
       await showTrip({ status: "OPEN" });
 
       expect(actionButton("Afwerken")).toBeInTheDocument();
-      expect(actionButton("Openen")).toBeNull();
+      expect(actionButton("Heropenen")).toBeNull();
     });
 
     it("offers Openen on a CANCELLED Trip", async () => {
       await showTrip({ status: "CANCELLED" });
 
-      expect(actionButton("Openen")).toBeInTheDocument();
+      expect(actionButton("Heropenen")).toBeInTheDocument();
       expect(actionButton("Afwerken")).toBeNull();
     });
 
@@ -149,19 +149,28 @@ describe("Ritten row actions", () => {
      * not allowed" outright. A "Heropenen" button here could only ever fail, so
      * there is none.
      */
-    it("offers no lifecycle action on a CLOSED Trip", async () => {
+    /**
+     * CLOSED used to offer nothing at all, because it was terminal. It reopens
+     * now — one column, no repricing — and it can be deleted like any other.
+     */
+    it("offers Heropenen on a CLOSED Trip", async () => {
       await showTrip({ status: "CLOSED" });
 
+      expect(actionButton("Heropenen")).toBeInTheDocument();
       expect(actionButton("Afwerken")).toBeNull();
-      expect(actionButton("Openen")).toBeNull();
-      expect(actionButton("Heropenen")).toBeNull();
+    });
+
+    it("offers Verwijderen on a CLOSED Trip", async () => {
+      await showTrip({ status: "CLOSED" });
+
+      expect(actionButton("Verwijderen")).toBeInTheDocument();
     });
 
     it("offers no lifecycle action on a DELETED Trip", async () => {
       await showTrip({ status: "DELETED" });
 
       expect(actionButton("Afwerken")).toBeNull();
-      expect(actionButton("Openen")).toBeNull();
+      expect(actionButton("Heropenen")).toBeNull();
     });
 
     /**
@@ -186,8 +195,8 @@ describe("Ritten row actions", () => {
   describe("LOSRIT does not alter the matrix", () => {
     const CASES: ReadonlyArray<[TripStatus, string | null]> = [
       ["OPEN", "Afwerken"],
-      ["CLOSED", null],
-      ["CANCELLED", "Openen"],
+      ["CLOSED", "Heropenen"],
+      ["CANCELLED", "Heropenen"],
     ];
 
     it.each(CASES)("a LOSRIT that is %s", async (status, expected) => {
@@ -197,7 +206,7 @@ describe("Ritten row actions", () => {
 
       if (expected === null) {
         expect(actionButton("Afwerken")).toBeNull();
-        expect(actionButton("Openen")).toBeNull();
+        expect(actionButton("Heropenen")).toBeNull();
       } else {
         expect(actionButton(expected)).toBeInTheDocument();
       }
@@ -300,20 +309,20 @@ describe("Ritten row actions", () => {
    * Trip and looks like every dialog a browser has ever shown.
    * ──────────────────────────────────────────────────────────────────────────
    */
-  describe("Openen", () => {
+  describe("Heropenen", () => {
     async function confirmReopen(): Promise<void> {
-      await userEvent.click(actionButton("Openen") as HTMLElement);
+      await userEvent.click(actionButton("Heropenen") as HTMLElement);
 
       const dialog = await screen.findByRole("dialog");
       await userEvent.click(
-        within(dialog).getByRole("button", { name: "Openen" }),
+        within(dialog).getByRole("button", { name: "Heropenen" }),
       );
     }
 
     it("asks before it reopens", async () => {
       await showTrip({ status: "CANCELLED" });
 
-      await userEvent.click(actionButton("Openen") as HTMLElement);
+      await userEvent.click(actionButton("Heropenen") as HTMLElement);
 
       const dialog = await screen.findByRole("dialog");
 
@@ -326,7 +335,7 @@ describe("Ritten row actions", () => {
     it("uses the application's dialog, not the browser's", async () => {
       await showTrip({ status: "CANCELLED" });
 
-      await userEvent.click(actionButton("Openen") as HTMLElement);
+      await userEvent.click(actionButton("Heropenen") as HTMLElement);
       await screen.findByRole("dialog");
 
       expect(confirmSpy).not.toHaveBeenCalled();
@@ -335,7 +344,7 @@ describe("Ritten row actions", () => {
     it("sends nothing when the confirmation is cancelled", async () => {
       await showTrip({ status: "CANCELLED" });
 
-      await userEvent.click(actionButton("Openen") as HTMLElement);
+      await userEvent.click(actionButton("Heropenen") as HTMLElement);
       const dialog = await screen.findByRole("dialog");
       await userEvent.click(
         within(dialog).getByRole("button", { name: "Annuleren" }),
@@ -576,7 +585,7 @@ describe("Ritten row actions", () => {
       await showTrip({ status: "CANCELLED" });
 
       expect(
-        screen.getByRole("button", { name: "Aç ANRDUB2602247" }),
+        screen.getByRole("button", { name: "Yeniden aç ANRDUB2602247" }),
       ).toBeInTheDocument();
     });
 

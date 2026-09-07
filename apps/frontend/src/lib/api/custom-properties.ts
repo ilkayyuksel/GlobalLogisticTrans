@@ -111,6 +111,29 @@ export function deactivateCustomProperty(
   );
 }
 
+/**
+ * PERMANENTLY deletes the property. The row leaves the database.
+ *
+ * Not a stronger deactivation — a different operation. The backend refuses it
+ * with a 409 while any Trip still carries the property, while any frozen
+ * pricing line names it, or when it is system-managed (TAR, Flat, Toll,
+ * Tunnel); the message says which of those applies and how many there are.
+ * Nothing is cleaned up as a side effect, so no Trip's price can change
+ * because a settings page was tidied.
+ *
+ * Answers with the property that was deleted, which is what lets the caller
+ * drop exactly that row without refetching the list.
+ */
+export function deleteCustomProperty(
+  customPropertyId: string,
+  signal?: AbortSignal,
+): Promise<CustomProperty> {
+  return request<CustomProperty>(
+    `${CUSTOM_PROPERTIES_PATH}/${customPropertyId}`,
+    { method: "DELETE", signal },
+  );
+}
+
 /** A property whose amount comes from the route configuration. */
 export function isRoutePriced(property: CustomProperty): boolean {
   return property.pricingComponentId !== null;

@@ -50,7 +50,6 @@ import {
   canTransition,
 } from "./trip-status.rules";
 import { TripPlanningDataService } from "./trip-planning-data.service";
-import { hasTarNummer, meaningfulTarNummer } from "./tar-nummer";
 import { TripIdentity, TripRepository } from "./trip.repository";
 
 /**
@@ -366,43 +365,18 @@ export class TripService {
     }
 
     /*
-     * ── ONE TAR-NUMMER PER GROUP ──────────────────────────────────────────
-     * A group carries a single TAR price, so its members carry a single
-     * TAR-nummer. Editing it on one leg is the operator stating what the
-     * group's number IS, so the other legs follow — including a clear, which
-     * empties the whole group rather than leaving one leg holding a value the
-     * operator just removed.
+     * ── A TAR-NUMMER BELONGS TO ONE TRIP ──────────────────────────────────
+     * It is written to the edited Trip and to nothing else. There is no group
+     * transaction here any more: editing or clearing the number on one leg
+     * leaves every other leg exactly as it was, whatever group, Combination,
+     * container, booking or date they happen to share.
      *
-     * In ONE transaction with the edit itself: a group half-updated would be a
-     * state no rule describes and nothing would ever repair it.
-     *
-     * Identity is `tripGroupId` — the membership the schema actually stores,
-     * and the same one `createGroup` and `removeFromGroup` work in. Nothing is
-     * inferred from route, container type, booking number or date.
+     * This REPLACES an earlier rule under which a group carried one shared
+     * number and the other members followed. Values that rule already copied
+     * are left alone — they are stored data now, and rewriting history would
+     * be a second automatic decision about numbers an operator can see.
      */
-    const sharesGroup =
-      existing.tripGroupId !== null && dto.tarNummer !== undefined;
-
-    const updated = sharesGroup
-      ? await this.repository.runInTransaction(async (repository) => {
-          const written = await repository.update(id, this.toUpdateData(dto));
-
-          const followers = await repository.shareTarNummerWithinGroup(
-            existing.tripGroupId as string,
-            written.tarNummer,
-            id,
-          );
-
-          this.logger.log("TAR-nummer shared across the group", {
-            tripId: id,
-            tripGroupId: existing.tripGroupId,
-            // A count, never the value: a TAR-nummer is business data.
-            followerCount: followers,
-          });
-
-          return written;
-        })
-      : await this.repository.update(id, this.toUpdateData(dto));
+    const updated = await this.repository.update(id, this.toUpdateData(dto));
 
     this.logger.log("Trip updated", {
       tripId: id,
@@ -902,7 +876,11 @@ export class TripService {
 
         await repository.assignToGroup(tripIds, group.id);
 
-        await this.shareTarNummerOnGrouping(repository, trips, group.id);
+        /*
+         * Grouping writes `tripGroupId` and nothing else. A TAR-nummer is not
+         * copied onto the joining Trips — each keeps its own, stated or empty,
+         * exactly as it was before the group existed.
+         */
 
         // Re-read inside the transaction: the rows now carry the group, and the
         // response must show what was actually written rather than what was
@@ -918,84 +896,6 @@ export class TripService {
     });
 
     return this.toResponses(grouped);
-  }
-
-  /**
-   * Carries an existing TAR-nummer onto the Trips that join it in a group.
-   *
-   * ── ONLY WHEN THE GROUP AGREES ────────────────────────────────────────────
-   * Exactly one distinct value among the members is a group that already knows
-   * its TAR-nummer, and the empty ones adopt it. Nobody's data is overwritten:
-   * the only rows written are the ones holding nothing.
-   *
-   * ── AND WHEN IT DOES NOT AGREE, NOTHING HAPPENS ───────────────────────────
-   * Two members arriving with DIFFERENT numbers is a genuine conflict, and this
-   * codebase has no rule for which of them wins. Neither is newer in any sense
-   * the schema records, neither leg is privileged, and picking one would
-   * silently destroy a value an operator typed.
-   *
-   * So the grouping proceeds exactly as it always did and the numbers are left
-   * alone — both survive, visible on their own rows, for a person to reconcile.
-   * Refusing the grouping instead would change how groups are formed, which is
-   * not this rule's business.
-   *
-   * The disagreement is logged as a warning, because a group carrying two
-   * TAR-nummers is a state somebody has to resolve before it is priced.
-   */
-  private async shareTarNummerOnGrouping(
-    repository: TripRepository,
-    trips: readonly Trip[],
-    tripGroupId: string,
-  ): Promise<void> {
-    /*
-     * A STATED number is a non-empty string. Null, undefined and a blank string
-     * all mean "this Trip states none" — the DTO already turns whitespace into
-     * null, and treating an absent value as a stated one would invent a
-     * conflict out of two Trips that both say nothing.
-     */
-    const stated = [
-      ...new Set(
-        trips
-          .map((trip) => trip.tarNummer)
-          .map((value) => meaningfulTarNummer(value))
-          .filter((value): value is string => value !== null),
-      ),
-    ];
-
-    if (stated.length === 0) {
-      return;
-    }
-
-    if (stated.length > 1) {
-      this.logger.warn(
-        "Grouped Trips state different TAR-nummers; none was copied",
-        {
-          tripGroupId,
-          tripIds: trips.map((trip) => trip.id),
-          // The COUNT of distinct values, never the values themselves.
-          distinctCount: stated.length,
-        },
-      );
-
-      return;
-    }
-
-    /*
-     * One value, so the members holding nothing adopt it. `excludeTripId` names
-     * a Trip that already carries it, which keeps the write off that row.
-     */
-    const holder = trips.find((trip) => hasTarNummer(trip.tarNummer)) as Trip;
-
-    const followers = await repository.shareTarNummerWithinGroup(
-      tripGroupId,
-      holder.tarNummer,
-      holder.id,
-    );
-
-    this.logger.log("TAR-nummer shared across a new group", {
-      tripGroupId,
-      followerCount: followers,
-    });
   }
 
   /**
@@ -1054,12 +954,14 @@ export class TripService {
 
   /**
    * Soft delete. The row is never removed, so history, exports and pricing keep
-   * resolving it.
+   * resolving it — including the pricing snapshot of a Trip deleted from
+   * CLOSED, which is left exactly as it was.
    *
-   * Only an OPEN Trip may be deleted. Restore has to return the Trip to the
-   * status it held before, and that previous status lives in trip_history,
-   * which does not exist yet — restricting the entry point keeps restore exact
-   * instead of guessing.
+   * Which statuses may be deleted from is `DELETABLE_FROM_STATUSES`, and the
+   * cost of allowing more than one is stated there: restore returns every Trip
+   * to OPEN, because the status it held before deletion is recorded nowhere.
+   * A Trip deleted from CLOSED therefore comes back OPEN, and closing it again
+   * is one step.
    */
   async softDelete(id: string): Promise<TripResponseDto> {
     const trip = await this.requireTrip(id);

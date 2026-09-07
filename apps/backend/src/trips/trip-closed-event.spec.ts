@@ -159,8 +159,30 @@ describe("TripService — TripClosed event", () => {
       expect(repository.setStatus).not.toHaveBeenCalled();
     });
 
+    /**
+     * Reopening is allowed now, and it is the case that matters most here: a
+     * Trip leaving CLOSED must NOT announce anything, or the Engine would
+     * reprice a transport on its way back into the planning.
+     */
+    it("emits nothing when a CLOSED Trip is reopened", async () => {
+      repository.findById.mockResolvedValue(
+        buildTrip({ status: TripStatus.CLOSED }),
+      );
+      repository.setStatus.mockResolvedValue(
+        buildTrip({ status: TripStatus.OPEN }),
+      );
+
+      await service.changeStatus(TRIP_ID, { status: TripStatus.OPEN });
+
+      expect(eventBus.publish).not.toHaveBeenCalled();
+    });
+
     it.each([
-      [TripStatus.CLOSED, TripStatus.OPEN, "CLOSED is terminal"],
+      [
+        TripStatus.CLOSED,
+        TripStatus.CANCELLED,
+        "CLOSED reopens, it does not cancel",
+      ],
       [TripStatus.CANCELLED, TripStatus.CLOSED, "CANCELLED cannot close"],
       [TripStatus.DELETED, TripStatus.CLOSED, "DELETED cannot close"],
     ])(

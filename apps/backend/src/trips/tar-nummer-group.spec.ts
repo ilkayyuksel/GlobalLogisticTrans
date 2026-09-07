@@ -5,19 +5,27 @@ import { TripRepository } from "./trip.repository";
 import { TripService } from "./trip.service";
 
 /**
- * One TAR-nummer per group.
+ * A TAR-nummer belongs to ONE Trip.
  *
- * ── THE IDENTITY IS `tripGroupId`, AND NOTHING ELSE ─────────────────────────
- * The membership the schema stores, which is the same one `createGroup`,
- * `removeFromGroup` and the pricing resolver already work in. Nothing is
- * inferred from route, container type, booking number or planning date — two
- * Trips that merely look alike are not a group and share nothing.
+ * ── WHAT THIS FILE USED TO ASSERT, AND WHY IT NO LONGER DOES ────────────────
+ * It used to prove the opposite: that a group carried a single TAR-nummer, that
+ * editing it on one leg copied it to the others, and that grouping carried an
+ * existing number onto the Trips joining it. That rule is withdrawn. Every Trip
+ * now states its own number, and nothing copies it anywhere — not by
+ * `tripGroupId`, not by Combination, not by container, booking, planning date
+ * or DELIVERY/COLLECTION direction.
  *
- * ── AND THE CONFLICT IS DELIBERATELY NOT RESOLVED ───────────────────────────
- * Two Trips arriving in a group with DIFFERENT numbers is a case this codebase
- * has no rule for. Neither is newer in any sense the schema records and neither
- * leg is privileged, so nothing is copied and both survive. Choosing one would
- * destroy a value somebody typed.
+ * So the tests below are all of the same shape: an operator writes a number on
+ * one Trip, and the other Trip is exactly as it was. Two legs may legitimately
+ * hold two different numbers, one may hold a number while the other holds
+ * none, and clearing either changes only the row it was cleared on.
+ *
+ * ── WHAT IS NOT AFFECTED ────────────────────────────────────────────────────
+ * Group FORMATION is untouched: `createGroup` still writes `tripGroupId` and
+ * still refuses the cases it always refused. And the pricing ALLOCATION is
+ * untouched — a genuine Combination still charges TAR at most once, on the
+ * delivery leg. That lives in the pricing resolver and is tested there; the
+ * only thing that changed for it is that it reads each Trip's own column.
  * ────────────────────────────────────────────────────────────────────────────
  */
 
@@ -64,23 +72,6 @@ function row(id: string, overrides: Partial<Trip> = {}): Trip {
 }
 
 function buildService(stored: Row[]) {
-  const shareTarNummerWithinGroup = jest.fn(
-    (groupId: string, tarNummer: string | null, excludeTripId: string) => {
-      const followers = stored.filter(
-        (trip) =>
-          trip.tripGroupId === groupId &&
-          trip.id !== excludeTripId &&
-          trip.status !== TripStatus.DELETED,
-      );
-
-      for (const follower of followers) {
-        follower.tarNummer = tarNummer;
-      }
-
-      return Promise.resolve(followers.length);
-    },
-  );
-
   const repository = {
     findById: jest.fn((id: string) =>
       Promise.resolve(stored.find((trip) => trip.id === id) ?? null),
@@ -107,17 +98,11 @@ function buildService(stored: Row[]) {
 
       return Promise.resolve(trip);
     }),
-    shareTarNummerWithinGroup,
     // Assigned below: it hands the work THIS repository, so it cannot be part
     // of the object literal that defines it.
     runInTransaction: jest.fn(),
   };
 
-  /*
-   * The transaction is the same repository. What matters for these tests is
-   * that the edit and the group write happen inside ONE call, which the double
-   * records.
-   */
   repository.runInTransaction.mockImplementation(
     (work: (repo: unknown) => Promise<unknown>) => work(repository),
   );
@@ -129,16 +114,12 @@ function buildService(stored: Row[]) {
     error: jest.fn(),
   };
 
-  // The Engine is stubbed rather than omitted, so a test can prove it is never
-  // called — sharing a TAR-nummer must not reprice anything.
   const recalculation = { recalculate: jest.fn() };
 
   const service = new TripService(
     repository as unknown as TripRepository,
     {} as never,
     {} as never,
-    // Builds the response; these tests are about what was WRITTEN, so it
-    // resolves nothing.
     {
       resolveOne: jest.fn().mockResolvedValue({}),
       resolveMany: jest.fn().mockResolvedValue(new Map()),
@@ -149,197 +130,195 @@ function buildService(stored: Row[]) {
     logger as unknown as AppLoggerService,
   );
 
-  return {
-    service,
-    repository,
-    logger,
-    recalculation,
-    shareTarNummerWithinGroup,
-  };
+  return { service, repository, logger, recalculation };
 }
 
-describe("sharing a TAR-nummer across a group", () => {
-  describe("when an operator edits one leg", () => {
-    it("copies the value onto the other legs", async () => {
-      const stored = [
-        row(TRIP_A, { tripGroupId: GROUP_ID }),
-        row(TRIP_B, { tripGroupId: GROUP_ID }),
-      ];
+/** Two Trips already sharing one group — the case that used to propagate. */
+function groupedPair(overrides: [Partial<Trip>, Partial<Trip>?] = [{}]): Row[] {
+  return [
+    row(TRIP_A, { tripGroupId: GROUP_ID, ...overrides[0] }),
+    row(TRIP_B, { tripGroupId: GROUP_ID, ...(overrides[1] ?? {}) }),
+  ];
+}
+
+describe("a TAR-nummer is per Trip", () => {
+  /**
+   * The method that did the copying is gone from the repository entirely, so
+   * no call site can quietly reintroduce it.
+   */
+  it("no longer exists as a repository operation", () => {
+    const methods = Object.getOwnPropertyNames(TripRepository.prototype);
+
+    expect(methods).not.toContain("shareTarNummerWithinGroup");
+  });
+
+  describe("editing one leg of a group", () => {
+    it("writes the number on that Trip only", async () => {
+      const stored = groupedPair();
       const { service } = buildService(stored);
 
       await service.update(TRIP_A, { tarNummer: "TAR123" });
 
       expect(stored[0].tarNummer).toBe("TAR123");
-      expect(stored[1].tarNummer).toBe("TAR123");
+      expect(stored[1].tarNummer).toBeNull();
     });
 
-    /** Clearing is a statement too: the group has no TAR-nummer any more. */
-    it("clears the other legs when the value is cleared", async () => {
-      const stored = [
-        row(TRIP_A, { tripGroupId: GROUP_ID, tarNummer: "TAR123" }),
-        row(TRIP_B, { tripGroupId: GROUP_ID, tarNummer: "TAR123" }),
-      ];
+    /** The two legs may legitimately state different numbers. */
+    it("lets the two legs hold different numbers", async () => {
+      const stored = groupedPair();
+      const { service } = buildService(stored);
+
+      await service.update(TRIP_A, { tarNummer: "TAR-A" });
+      await service.update(TRIP_B, { tarNummer: "TAR-B" });
+
+      expect(stored[0].tarNummer).toBe("TAR-A");
+      expect(stored[1].tarNummer).toBe("TAR-B");
+    });
+
+    it("lets one leg state a number while the other states none", async () => {
+      const stored = groupedPair();
+      const { service } = buildService(stored);
+
+      await service.update(TRIP_B, { tarNummer: "TAR-B" });
+
+      expect(stored[0].tarNummer).toBeNull();
+      expect(stored[1].tarNummer).toBe("TAR-B");
+    });
+
+    /*
+     * Clearing used to empty the whole group, which was the most destructive
+     * half of the old rule: removing a number on one leg silently removed a
+     * different operator's number on another.
+     */
+    it("clears only the Trip it was cleared on", async () => {
+      const stored = groupedPair([{ tarNummer: "TAR-A" }, { tarNummer: "TAR-B" }]);
       const { service } = buildService(stored);
 
       await service.update(TRIP_A, { tarNummer: null });
 
+      expect(stored[0].tarNummer).toBeNull();
+      expect(stored[1].tarNummer).toBe("TAR-B");
+    });
+
+    it("clears the other leg without touching the first", async () => {
+      const stored = groupedPair([{ tarNummer: "TAR-A" }, { tarNummer: "TAR-B" }]);
+      const { service } = buildService(stored);
+
+      await service.update(TRIP_B, { tarNummer: null });
+
+      expect(stored[0].tarNummer).toBe("TAR-A");
       expect(stored[1].tarNummer).toBeNull();
     });
 
-    /** One statement for the whole group, however many members it has. */
-    it("writes the group in a single query", async () => {
-      const stored = [
-        row(TRIP_A, { tripGroupId: GROUP_ID }),
-        row(TRIP_B, { tripGroupId: GROUP_ID }),
-        row("33333333-3333-4333-8333-333333333333", { tripGroupId: GROUP_ID }),
-      ];
-      const { service, shareTarNummerWithinGroup } = buildService(stored);
+    /** Whitespace is still absence; that semantic is unchanged. */
+    it("treats a blank entry as absence, still on that Trip only", async () => {
+      const stored = groupedPair([{ tarNummer: "TAR-A" }, { tarNummer: "TAR-B" }]);
+      const { service } = buildService(stored);
 
-      await service.update(TRIP_A, { tarNummer: "TAR123" });
+      await service.update(TRIP_A, { tarNummer: null });
 
-      expect(shareTarNummerWithinGroup).toHaveBeenCalledTimes(1);
+      expect(stored[0].tarNummer).toBeNull();
+      expect(stored[1].tarNummer).toBe("TAR-B");
     });
 
-    it("does it in the same transaction as the edit", async () => {
-      const stored = [
-        row(TRIP_A, { tripGroupId: GROUP_ID }),
-        row(TRIP_B, { tripGroupId: GROUP_ID }),
-      ];
+    /**
+     * No group read and no group write. The edit is one plain update, so a
+     * grouped Trip costs exactly what an ungrouped one costs.
+     */
+    it("runs no group transaction", async () => {
+      const stored = groupedPair();
       const { service, repository } = buildService(stored);
 
       await service.update(TRIP_A, { tarNummer: "TAR123" });
 
-      expect(repository.runInTransaction).toHaveBeenCalledTimes(1);
+      expect(repository.runInTransaction).not.toHaveBeenCalled();
+      expect(repository.findManyByIds).not.toHaveBeenCalled();
+      expect(repository.update).toHaveBeenCalledTimes(1);
+      expect(repository.update).toHaveBeenCalledWith(
+        TRIP_A,
+        expect.objectContaining({ tarNummer: "TAR123" }),
+      );
     });
 
-    /** A standalone Trip has nobody to tell. */
-    it("leaves a Trip outside any group alone", async () => {
-      const stored = [row(TRIP_A), row(TRIP_B)];
-      const { service, shareTarNummerWithinGroup } = buildService(stored);
+    /** An ungrouped Trip behaves identically, as it always did. */
+    it("writes a standalone Trip the same way", async () => {
+      const stored = [row(TRIP_A)];
+      const { service, repository } = buildService(stored);
 
       await service.update(TRIP_A, { tarNummer: "TAR123" });
 
-      expect(shareTarNummerWithinGroup).not.toHaveBeenCalled();
-      expect(stored[1].tarNummer).toBeNull();
+      expect(stored[0].tarNummer).toBe("TAR123");
+      expect(repository.runInTransaction).not.toHaveBeenCalled();
     });
 
-    /** Editing something else must not touch the group's TAR-nummer. */
-    it("does not share when the edit is about another field", async () => {
-      const stored = [
-        row(TRIP_A, { tripGroupId: GROUP_ID }),
-        row(TRIP_B, { tripGroupId: GROUP_ID, tarNummer: "TAR123" }),
-      ];
-      const { service, shareTarNummerWithinGroup } = buildService(stored);
+    /** Editing anything else never touches the number either. */
+    it("leaves both numbers alone when another field is edited", async () => {
+      const stored = groupedPair([{ tarNummer: "TAR-A" }, { tarNummer: "TAR-B" }]);
+      const { service } = buildService(stored);
 
-      await service.update(TRIP_A, { internalNotes: "call the customer" });
+      await service.update(TRIP_A, { distanceKm: 120 });
 
-      expect(shareTarNummerWithinGroup).not.toHaveBeenCalled();
-      expect(stored[1].tarNummer).toBe("TAR123");
+      expect(stored[0].tarNummer).toBe("TAR-A");
+      expect(stored[1].tarNummer).toBe("TAR-B");
     });
   });
 
-  describe("when a group is formed", () => {
-    it("carries the one stated value onto the empty legs", async () => {
+  describe("forming a group", () => {
+    it("copies nothing onto the Trips that join it", async () => {
       const stored = [row(TRIP_A, { tarNummer: "TAR123" }), row(TRIP_B)];
       const { service } = buildService(stored);
 
       await service.createGroup([TRIP_A, TRIP_B]);
 
       expect(stored[0].tarNummer).toBe("TAR123");
-      expect(stored[1].tarNummer).toBe("TAR123");
+      expect(stored[1].tarNummer).toBeNull();
     });
 
-    it("does nothing when both legs are empty", async () => {
-      const stored = [row(TRIP_A), row(TRIP_B)];
-      const { service, shareTarNummerWithinGroup } = buildService(stored);
-
-      await service.createGroup([TRIP_A, TRIP_B]);
-
-      expect(shareTarNummerWithinGroup).not.toHaveBeenCalled();
-      expect(stored.every((trip) => trip.tarNummer === null)).toBe(true);
-    });
-
-    it("does nothing when both legs already agree", async () => {
+    it("leaves two different numbers exactly as they were", async () => {
       const stored = [
-        row(TRIP_A, { tarNummer: "TAR123" }),
-        row(TRIP_B, { tarNummer: "TAR123" }),
+        row(TRIP_A, { tarNummer: "TAR-A" }),
+        row(TRIP_B, { tarNummer: "TAR-B" }),
       ];
       const { service } = buildService(stored);
 
       await service.createGroup([TRIP_A, TRIP_B]);
 
-      expect(stored.every((trip) => trip.tarNummer === "TAR123")).toBe(true);
+      expect(stored[0].tarNummer).toBe("TAR-A");
+      expect(stored[1].tarNummer).toBe("TAR-B");
     });
 
-    /**
-     * ── THE CONFLICT ──────────────────────────────────────────────────────
-     * No rule exists for which value wins, so neither is touched and the
-     * grouping proceeds exactly as it always did. Refusing it instead would
-     * change how groups are formed, which is not this rule's business.
-     */
-    describe("when the legs state different numbers", () => {
-      const conflicting = () => [
-        row(TRIP_A, { tarNummer: "TAR123" }),
-        row(TRIP_B, { tarNummer: "TAR456" }),
-      ];
+    /** Grouping still does what grouping does. */
+    it("still assigns the group itself", async () => {
+      const stored = [row(TRIP_A, { tarNummer: "TAR123" }), row(TRIP_B)];
+      const { service, repository } = buildService(stored);
 
-      it("overwrites neither", async () => {
-        const stored = conflicting();
-        const { service } = buildService(stored);
+      await service.createGroup([TRIP_A, TRIP_B]);
 
-        await service.createGroup([TRIP_A, TRIP_B]);
-
-        expect(stored[0].tarNummer).toBe("TAR123");
-        expect(stored[1].tarNummer).toBe("TAR456");
-      });
-
-      it("still forms the group", async () => {
-        const stored = conflicting();
-        const { service } = buildService(stored);
-
-        await service.createGroup([TRIP_A, TRIP_B]);
-
-        expect(stored.every((trip) => trip.tripGroupId === GROUP_ID)).toBe(true);
-      });
-
-      it("warns, so somebody can reconcile it", async () => {
-        const { service, logger } = buildService(conflicting());
-
-        await service.createGroup([TRIP_A, TRIP_B]);
-
-        expect(logger.warn).toHaveBeenCalledWith(
-          expect.stringContaining("different TAR-nummers"),
-          expect.objectContaining({ distinctCount: 2 }),
-        );
-      });
-
-      /** A TAR-nummer is business data and never reaches the log. */
-      it("logs the count, never the values", async () => {
-        const { service, logger } = buildService(conflicting());
-
-        await service.createGroup([TRIP_A, TRIP_B]);
-
-        expect(JSON.stringify(logger.warn.mock.calls)).not.toMatch(/TAR123|TAR456/);
-      });
+      expect(repository.assignToGroup).toHaveBeenCalledWith(
+        [TRIP_A, TRIP_B],
+        GROUP_ID,
+      );
+      expect(stored[0].tripGroupId).toBe(GROUP_ID);
+      expect(stored[1].tripGroupId).toBe(GROUP_ID);
     });
-  });
 
-  /**
-   * ── IT PRICES NOTHING ─────────────────────────────────────────────────────
-   * Sharing a TAR-nummer is a data rule. It holds no Engine and no snapshot
-   * writer, so no historical Trip is recalculated by it — a CLOSED Trip keeps
-   * the amounts it was priced with until an explicit reprocess.
-   */
-  it("never recalculates pricing", async () => {
-    const stored = [
-      row(TRIP_A, { tripGroupId: GROUP_ID, status: TripStatus.CLOSED }),
-      row(TRIP_B, { tripGroupId: GROUP_ID, status: TripStatus.CLOSED }),
-    ];
-    const { service, recalculation } = buildService(stored);
+    it("writes no Trip field while grouping", async () => {
+      const stored = [row(TRIP_A, { tarNummer: "TAR123" }), row(TRIP_B)];
+      const { service, repository } = buildService(stored);
 
-    await service.update(TRIP_A, { tarNummer: "TAR123" });
+      await service.createGroup([TRIP_A, TRIP_B]);
 
-    expect(recalculation.recalculate).not.toHaveBeenCalled();
-    expect(stored[1].tarNummer).toBe("TAR123");
+      expect(repository.update).not.toHaveBeenCalled();
+    });
+
+    /** Nothing about a TAR-nummer reprices anything. */
+    it("reprices nothing", async () => {
+      const stored = [row(TRIP_A, { tarNummer: "TAR123" }), row(TRIP_B)];
+      const { service, recalculation } = buildService(stored);
+
+      await service.createGroup([TRIP_A, TRIP_B]);
+
+      expect(recalculation.recalculate).not.toHaveBeenCalled();
+    });
   });
 });

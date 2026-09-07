@@ -255,15 +255,18 @@ describe("Trip management", () => {
       expect(screen.queryByRole("button", { name: "Annuleren" })).not.toBeInTheDocument();
     });
 
-    it("offers reopening for a CANCELLED trip", async () => {
-      getTripMock.mockResolvedValue(buildTrip({ status: "CANCELLED" }));
+    it.each(["CANCELLED", "CLOSED"] as const)(
+      "offers reopening for a %s trip",
+      async (status) => {
+        getTripMock.mockResolvedValue(buildTrip({ status }));
 
-      render(<TripDetailPage />);
+        render(<TripDetailPage />);
 
-      expect(
-        await screen.findByRole("button", { name: "Openen" }),
-      ).toBeInTheDocument();
-    });
+        expect(
+          await screen.findByRole("button", { name: "Heropenen" }),
+        ).toBeInTheDocument();
+      },
+    );
 
     it("offers only restoration for a DELETED trip", async () => {
       getTripMock.mockResolvedValue(buildTrip({ status: "DELETED" }));
@@ -464,13 +467,16 @@ describe("Trip management", () => {
       expect(deleteTripMock).not.toHaveBeenCalled();
     });
 
-    it("does not offer deletion for a CLOSED trip", async () => {
+    /** A CLOSED trip is deletable now, through the same soft delete. */
+    it("offers deletion for a CLOSED trip", async () => {
       getTripMock.mockResolvedValue(buildTrip({ status: "CLOSED" }));
 
       render(<TripDetailPage />);
       await screen.findByText("Rit ANRDUB2602247");
 
-      expect(screen.queryByRole("button", { name: "Verwijderen" })).not.toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: "Verwijderen" }),
+      ).toBeInTheDocument();
     });
 
     it("restores a deleted trip", async () => {

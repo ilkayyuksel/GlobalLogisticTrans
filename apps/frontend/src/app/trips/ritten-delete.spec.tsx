@@ -104,19 +104,28 @@ describe("deleting a Trip from the Ritten list", () => {
      * Directly, without reopening first: CANCELLED → OPEN → DELETED moved the
      * Trip through a state it was never in on the way past.
      */
-    it("is offered on a CANCELLED Trip, beside Openen", async () => {
+    it("is offered on a CANCELLED Trip, beside Heropenen", async () => {
       await showTrip({ status: "CANCELLED" });
 
       expect(
-        screen.getByRole("button", { name: "Openen ANRDUB2602247" }),
+        screen.getByRole("button", { name: "Heropenen ANRDUB2602247" }),
       ).toBeInTheDocument();
       expect(deleteButton()).toBeEnabled();
     });
 
-    it("is not offered on a CLOSED Trip", async () => {
+    /**
+     * A CLOSED Trip too. It used to be excluded on the reasoning that finished,
+     * priced work is not tidied away — which left a Trip created in error with
+     * no way out of the lists at all. The delete is the same soft delete, and
+     * the pricing snapshot survives it.
+     */
+    it("is offered on a CLOSED Trip, beside Heropenen", async () => {
       await showTrip({ status: "CLOSED" });
 
-      expect(deleteButton()).toBeNull();
+      expect(
+        screen.getByRole("button", { name: "Heropenen ANRDUB2602247" }),
+      ).toBeInTheDocument();
+      expect(deleteButton()).toBeEnabled();
     });
 
     it("is not offered on a DELETED Trip", async () => {

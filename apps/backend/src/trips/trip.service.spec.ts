@@ -11,7 +11,6 @@ import {
   DuplicateBookingNumberException,
   InactiveAssignmentException,
   InvalidTripStatusTransitionException,
-  TripNotDeletableException,
   TripNotDeletedException,
   TripNotFoundException,
   UnknownPdfDocumentException,
@@ -1004,20 +1003,61 @@ describe("TripService", () => {
         buildTrip({ status: TripStatus.CLOSED, isLooseTrip: true }),
       );
 
+      // CLOSED reopens, but it still does not go straight to CANCELLED.
       await expect(
-        service.changeStatus(TRIP_ID, { status: TripStatus.OPEN }),
+        service.changeStatus(TRIP_ID, { status: TripStatus.CANCELLED }),
       ).rejects.toBeInstanceOf(InvalidTripStatusTransitionException);
     });
 
-    it("rejects reopening a CLOSED Trip", async () => {
-      repository.findById.mockResolvedValue(
-        buildTrip({ status: TripStatus.CLOSED }),
-      );
+    /**
+     * Reopening a CLOSED Trip, which used to be refused outright.
+     *
+     * It writes the status column and nothing else: the Trip keeps its id, its
+     * identity, its group and its pricing snapshot, and no recalculation is
+     * announced — `announceIfClosed` fires only when a Trip BECOMES closed.
+     */
+    describe("reopening a CLOSED Trip", () => {
+      beforeEach(() => {
+        repository.findById.mockResolvedValue(
+          buildTrip({ status: TripStatus.CLOSED }),
+        );
+        repository.setStatus.mockResolvedValue(
+          buildTrip({ status: TripStatus.OPEN }),
+        );
+      });
 
-      await expect(
-        service.changeStatus(TRIP_ID, { status: TripStatus.OPEN }),
-      ).rejects.toBeInstanceOf(InvalidTripStatusTransitionException);
-      expect(repository.setStatus).not.toHaveBeenCalled();
+      it("moves it to OPEN", async () => {
+        const result = await service.changeStatus(TRIP_ID, {
+          status: TripStatus.OPEN,
+        });
+
+        expect(result.status).toBe(TripStatus.OPEN);
+        expect(repository.setStatus).toHaveBeenCalledWith(
+          TRIP_ID,
+          TripStatus.OPEN,
+        );
+      });
+
+      it("keeps the same Trip", async () => {
+        const result = await service.changeStatus(TRIP_ID, {
+          status: TripStatus.OPEN,
+        });
+
+        expect(result.id).toBe(TRIP_ID);
+      });
+
+      /** Nothing is repriced on the way out of CLOSED. */
+      it("announces nothing to the Pricing Engine", async () => {
+        await service.changeStatus(TRIP_ID, { status: TripStatus.OPEN });
+
+        expect(eventBus.publish).not.toHaveBeenCalled();
+      });
+
+      it("writes only the status column", async () => {
+        await service.changeStatus(TRIP_ID, { status: TripStatus.OPEN });
+
+        expect(repository.update).not.toHaveBeenCalled();
+      });
     });
 
     it("rejects cancelling a CLOSED Trip", async () => {
@@ -1156,16 +1196,41 @@ describe("TripService", () => {
       );
     });
 
-    /** A closed Trip has been carried out and priced; it is not tidied away. */
-    it("refuses to delete a CLOSED Trip", async () => {
+    /**
+     * A CLOSED Trip may be deleted now. It used to be refused, which left a
+     * Trip created in error with no way out of the lists at all.
+     *
+     * The same SOFT delete: the row survives, its pricing snapshot survives,
+     * and restore brings it back — to OPEN, as it does from every status.
+     */
+    it("soft-deletes a CLOSED Trip", async () => {
       repository.findById.mockResolvedValue(
         buildTrip({ status: TripStatus.CLOSED }),
       );
-
-      await expect(service.softDelete(TRIP_ID)).rejects.toBeInstanceOf(
-        TripNotDeletableException,
+      repository.setStatus.mockResolvedValue(
+        buildTrip({ status: TripStatus.DELETED }),
       );
-      expect(repository.setStatus).not.toHaveBeenCalled();
+
+      const result = await service.softDelete(TRIP_ID);
+
+      expect(result.status).toBe(TripStatus.DELETED);
+      expect(repository.setStatus).toHaveBeenCalledWith(
+        TRIP_ID,
+        TripStatus.DELETED,
+      );
+    });
+
+    it("reprices nothing when a CLOSED Trip is deleted", async () => {
+      repository.findById.mockResolvedValue(
+        buildTrip({ status: TripStatus.CLOSED }),
+      );
+      repository.setStatus.mockResolvedValue(
+        buildTrip({ status: TripStatus.DELETED }),
+      );
+
+      await service.softDelete(TRIP_ID);
+
+      expect(eventBus.publish).not.toHaveBeenCalled();
     });
 
     it("is idempotent", async () => {

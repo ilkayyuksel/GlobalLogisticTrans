@@ -22,6 +22,7 @@ describe("Trip status rules", () => {
     [TripStatus.OPEN, TripStatus.CLOSED],
     [TripStatus.OPEN, TripStatus.CANCELLED],
     [TripStatus.CANCELLED, TripStatus.OPEN],
+    [TripStatus.CLOSED, TripStatus.OPEN],
   ];
 
   it.each(ALLOWED)("permits %s to %s", (from, to) => {
@@ -38,9 +39,15 @@ describe("Trip status rules", () => {
     );
   });
 
-  it("treats CLOSED as terminal, as the model states explicitly", () => {
-    expect(canTransition(TripStatus.CLOSED, TripStatus.OPEN)).toBe(false);
-    expect(allowedTransitionsFrom(TripStatus.CLOSED)).toEqual([]);
+  /**
+   * CLOSED used to be terminal. It reopens now — and only to OPEN, so
+   * cancelling a reopened Trip stays a second, separate decision.
+   */
+  it("reopens a CLOSED Trip to OPEN, and to nothing else", () => {
+    expect(canTransition(TripStatus.CLOSED, TripStatus.OPEN)).toBe(true);
+    expect(allowedTransitionsFrom(TripStatus.CLOSED)).toEqual([
+      TripStatus.OPEN,
+    ]);
   });
 
   it("never reaches DELETED through a transition", () => {
@@ -73,14 +80,17 @@ describe("Trip status rules", () => {
    * administrator recovering a record, not an undo of the cancellation.
    * ──────────────────────────────────────────────────────────────────────────
    */
-  it("allows deletion from OPEN and from CANCELLED", () => {
+  it("allows deletion from OPEN, CANCELLED and CLOSED", () => {
     expect([...DELETABLE_FROM_STATUSES].sort()).toEqual(
-      [TripStatus.OPEN, TripStatus.CANCELLED].sort(),
+      [TripStatus.OPEN, TripStatus.CANCELLED, TripStatus.CLOSED].sort(),
     );
   });
 
-  it("never allows deletion of a CLOSED or an already DELETED Trip", () => {
-    expect(DELETABLE_FROM_STATUSES).not.toContain(TripStatus.CLOSED);
+  /**
+   * Deleting an already deleted Trip is not a transition — `softDelete`
+   * answers it idempotently — so DELETED must never appear here.
+   */
+  it("never allows deletion of an already DELETED Trip", () => {
     expect(DELETABLE_FROM_STATUSES).not.toContain(TripStatus.DELETED);
   });
 

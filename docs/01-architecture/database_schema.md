@@ -457,7 +457,7 @@ These cannot be expressed as simple database constraints:
 
 - **Booking Number uniqueness** — unique per Trip, except that all Trips sharing a `trip_group_id` share the same value.
 - **Vehicle overlap** — a Vehicle may not be assigned to two Trips whose `planning_date` + `start_time` / `end_time` intervals overlap.
-- **Status transitions** — invalid transitions are rejected; `CLOSED → OPEN` is not allowed.
+- **Status transitions** — invalid transitions are rejected; `CLOSED → CANCELLED` is not allowed (a closed Trip is reopened first). `CLOSED → OPEN` IS allowed and touches no pricing.
 - **Assignment eligibility** — inactive Vehicles and inactive Drivers cannot be assigned to new Trips; a Driver on Vacation cannot be assigned.
 - **Manual field protection** — parser updates never overwrite `planning_date`, `driver_id`, `vehicle_id`, `waiting_time_minutes`, `distance_km`, `container_number`, `internal_notes`, or Custom Property assignments.
 - **Immutability** — `original_planning_date`, `booking_number` and `pdf_document_id` never change after creation.

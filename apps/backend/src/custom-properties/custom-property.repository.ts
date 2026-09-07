@@ -163,6 +163,46 @@ export class CustomPropertyRepository {
     });
   }
 
+  /**
+   * How many Trips currently carry this property.
+   *
+   * `trip_custom_property.custom_property_id` is NOT NULL with ON DELETE
+   * RESTRICT, so a single row here makes a physical delete impossible. Counted
+   * rather than merely detected, because the number is what tells an operator
+   * how much work withdrawing the property would be.
+   */
+  countAssignments(id: string): Promise<number> {
+    return this.prisma.tripCustomProperty.count({
+      where: { customPropertyId: id },
+    });
+  }
+
+  /**
+   * How many FROZEN pricing lines name this property.
+   *
+   * `trip_pricing_item` is the historical snapshot: its `description` and
+   * `amount` are already denormalised onto the row, so the money and the label
+   * survive without the property. The foreign key is RESTRICT all the same, and
+   * this module does not weaken it — see `remove` in the service for why a
+   * priced-in-history property is refused rather than unlinked.
+   */
+  countPricingItems(id: string): Promise<number> {
+    return this.prisma.tripPricingItem.count({
+      where: { customPropertyId: id },
+    });
+  }
+
+  /**
+   * PHYSICALLY removes the row. There is no soft flag involved.
+   *
+   * Both foreign keys pointing here are RESTRICT, so the database is the final
+   * guard: if the service's checks were ever to miss a reference, this throws
+   * P2003 rather than leaving the data half-removed.
+   */
+  delete(id: string): Promise<CustomProperty> {
+    return this.prisma.customProperty.delete({ where: { id } });
+  }
+
   private buildWhere(
     filter: FindCustomPropertiesFilter,
   ): Prisma.CustomPropertyWhereInput {
