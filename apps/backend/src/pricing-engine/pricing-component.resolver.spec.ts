@@ -99,6 +99,7 @@ describe("PricingComponentResolver", () => {
   let customPropertyService: { findById: jest.Mock };
   let trips: { findByGroupId: jest.Mock };
   let logger: { setContext: jest.Mock; log: jest.Mock; warn: jest.Mock };
+  let tarCharges: { hasBeenChargedToday: jest.Mock };
   let resolver: PricingComponentResolver;
 
   beforeEach(() => {
@@ -123,6 +124,8 @@ describe("PricingComponentResolver", () => {
       resolveDistanceRatePerKm: jest.fn().mockResolvedValue("1.85"),
     };
     logger = { setContext: jest.fn(), log: jest.fn(), warn: jest.fn() };
+    // Nothing has been charged today unless a test says otherwise.
+    tarCharges = { hasBeenChargedToday: jest.fn().mockResolvedValue(false) };
 
     resolver = new PricingComponentResolver(
       routePricingService as unknown as RoutePricingService,
@@ -130,6 +133,7 @@ describe("PricingComponentResolver", () => {
       customPropertyService as unknown as CustomPropertyService,
       trips as unknown as TripReadService,
       ruleResolver as unknown as PricingRuleResolver,
+      tarCharges as never,
       logger as unknown as AppLoggerService,
     );
   });
@@ -561,6 +565,10 @@ describe("PricingComponentResolver", () => {
         "customPropertyService",
         "trips",
         "ruleResolver",
+        // The same-day TAR check. Read-only by construction — see
+        // `tar-charge-read.repository.spec.ts`, which pins that it exposes no
+        // create, update or delete, and that it selects an id and nothing else.
+        "tarCharges",
         "logger",
       ]);
     });

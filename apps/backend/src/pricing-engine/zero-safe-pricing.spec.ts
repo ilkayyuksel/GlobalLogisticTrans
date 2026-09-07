@@ -151,6 +151,8 @@ describe("a CLOSED Trip on an unconfigured route", () => {
         customProperties as unknown as CustomPropertyService,
         trips as unknown as TripReadService,
         ruleResolver,
+        // Nothing has been charged today unless a test says so.
+        { hasBeenChargedToday: jest.fn().mockResolvedValue(false) } as never,
         appLogger,
       ),
       new RouteCostResolver(routeCosts as never, appLogger),
@@ -492,6 +494,7 @@ describe("the two legs of a Combination", () => {
         } as never,
         trips,
         ruleResolver,
+        { hasBeenChargedToday: jest.fn().mockResolvedValue(false) } as never,
         logger,
       ),
       new RouteCostResolver(

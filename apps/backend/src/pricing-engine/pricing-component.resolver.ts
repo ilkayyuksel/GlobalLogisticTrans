@@ -4,7 +4,9 @@ import { CustomPropertyService } from "../custom-properties/custom-property.serv
 import { AppLoggerService } from "../logger/app-logger.service";
 import { RoutePricingService } from "../route-pricing/route-pricing.service";
 import { TripCustomPropertyReadService } from "../trip-custom-properties/trip-custom-property-read.service";
-import { hasTarNummer } from "../trips/tar-nummer";
+import { meaningfulTarNummer } from "../trips/tar-nummer";
+import { toUtcDate } from "../common/dates";
+import { TarChargeReadRepository } from "./tar-charge-read.repository";
 import { TripReadService, TripReadView } from "../trips/trip-read.service";
 import {
   CombinationLeg,
@@ -56,6 +58,7 @@ export class PricingComponentResolver {
     private readonly customPropertyService: CustomPropertyService,
     private readonly trips: TripReadService,
     private readonly ruleResolver: PricingRuleResolver,
+    private readonly tarCharges: TarChargeReadRepository,
     private readonly logger: AppLoggerService,
   ) {
     this.logger.setContext(PricingComponentResolver.name);
@@ -201,8 +204,49 @@ export class PricingComponentResolver {
      * the same leg as always — and one whose delivery leg states none produces
      * no TAR charge at all, however the collection leg is filled in.
      */
-    if (!hasTarNummer(trip.tarNummer)) {
+    const tarNummer = meaningfulTarNummer(trip.tarNummer);
+
+    if (tarNummer === null) {
       return withoutIt;
+    }
+
+    /*
+     * ── ONE TAR NUMBER IS CHARGED ONCE A DAY ────────────────────────────────
+     * The number is not globally unique — it is unique for CHARGING purposes
+     * within its operational day. Several Trips legitimately carry the same
+     * one, and the charge belongs to the first of them that was actually
+     * priced; the rest state the number without paying for it again.
+     *
+     * "Already charged" is a CHARGE, never the mere presence of the string:
+     * see `TarChargeReadRepository`, which looks for a pricing item naming the
+     * automatic property. A number typed on a Trip nobody ever closed has been
+     * charged to nobody and must not block a real one.
+     *
+     * The day is `planningDate` — the operational day the Ritten views group
+     * by. `originalPlanningDate` is deliberately not used: the schema keeps it
+     * as the immutable IMPORT date, so a Trip an operator moved to another day
+     * would still be judged against the day it arrived for.
+     *
+     * A Trip with no planning date is not on any day, so there is nothing to
+     * compare it against and the charge applies as it always did.
+     */
+    if (trip.planningDate !== null) {
+      const alreadyCharged = await this.tarCharges.hasBeenChargedToday({
+        tripId: trip.id,
+        planningDate: toUtcDate(trip.planningDate),
+        tarNummer,
+        automaticCustomPropertyId: rules.automaticCustomPropertyId,
+      });
+
+      if (alreadyCharged) {
+        this.logger.log("TAR already charged on this day; not charged again", {
+          tripId: trip.id,
+          planningDate: trip.planningDate,
+          // The NUMBER is business data and is never logged.
+        });
+
+        return withoutIt;
+      }
     }
 
     return [...withoutIt, await this.automaticProperty(rules)];
