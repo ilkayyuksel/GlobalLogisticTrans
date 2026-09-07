@@ -53,7 +53,7 @@ describe("pricing a Cost Confirmation", () => {
 
   it("produces one line carrying the confirmed amount", () => {
     const lines = calculator.calculate(
-      buildContext({ ccNumber: "CC4139505", amount: "27.50" }),
+      buildContext({ ccNumbers: ["CC4139505"], amount: "27.50" }),
     );
 
     expect(lines).toHaveLength(1);
@@ -64,7 +64,7 @@ describe("pricing a Cost Confirmation", () => {
   /** The reference explains WHICH document an amount came from. */
   it("names the confirmation in the description", () => {
     const lines = calculator.calculate(
-      buildContext({ ccNumber: "CC4149079", amount: "165.00" }),
+      buildContext({ ccNumbers: ["CC4149079"], amount: "165.00" }),
     );
 
     expect(lines[0].description).toBe("Cost confirmation CC4149079");
@@ -72,7 +72,7 @@ describe("pricing a Cost Confirmation", () => {
 
   it("takes the amount verbatim rather than deriving one", () => {
     const lines = calculator.calculate(
-      buildContext({ ccNumber: "CC1", amount: "165.00" }),
+      buildContext({ ccNumbers: ["CC1"], amount: "165.00" }),
     );
 
     expect(lines[0].amount.toFixed(2)).toBe("165.00");
@@ -91,7 +91,7 @@ describe("pricing a Cost Confirmation", () => {
   /** `cost_confirmation.trip_id` is unique, so one is all there can be. */
   it("never produces more than one line", () => {
     const lines = calculator.calculate(
-      buildContext({ ccNumber: "CC1", amount: "10.00" }),
+      buildContext({ ccNumbers: ["CC1"], amount: "10.00" }),
     );
 
     expect(lines).toHaveLength(1);
@@ -100,7 +100,7 @@ describe("pricing a Cost Confirmation", () => {
   /** It belongs to no Custom Property; that reference explains a different charge. */
   it("leaves the custom property reference empty", () => {
     const lines = calculator.calculate(
-      buildContext({ ccNumber: "CC1", amount: "10.00" }),
+      buildContext({ ccNumbers: ["CC1"], amount: "10.00" }),
     );
 
     expect(lines[0].customPropertyId).toBeNull();
@@ -108,7 +108,7 @@ describe("pricing a Cost Confirmation", () => {
 
   /** A log line identifies the document; the amount is never in it. */
   it("never logs the amount", () => {
-    calculator.calculate(buildContext({ ccNumber: "CC1", amount: "1234.56" }));
+    calculator.calculate(buildContext({ ccNumbers: ["CC1"], amount: "1234.56" }));
 
     expect(JSON.stringify(logger.log.mock.calls)).not.toContain("1234.56");
   });

@@ -481,13 +481,20 @@ model Trip {
 model CostConfirmation {
   id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
 
-  /// UNIQUE: a Trip has at most ONE confirmed cost.
+  /// A Trip may receive SEVERAL confirmations over time, and every one is kept.
   ///
-  /// Eucon confirms a Trip's waiting time once, and the first confirmation is
-  /// the authoritative one. A second, different confirmation for the same Trip
-  /// is refused rather than added, overwritten or summed — and the constraint
-  /// is what guarantees it, so no path through the code can produce a second.
-  tripId        String @unique @map("trip_id") @db.Uuid
+  /// This column was UNIQUE, on the rule that Eucon confirms a Trip once and a
+  /// second confirmation is refused. That is withdrawn: confirmations arrive in
+  /// instalments — €100, then €25, then €40 — and the Trip is worth their SUM.
+  /// Refusing the later ones lost real money and real evidence.
+  ///
+  /// Nothing else about the row changed. Each confirmation still carries its
+  /// own document, its own `cc_number` and its own amount, and none is ever
+  /// updated or deleted; a correction is a new row, as it always was.
+  ///
+  /// What stops the same document counting twice is `cc_number`, which is
+  /// Eucon's own reference — see `CostConfirmationService.record`.
+  tripId        String @map("trip_id") @db.Uuid
   /// The confirmation document itself. Non-null: an amount whose evidence
   /// cannot be produced is not a confirmation.
   pdfDocumentId String @map("pdf_document_id") @db.Uuid
@@ -511,6 +518,10 @@ model CostConfirmation {
   trip        Trip        @relation(fields: [tripId], references: [id], onDelete: Restrict)
   pdfDocument PdfDocument @relation(fields: [pdfDocumentId], references: [id], onDelete: Restrict)
 
+  /// The Ritten list shows the LATEST confirmation and pricing sums them all,
+  /// so both read by Trip, newest first. `received_at` is written by the
+  /// importer at the moment the document is processed.
+  @@index([tripId, receivedAt(sort: Desc)])
   @@index([pdfDocumentId])
   @@map("cost_confirmation")
 }

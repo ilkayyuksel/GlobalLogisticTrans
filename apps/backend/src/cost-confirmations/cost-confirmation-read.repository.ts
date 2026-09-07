@@ -23,14 +23,24 @@ export class CostConfirmationReadRepository {
   constructor(private readonly prisma: PrismaService) {}
 
   /**
-   * The confirmation of one Trip, or null.
+   * EVERY confirmation of one Trip, newest first.
    *
-   * `findUnique` on `trip_id`, which is unique: a Trip has at most one
-   * confirmed cost, so the question is never "which one".
+   * It was `findUnique` on a unique `trip_id`. A Trip may now hold several and
+   * is worth their SUM, so the Engine reads them all — one query for the Trip
+   * it is pricing, which is what it already cost.
+   *
+   * The order is the arrival order and matters to the caller: the breakdown
+   * names the confirmations newest first, the same way the Ritten row picks
+   * the latest.
    */
-  findByTrip(tripId: string): Promise<CostConfirmationPricingRow | null> {
-    return this.prisma.costConfirmation.findUnique({
+  findAllByTrip(tripId: string): Promise<CostConfirmationPricingRow[]> {
+    return this.prisma.costConfirmation.findMany({
       where: { tripId },
+      orderBy: [
+        { receivedAt: "desc" },
+        { createdAt: "desc" },
+        { id: "desc" },
+      ],
       select: PRICING_COLUMNS,
     });
   }

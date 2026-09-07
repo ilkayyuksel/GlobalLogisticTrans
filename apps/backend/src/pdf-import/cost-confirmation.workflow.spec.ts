@@ -600,13 +600,31 @@ describe("every real Cost Confirmation, through the real workflow", () => {
     });
   });
 
+  /**
+   * SEVERAL confirmations for one Trip, through the real workflow.
+   *
+   * A Trip used to hold exactly one confirmed cost and a second was refused.
+   * That is withdrawn: Eucon confirms in instalments, every arrival is kept,
+   * and the Trip is worth their sum.
+   */
   describe("a second, DIFFERENT confirmation for one Trip", () => {
-    /**
-     * A Trip has exactly one confirmed cost. Eucon confirms the waiting time
-     * once, and the first confirmation is the authoritative one — so a second
-     * with another number is refused rather than added, overwritten or summed.
-     */
-    it("is refused, and the first one stands", async () => {
+    /** Whatever `seedTrip` hands back — a Trip row as this harness builds one. */
+    type SeededTrip = Awaited<ReturnType<typeof seedTrip>>;
+
+    /** Imports EXPECTED[0], then re-aims the Trip and imports EXPECTED[index]. */
+    async function alsoConfirm(
+      trip: SeededTrip,
+      index: number,
+    ): Promise<void> {
+      retarget(trip, EXPECTED[index]);
+
+      await harness.importer.confirmCost(
+        readConfirmation(EXPECTED[index].file),
+        EXPECTED[index].file,
+      );
+    }
+
+    async function seedWithFirstConfirmation(): Promise<SeededTrip> {
       const trip = await seedTrip(EXPECTED[0]);
 
       await harness.importer.confirmCost(
@@ -614,113 +632,104 @@ describe("every real Cost Confirmation, through the real workflow", () => {
         EXPECTED[0].file,
       );
 
-      // The second document names another transport, so the Trip is given that
-      // document's identity — booking, ordered date and container. The workflow
-      // that follows is exactly the same, and the Trip already has a cost.
-      retarget(trip, EXPECTED[2]);
+      return trip;
+    }
 
-      await expect(
-        harness.importer.confirmCost(
-          readConfirmation(EXPECTED[2].file),
-          EXPECTED[2].file,
-        ),
-      ).rejects.toThrow(/already has cost confirmation CC4132482/);
+    it("is recorded, and BOTH are kept", async () => {
+      const trip = await seedWithFirstConfirmation();
 
-      expect(harness.costConfirmations).toHaveLength(1);
-      expect(harness.costConfirmations[0].ccNumber).toBe("4132482");
-      expect(String(harness.costConfirmations[0].amount)).toBe("25.00");
+      await alsoConfirm(trip, 2);
+
+      expect(harness.costConfirmations).toHaveLength(2);
+      expect(
+        harness.costConfirmations.map((row) => row.ccNumber).sort(),
+      ).toEqual(["4132482", "4139509"]);
+    });
+
+    /** Neither amount is overwritten: each row holds what its document said. */
+    it("keeps each confirmation's own amount", async () => {
+      const trip = await seedWithFirstConfirmation();
+
+      await alsoConfirm(trip, 2);
+
+      const amounts = harness.costConfirmations
+        .map((row) => String(row.amount))
+        .sort();
+
+      // Each document's own figure, from the table above — never one of them
+      // twice, and never a sum written into a row.
+      expect(amounts).toEqual(
+        [EXPECTED[0].amount, EXPECTED[2].amount].sort(),
+      );
+    });
+
+    /** Each carries its OWN document; the first PDF is not replaced. */
+    it("keeps both documents", async () => {
+      const trip = await seedWithFirstConfirmation();
+
+      await alsoConfirm(trip, 2);
+
+      const documentIds = new Set(
+        harness.costConfirmations.map((row) => row.pdfDocumentId),
+      );
+
+      expect(documentIds.size).toBe(2);
+      // The Trip's own source order, and one PDF per confirmation.
+      expect(harness.pdfDocuments).toHaveLength(3);
     });
 
     it("changes nothing at all about the Trip", async () => {
-      const trip = await seedTrip(EXPECTED[0]);
-
-      await harness.importer.confirmCost(
-        readConfirmation(EXPECTED[0].file),
-        EXPECTED[0].file,
-      );
+      const trip = await seedWithFirstConfirmation();
 
       retarget(trip, EXPECTED[2]);
       const before = { ...trip };
 
-      await expect(
-        harness.importer.confirmCost(
-          readConfirmation(EXPECTED[2].file),
-          EXPECTED[2].file,
-        ),
-      ).rejects.toThrow();
+      await harness.importer.confirmCost(
+        readConfirmation(EXPECTED[2].file),
+        EXPECTED[2].file,
+      );
 
       expect(trip).toEqual(before);
       expect(trip.waitingTimeMinutes).toBe(150);
       expect(trip.status).toBe(TripStatus.OPEN);
     });
 
-    /**
-     * The arrival is still a fact. Its document stays as the evidence for the
-     * refusal, exactly as a refused revision's does — the record and the
-     * document belong together.
-     */
-    it("records the refusal against the Trip and keeps the document", async () => {
-      const trip = await seedTrip(EXPECTED[0]);
+    /** Nothing is refused any more, so nothing records a refusal. */
+    it("records no refusal", async () => {
+      const trip = await seedWithFirstConfirmation();
 
-      await harness.importer.confirmCost(
-        readConfirmation(EXPECTED[0].file),
-        EXPECTED[0].file,
-      );
+      await alsoConfirm(trip, 2);
 
-      retarget(trip, EXPECTED[2]);
-
-      await expect(
-        harness.importer.confirmCost(
-          readConfirmation(EXPECTED[2].file),
-          EXPECTED[2].file,
+      expect(
+        harness.history.filter(
+          (entry) => entry.eventType === "COST_CONFIRMATION_REFUSED",
         ),
-      ).rejects.toThrow();
-
-      const refusal = harness.history.filter(
-        (entry) => entry.eventType === "COST_CONFIRMATION_REFUSED",
-      );
-
-      expect(refusal).toHaveLength(1);
-      expect(refusal[0].description).toContain("CC4139509");
-      expect(refusal[0].description).toContain("CC4132482");
-      /*
-       * Three: the Trip's seeded source order, the confirmation that counted,
-       * and the one that did not. The refusal points at the last.
-       */
-      expect(harness.pdfDocuments).toHaveLength(3);
-      expect(refusal[0].pdfDocumentId).toBe(harness.pdfDocuments.at(-1)?.id);
+      ).toEqual([]);
     });
 
-    it("shows both documents in the history, one of them not applied", async () => {
-      const trip = await seedTrip(EXPECTED[0]);
+    it("shows both confirmations in the history, both applied", async () => {
+      const trip = await seedWithFirstConfirmation();
 
-      await harness.importer.confirmCost(
-        readConfirmation(EXPECTED[0].file),
-        EXPECTED[0].file,
-      );
-
-      retarget(trip, EXPECTED[2]);
-      await expect(
-        harness.importer.confirmCost(
-          readConfirmation(EXPECTED[2].file),
-          EXPECTED[2].file,
-        ),
-      ).rejects.toThrow();
+      await alsoConfirm(trip, 2);
 
       const { items } = await harness.documents.findForTrip(trip.id);
-
-      /*
-       * Three documents, of which TWO are confirmations: the one that counted
-       * and the one that did not. The third is the order the Trip was created
-       * from, which was there before either arrived.
-       */
       const confirmations = items.filter(
         (item) => item.action === "COST_CONFIRMATION",
       );
 
       expect(items).toHaveLength(3);
       expect(confirmations).toHaveLength(2);
-      expect(confirmations.filter((item) => item.applied)).toHaveLength(1);
+      expect(confirmations.filter((item) => item.applied)).toHaveLength(2);
+    });
+
+    /** And the same document again still counts once. */
+    it("counts a repeat of one of them only once", async () => {
+      const trip = await seedWithFirstConfirmation();
+
+      await alsoConfirm(trip, 2);
+      await alsoConfirm(trip, 2);
+
+      expect(harness.costConfirmations).toHaveLength(2);
     });
   });
 

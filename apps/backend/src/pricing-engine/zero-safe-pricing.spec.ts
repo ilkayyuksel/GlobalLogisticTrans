@@ -276,7 +276,7 @@ describe("a CLOSED Trip on an unconfigured route", () => {
 
     it("prices a Cost Confirmation into EK", async () => {
       costConfirmations.findForTrip.mockResolvedValue({
-        ccNumber: "4139505",
+        ccNumbers: ["4139505"],
         amount: "165.00",
       });
 
@@ -298,7 +298,7 @@ describe("a CLOSED Trip on an unconfigured route", () => {
         },
       ]);
       costConfirmations.findForTrip.mockResolvedValue({
-        ccNumber: "4139505",
+        ccNumbers: ["4139505"],
         amount: "165.00",
       });
 

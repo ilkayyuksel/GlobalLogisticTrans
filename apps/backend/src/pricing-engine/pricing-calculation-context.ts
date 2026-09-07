@@ -145,10 +145,17 @@ export interface ExistingPricingSnapshot {
   readonly itemCount: number;
 }
 
-/** What a Cost Confirmation contributes: a reference and an agreed amount. */
+/**
+ * What a Trip's Cost Confirmations contribute: their references and their TOTAL.
+ *
+ * A Trip may be confirmed in instalments, so this carries every contributing
+ * document's reference and the sum of their amounts — added as Decimal by the
+ * read side, never as JS numbers.
+ */
 export interface PricingCostConfirmationInput {
-  readonly ccNumber: string;
-  /** Fixed-2 string, as the database holds it. */
+  /** Every contributing confirmation, newest first. Never empty. */
+  readonly ccNumbers: readonly string[];
+  /** The SUM, as a fixed-2 string, in the same form the database holds. */
   readonly amount: string;
 }
 

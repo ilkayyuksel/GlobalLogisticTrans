@@ -51,7 +51,7 @@ function command(overrides: Record<string, unknown> = {}) {
 describe("CostConfirmationService", () => {
   let repository: {
     create: jest.Mock;
-    findByTrip: jest.Mock;
+    findAllByTrip: jest.Mock;
     findForTrips: jest.Mock;
   };
   let service: CostConfirmationService;
@@ -61,7 +61,7 @@ describe("CostConfirmationService", () => {
       create: jest.fn((data: Record<string, unknown>) =>
         Promise.resolve(buildRow(data as Partial<CostConfirmation>)),
       ),
-      findByTrip: jest.fn().mockResolvedValue(null),
+      findAllByTrip: jest.fn().mockResolvedValue([]),
       findForTrips: jest.fn().mockResolvedValue([]),
     };
 
@@ -102,7 +102,7 @@ describe("CostConfirmationService", () => {
 
   describe("the same confirmation again", () => {
     beforeEach(() => {
-      repository.findByTrip.mockResolvedValue(buildRow());
+      repository.findAllByTrip.mockResolvedValue([buildRow()]);
     });
 
     it("is reported as already recorded", async () => {
@@ -125,31 +125,65 @@ describe("CostConfirmationService", () => {
     });
   });
 
+  /**
+   * A SECOND, different confirmation used to be refused, on the rule that a
+   * Trip has one confirmed cost. That is withdrawn: confirmations arrive in
+   * instalments and the Trip is worth their sum, so each one is kept.
+   */
   describe("a different confirmation for the same Trip", () => {
     beforeEach(() => {
-      repository.findByTrip.mockResolvedValue(buildRow());
+      repository.findAllByTrip.mockResolvedValue([buildRow()]);
     });
 
-    it("is refused", async () => {
+    it("is recorded", async () => {
       const result = await service.record(command({ ccNumber: "4139511" }));
 
-      expect(result.outcome).toBe("CC_ALREADY_EXISTS");
+      expect(result.outcome).toBe("RECORDED");
     });
 
-    it("creates no second confirmation", async () => {
-      await service.record(command({ ccNumber: "4139511" }));
+    it("creates a second row", async () => {
+      await service.record(command({ ccNumber: "4139511", amount: "96.25" }));
 
-      expect(repository.create).not.toHaveBeenCalled();
-    });
-
-    /** The first one stands: not replaced, not summed, not adjusted. */
-    it("leaves the existing confirmation authoritative", async () => {
-      const result = await service.record(
-        command({ ccNumber: "4139511", amount: "96.25" }),
+      expect(repository.create).toHaveBeenCalledWith(
+        expect.objectContaining({ ccNumber: "4139511", amount: "96.25" }),
       );
+    });
 
-      expect(result.confirmation?.ccNumber).toBe("4132482");
-      expect(result.confirmation?.amount.toFixed(2)).toBe("25.00");
+    /** The existing one is never touched: no update, no delete, no overwrite. */
+    it("leaves the earlier confirmation exactly as it was", async () => {
+      await service.record(command({ ccNumber: "4139511", amount: "96.25" }));
+
+      expect(repository).not.toHaveProperty("update");
+      expect(repository.create).toHaveBeenCalledTimes(1);
+    });
+
+    /** A third one is no different from a second. */
+    it("records a third alongside the first two", async () => {
+      repository.findAllByTrip.mockResolvedValue([
+        buildRow(),
+        buildRow({ ccNumber: "4139511" }),
+      ]);
+
+      const result = await service.record(command({ ccNumber: "4139512" }));
+
+      expect(result.outcome).toBe("RECORDED");
+      expect(repository.create).toHaveBeenCalledTimes(1);
+    });
+
+    /**
+     * The one thing still refused: the SAME reference again, whichever of the
+     * Trip's confirmations it repeats.
+     */
+    it("still refuses a repeat of an earlier reference", async () => {
+      repository.findAllByTrip.mockResolvedValue([
+        buildRow({ ccNumber: "4139511" }),
+        buildRow(),
+      ]);
+
+      const result = await service.record(command({ ccNumber: "4132482" }));
+
+      expect(result.outcome).toBe("ALREADY_RECORDED");
+      expect(repository.create).not.toHaveBeenCalled();
     });
   });
 

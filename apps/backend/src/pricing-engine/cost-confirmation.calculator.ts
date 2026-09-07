@@ -30,10 +30,20 @@ import { toStorableAmount } from "./pricing-money";
  * confirmed, by the party paying it, in a document this system stored. Applying
  * arithmetic to it would be inventing a rule nobody agreed to.
  *
- * ── ONE PER TRIP ────────────────────────────────────────────────────────────
- * `cost_confirmation.trip_id` is unique, so a Trip has at most one, and this
- * step can produce at most one line. A Trip without a confirmation produces
- * none at all — not a zero, which would claim a confirmed cost of nothing.
+ * ── SEVERAL CONFIRMATIONS, ONE LINE ─────────────────────────────────────────
+ * A Trip may be confirmed in instalments — €100, then €25, then €40 — and it is
+ * worth their sum. `trip_id` used to be unique and this step read a single
+ * amount; it now reads the TOTAL, which the read side adds up as Decimal.
+ *
+ * Still ONE line, because a component appears once in a breakdown: two rows
+ * carrying the same component code would change what a pricing item means and
+ * would be counted twice by anything that groups by component. The individual
+ * documents are not lost — every confirmation is its own row, its own PDF and
+ * its own history event — and the description names them so a breakdown says
+ * WHICH confirmations produced the figure.
+ *
+ * A Trip without any confirmation produces no line at all — not a zero, which
+ * would claim a confirmed cost of nothing.
  * ────────────────────────────────────────────────────────────────────────────
  */
 
@@ -59,19 +69,25 @@ export class CostConfirmationCalculator implements PricingCalculationStep {
 
     this.logger.log("Cost confirmation priced", {
       tripId: context.tripId,
-      // The reference identifies the document; the amount is never logged.
-      ccNumber: confirmation.ccNumber,
+      // The references identify the documents; no amount is ever logged.
+      ccNumbers: confirmation.ccNumbers,
+      confirmationCount: confirmation.ccNumbers.length,
     });
 
     return [
       {
         component: PricingComponentCode.COST_CONFIRMATION,
-        // The document's own reference, so a breakdown says WHICH confirmation
-        // an amount came from rather than merely that one existed.
-        description: `Cost confirmation ${confirmation.ccNumber}`,
-        // Verbatim, then stored at the schema's two places. The confirmation
-        // already holds a fixed-2 amount, so this rounds nothing in practice —
-        // it states the precision rather than trusting the string.
+        /*
+         * The documents' own references, so a breakdown says WHICH
+         * confirmations an amount came from rather than merely that some
+         * existed. One reads exactly as it always did; several are listed in
+         * arrival order, newest first.
+         */
+        description: describe(confirmation.ccNumbers),
+        // Verbatim, then stored at the schema's two places. The read side
+        // already summed the confirmations as Decimal and handed over a fixed-2
+        // amount, so this rounds nothing in practice — it states the precision
+        // rather than trusting the string.
         amount: toStorableAmount(new Prisma.Decimal(confirmation.amount)),
         calculationOrder: CALCULATION_ORDER,
         quantity: null,
@@ -80,4 +96,17 @@ export class CostConfirmationCalculator implements PricingCalculationStep {
       },
     ];
   }
+}
+
+/**
+ * What to call the line, from the confirmations that produced it.
+ *
+ * A single confirmation keeps the wording it has always had, so an existing
+ * breakdown reads identically and nothing downstream sees a new shape for the
+ * ordinary case.
+ */
+function describe(ccNumbers: readonly string[]): string {
+  return ccNumbers.length === 1
+    ? `Cost confirmation ${ccNumbers[0]}`
+    : `Cost confirmations ${ccNumbers.join(", ")}`;
 }

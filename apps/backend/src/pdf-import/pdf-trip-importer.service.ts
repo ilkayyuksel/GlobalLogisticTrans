@@ -660,24 +660,11 @@ export class PdfTripImporter {
       });
 
       /*
-       * A Trip has ONE confirmed cost. A second, different one is refused and
-       * recorded against the Trip — the arrival is a fact, and the document
-       * stays as its evidence, exactly as a refused revision does. What must
-       * not happen is a second row, an overwritten amount or a sum.
+       * A SECOND, different confirmation is no longer refused. A Trip may be
+       * confirmed in instalments, and each arrival is kept and added to the
+       * total — see `CostConfirmationService.record`, which still refuses the
+       * same `cc_number` twice so one document cannot count twice.
        */
-      if (recorded.outcome === "CC_ALREADY_EXISTS") {
-        await this.tripRevision.recordRefusedCostConfirmation(
-          trip.id,
-          { pdfDocumentId: document.id },
-          confirmation.ccNumber,
-          recorded.confirmation?.ccNumber ?? "unknown",
-        );
-
-        throw new CostConfirmationRefusedException(
-          confirmation.ccNumber,
-          `Trip ${trip.id} already has cost confirmation CC${recorded.confirmation?.ccNumber ?? "unknown"}.`,
-        );
-      }
 
       /*
        * The same document also becomes an event on the Trip, so it appears in

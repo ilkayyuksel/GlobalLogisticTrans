@@ -54,12 +54,7 @@ export type CostConfirmationOutcome =
    * The same confirmation again — same Trip, same number. Harmless, and common
    * when one message arrives twice. Nothing was written.
    */
-  | "ALREADY_RECORDED"
-  /**
-   * A DIFFERENT confirmation for a Trip that already has one. Refused: the
-   * existing amount stays authoritative, and nothing is overwritten or summed.
-   */
-  | "CC_ALREADY_EXISTS";
+  | "ALREADY_RECORDED";
 
 export interface CostConfirmationResult {
   readonly outcome: CostConfirmationOutcome;
@@ -68,10 +63,9 @@ export interface CostConfirmationResult {
    * The Trip's complete effective pricing after this confirmation, or null.
    *
    * Present only on RECORDED — the one outcome that WROTE something. Nothing
-   * was written for ALREADY_RECORDED or CC_ALREADY_EXISTS, so there is nothing
-   * to have changed and no recalculation is run: repricing on a duplicate
-   * message would burn a calculation to produce the snapshot that is already
-   * stored.
+   * was written for ALREADY_RECORDED, so there is nothing to have changed and
+   * no recalculation is run: repricing on a duplicate message would burn a
+   * calculation to produce the snapshot that is already stored.
    *
    * Null on RECORDED too when the Trip could not be priced — see `reasonCode`.
    * It is never the pricing from before the confirmation was recorded.
@@ -118,9 +112,24 @@ export class CostConfirmationService {
   async record(
     command: RecordCostConfirmationCommand,
   ): Promise<CostConfirmationResult> {
-    const existing = await this.repository.findByTrip(command.tripId);
+    const existing = await this.repository.findAllByTrip(command.tripId);
 
-    if (existing && existing.ccNumber === command.ccNumber) {
+    /*
+     * ── THE ONE THING THAT IS STILL REFUSED ─────────────────────────────────
+     * The SAME confirmation arriving twice. `cc_number` is Eucon's own
+     * reference for the document, so two rows carrying it would be one amount
+     * counted twice — and the aggregate is money.
+     *
+     * Every OTHER confirmation is kept. A Trip confirmed in instalments —
+     * €100, then €25, then €40 — is worth their sum, and refusing the later
+     * ones (which is what this service used to do) lost both the money and the
+     * evidence for it.
+     */
+    const duplicate = existing.find(
+      (confirmation) => confirmation.ccNumber === command.ccNumber,
+    );
+
+    if (duplicate) {
       this.logger.log("Cost confirmation already recorded", {
         tripId: command.tripId,
         ccNumber: command.ccNumber,
@@ -128,23 +137,8 @@ export class CostConfirmationService {
 
       return {
         outcome: "ALREADY_RECORDED",
-        confirmation: existing,
+        confirmation: duplicate,
         // Nothing was written, so nothing can have changed.
-        pricing: null,
-        reasonCode: null,
-      };
-    }
-
-    if (existing) {
-      this.logger.warn("A second cost confirmation was refused", {
-        tripId: command.tripId,
-        existingCcNumber: existing.ccNumber,
-        refusedCcNumber: command.ccNumber,
-      });
-
-      return {
-        outcome: "CC_ALREADY_EXISTS",
-        confirmation: existing,
         pricing: null,
         reasonCode: null,
       };
@@ -183,15 +177,27 @@ export class CostConfirmationService {
     };
   }
 
-  /** The confirmation of each Trip on a page, keyed by Trip id. */
+  /**
+   * The LATEST confirmation of each Trip on a page, keyed by Trip id.
+   *
+   * ── WHY THE LATEST AND NOT ALL OF THEM ──────────────────────────────────
+   * This feeds the Ritten row, which shows one confirmation and opens its PDF.
+   * Returning every confirmation of every Trip would grow the list payload for
+   * a history nothing on that screen reads. The older ones are not lost — they
+   * are rows like any other, and pricing reads all of them.
+   *
+   * Still ONE query for the page. The rows arrive newest first, so the first
+   * one seen for a Trip is its latest and the rest are stepped over.
+   */
   async findForTrips(
     tripIds: readonly string[],
   ): Promise<Map<string, CostConfirmationDto>> {
     const byTrip = new Map<string, CostConfirmationDto>();
-    const rows = await this.repository.findForTrips(tripIds);
 
-    for (const row of rows) {
-      byTrip.set(row.tripId, toResponse(row));
+    for (const row of await this.repository.findForTrips(tripIds)) {
+      if (!byTrip.has(row.tripId)) {
+        byTrip.set(row.tripId, toResponse(row));
+      }
     }
 
     return byTrip;

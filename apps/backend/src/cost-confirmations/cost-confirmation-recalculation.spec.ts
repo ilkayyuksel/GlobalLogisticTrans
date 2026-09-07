@@ -20,10 +20,10 @@ const DOCUMENT_ID = "9c858901-8a57-4791-81fe-4c455b099bc9";
  * Trip's stored total describing a Trip that no longer exists.
  *
  * ── AND WHY ONLY ON A REAL WRITE ────────────────────────────────────────────
- * A Trip has at most one confirmation. The same message arriving twice writes
- * nothing, and a second, DIFFERENT confirmation is refused — so neither
- * changes what the Trip is worth, and neither burns a calculation to produce
- * the snapshot that is already stored.
+ * A Trip may hold several confirmations and is worth their sum, so every NEW
+ * one reprices. The same message arriving twice writes nothing — the reference
+ * is already on the Trip — and repricing it would burn a calculation to
+ * produce the snapshot that is already stored.
  * ────────────────────────────────────────────────────────────────────────────
  */
 
@@ -81,7 +81,7 @@ function pricingWithEk(ek: string) {
 describe("recording a Cost Confirmation reprices the Trip", () => {
   let repository: {
     create: jest.Mock;
-    findByTrip: jest.Mock;
+    findAllByTrip: jest.Mock;
     findForTrips: jest.Mock;
   };
   let recalculation: ReturnType<typeof stubPricingRecalculation>;
@@ -106,7 +106,7 @@ describe("recording a Cost Confirmation reprices the Trip", () => {
   beforeEach(() => {
     repository = {
       create: jest.fn().mockResolvedValue(buildRow()),
-      findByTrip: jest.fn().mockResolvedValue(null),
+      findAllByTrip: jest.fn().mockResolvedValue([]),
       findForTrips: jest.fn().mockResolvedValue([]),
     };
 
@@ -184,7 +184,7 @@ describe("recording a Cost Confirmation reprices the Trip", () => {
 
   describe("a message that writes nothing", () => {
     it("does not reprice when the same confirmation arrives again", async () => {
-      repository.findByTrip.mockResolvedValue(buildRow());
+      repository.findAllByTrip.mockResolvedValue([buildRow()]);
 
       const result = await service.record(COMMAND);
 
@@ -193,14 +193,38 @@ describe("recording a Cost Confirmation reprices the Trip", () => {
       expect(result.pricing).toBeNull();
     });
 
-    it("does not reprice when a second, different confirmation is refused", async () => {
-      repository.findByTrip.mockResolvedValue(buildRow({ ccNumber: "4139999" }));
+  });
 
-      const result = await service.record(COMMAND);
+  /**
+   * A SECOND, different confirmation used to be refused and repriced nothing.
+   * It is recorded now — the Trip is worth the sum of its confirmations — so it
+   * follows the ordinary write contract: one row, then one recalculation.
+   */
+  describe("a second, different confirmation", () => {
+    beforeEach(() => {
+      repository.findAllByTrip.mockResolvedValue([
+        buildRow({ ccNumber: "4139999" }),
+      ]);
+    });
 
-      expect(result.outcome).toBe("CC_ALREADY_EXISTS");
-      expect(repository.create).not.toHaveBeenCalled();
-      expect(recalculation.recalculate).not.toHaveBeenCalled();
+    it("is recorded", async () => {
+      expect((await service.record(COMMAND)).outcome).toBe("RECORDED");
+    });
+
+    it("reprices the Trip exactly once", async () => {
+      await service.record(COMMAND);
+
+      expect(recalculation.recalculate).toHaveBeenCalledTimes(1);
+      expect(recalculation.recalculate).toHaveBeenCalledWith(TRIP_ID);
+    });
+
+    /** The row is written BEFORE the price, so the Engine reads it. */
+    it("writes the row before it asks for a price", async () => {
+      await service.record(COMMAND);
+
+      expect(repository.create.mock.invocationCallOrder[0]).toBeLessThan(
+        recalculation.recalculate.mock.invocationCallOrder[0],
+      );
     });
   });
 

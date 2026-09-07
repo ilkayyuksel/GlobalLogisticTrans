@@ -14,6 +14,22 @@ export type CreateCostConfirmationData =
  * claiming Eucon said something it did not, and the only honest way to change
  * the picture is a NEW confirmation, which is a new row.
  */
+/**
+ * Newest first, and DETERMINISTIC.
+ *
+ * `received_at` is written by the importer at the moment the document is
+ * processed, so it is the arrival order rather than anything the document
+ * claims about itself. Two confirmations processed in the same millisecond
+ * would tie on it, and "which is latest" must never depend on the order the
+ * database happens to return rows in — so `created_at` and finally the primary
+ * key break the tie. The answer is the same on every query.
+ */
+const NEWEST_FIRST = [
+  { receivedAt: "desc" },
+  { createdAt: "desc" },
+  { id: "desc" },
+] as const satisfies Prisma.CostConfirmationOrderByWithRelationInput[];
+
 @Injectable()
 export class CostConfirmationRepository {
   constructor(private readonly prisma: PrismaService) {}
@@ -23,20 +39,27 @@ export class CostConfirmationRepository {
   }
 
   /**
-   * The confirmation this Trip already holds, if any.
+   * Every confirmation this Trip holds, NEWEST FIRST.
    *
-   * By TRIP, because a Trip has at most one: the question is never "which
-   * confirmation" but "is there one already".
+   * It was `findUnique` on a unique `trip_id`, where the question was only
+   * "is there one already". A Trip may now hold several, so both questions the
+   * callers ask — which is the latest, and what do they add up to — are
+   * answered from this one ordered list.
    */
-  findByTrip(tripId: string): Promise<CostConfirmation | null> {
-    return this.prisma.costConfirmation.findUnique({ where: { tripId } });
+  findAllByTrip(tripId: string): Promise<CostConfirmation[]> {
+    return this.prisma.costConfirmation.findMany({
+      where: { tripId },
+      orderBy: NEWEST_FIRST,
+    });
   }
 
   /**
-   * The confirmation of each Trip on a page — at most one apiece.
+   * Every confirmation of every Trip on a page, newest first.
    *
-   * One query for the whole page: the Ritten list shows the confirmed amount
-   * beside the Trip, and a query per row would be a request per truck.
+   * ONE query for the whole page, as before. The Ritten list shows the latest
+   * confirmation beside each Trip and a query per row would be a request per
+   * truck — which matters more now that a Trip can hold several, not less.
+   * Grouping by Trip is the caller's job; ordering is guaranteed here.
    */
   findForTrips(tripIds: readonly string[]): Promise<CostConfirmation[]> {
     if (tripIds.length === 0) {
@@ -45,7 +68,7 @@ export class CostConfirmationRepository {
 
     return this.prisma.costConfirmation.findMany({
       where: { tripId: { in: [...tripIds] } },
-      orderBy: { receivedAt: "desc" },
+      orderBy: NEWEST_FIRST,
     });
   }
 }

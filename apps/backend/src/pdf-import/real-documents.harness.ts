@@ -478,19 +478,20 @@ export function buildHarness(storageDirectory: string) {
         return Promise.resolve(row);
       }),
       /**
-       * By TRIP: the unique constraint is on `trip_id`, so the question the
-       * real repository answers is "does this Trip already have one".
+       * EVERY confirmation of the Trip, newest first — a Trip may hold several.
+       * The service asks this to decide whether the arriving `cc_number` is one
+       * it already has.
        */
-      findByTrip: jest.fn((tripId: string) =>
+      findAllByTrip: jest.fn((tripId: string) =>
         Promise.resolve(
-          costConfirmations.find((row) => row.tripId === tripId) ?? null,
+          costConfirmations.filter((row) => row.tripId === tripId).reverse(),
         ),
       ),
       findForTrips: jest.fn((tripIds: readonly string[]) =>
         Promise.resolve(
-          costConfirmations.filter((row) =>
-            tripIds.includes(row.tripId as string),
-          ),
+          costConfirmations
+            .filter((row) => tripIds.includes(row.tripId as string))
+            .reverse(),
         ),
       ),
     } as unknown as CostConfirmationRepository,
