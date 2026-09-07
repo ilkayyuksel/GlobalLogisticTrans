@@ -590,6 +590,48 @@ const PARSED_DOCUMENTS: readonly ExpectedDocument[] = [
   },
   {
     /*
+     * BUG — the postcode printed TWICE, immediately before the city:
+     *
+     *   [9160]
+     *   Willems Biscuits
+     *   Zoomstraat 2 AA
+     *   9160 9160 Lokeren
+     *   Belgium
+     *
+     * The form has put the customer's postcode field and the address line's own
+     * postcode side by side. Every rule that reads a postcode expects one, and
+     * each requires a LETTER immediately after it — the guard that keeps a house
+     * number out of the city field — so the second number stopped all of them.
+     *
+     * The country is on its own line, so `readCountryLine` is the rule that
+     * should have read this: it found `Belgium` and looked at the line above,
+     * but `cityWithoutPostcode` could strip only ONE postcode, leaving
+     * `9160 Lokeren`, and the digit guard then refused the whole block.
+     */
+    file: "BUG-CITY/transportorder1376481.pdf",
+    pageCount: 2,
+    layout: "SINGLE_TWO_PAGE",
+    documentStatus: "PLANNED",
+    trips: [
+      {
+        bookingNumber: "ANRDUB2799770",
+        direction: "COLLECTION",
+        containerType: "45PH",
+        containerNumber: null,
+        terminal: "PSA Quay 869",
+        destinationCity: "Lokeren",
+        destinationCountry: "Belgium",
+        date: "2026-09-08",
+        startTime: "09:00",
+        endTime: "11:00",
+        groupKey: null,
+        page: 1,
+        addressSection: "LOADING 1",
+      },
+    ],
+  },
+  {
+    /*
      * BUG — a country-prefixed postcode carrying the Dutch letter pair, with
      * the city on the SAME line:
      *

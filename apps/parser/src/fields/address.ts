@@ -90,6 +90,41 @@ export const POSTCODE_LINE = new RegExp(
 );
 
 /**
+ * The postcode as an address line prints it — possibly TWICE.
+ *
+ * ── THE LAYOUT THIS EXISTS FOR ──────────────────────────────────────────────
+ * A real order prints its loading address like this:
+ *
+ *     [9160]
+ *     Willems Biscuits
+ *     Zoomstraat 2 AA
+ *     9160 9160 Lokeren        <- the postcode, twice
+ *     Belgium
+ *
+ * The form has printed the customer's postcode field and the address line's own
+ * postcode next to each other. Every rule that reads a postcode expects exactly
+ * one, and each of them requires the city to begin with a LETTER immediately
+ * afterwards — which is what keeps a house number out of the city field. With a
+ * second number in the way none of them matched, and a document naming its
+ * destination plainly was reported as having no readable city.
+ *
+ * ── WHY A BACKREFERENCE AND NOT A SECOND NUMBER ─────────────────────────────
+ * `\k<name>` matches the FIRST postcode's exact text, so only a genuine repeat
+ * is absorbed. `1234 5678 Lokeren` still matches nothing: the two differ, so
+ * the optional group declines, and the city group then meets `5678` and fails —
+ * which is the existing behaviour, and the right one. Two different numbers are
+ * not a postcode printed twice, and this must never become "skip any digits in
+ * front of a word".
+ *
+ * It takes the pattern and a group name rather than being one fixed constant,
+ * because the two lines that need it accept different digit runs — see
+ * `POSTCODE_THEN_CITY`, which is deliberately wider.
+ */
+function printedOnceOrTwice(postcode: string, groupName: string): string {
+  return String.raw`(?<${groupName}>${postcode})(?:\s+\k<${groupName}>)?`;
+}
+
+/**
  * `NNNN City` — the same line without its country prefix.
  *
  * Real orders print `2040 Antwerpen`, `3980 Tessenderlo` and `9940 Evergem,`.
@@ -111,7 +146,7 @@ export const POSTCODE_LINE = new RegExp(
  * country has to come from somewhere the document actually states it.
  */
 const BARE_POSTCODE_LINE = new RegExp(
-  String.raw`^(${POSTCODE})[\s,]+([A-Za-z].*)$`,
+  String.raw`^${printedOnceOrTwice(POSTCODE, "postcode")}[\s,]+([A-Za-z].*)$`,
 );
 
 /**
@@ -522,8 +557,11 @@ const POSTCODE_ONLY_LINE = /^\d{4,5}$/;
  * one: `416 Boulevard Ferdinand` has only three digits and does not match at
  * all.
  */
-const POSTCODE_THEN_CITY =
-  /^(?:[A-Za-z]{1,2}\s*-\s*)?\d{4,8}(?:\s?[A-Z]{2})?[\s,]+([A-Za-z].*)$/;
+const POSTCODE_THEN_CITY = new RegExp(
+  String.raw`^(?:[A-Za-z]{1,2}\s*-\s*)?` +
+    printedOnceOrTwice(String.raw`\d{4,8}(?:\s?[A-Z]{2})?`, "postcode") +
+    String.raw`[\s,]+(?<city>[A-Za-z].*)$`,
+);
 
 /**
  * The mirror layout: the city first, its postcode after it.
@@ -554,7 +592,9 @@ function cityWithoutPostcode(line: string): string {
   const postcodeFirst = POSTCODE_THEN_CITY.exec(line);
 
   if (postcodeFirst) {
-    return postcodeFirst[1];
+    // By NAME: the postcode is a capturing group of its own now, so the city is
+    // no longer the first one.
+    return postcodeFirst.groups?.city ?? line;
   }
 
   const postcodeLast = CITY_THEN_POSTCODE.exec(line);
