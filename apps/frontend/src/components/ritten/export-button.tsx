@@ -5,13 +5,17 @@ import { useState } from "react";
 import { userFacingMessage } from "@/lib/api/client";
 import { listCustomProperties } from "@/lib/api/custom-properties";
 import { fetchPricingSnapshots } from "@/lib/api/pricing";
-import { findFuelPercentage, listSettings } from "@/lib/api/settings";
+import {
+  findAutomaticPropertyId,
+  findFuelPercentage,
+  listSettings,
+} from "@/lib/api/settings";
 import { ExportTooLargeError, fetchTripsForExport } from "@/lib/api/trip-export";
 import { MAX_PAGE_SIZE, type ListTripsParams } from "@/lib/api/trips";
 import { useLanguage, useTranslation } from "@/lib/i18n/language-provider";
 import {
   toBasicRow,
-  toFixedPropertyIds,
+  toManualPropertyIds,
   toPricingRow,
 } from "@/lib/ritten/export-rows";
 import {
@@ -89,20 +93,33 @@ export function ExportButton({
           pricingFileName(periodStart, periodEnd),
         );
       } else {
-        // Which properties are fixed-price decides what belongs in Kosten; a
-        // route-priced one is charged through its own component.
+        /*
+         * The catalog, read at EXPORT time like everything else here, so a
+         * property added or deactivated since the Trips were closed is
+         * reflected. It decides which names belong in Info: fixed-price and
+         * chosen by an operator — see `toManualPropertyIds`.
+         */
         const properties = await listCustomProperties({
           pageSize: MAX_PAGE_SIZE,
         });
-        const fixedPropertyIds = toFixedPropertyIds(properties.items);
+        const manualPropertyIds = toManualPropertyIds(properties.items);
         const waitingWord = t("ritten.export.waitingWord");
+        /*
+         * Which property is TAR, so its line can be RECOGNISED in a stored
+         * snapshot. Whether TAR applied is never decided here — the Engine
+         * already decided it, same-day rule included, and the snapshot says so.
+         */
+        const automaticPropertyId = findAutomaticPropertyId(
+          await listSettings(),
+        );
 
         const rows = trips.map((trip) =>
           toBasicRow(
             trip,
             snapshots.get(trip.id) ?? null,
-            fixedPropertyIds,
+            manualPropertyIds,
             waitingWord,
+            automaticPropertyId,
           ),
         );
 

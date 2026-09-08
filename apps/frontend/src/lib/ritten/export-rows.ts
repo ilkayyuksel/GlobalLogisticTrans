@@ -40,11 +40,21 @@ export interface PricingExportRow {
   readonly tunnel: number | null;
   readonly others: number | null;
   readonly waitingTime: number | null;
+  /** The confirmed cost. Its own column, which used to hold the waiting time. */
+  readonly ek: number | null;
   readonly remarks: string;
 }
 
 export interface BasicExportRow {
-  readonly isCompleted: boolean;
+  /**
+   * The group this Trip belongs to, or null.
+   *
+   * Not a column: it decides the ROW's background, so every cell of one
+   * Combination carries the same colour — see `combinationColorIndex`, which
+   * the Ritten list's own group tag uses. Presentation only; the export invents
+   * no grouping and reads no membership of its own.
+   */
+  readonly tripGroupId: string | null;
   readonly licensePlate: string;
   readonly startTime: string | null;
   readonly endTime: string | null;
@@ -121,6 +131,7 @@ export function toPricingRow(
     tunnel: lines.tunnel,
     others: lines.others,
     waitingTime: lines.waitingTime,
+    ek: lines.ek,
     remarks: toRemarks(trip),
   };
 }
@@ -186,14 +197,26 @@ export function toWaitingLabel(
 /**
  * The words behind those numbers, in the same order.
  *
- * Only the FIXED Custom Properties are named: a route-priced one is not part of
- * the Kosten sum, so naming it here would explain a number that is not there.
+ * ── WHICH PROPERTIES ARE NAMED ──────────────────────────────────────────────
+ * The ones an operator ASSIGNED, and only those. Two kinds are left out, for
+ * two different reasons:
+ *
+ *   ROUTE-PRICED (Toll, Tunnel) — not part of the Kosten sum at all, so naming
+ *     one here would explain a number that is not there;
+ *   SYSTEM-MANAGED (TAR, Flat)  — not an operator's decision. Flat is written
+ *     by the container-type rule and TAR by the Engine itself, so listing them
+ *     among the properties somebody chose would misrepresent who decided what.
+ *     Their amounts are still in Kosten; this column is about choices.
+ *
+ * Both exclusions come from the catalog rather than from a list of names here —
+ * see `toManualPropertyIds`.
  */
 export function toInfoLabel(
   trip: Trip,
   lines: PricedTripLines,
-  fixedPropertyIds: ReadonlySet<string>,
+  manualPropertyIds: ReadonlySet<string>,
   waitingLabel: string | null,
+  wasTarCharged = false,
 ): string {
   const names: string[] = [];
 
@@ -204,24 +227,103 @@ export function toInfoLabel(
 
   names.push(
     ...trip.customProperties
-      .filter((property) => fixedPropertyIds.has(property.id))
+      .filter((property) => manualPropertyIds.has(property.id))
       .map((property) => property.name),
   );
+
+  /*
+   * ── TAR, AND ONLY THE WORD ──────────────────────────────────────────────
+   * The NUMBER never appears here. It is business data an operator types for
+   * their own reference, the sheet leaves the office, and the charge it refers
+   * to is already in the pricing columns — so the word says "this Trip was
+   * charged TAR" and nothing more.
+   *
+   * Whether it WAS charged is not decided here. `wasTarCharged` comes from the
+   * stored snapshot — see `wasTarChargedIn` — so the stated number, the
+   * Combination leg and the same-day rule that withholds a number already
+   * charged that day are all honoured exactly as the Engine applied them.
+   */
+  if (wasTarCharged) {
+    names.push(TAR_MARK);
+  }
 
   if (lines.waitingTime !== null && waitingLabel) {
     names.push(waitingLabel);
   }
 
+  /*
+   * Last, because it is a sentence and the entries before it are labels. The
+   * text is taken VERBATIM — no prefix, no truncation, no quoting — since the
+   * sheet has no convention for one and inventing "Notitie: " would be a
+   * format nobody asked for. Its own commas are part of what somebody wrote.
+   */
+  const notes = meaningfulText(trip.internalNotes);
+
+  if (notes !== null) {
+    names.push(notes);
+  }
+
   return names.join(", ");
 }
 
-/** Which Custom Properties are fixed-price — the ones with no component. */
-export function toFixedPropertyIds(
+/** The word the sheet carries for a charged TAR. Never the number. */
+const TAR_MARK = "TAR";
+
+/**
+ * Whether the Engine actually charged TAR, read from the stored snapshot.
+ *
+ * The snapshot is the Engine's own answer and the only honest source: it
+ * already reflects the stated number, the Combination allocation and the
+ * same-day rule. Recomputing any of that here would be a second opinion about
+ * money, and the two would drift the first time a rule changed.
+ *
+ * `automaticPropertyId` is the configured TAR property. Without it — no
+ * setting, or an unreadable one — no line can be recognised and nothing is
+ * labelled.
+ */
+export function wasTarChargedIn(
+  snapshot: PricingSnapshot | null,
+  automaticPropertyId: string | null,
+): boolean {
+  if (snapshot === null || automaticPropertyId === null) {
+    return false;
+  }
+
+  return snapshot.items.some(
+    (item) => item.customPropertyId === automaticPropertyId,
+  );
+}
+
+/**
+ * Free text that says something, or null.
+ *
+ * The same reading `hasTarNummer` applies on the backend: whitespace is
+ * absence, so a note of spaces adds no comma to the cell.
+ */
+function meaningfulText(value: string | null): string | null {
+  const trimmed = (value ?? "").trim();
+
+  return trimmed === "" ? null : trimmed;
+}
+
+/**
+ * The Custom Properties an operator may choose and whose amount lands in Kosten.
+ *
+ * Fixed-price — a route-priced property is charged through its own component —
+ * AND not system-managed. `isSystemManaged` is the backend's own classification,
+ * the same one that decides which properties the assignment endpoint refuses and
+ * which the settings page will not delete, so this cannot drift from it. Naming
+ * the properties here instead would be a second opinion about TAR and Flat.
+ */
+export function toManualPropertyIds(
   properties: readonly CustomProperty[],
 ): Set<string> {
   return new Set(
     properties
-      .filter((property) => property.pricingComponentId === null)
+      .filter(
+        (property) =>
+          property.pricingComponentId === null && !property.isSystemManaged,
+      )
       .map((property) => property.id),
   );
 }
@@ -229,14 +331,14 @@ export function toFixedPropertyIds(
 export function toBasicRow(
   trip: Trip,
   snapshot: PricingSnapshot | null,
-  fixedPropertyIds: ReadonlySet<string>,
+  manualPropertyIds: ReadonlySet<string>,
   waitingWord: string,
+  automaticPropertyId: string | null = null,
 ): BasicExportRow {
   const lines = toPricedTripLines(snapshot);
 
   return {
-    // The Trip's own status, read not written: an export never changes one.
-    isCompleted: trip.status === "CLOSED",
+    tripGroupId: trip.tripGroupId,
     licensePlate: trip.vehicle?.licensePlate ?? EMPTY_CELL,
     startTime: trip.startTime,
     endTime: trip.endTime,
@@ -248,8 +350,9 @@ export function toBasicRow(
     info: toInfoLabel(
       trip,
       lines,
-      fixedPropertyIds,
+      manualPropertyIds,
       toWaitingLabel(trip, waitingWord),
+      wasTarChargedIn(snapshot, automaticPropertyId),
     ),
   };
 }

@@ -28,6 +28,8 @@ export const PRICING_CODES = {
   tunnel: "TUNNEL",
   waitingTime: "WAITING_TIME",
   customProperty: "CUSTOM_PROPERTY",
+  /** What Eucon confirmed for the Trip. Presented as EK. */
+  costConfirmation: "COST_CONFIRMATION",
 } as const;
 
 export interface PricedTripLines {
@@ -38,6 +40,14 @@ export interface PricedTripLines {
   readonly toll: number | null;
   readonly tunnel: number | null;
   readonly waitingTime: number | null;
+  /**
+   * The confirmed cost, presented as EK.
+   *
+   * One stored line whatever the Trip holds: several confirmations are summed
+   * by the backend into a single COST_CONFIRMATION item, so nothing is added
+   * here beyond reading it.
+   */
+  readonly ek: number | null;
   /** Fixed Custom Properties, summed. Route-priced ones are NOT here. */
   readonly others: number | null;
   /** The fixed-property lines behind `others`, for the Info/Kosten columns. */
@@ -51,6 +61,7 @@ export const NO_PRICING: PricedTripLines = {
   toll: null,
   tunnel: null,
   waitingTime: null,
+  ek: null,
   others: null,
   customPropertyAmounts: [],
 };
@@ -105,6 +116,7 @@ export function toPricedTripLines(
     toll: lineFor(items, PRICING_CODES.toll),
     tunnel: lineFor(items, PRICING_CODES.tunnel),
     waitingTime: lineFor(items, PRICING_CODES.waitingTime),
+    ek: lineFor(items, PRICING_CODES.costConfirmation),
     others:
       fixedCustomProperties.length === 0
         ? null

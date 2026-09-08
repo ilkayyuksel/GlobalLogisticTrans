@@ -15,21 +15,42 @@ import { cn } from "@/lib/cn";
  * ────────────────────────────────────────────────────────────────────────────
  *
  * What it does NOT change is the shape of the list: the planning date stays the
- * first ordering key, so the Day, Week and Month sections survive, and one
- * truck's Trips stay together inside a day. This chooses the order within that
- * grouping.
+ * first ordering key, so the Day, Week and Month sections survive. This chooses
+ * the order within a day — truck by truck, or as the day happens.
  */
 export interface RittenSort {
   field: TripSortField;
   direction: TripSortDirection;
 }
 
+/**
+ * Truck by truck, ascending — how a planner reads the day.
+ *
+ * The plate was ALWAYS the second ordering key before this, ahead of the time
+ * and never adjustable, so the list already read this way and choosing a time
+ * only ordered Trips within one truck. Making the plate a field a planner can
+ * choose is what lets the other order — the day as it happens — exist at all;
+ * the default is unchanged in effect.
+ */
 export const DEFAULT_RITTEN_SORT: RittenSort = {
-  field: "startTime",
+  field: "licensePlate",
   direction: "asc",
 };
 
-const FIELDS: readonly { field: TripSortField; labelKey: "ritten.column.start" | "ritten.column.end" }[] = [
+type SortLabelKey =
+  | "ritten.column.licensePlate"
+  | "ritten.column.start"
+  | "ritten.column.end";
+
+/**
+ * Nummerplaat, and the two times the list already offered.
+ *
+ * The times are kept as the two separate columns they are rather than folded
+ * into one "Tijd": both are real columns of this table, a planner sorts by
+ * either, and merging them would take away a choice that already existed.
+ */
+const FIELDS: readonly { field: TripSortField; labelKey: SortLabelKey }[] = [
+  { field: "licensePlate", labelKey: "ritten.column.licensePlate" },
   { field: "startTime", labelKey: "ritten.column.start" },
   { field: "endTime", labelKey: "ritten.column.end" },
 ];

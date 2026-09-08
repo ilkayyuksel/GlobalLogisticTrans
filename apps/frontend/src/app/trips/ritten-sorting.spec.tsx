@@ -44,13 +44,45 @@ describe("Ritten sorting", () => {
   }
 
   describe("what is asked of the backend", () => {
-    it("sorts by start time ascending until told otherwise", async () => {
+    /**
+     * The plate, ascending. It was ALWAYS the second ordering key — ahead of
+     * the time and not adjustable — so the list already read truck by truck;
+     * what changed is that a planner can now choose the other order.
+     */
+    it("sorts by licence plate ascending until told otherwise", async () => {
       await showList();
+
+      await waitFor(() => {
+        expect(lastListCall(requestMock)).toMatchObject({
+          sortBy: "licensePlate",
+          sortDirection: "asc",
+        });
+      });
+    });
+
+    it("asks the backend again when a time is chosen", async () => {
+      await showList();
+
+      await userEvent.click(screen.getByRole("radio", { name: "Begin" }));
 
       await waitFor(() => {
         expect(lastListCall(requestMock)).toMatchObject({
           sortBy: "startTime",
           sortDirection: "asc",
+        });
+      });
+    });
+
+    /** And back again: the choice is a toggle, not a one-way door. */
+    it("returns to the plate when it is chosen again", async () => {
+      await showList();
+
+      await userEvent.click(screen.getByRole("radio", { name: "Begin" }));
+      await userEvent.click(screen.getByRole("radio", { name: "Nummerplaat" }));
+
+      await waitFor(() => {
+        expect(lastListCall(requestMock)).toMatchObject({
+          sortBy: "licensePlate",
         });
       });
     });
@@ -77,7 +109,7 @@ describe("Ritten sorting", () => {
 
       await waitFor(() => {
         expect(lastListCall(requestMock)).toMatchObject({
-          sortBy: "startTime",
+          sortBy: "licensePlate",
           sortDirection: "desc",
         });
       });
@@ -113,17 +145,43 @@ describe("Ritten sorting", () => {
   });
 
   describe("the control", () => {
-    it("marks the chosen time", async () => {
+    it("marks the plate as the active choice", async () => {
       await showList();
 
+      expect(
+        screen.getByRole("radio", { name: "Nummerplaat" }),
+      ).toHaveAttribute("aria-checked", "true");
       expect(screen.getByRole("radio", { name: "Begin" })).toHaveAttribute(
         "aria-checked",
-        "true",
+        "false",
       );
       expect(screen.getByRole("radio", { name: "Eind" })).toHaveAttribute(
         "aria-checked",
         "false",
       );
+    });
+
+    it("moves the marking when a time is chosen", async () => {
+      await showList();
+
+      await userEvent.click(screen.getByRole("radio", { name: "Begin" }));
+
+      expect(screen.getByRole("radio", { name: "Begin" })).toHaveAttribute(
+        "aria-checked",
+        "true",
+      );
+      expect(
+        screen.getByRole("radio", { name: "Nummerplaat" }),
+      ).toHaveAttribute("aria-checked", "false");
+    });
+
+    /** All three, and nothing lost: the two times the list already offered. */
+    it("offers the plate and both times", async () => {
+      await showList();
+
+      for (const name of ["Nummerplaat", "Begin", "Eind"]) {
+        expect(screen.getByRole("radio", { name })).toBeInTheDocument();
+      }
     });
 
     it("names the direction it will apply", async () => {

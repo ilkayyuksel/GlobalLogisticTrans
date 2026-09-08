@@ -58,3 +58,40 @@ const COMBINATION_CLASSES: Record<number, string> = {
 export function combinationClasses(tripGroupId: string): string {
   return COMBINATION_CLASSES[combinationColorIndex(tripGroupId)];
 }
+
+/**
+ * The same six colours, as Excel needs them: solid ARGB, not CSS tokens.
+ *
+ * ── ONE MAPPING, TWO REPRESENTATIONS ────────────────────────────────────────
+ * The INDEX is the shared part and the only part that decides anything —
+ * `combinationColorIndex` derives it from the group id, so a Combination gets
+ * the same colour on screen and on paper, on every page, on every day it spans
+ * and for every user. What differs is only how a colour is expressed: the
+ * interface needs Tailwind classes bound to `--color-combination-*`, a
+ * spreadsheet needs a fill.
+ *
+ * The values are those tokens' own RGB, read from `globals.css`, tinted towards
+ * white. A full-strength violet behind a whole row would be unreadable on
+ * paper; the tint is the same idea as the interface's `/10` opacity.
+ */
+const COMBINATION_FILLS: Record<number, string> = {
+  1: "FFE9E1FB", // violet  124 58 237
+  2: "FFDCF0EE", // teal    13 148 136
+  3: "FFF7E9D5", // amber   217 119 6
+  4: "FFF8DFEC", // pink    219 39 119
+  5: "FFDFDDF7", // indigo  79 70 229
+  6: "FFE6F0D9", // lime    101 163 13
+};
+
+/**
+ * The row fill for a group, or null for a Trip that belongs to none.
+ *
+ * Null rather than white: a standalone Trip must keep the sheet's own
+ * background, and painting it white would flatten the grid lines the office
+ * reads the table by.
+ */
+export function combinationFillArgb(tripGroupId: string | null): string | null {
+  return tripGroupId === null
+    ? null
+    : COMBINATION_FILLS[combinationColorIndex(tripGroupId)];
+}

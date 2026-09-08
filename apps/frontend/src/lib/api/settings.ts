@@ -109,6 +109,8 @@ export const FUEL_PERCENTAGE_SETTING = {
 /** The category and key the Pricing Engine reads its fuel percentage from. */
 const PRICING_CATEGORY = "PRICING";
 const FUEL_PERCENTAGE_KEY = "FUEL_PERCENTAGE";
+/** Which Custom Property the Engine applies automatically — TAR. */
+const AUTOMATIC_PROPERTY_KEY = "AUTOMATIC_CUSTOM_PROPERTY_ID";
 
 /**
  * The configured fuel percentage, for the export to LABEL a stored surcharge.
@@ -137,4 +139,33 @@ export function findFuelPercentage(settings: readonly Setting[]): number | null 
   const percentage = Number(setting.value);
 
   return Number.isFinite(percentage) ? percentage : null;
+}
+
+/**
+ * The Custom Property the Pricing Engine applies automatically — TAR.
+ *
+ * ── WHY THE EXPORT NEEDS THE ID ─────────────────────────────────────────────
+ * To recognise the Engine's own TAR line in a stored snapshot, and so to know
+ * whether TAR was ACTUALLY charged for a Trip. That question has real rules
+ * behind it — a stated `tar_nummer`, the Combination leg, and the same-day rule
+ * that withholds a number already charged that day — and the export must never
+ * answer it a second time. The snapshot is the answer; this is only how the
+ * line is identified.
+ *
+ * By ID rather than by NAME: the property is renameable configuration, and
+ * matching on "TAR" would break the day somebody edits it.
+ *
+ * Null when the setting is absent, in which case no line can be recognised as
+ * TAR and none is labelled — silence rather than a guess.
+ */
+export function findAutomaticPropertyId(
+  settings: readonly Setting[],
+): string | null {
+  const setting = settings.find(
+    (candidate) =>
+      candidate.key === AUTOMATIC_PROPERTY_KEY &&
+      candidate.category === PRICING_CATEGORY,
+  );
+
+  return setting?.value.trim() ? setting.value.trim() : null;
 }

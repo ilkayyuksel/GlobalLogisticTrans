@@ -2,7 +2,7 @@ import type { PricingSnapshot, Trip, TripPricingItem } from "@/lib/api/types";
 import {
   toBasicRow,
   toCostsLabel,
-  toFixedPropertyIds,
+  toManualPropertyIds,
   toPricingRow,
   toRemarks,
   toRouteLabel,
@@ -309,23 +309,48 @@ describe("the pricing row", () => {
 });
 
 describe("the basic row", () => {
-  const FIXED = toFixedPropertyIds([
-    { id: "prop-1", pricingComponentId: null },
-    { id: "prop-2", pricingComponentId: null },
-    { id: "toll", pricingComponentId: "component-toll" },
+  /**
+   * The catalog as the export reads it: two ordinary properties an operator
+   * chooses, one route-priced component and one the SYSTEM manages. Only the
+   * first two may be named in Info.
+   */
+  const FIXED = toManualPropertyIds([
+    { id: "prop-1", pricingComponentId: null, isSystemManaged: false },
+    { id: "prop-2", pricingComponentId: null, isSystemManaged: false },
+    { id: "toll", pricingComponentId: "component-toll", isSystemManaged: true },
+    { id: "flat", pricingComponentId: null, isSystemManaged: true },
   ] as never);
 
-  it("marks a CLOSED Trip as completed", () => {
-    expect(toBasicRow(buildTrip({ status: "CLOSED" }), null, FIXED, "Wachttijd"))
-      .toMatchObject({ isCompleted: true });
+  /**
+   * The row carries the GROUP, not the status. `AFGEWERKT` was TRANO's own
+   * tenth column and has been removed; the sheet is the reference's nine again.
+   * The group id decides the row's background colour — see `combinationFillArgb`.
+   */
+  it("carries the Trip's group so the row can be coloured", () => {
+    expect(
+      toBasicRow(
+        buildTrip({ tripGroupId: "group-1" }),
+        null,
+        FIXED,
+        "Wachttijd",
+      ).tripGroupId,
+    ).toBe("group-1");
   });
 
-  it.each(["OPEN", "CANCELLED", "DELETED"] as const)(
-    "leaves a %s Trip unmarked",
+  it("carries null for a Trip in no group", () => {
+    expect(
+      toBasicRow(buildTrip({ tripGroupId: null }), null, FIXED, "Wachttijd")
+        .tripGroupId,
+    ).toBeNull();
+  });
+
+  /** The status is not a column any more, in any form. */
+  it.each(["OPEN", "CLOSED", "CANCELLED", "DELETED"] as const)(
+    "exposes no completed flag for a %s Trip",
     (status) => {
       expect(
-        toBasicRow(buildTrip({ status }), null, FIXED, "Wachttijd").isCompleted,
-      ).toBe(false);
+        toBasicRow(buildTrip({ status }), null, FIXED, "Wachttijd"),
+      ).not.toHaveProperty("isCompleted");
     },
   );
 
@@ -386,8 +411,8 @@ describe("the basic row", () => {
       buildTrip({
         waitingTimeMinutes: 90,
         customProperties: [
-          { id: "prop-1", name: "TAR", isActive: true },
-          { id: "prop-2", name: "Flat", isActive: true },
+          { id: "prop-1", name: "Aan/Afkoppelen", isActive: true },
+          { id: "prop-2", name: "Over/EX", isActive: true },
         ],
       }),
       snapshotOf(
@@ -399,7 +424,223 @@ describe("the basic row", () => {
       "Wachttijd",
     );
 
-    expect(row.info).toBe("TAR, Flat, Wachttijd 1 u 30 min");
+    expect(row.info).toBe("Aan/Afkoppelen, Over/EX, Wachttijd 1 u 30 min");
+  });
+
+  /**
+   * ── SYSTEM-MANAGED PROPERTIES ARE NOT NAMED ──────────────────────────────
+   * Flat is written by the container-type rule and TAR by the Engine itself.
+   * Neither is a choice an operator made, so listing them among the properties
+   * somebody chose would misrepresent who decided what. Their amounts stay in
+   * Kosten; this column is about choices.
+   */
+  it("does not name a system-managed property in Info", () => {
+    const row = toBasicRow(
+      buildTrip({
+        customProperties: [
+          { id: "prop-1", name: "Aan/Afkoppelen", isActive: true },
+          { id: "flat", name: "Flat", isActive: true },
+        ],
+      }),
+      snapshotOf(
+        line("CUSTOM_PROPERTY", "35.00", "prop-1"),
+        line("CUSTOM_PROPERTY", "20.00", "flat"),
+      ),
+      FIXED,
+      "Wachttijd",
+    );
+
+    expect(row.info).toBe("Aan/Afkoppelen");
+    // Its amount is still charged — only the NAME is withheld. Kosten lists
+    // the amounts as the sheet has always done, one per property.
+    expect(row.costs).toBe("35.00 + 20.00");
+  });
+
+  /** Several manual properties are listed in the order the Trip carries them. */
+  it("names every manual property that is assigned", () => {
+    const row = toBasicRow(
+      buildTrip({
+        customProperties: [
+          { id: "prop-1", name: "Aan/Afkoppelen", isActive: true },
+          { id: "prop-2", name: "Over/EX", isActive: true },
+        ],
+      }),
+      snapshotOf(
+        line("CUSTOM_PROPERTY", "20.00", "prop-1"),
+        line("CUSTOM_PROPERTY", "15.00", "prop-2"),
+      ),
+      FIXED,
+      "Wachttijd",
+    );
+
+    expect(row.info).toBe("Aan/Afkoppelen, Over/EX");
+    expect(row.costs).toBe("20.00 + 15.00");
+  });
+
+  /**
+   * The row is built from whatever it is HANDED. A property assigned after the
+   * Trip was closed appears because the export re-reads the Trip and its
+   * recalculated snapshot at export time — and a removed one disappears for
+   * the same reason. Nothing here caches anything.
+   */
+  it("names a property added after the Trip was closed", () => {
+    const closed = buildTrip({
+      status: "CLOSED",
+      customProperties: [
+        { id: "prop-1", name: "Aan/Afkoppelen", isActive: true },
+      ],
+    });
+
+    const row = toBasicRow(
+      closed,
+      snapshotOf(line("CUSTOM_PROPERTY", "20.00", "prop-1")),
+      FIXED,
+      "Wachttijd",
+    );
+
+    expect(row.info).toBe("Aan/Afkoppelen");
+    expect(row.costs).toBe("20.00");
+  });
+
+  it("drops it again once it is removed", () => {
+    const row = toBasicRow(
+      buildTrip({ status: "CLOSED", customProperties: [] }),
+      snapshotOf(),
+      FIXED,
+      "Wachttijd",
+    );
+
+    expect(row.info).toBe("");
+    expect(row.costs).toBe("");
+  });
+
+  /**
+   * ── TAR: THE WORD, NEVER THE NUMBER ──────────────────────────────────────
+   * Whether TAR applied is the Engine's answer, read back out of the stored
+   * snapshot — so the stated number, the Combination leg and the same-day rule
+   * that withholds a number already charged that day are all honoured without
+   * this file knowing any of them.
+   */
+  describe("TAR in Info", () => {
+    const TAR_ID = "b36469b0-37ec-40ba-81da-9bc272e05d60";
+
+    function withTarCharged() {
+      return snapshotOf(line("CUSTOM_PROPERTY", "50.00", TAR_ID));
+    }
+
+    it("says TAR when the Engine charged it", () => {
+      expect(
+        toBasicRow(buildTrip({ tarNummer: "TAR123" }), withTarCharged(), FIXED, "Wachttijd", TAR_ID).info,
+      ).toBe("TAR");
+    });
+
+    /** The whole point: the number is business data and never leaves here. */
+    it("never prints the number itself", () => {
+      const row = toBasicRow(buildTrip({ tarNummer: "TAR123" }), withTarCharged(), FIXED, "Wachttijd", TAR_ID);
+
+      expect(row.info).not.toContain("TAR123");
+      expect(JSON.stringify(row)).not.toContain("TAR123");
+    });
+
+    /**
+     * The same-day rule: Trip B states the number but the Engine withheld the
+     * charge, so no line exists and Info says nothing.
+     */
+    it("says nothing when the charge was withheld, even with a number stated", () => {
+      expect(
+        toBasicRow(buildTrip({ tarNummer: "TAR123" }), snapshotOf(line("BASE_PRICE", "300.00")), FIXED, "Wachttijd", TAR_ID).info,
+      ).toBe("");
+    });
+
+    it.each([
+      ["null", null],
+      ["an empty string", ""],
+      ["whitespace only", "   "],
+    ])("says nothing when the number is %s", (_label, tarNummer) => {
+      expect(
+        toBasicRow(buildTrip({ tarNummer }), snapshotOf(line("BASE_PRICE", "300.00")), FIXED, "Wachttijd", TAR_ID).info,
+      ).toBe("");
+    });
+
+    /** The AMOUNT stays where amounts live. */
+    it("leaves the amount in the pricing columns", () => {
+      const row = toBasicRow(buildTrip({ tarNummer: "TAR123" }), withTarCharged(), FIXED, "Wachttijd", TAR_ID);
+
+      expect(row.costs).toBe("50.00");
+      expect(row.info).toBe("TAR");
+    });
+
+    it("says nothing when the automatic property is not configured", () => {
+      expect(
+        toBasicRow(buildTrip({ tarNummer: "TAR123" }), withTarCharged(), FIXED, "Wachttijd", null).info,
+      ).toBe("");
+    });
+  });
+
+  /**
+   * ── INTERNAL NOTES ────────────────────────────────────────────────────────
+   * Verbatim, last, with no label. The sheet has no convention for one, and
+   * inventing "Notitie: " would be a format nobody asked for.
+   */
+  describe("internal notes in Info", () => {
+    function infoFor(internalNotes: string | null): string {
+      return toBasicRow(buildTrip({ internalNotes }), snapshotOf(), FIXED, "Wachttijd").info;
+    }
+
+    it("includes the text as it was written", () => {
+      expect(infoFor("Chauffeur bellen bij aankomst")).toBe("Chauffeur bellen bij aankomst");
+    });
+
+    it.each([
+      ["null", null],
+      ["an empty string", ""],
+      ["whitespace only", "   "],
+      ["a tab", "	"],
+    ])("includes nothing for %s", (_label, notes) => {
+      expect(infoFor(notes)).toBe("");
+    });
+
+    /** A note's own commas are part of what somebody wrote. */
+    it("keeps a note's commas intact", () => {
+      expect(infoFor("Bellen, dan poort 4, papieren mee")).toBe("Bellen, dan poort 4, papieren mee");
+    });
+
+    it("trims the edges but not the middle", () => {
+      expect(infoFor("  Poort 4  gebruiken  ")).toBe("Poort 4  gebruiken");
+    });
+  });
+
+  /** Everything at once, in the order the file assembles it. */
+  it("assembles every source in one cell, in order", () => {
+    const TAR_ID = "b36469b0-37ec-40ba-81da-9bc272e05d60";
+
+    const row = toBasicRow(
+      buildTrip({
+        isLooseTrip: true,
+        tarNummer: "TAR123",
+        waitingTimeMinutes: 90,
+        internalNotes: "Chauffeur bellen bij aankomst",
+        customProperties: [
+          { id: "prop-1", name: "Aan/Afkoppelen", isActive: true },
+          { id: "flat", name: "Flat", isActive: true },
+        ],
+      }),
+      snapshotOf(
+        line("CUSTOM_PROPERTY", "20.00", "prop-1"),
+        line("CUSTOM_PROPERTY", "20.00", "flat"),
+        line("CUSTOM_PROPERTY", "50.00", TAR_ID),
+        line("WAITING_TIME", "25.00"),
+      ),
+      FIXED,
+      "Wachttijd",
+      TAR_ID,
+    );
+
+    expect(row.info).toBe(
+      "LOSRIT, Aan/Afkoppelen, TAR, Wachttijd 1 u 30 min, Chauffeur bellen bij aankomst",
+    );
+    expect(row.info).not.toContain("Flat");
+    expect(row.info).not.toContain("TAR123");
   });
 
   /** A route-priced property is not part of Kosten, so it is not named here. */
@@ -407,7 +648,7 @@ describe("the basic row", () => {
     const row = toBasicRow(
       buildTrip({
         customProperties: [
-          { id: "prop-1", name: "TAR", isActive: true },
+          { id: "prop-1", name: "Aan/Afkoppelen", isActive: true },
           { id: "toll", name: "Toll", isActive: true },
         ],
       }),
@@ -419,7 +660,7 @@ describe("the basic row", () => {
       "Wachttijd",
     );
 
-    expect(row.info).toBe("TAR");
+    expect(row.info).toBe("Aan/Afkoppelen");
     expect(row.costs).toBe("35.00");
   });
 

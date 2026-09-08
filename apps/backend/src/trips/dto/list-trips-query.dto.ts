@@ -44,6 +44,7 @@ export const TRIP_SEARCH_MAX_LENGTH = 200;
  * other.
  */
 export const TripSortFieldValues: readonly TripSortField[] = [
+  "licensePlate",
   "startTime",
   "endTime",
 ];
@@ -236,7 +237,7 @@ export class ListTripsQueryDto extends PaginationQueryDto {
   @ApiPropertyOptional({
     enum: TripSortFieldValues,
     description:
-      "Which time to order a day's Trips by. The planning date always stays the first ordering key, and a Vehicle's Trips stay together within a day — this chooses the order inside that grouping. Trips without the chosen time are listed last, in both directions.",
+      "What to order a day's Trips by. The planning date always stays the first ordering key, so the Day, Week and Month sections survive whatever is chosen here. `licensePlate` (the default) reads the day truck by truck with each truck's Trips in time order; a time reads the day as it happens with the plate breaking ties. Trips missing the chosen value — no vehicle, or no such time — are listed last in both directions.",
   })
   @IsOptional()
   @IsIn(TripSortFieldValues)
@@ -245,7 +246,7 @@ export class ListTripsQueryDto extends PaginationQueryDto {
   @ApiPropertyOptional({
     enum: SortDirectionValues,
     description:
-      "Direction of the time ordering. Applies to sortBy only: the date keeps its own order so the Day, Week and Month sections stay intact.",
+      "Direction of the chosen ordering. Applies to sortBy only: the date keeps its own order so the Day, Week and Month sections stay intact.",
   })
   @IsOptional()
   @IsIn(SortDirectionValues)

@@ -2,6 +2,7 @@ import type { Worksheet } from "exceljs";
 
 import type { Language } from "@/lib/i18n/translations";
 import { TRANSLATIONS } from "@/lib/i18n/translations";
+import { combinationFillArgb } from "./combination";
 import type { BasicExportRow, PricingExportRow } from "./export-rows";
 import {
   GRID_BORDER,
@@ -115,6 +116,17 @@ const PRICING_COLUMNS: readonly ColumnSpec[] = [
   { header: "Tol", width: 12, format: MONEY_FORMAT },
   { header: "Tunnel", width: 12, format: MONEY_FORMAT },
   { header: "Others", width: 12, format: MONEY_FORMAT },
+  /*
+   * ── WACHTTIJD HAD NO COLUMN, AND EK HELD IT ─────────────────────────────
+   * The waiting time was written into the column headed EK, so the sheet
+   * labelled one component as another and the CONFIRMED COST — which is what
+   * EK means everywhere else in this system, including the Ritten list —
+   * appeared nowhere at all. A Cost Confirmation arriving for a Trip changed
+   * the total on screen and changed nothing in the export.
+   *
+   * The waiting time now has the column it always needed, and EK holds EK.
+   */
+  { header: "Wachttijd", width: 12, format: MONEY_FORMAT },
   { header: "EK", width: 12, format: MONEY_FORMAT },
   { header: "Remarks", width: 32, wrap: true },
 ];
@@ -130,12 +142,10 @@ const PRICING_COLUMNS: readonly ColumnSpec[] = [
  * a real desk. `CONT NR` in particular is 11.54 wide because a container number
  * such as `EUCU1451295` has to sit on one line.
  *
- * ── THE TENTH COLUMN ────────────────────────────────────────────────────────
- * `AFGEWERKT` is TRANO's, not the reference's. It carries the Trip's completed
- * state, which the old workbook had no way to record, and it is appended rather
- * than inserted so the nine familiar columns keep their familiar places. It is
- * written in black: the colour convention belongs to the reference's fields and
- * inventing a sixth ink for a new column would weaken it.
+ * ── NINE COLUMNS, EXACTLY THE REFERENCE'S ───────────────────────────────────
+ * A tenth, `AFGEWERKT`, was TRANO's own addition and has been removed: the
+ * sheet is the reference's again. The Trip's status is untouched — it is simply
+ * not a column here.
  */
 const BASIC_COLUMNS: readonly StyledColumn[] = [
   { header: "NR PLAAT", width: 8.7265625, fontColor: INK.red },
@@ -157,7 +167,6 @@ const BASIC_COLUMNS: readonly StyledColumn[] = [
   { header: "PLAATS", width: 19.6328125, fontColor: INK.blue },
   { header: "COMBI EN KOST", width: 25.90625, fontColor: INK.green },
   { header: "INFO", width: 41, fontColor: INK.red },
-  { header: "AFGEWERKT", width: 11, fontColor: INK.black },
 ];
 
 /** Column G, where the reference prints the day. */
@@ -166,15 +175,7 @@ const DATE_HEADING_COLUMN = 7;
 /** Row 1 is the date; the table starts under it. */
 const BASIC_HEADER_ROW = 2;
 
-/**
- * The completed indicator.
- *
- * Symbols rather than a form control: ExcelJS has no checkbox, and a drawn one
- * would be a picture that no filter or formula can read. These are characters,
- * so a column of them sorts and filters like data.
- */
-export const COMPLETED_MARK = "☑";
-export const NOT_COMPLETED_MARK = "☐";
+
 
 /** An empty workbook with one sheet, however that sheet is later dressed. */
 async function createWorkbook(title: string) {
@@ -276,6 +277,7 @@ export async function buildPricingWorkbook(
       row.tunnel,
       row.others,
       row.waitingTime,
+      row.ek,
       row.remarks,
     ]);
   }
@@ -326,9 +328,19 @@ export async function buildBasicWorkbook(
       row.trip,
       row.costs,
       row.info,
-      row.isCompleted ? COMPLETED_MARK : NOT_COMPLETED_MARK,
     ]);
   }
+
+  /*
+   * ── ONE COMBINATION, ONE COLOUR, ACROSS THE WHOLE ROW ───────────────────
+   * Applied AFTER the reference look, which paints every body cell, so the
+   * fill lands on all nine columns rather than only the ones that happen to
+   * hold a value. The colour comes from the group ID through the very function
+   * the Ritten list's group tag uses, so a Combination reads the same on paper
+   * as on screen — and keeps its colour across the days it spans, because the
+   * id does not change with the date or the row's position.
+   */
+  paintGroupRows(sheet, rows, BASIC_HEADER_ROW);
 
   applyReferenceLook(sheet, BASIC_COLUMNS, BASIC_HEADER_ROW);
   writeDatePeriod(sheet, period);
@@ -403,4 +415,35 @@ function buildFileName(
   return periodStart === periodEnd
     ? `${prefix}_${periodStart}.xlsx`
     : `${prefix}_${periodStart}_${periodEnd}.xlsx`;
+}
+
+/**
+ * Fills each row belonging to a group, every cell of it.
+ *
+ * A Trip in no group is left alone: the sheet's own background and its grid
+ * lines are what the office reads the table by, and painting a standalone row
+ * white would flatten them.
+ */
+function paintGroupRows(
+  sheet: Worksheet,
+  rows: readonly BasicExportRow[],
+  headerRowNumber: number,
+): void {
+  rows.forEach((row, index) => {
+    const argb = combinationFillArgb(row.tripGroupId);
+
+    if (argb === null) {
+      return;
+    }
+
+    const sheetRow = sheet.getRow(headerRowNumber + 1 + index);
+
+    for (let column = 1; column <= BASIC_COLUMNS.length; column += 1) {
+      sheetRow.getCell(column).fill = {
+        type: "pattern",
+        pattern: "solid",
+        fgColor: { argb },
+      };
+    }
+  });
 }

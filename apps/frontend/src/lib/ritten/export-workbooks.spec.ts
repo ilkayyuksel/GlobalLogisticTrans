@@ -1,7 +1,7 @@
+import type { Worksheet } from "exceljs";
+
 import type { BasicExportRow, PricingExportRow } from "./export-rows";
 import {
-  COMPLETED_MARK,
-  NOT_COMPLETED_MARK,
   basicFileName,
   buildBasicWorkbook,
   buildPricingWorkbook,
@@ -81,6 +81,7 @@ function buildPricingRow(
     tunnel: null,
     others: null,
     waitingTime: null,
+    ek: null,
     remarks: "",
     ...overrides,
   };
@@ -88,7 +89,7 @@ function buildPricingRow(
 
 function buildBasicRow(overrides: Partial<BasicExportRow> = {}): BasicExportRow {
   return {
-    isCompleted: false,
+    tripGroupId: null,
     licensePlate: "1-ABC-123",
     startTime: "07:00:00",
     endTime: "15:00:00",
@@ -134,7 +135,13 @@ describe("Excel date and time values", () => {
 });
 
 describe("the pricing workbook", () => {
-  it("has the seventeen columns, in the agreed order", async () => {
+  /**
+   * EIGHTEEN now. The waiting time used to be written into the column headed
+   * EK, so the sheet named one component as another and the confirmed cost
+   * appeared nowhere — a Cost Confirmation changed the total on screen and
+   * changed nothing here. Wachttijd got the column it needed and EK holds EK.
+   */
+  it("has the eighteen columns, in the agreed order", async () => {
     const sheet = await reopen(await buildPricingWorkbook([], "nl"));
 
     expect(sheet.getRow(1).values).toEqual([
@@ -154,6 +161,7 @@ describe("the pricing workbook", () => {
       "Tol",
       "Tunnel",
       "Others",
+      "Wachttijd",
       "EK",
       "Remarks",
     ]);
@@ -300,7 +308,34 @@ describe("the pricing workbook", () => {
         ),
       );
 
-      expect(sheet.getRow(2).getCell(17).value).toBe("TAR, Flat");
+      // Column 18 since Wachttijd gained one of its own.
+      expect(sheet.getRow(2).getCell(18).value).toBe("TAR, Flat");
+    });
+
+    /**
+     * EK is the CONFIRMED COST, which is what it means everywhere else in this
+     * system. It used to hold the waiting time, so a Cost Confirmation arriving
+     * for a Trip was invisible in the export.
+     */
+    it("writes the confirmed cost in the EK column", async () => {
+      const sheet = await reopen(
+        await buildPricingWorkbook(
+          [buildPricingRow({ ek: 165, waitingTime: 25 })],
+          "nl",
+        ),
+      );
+
+      expect(sheet.getRow(2).getCell(16).value).toBe(25);
+      expect(sheet.getRow(2).getCell(17).value).toBe(165);
+    });
+
+    /** A Trip with no confirmation leaves EK empty, never zero. */
+    it("leaves EK empty when nothing was confirmed", async () => {
+      const sheet = await reopen(
+        await buildPricingWorkbook([buildPricingRow({ ek: null })], "nl"),
+      );
+
+      expect(sheet.getRow(2).getCell(17).value).toBeNull();
     });
   });
 
@@ -386,7 +421,6 @@ describe("the basic workbook's structure", () => {
       "PLAATS",
       "COMBI EN KOST",
       "INFO",
-      "AFGEWERKT",
     ]);
   });
 
@@ -414,12 +448,113 @@ describe("the basic workbook's structure", () => {
     expect(row.getCell(9).value).toBe("LOSRIT, Wachttijd 07:00-10:00");
   });
 
-  it("marks a completed Trip in the last column", async () => {
-    const ticked = await openBasic([buildBasicRow({ isCompleted: true })]);
-    const empty = await openBasic([buildBasicRow({ isCompleted: false })]);
+  /**
+   * `AFGEWERKT` was TRANO's own tenth column and is gone: the sheet is the
+   * reference's nine again. The Trip's status is untouched — it is simply not
+   * exported.
+   */
+  it("has no tenth column", async () => {
+    const sheet = await openBasic([buildBasicRow()]);
 
-    expect(ticked.getRow(3).getCell(10).value).toBe(COMPLETED_MARK);
-    expect(empty.getRow(3).getCell(10).value).toBe(NOT_COMPLETED_MARK);
+    expect(sheet.getRow(2).getCell(10).value).toBeNull();
+    expect(sheet.getRow(3).getCell(10).value).toBeNull();
+  });
+
+  it("ends on INFO", async () => {
+    const sheet = await openBasic([buildBasicRow()]);
+    const headers = (sheet.getRow(2).values as unknown[]).filter(Boolean);
+
+    expect(headers).toEqual([
+      "NR PLAAT",
+      "TIJD",
+      "TIJD",
+      "BOEKING",
+      "TYPE",
+      "CONT NR",
+      "PLAATS",
+      "COMBI EN KOST",
+      "INFO",
+    ]);
+  });
+
+  /**
+   * ── ONE COMBINATION, ONE COLOUR, WHOLE ROW ──────────────────────────────
+   * The colour comes from the group ID through the same function the Ritten
+   * list's group tag uses, so a Combination reads the same on paper as on
+   * screen — and keeps its colour across the days it spans.
+   */
+  describe("group colours", () => {
+    const GROUP_A = "5c2f4d8e-1a3b-4c6d-8e9f-0a1b2c3d4e5f";
+    const GROUP_B = "97777777-7777-4777-8777-777777777777";
+
+    function fillsOf(sheet: Worksheet, rowNumber: number): string[] {
+      const row = sheet.getRow(rowNumber);
+      const fills: string[] = [];
+
+      for (let column = 1; column <= 9; column += 1) {
+        const fill = row.getCell(column).fill as
+          | { fgColor?: { argb?: string } }
+          | undefined;
+
+        fills.push(fill?.fgColor?.argb ?? "NONE");
+      }
+
+      return fills;
+    }
+
+    it("paints every cell of a grouped row", async () => {
+      const sheet = await openBasic([buildBasicRow({ tripGroupId: GROUP_A })]);
+      const fills = fillsOf(sheet, 3);
+
+      expect(new Set(fills).size).toBe(1);
+      expect(fills[0]).not.toBe("NONE");
+    });
+
+    it("gives both legs of one group the same colour", async () => {
+      const sheet = await openBasic([
+        buildBasicRow({ tripGroupId: GROUP_A }),
+        buildBasicRow({ tripGroupId: GROUP_A }),
+      ]);
+
+      expect(fillsOf(sheet, 3)).toEqual(fillsOf(sheet, 4));
+    });
+
+    it("gives a different group a different colour", async () => {
+      const sheet = await openBasic([
+        buildBasicRow({ tripGroupId: GROUP_A }),
+        buildBasicRow({ tripGroupId: GROUP_B }),
+      ]);
+
+      expect(fillsOf(sheet, 3)[0]).not.toBe(fillsOf(sheet, 4)[0]);
+    });
+
+    it("leaves a standalone Trip unpainted", async () => {
+      const sheet = await openBasic([buildBasicRow({ tripGroupId: null })]);
+
+      expect(fillsOf(sheet, 3).every((fill) => fill === "NONE")).toBe(true);
+    });
+
+    /**
+     * The colour follows the GROUP, never the row position or the date. A
+     * Combination running over two days keeps one colour, and rows between
+     * them do not shift it.
+     */
+    it("keeps one colour when the group spans two days with others between", async () => {
+      const sheet = await openBasic([
+        buildBasicRow({ tripGroupId: GROUP_A }),
+        buildBasicRow({ tripGroupId: null }),
+        buildBasicRow({ tripGroupId: GROUP_B }),
+        buildBasicRow({ tripGroupId: GROUP_A }),
+      ]);
+
+      expect(fillsOf(sheet, 3)).toEqual(fillsOf(sheet, 6));
+    });
+
+    it("does not paint the header", async () => {
+      const sheet = await openBasic([buildBasicRow({ tripGroupId: GROUP_A })]);
+
+      expect(fillsOf(sheet, 2)[0]).not.toBe(fillsOf(sheet, 3)[0]);
+    });
   });
 
   /**
@@ -553,7 +688,8 @@ describe("the basic workbook's appearance", () => {
     const thin = { style: "thin", color: { argb: "FF000000" } };
 
     for (const row of [sheet.getRow(2), sheet.getRow(3)]) {
-      for (let column = 1; column <= 10; column += 1) {
+      // Nine columns now: AFGEWERKT was TRANO's own tenth and is gone.
+      for (let column = 1; column <= 9; column += 1) {
         expect(row.getCell(column).border).toEqual({
           top: thin,
           left: thin,

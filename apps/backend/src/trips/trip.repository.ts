@@ -127,8 +127,14 @@ export interface BookingDigitsQuery {
   readonly excludeTripId?: string;
 }
 
-/** The time a planner asked to sort a day's work by. */
-export type TripSortField = "startTime" | "endTime";
+/**
+ * What a planner asked to sort a day's work by.
+ *
+ * `licensePlate` is the default and the ordinary way to read the list: a
+ * planner works truck by truck. The two times are the other way round — the
+ * day's work in the order it happens, whichever truck does it.
+ */
+export type TripSortField = "licensePlate" | "startTime" | "endTime";
 export type SortDirection = "asc" | "desc";
 
 export interface TripSort {
@@ -145,16 +151,21 @@ export interface TripSort {
  *                  views are built from date sections — sorting globally by
  *                  time would scatter one day's work across the whole period.
  *
- * 2. the vehicle   So one truck's Trips read as a block. Ordered by PLATE
- *                  rather than by id: a UUID groups just as well but presents
- *                  the trucks in an order nobody recognises. Trips with no
- *                  vehicle sort last — Postgres puts NULLs last in ASC, which
- *                  is exactly the wanted "unassigned at the bottom".
+ * 2/3. the PLATE   The plate and the time, and WHICH COMES FIRST is what the
+ *    and the TIME  operator chooses. Sorting by plate reads the day truck by
+ *                  truck, with each truck's Trips in time order underneath;
+ *                  sorting by a time reads the day as it happens, whichever
+ *                  truck does it, with the plate breaking ties.
  *
- * 3. the chosen    Start or end time, ascending or descending as asked. Nulls
- *    time          are pinned LAST in both directions: a Trip with no time is
- *                  not early, it is unknown, and floating it to the top of a
- *                  descending list would read as "latest".
+ *                  The plate used to be key 2 unconditionally, so choosing a
+ *                  time only ordered Trips WITHIN one truck — the day could
+ *                  not be read chronologically at all. Both orders are useful
+ *                  and neither is a view: each is a query the database answers.
+ *
+ *                  Nulls are pinned LAST whichever key they belong to. A Trip
+ *                  with no vehicle is unassigned and belongs at the bottom; a
+ *                  Trip with no time is not early, it is unknown, and floating
+ *                  it to the top of a descending list would read as "latest".
  *
  * 4. id            A total order. Without it two Trips that tie on every key
  *                  above could swap places between two requests, which makes
@@ -163,23 +174,60 @@ export interface TripSort {
  *
  * The date keeps the descending order the list has always had — newest day
  * first — so which Trips fall on which page does not change under anyone's
- * feet. `sortDirection` applies to the TIME within a day, which is what the
- * operator is actually choosing; the Day/Week/Month sections are ordered by the
- * frontend from the date range it asked for.
+ * feet, and the Day/Week/Month sections survive whatever is chosen below it.
+ * `sortDirection` applies to the CHOSEN key.
  */
 export function buildOrderBy(
   sort: TripSort | undefined,
 ): Prisma.TripOrderByWithRelationInput[] {
   const direction: SortDirection = sort?.direction ?? "asc";
-  const timeKey: TripSortField = sort?.field ?? "startTime";
+  const field: TripSortField = sort?.field ?? DEFAULT_TRIP_SORT_FIELD;
 
+  /*
+   * Plain, because Prisma cannot annotate null placement on a RELATION's
+   * column — `{ vehicle: { licensePlate: { sort, nulls } } }` is not a shape it
+   * accepts. So the placement is Postgres's own: ASCENDING puts NULLs last,
+   * which is exactly the wanted "unassigned at the bottom" and is the default
+   * and the ordinary case. Descending plate therefore lists the unassigned
+   * FIRST — stated here rather than hidden, because it is a real consequence of
+   * a limit in the query language rather than a decision anybody made.
+   */
+  const plate = (order: SortDirection) => ({
+    vehicle: { licensePlate: order },
+  }) as Prisma.TripOrderByWithRelationInput;
+
+  const time = (key: "startTime" | "endTime", order: SortDirection) => ({
+    [key]: { sort: order, nulls: "last" },
+  }) as Prisma.TripOrderByWithRelationInput;
+
+  /*
+   * By plate: the truck first, then that truck's Trips in time order. The time
+   * is always ascending here — it is the tiebreaker, not the choice, and a
+   * truck's own day always reads forwards.
+   */
+  if (field === "licensePlate") {
+    return [
+      { planningDate: "desc" },
+      plate(direction),
+      time("startTime", "asc"),
+      { id: "asc" },
+    ];
+  }
+
+  /*
+   * By time: the day in the order it happens, with the plate keeping one
+   * truck's simultaneous Trips together underneath.
+   */
   return [
     { planningDate: "desc" },
-    { vehicle: { licensePlate: "asc" } },
-    { [timeKey]: { sort: direction, nulls: "last" } },
+    time(field, direction),
+    plate("asc"),
     { id: "asc" },
   ];
 }
+
+/** Truck by truck: how a planner reads the day unless they ask otherwise. */
+export const DEFAULT_TRIP_SORT_FIELD: TripSortField = "licensePlate";
 
 /** Named here so the repository does not import the whole event vocabulary. */
 const UPDATE_APPLIED_EVENT: string = TripHistoryEvent.UpdateApplied;

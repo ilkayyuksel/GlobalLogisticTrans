@@ -20,7 +20,7 @@ import type {
 const TRIPS_PATH = "/api/v1/trips";
 
 /** The times a planning list can be ordered by, as the backend accepts them. */
-export type TripSortField = "startTime" | "endTime";
+export type TripSortField = "licensePlate" | "startTime" | "endTime";
 export type TripSortDirection = "asc" | "desc";
 
 export interface ListTripsParams {
