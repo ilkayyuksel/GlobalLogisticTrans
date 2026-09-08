@@ -41,6 +41,10 @@ const config: Config = {
           4: "rgb(var(--color-combination-4) / <alpha-value>)",
           5: "rgb(var(--color-combination-5) / <alpha-value>)",
           6: "rgb(var(--color-combination-6) / <alpha-value>)",
+          7: "rgb(var(--color-combination-7) / <alpha-value>)",
+          8: "rgb(var(--color-combination-8) / <alpha-value>)",
+          9: "rgb(var(--color-combination-9) / <alpha-value>)",
+          10: "rgb(var(--color-combination-10) / <alpha-value>)",
         },
 
         /* The brand navigation surface, dark in both themes. */

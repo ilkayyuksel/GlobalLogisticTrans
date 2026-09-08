@@ -211,6 +211,60 @@ describe("the Info column in a real BASIS workbook", () => {
     expect(info).not.toContain("TAR123");
   });
 
+  /**
+   * ── THE INVARIANT ─────────────────────────────────────────────────────────
+   * TAR in the pricing ↔ `TAR` in Info. They read the SAME snapshot — the word
+   * from the presence of the automatic property's line, the amount from that
+   * line itself — so the exporter has no way to make them disagree. This walks
+   * both states and asserts the two together, in the file.
+   */
+  describe("the TAR word and the TAR amount agree", () => {
+    async function rowOf(charged: boolean) {
+      const snapshot = charged
+        ? snapshotOf(
+            property("CUSTOM_PROPERTY", "20.00", MANUAL_ID),
+            property("CUSTOM_PROPERTY", "50.00", TAR_ID),
+          )
+        : snapshotOf(property("CUSTOM_PROPERTY", "20.00", MANUAL_ID));
+
+      const trip = buildTrip({
+        // Stated in BOTH cases: the number never decides anything.
+        tarNummer: "TAR123",
+        customProperties: [
+          { id: MANUAL_ID, name: "Aan/Afkoppelen", isActive: true },
+        ],
+      } as Partial<Trip>);
+
+      const built = toBasicRow(trip, snapshot, MANUAL_IDS, "Wachttijd", TAR_ID);
+
+      return { info: await infoCellOf(trip, snapshot), costs: built.costs };
+    }
+
+    it("says TAR exactly when the amount is there", async () => {
+      const charged = await rowOf(true);
+
+      expect(charged.info).toContain("TAR");
+      expect(charged.costs).toBe("20.00 + 50.00");
+    });
+
+    it("says nothing when the amount is not there", async () => {
+      const withheld = await rowOf(false);
+
+      expect(withheld.info).not.toContain("TAR");
+      expect(withheld.costs).toBe("20.00");
+    });
+
+    /** The same Trip, the same stated number: only the snapshot differs. */
+    it("is decided by the snapshot and never by the number", async () => {
+      const charged = await rowOf(true);
+      const withheld = await rowOf(false);
+
+      expect(charged.info).not.toBe(withheld.info);
+      expect(charged.info).not.toContain("TAR123");
+      expect(withheld.info).not.toContain("TAR123");
+    });
+  });
+
   /** A Trip with nothing to say leaves the cell empty, never "null". */
   it("writes an empty cell when there is nothing to say", async () => {
     expect(await infoCellOf(buildTrip(), snapshotOf())).toBe("");

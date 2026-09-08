@@ -14,6 +14,7 @@ import {
 import { buildSections } from "./sections";
 import {
   combinationClasses,
+  COMBINATION_COLOR_COUNT,
   combinationColorIndex,
   combinationLabel,
 } from "./combination";
@@ -238,7 +239,11 @@ describe("Combination markers", () => {
       "abcdefab-cdef-4bcd-8bcd-efabcdefabcd",
     ].map(combinationColorIndex);
 
-    expect(indexes.every((index) => index >= 1 && index <= 6)).toBe(true);
+    expect(
+      indexes.every(
+        (index) => index >= 1 && index <= COMBINATION_COLOR_COUNT,
+      ),
+    ).toBe(true);
   });
 
   /** Two Combinations on one screen must be tellable apart. */

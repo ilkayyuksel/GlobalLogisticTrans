@@ -60,13 +60,23 @@
    * Combination always read as a pair and two groups on one screen stay
    * distinguishable. They are hues no status badge uses, so a group marker can
    * never be mistaken for a state.
+   *
+   * TEN of them, ordered so that CONSECUTIVE entries sit far apart on the
+   * wheel — the earlier palette held violet beside indigo and teal beside
+   * lime, and two groups could land on shades of one colour. Hue angles are
+   * noted per token so a future addition can be placed in the widest gap
+   * rather than beside a neighbour.
    */
-  --color-combination-1: 124 58 237; /* violet */
-  --color-combination-2: 13 148 136; /* teal */
-  --color-combination-3: 217 119 6; /* amber */
-  --color-combination-4: 219 39 119; /* pink */
-  --color-combination-5: 79 70 229; /* indigo */
-  --color-combination-6: 101 163 13; /* lime */
+  --color-combination-1: 37 99 235; /* blue      hue 221 */
+  --color-combination-2: 234 88 12; /* orange    hue  25 */
+  --color-combination-3: 22 163 74; /* green     hue 142 */
+  --color-combination-4: 192 38 211; /* magenta   hue 293 */
+  --color-combination-5: 8 145 178; /* cyan      hue 192 */
+  --color-combination-6: 220 38 38; /* red       hue   0 */
+  --color-combination-7: 124 58 237; /* violet    hue 262 */
+  --color-combination-8: 202 138 4; /* amber     hue  41 */
+  --color-combination-9: 219 39 119; /* pink      hue 330 */
+  --color-combination-10: 101 163 13; /* lime      hue  82 */
 }
 
 /**
@@ -93,13 +103,17 @@
   --color-text-muted: 148 163 184; /* #94A3B8 */
   --color-hover: 51 65 85; /* #334155 */
 
-  /* The same six hues, lightened so they carry on a navy surface. */
-  --color-combination-1: 167 139 250;
-  --color-combination-2: 45 212 191;
-  --color-combination-3: 251 191 36;
-  --color-combination-4: 244 114 182;
-  --color-combination-5: 129 140 248;
-  --color-combination-6: 163 230 53;
+  /* The same ten hues, lightened so they carry on a navy surface. */
+  --color-combination-1: 96 165 250; /* blue */
+  --color-combination-2: 251 146 60; /* orange */
+  --color-combination-3: 74 222 128; /* green */
+  --color-combination-4: 232 121 249; /* magenta */
+  --color-combination-5: 34 211 238; /* cyan */
+  --color-combination-6: 248 113 113; /* red */
+  --color-combination-7: 167 139 250; /* violet */
+  --color-combination-8: 251 191 36; /* amber */
+  --color-combination-9: 244 114 182; /* pink */
+  --color-combination-10: 163 230 53; /* lime */
 }
 
 body {
