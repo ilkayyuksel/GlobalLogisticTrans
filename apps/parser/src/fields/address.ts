@@ -182,7 +182,11 @@ function countryOnCityLine(value: string): string | null {
 }
 
 export interface ExtractedAddress {
-  readonly destinationCity: string;
+  /**
+   * Null when the address block states NO place — see `statesNoPlace`. It is
+   * never null because a city could not be read: that still refuses.
+   */
+  readonly destinationCity: string | null;
   /** Null when the document states no country. */
   readonly destinationCountry: string | null;
   readonly rawAddress: string;
@@ -211,6 +215,36 @@ export function extractAddress(
   const place = readPlace(block, fragments);
 
   if (!place) {
+    /*
+     * ── A BLOCK MAY STATE NO PLACE AT ALL ───────────────────────────────────
+     * Which is a different fact from one this parser could not read, and the
+     * two must not share an answer. A real order prints:
+     *
+     *     [8700]
+     *     Novaya Handling
+     *     Ten Hovestraat 32
+     *     8700
+     *
+     * — the postcode, a company, a street, and the postcode again. There is no
+     * city in it to find. Refusing that order treated an ABSENT field as a
+     * broken one and blocked a transport nobody could unblock, because the
+     * document is what it is.
+     *
+     * So an address that names no place yields a NULL city, which is what this
+     * project does with every other absent value, and an operator fills it in
+     * from the Ritten list. A block whose city is present but unreadable still
+     * fails loudly — that signal is what found the last three parser bugs, and
+     * `statesNoPlace` is deliberately narrow to preserve it.
+     */
+    if (statesNoPlace(block)) {
+      return {
+        destinationCity: null,
+        destinationCountry: null,
+        rawAddress: joinText(block),
+        section: sectionHeader.text.replace(/:$/, ""),
+      };
+    }
+
     throw new ExtractionError(
       "MALFORMED_ADDRESS",
       `No readable city line was found under '${sectionHeader.text}'. Read instead: ${JSON.stringify(joinText(block))}.`,
@@ -1148,4 +1182,52 @@ function resolveCountry(prefix: string, next: Fragment | null): string {
   }
 
   return derived;
+}
+
+/**
+ * Whether this block genuinely names no place, as opposed to one this parser
+ * failed to read.
+ *
+ * ── WHY THE DISTINCTION HAS TO BE NARROW ────────────────────────────────────
+ * "No city" is a quiet answer: the Trip imports and somebody types the address
+ * in later. "Unreadable" is a loud one: the order is refused and a person looks
+ * at the document. Getting the two the wrong way round is expensive in both
+ * directions — a silent import of a destination the parser merely could not
+ * parse would put a Trip on the planning with no address and no warning, and
+ * that is exactly how the last three address bugs would have gone unnoticed.
+ *
+ * ── THE TEST IT APPLIES ─────────────────────────────────────────────────────
+ * Only the shape `readBracketedPostcode` already recognises qualifies: the
+ * block must OPEN with the bracketed postcode and hold a full address. Within
+ * that shape, every line from the city position onward is examined, and the
+ * block states a place if ANY of them still holds letters once its postcode has
+ * been removed:
+ *
+ *   `8700`               -> nothing left     -> states no place
+ *   `be-8580 Avelgem`    -> `Avelgem`        -> states a place, unread: REFUSE
+ *   `9160 9160 Lokeren`  -> `Lokeren`        -> states a place, unread: REFUSE
+ *
+ * The company and the street are never examined, because the position rule puts
+ * them before the city — the same rule that stops `readBracketedPostcode`
+ * reading a company name as a destination.
+ *
+ * A country alone is not a place either: `extractAddress` already refuses a
+ * block whose only candidate is a country, and that refusal is louder and more
+ * specific than this one, so it keeps its own message.
+ */
+function statesNoPlace(block: readonly Fragment[]): boolean {
+  if (
+    block.length < MINIMUM_ADDRESS_LINES ||
+    !BRACKETED_POSTCODE.test(block[0].text.trim())
+  ) {
+    return false;
+  }
+
+  const candidates = block.slice(MINIMUM_ADDRESS_LINES - 1);
+
+  return candidates.every((fragment) => {
+    const withoutPostcode = cityWithoutPostcode(fragment.text.trim());
+
+    return !/[A-Za-z]/.test(withoutPostcode);
+  });
 }

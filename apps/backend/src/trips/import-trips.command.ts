@@ -60,7 +60,13 @@ export interface ImportedTripData {
    * RoutePricing and RouteCost are configured under, so nothing translates it.
    */
   readonly terminal: string | null;
-  readonly destinationCity: string;
+  /**
+   * Null when the order's address block names no place — the parser reports an
+   * absent city rather than refusing a document that simply has none. An
+   * address whose city is present but unreadable is still refused, so a null
+   * here means the document is silent.
+   */
+  readonly destinationCity: string | null;
   /**
    * Null when the document states no country.
    *

@@ -1187,9 +1187,14 @@ export class TripService {
    * change one entered wrongly, because it was excluded from every update as
    * "parser-controlled". That description is only true where a parser exists.
    *
-   * On an IMPORTED Trip it still is: a later UPDATE document re-reads the
-   * destination and would overwrite anything typed here, so the request is
-   * refused rather than accepted and silently reverted.
+   * On an IMPORTED Trip it still is, FOR THE FIELDS THE DOCUMENT FILLED IN: a
+   * later UPDATE re-reads those and would overwrite anything typed here, so the
+   * request is refused rather than accepted and silently reverted.
+   *
+   * A field the document left EMPTY is the operator's, though. An order that
+   * names no destination imports with a null city, and guarding that null on
+   * behalf of a document with no opinion would leave the Trip permanently
+   * address-less.
    *
    * ── THE TRANSPORT TIMES ARE NOT ON THIS LIST ─────────────────────────────
    * They used to be, and the owner decided otherwise: Begin and Eind are
@@ -1212,13 +1217,30 @@ export class TripService {
       return;
     }
 
-    const owned: ReadonlyArray<[keyof UpdateTripDto, string]> = [
-      ["destinationCity", "destination"],
-      ["destinationCountry", "destination"],
+    /*
+     * ── A DOCUMENT OWNS WHAT IT SAYS, NOT WHAT IT NEVER SAID ────────────────
+     * Some orders state no destination at all — the address block holds the
+     * postcode, a company and a street, and nothing else. The parser imports
+     * those with a null city rather than refusing a transport nobody can
+     * unblock, and the operator is then the only possible author of the
+     * address: refusing their edit would leave the Trip permanently without
+     * one, guarded on behalf of a document that never had an opinion.
+     *
+     * The protection is unchanged wherever the document DID state a value. A
+     * later UPDATE re-reads that field and would overwrite anything typed over
+     * it, so the request is still refused rather than accepted and silently
+     * reverted.
+     *
+     * Checked per FIELD, not per Trip: an order naming a country but no city
+     * keeps its country protected while its empty city is open.
+     */
+    const owned: ReadonlyArray<[keyof UpdateTripDto, keyof Trip, string]> = [
+      ["destinationCity", "destinationCity", "destination"],
+      ["destinationCountry", "destinationCountry", "destination"],
     ];
 
-    for (const [field, description] of owned) {
-      if (dto[field] !== undefined) {
+    for (const [field, column, description] of owned) {
+      if (dto[field] !== undefined && trip[column] !== null) {
         throw new DocumentControlledFieldException(
           trip.id,
           trip.pdfDocumentId,

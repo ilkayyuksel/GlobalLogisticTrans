@@ -28,7 +28,7 @@ import {
 } from "@/lib/trips/latest-update";
 import {
   canEdit,
-  canEditDocumentFields,
+  canEditDestination,
   canViewPdf,
   type RittenActions,
 } from "@/lib/ritten/row-actions";
@@ -646,7 +646,7 @@ function DestinationCell({
   );
   const display = parts.length > 0 ? parts.join(", ") : empty;
 
-  if (!canEditDocumentFields(trip)) {
+  if (!canEditDestination(trip)) {
     return <>{display}</>;
   }
 

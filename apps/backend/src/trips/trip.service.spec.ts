@@ -641,6 +641,74 @@ describe("TripService", () => {
 
         expect(repository.update).toHaveBeenCalled();
       });
+
+      /**
+       * ── A DOCUMENT OWNS WHAT IT SAYS, NOT WHAT IT NEVER SAID ─────────────
+       * Some orders state no destination at all, and the parser imports those
+       * with a null city rather than refusing a transport nobody can unblock.
+       * The operator is then the only possible author of the address, so the
+       * edit has to be accepted — refusing it on behalf of a document with no
+       * opinion would leave the Trip permanently address-less.
+       */
+      describe("a destination the document never stated", () => {
+        beforeEach(() => {
+          repository.findById.mockResolvedValue(
+            buildTrip({
+              pdfDocumentId: PDF_ID,
+              destinationCity: null,
+              destinationCountry: null,
+            }),
+          );
+        });
+
+        it("may be filled in on an imported Trip", async () => {
+          await service.update(TRIP_ID, { destinationCity: "Tielt" });
+
+          expect(repository.update).toHaveBeenCalledWith(
+            TRIP_ID,
+            expect.objectContaining({ destinationCity: "Tielt" }),
+          );
+        });
+
+        it("may be filled in together with its country", async () => {
+          await service.update(TRIP_ID, {
+            destinationCity: "Tielt",
+            destinationCountry: "Belgium",
+          });
+
+          expect(repository.update).toHaveBeenCalled();
+        });
+
+        /** Per FIELD: a stated country stays the document's. */
+        it("still refuses a country the document did state", async () => {
+          repository.findById.mockResolvedValue(
+            buildTrip({
+              pdfDocumentId: PDF_ID,
+              destinationCity: null,
+              destinationCountry: "Belgium",
+            }),
+          );
+
+          await expect(
+            service.update(TRIP_ID, { destinationCountry: "Netherlands" }),
+          ).rejects.toBeInstanceOf(DocumentControlledFieldException);
+        });
+
+        /** And the city stays open in that same Trip. */
+        it("still allows the empty city there", async () => {
+          repository.findById.mockResolvedValue(
+            buildTrip({
+              pdfDocumentId: PDF_ID,
+              destinationCity: null,
+              destinationCountry: "Belgium",
+            }),
+          );
+
+          await service.update(TRIP_ID, { destinationCity: "Tielt" });
+
+          expect(repository.update).toHaveBeenCalled();
+        });
+      });
     });
 
     /**

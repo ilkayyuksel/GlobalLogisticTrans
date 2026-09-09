@@ -71,7 +71,12 @@ export interface ParsedTrip {
    * layer, which is the only side that knows the configured names.
    */
   readonly terminal: string | null;
-  readonly destinationCity: string;
+  /**
+   * Null when the order's address block names no place at all. An address whose
+   * city is present but unreadable is REFUSED instead, so a null here always
+   * means the document is silent rather than that parsing fell short.
+   */
+  readonly destinationCity: string | null;
   readonly destinationCountry: string | null;
   /** ISO calendar date, `YYYY-MM-DD`. */
   readonly date: string;
