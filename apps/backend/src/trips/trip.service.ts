@@ -8,7 +8,10 @@ import { buildPaginationMeta } from "../common/dto/pagination-meta.dto";
 import { toUtcTime } from "../common/time-of-day";
 import { DriverService } from "../drivers/driver.service";
 import { AppLoggerService } from "../logger/app-logger.service";
-import { PricingRecalculationService } from "../pricing-engine/pricing-recalculation.service";
+import {
+  PricingRecalculationOutcome,
+  PricingRecalculationService,
+} from "../pricing-engine/pricing-recalculation.service";
 import { VehicleService } from "../vehicles/vehicle.service";
 import { AutomaticFlatPropertyService } from "./automatic-flat.service";
 import { ChangeTripPaymentDto } from "./dto/change-trip-payment.dto";
@@ -420,8 +423,6 @@ export class TripService {
       return response;
     }
 
-    const outcome = await this.recalculation.recalculate(updated.id);
-
     /*
      * The recalculated answer REPLACES what the response already carried. On
      * failure that means null rather than the figures the read produced: those
@@ -429,11 +430,10 @@ export class TripService {
      * would be a stale amount nothing on the screen could reveal. The write
      * itself is kept either way.
      */
-    return {
-      ...response,
-      pricing: outcome.pricing,
-      reasonCode: outcome.reasonCode,
-    };
+    return this.withOutcome(
+      response,
+      await this.recalculation.recalculate(updated.id),
+    );
   }
 
   /**
@@ -864,7 +864,7 @@ export class TripService {
       throw new TooFewTripsToGroupException(MINIMUM_TRIPS_PER_GROUP);
     }
 
-    const grouped = await this.repository.runInTransaction(
+    const { ungrouped, grouped } = await this.repository.runInTransaction(
       async (repository) => {
         const trips = await repository.findManyByIds(tripIds);
 
@@ -884,7 +884,10 @@ export class TripService {
         // Re-read inside the transaction: the rows now carry the group, and the
         // response must show what was actually written rather than what was
         // asked for.
-        return repository.findManyByIds(tripIds);
+        return {
+          ungrouped: trips,
+          grouped: await repository.findManyByIds(tripIds),
+        };
       },
     );
 
@@ -894,7 +897,13 @@ export class TripService {
       tripCount: grouped.length,
     });
 
-    return this.toResponses(grouped);
+    // After the commit, so the recalculation reads the group that now exists.
+    const outcomes = await this.repriceRegroupedTrips(ungrouped, grouped);
+    const responses = await this.toResponses(grouped);
+
+    return responses.map((response) =>
+      this.withOutcome(response, outcomes.get(response.id)),
+    );
   }
 
   /**
@@ -911,14 +920,98 @@ export class TripService {
       throw new TripNotInGroupException(id);
     }
 
-    const updated = await this.repository.update(id, { tripGroupId: null });
+    const tripGroupId = trip.tripGroupId;
+
+    const { members, updated } = await this.repository.runInTransaction(
+      async (repository) => ({
+        // The whole group as it stood, read with the write, so the comparison
+        // below describes exactly this change and no other.
+        members: await repository.findManyByGroupId(tripGroupId),
+        updated: await repository.update(id, { tripGroupId: null }),
+      }),
+    );
 
     this.logger.log("Trip removed from its group", {
       tripId: id,
-      previousTripGroupId: trip.tripGroupId,
+      previousTripGroupId: tripGroupId,
     });
 
-    return this.toResponse(updated);
+    const before = members.some((member) => member.id === id)
+      ? members
+      : [...members, trip];
+    const after = before.map((member) => (member.id === id ? updated : member));
+
+    // After the commit, so the recalculation reads the group without this Trip.
+    const outcomes = await this.repriceRegroupedTrips(before, after);
+
+    return this.withOutcome(await this.toResponse(updated), outcomes.get(id));
+  }
+
+  /**
+   * Reprices the CLOSED Trips whose Combination leg a regrouping changed.
+   *
+   * ── WHY GROUPING IS A PRICING INPUT ─────────────────────────────────────
+   * A Trip's leg is decided by its group, and the leg decides the Backload and
+   * which leg owes TAR. Grouping and ungrouping write only `tripGroupId`, so
+   * without this a Trip closed BEFORE it joined a genuine Combination kept a
+   * price with no Backload, and a leg taken OUT of one kept its €50 — each
+   * until some unrelated edit happened to reprice it.
+   *
+   * ── WHICH TRIPS ─────────────────────────────────────────────────────────
+   * The ones the pricing domain says were re-classified, from its own rule and
+   * nothing here: a manual group formed or split reprices nobody, and a genuine
+   * pair split reprices BOTH legs, since the one left behind is no longer a
+   * Combination either. Of those, only the CLOSED ones — an OPEN Trip is priced
+   * when it closes, from whatever group it is in by then, exactly as before.
+   *
+   * ── WHEN ────────────────────────────────────────────────────────────────
+   * After the group transaction has committed, never inside it: the Engine
+   * reads the Trip and its group for itself, and from inside the transaction
+   * it would still see the old membership. One call per Trip, because the
+   * Engine prices one Trip at a time and a Combination has two legs.
+   *
+   * It never throws. The regrouping has happened, and a Trip that cannot be
+   * priced answers with a reason code — the same contract as every other
+   * recalculation.
+   */
+  private async repriceRegroupedTrips(
+    before: readonly Trip[],
+    after: readonly Trip[],
+  ): Promise<Map<string, PricingRecalculationOutcome>> {
+    const reclassified = new Set(
+      this.recalculation.tripsAffectedByRegrouping(before, after),
+    );
+    const outcomes = new Map<string, PricingRecalculationOutcome>();
+
+    for (const trip of after) {
+      if (reclassified.has(trip.id) && trip.status === TripStatus.CLOSED) {
+        outcomes.set(trip.id, await this.recalculation.recalculate(trip.id));
+      }
+    }
+
+    if (reclassified.size > 0) {
+      this.logger.log("Regrouping changed Combination legs", {
+        reclassifiedTripIds: [...reclassified],
+        repricedTripIds: [...outcomes.keys()],
+      });
+    }
+
+    return outcomes;
+  }
+
+  /**
+   * A response carrying a recalculation's answer instead of what was read.
+   *
+   * On failure that means null and a reason rather than the figures the read
+   * produced, which would describe the Trip before the change.
+   */
+  private withOutcome(
+    response: TripResponseDto,
+    outcome: PricingRecalculationOutcome | undefined,
+  ): TripResponseDto {
+    return outcome === undefined
+      ? response
+      : { ...response, pricing: outcome.pricing, reasonCode: outcome.reasonCode };
   }
 
   private assertAllTripsExist(

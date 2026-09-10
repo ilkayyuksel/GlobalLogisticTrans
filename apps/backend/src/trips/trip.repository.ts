@@ -620,6 +620,18 @@ export class TripRepository {
     return this.prisma.trip.findMany({ where: { id: { in: [...ids] } } });
   }
 
+  /**
+   * Every Trip in a group, whatever its status.
+   *
+   * Unfiltered on purpose. The Pricing Engine reads a group exactly this way
+   * (`TripReadRepository.findByGroupId`), and deciding which legs a change
+   * re-classified against a different membership than the one the Engine
+   * prices from would recalculate the wrong Trips.
+   */
+  findManyByGroupId(tripGroupId: string): Promise<Trip[]> {
+    return this.prisma.trip.findMany({ where: { tripGroupId } });
+  }
+
   /** Puts every named Trip in one group, in a single statement. */
   async assignToGroup(
     ids: readonly string[],

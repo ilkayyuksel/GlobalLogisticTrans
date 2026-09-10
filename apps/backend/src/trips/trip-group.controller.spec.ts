@@ -22,6 +22,7 @@ import { TripDocumentsService } from "./trip-documents.service";
 import { TripRepository } from "./trip.repository";
 import { TripService } from "./trip.service";
 import { PricingRecalculationService } from "../pricing-engine/pricing-recalculation.service";
+import { stubPricingRecalculation } from "../pricing-engine/pricing-recalculation.double";
 
 const TRIP_A = "3f2504e0-4f89-41d3-9a0c-0305e82c3301";
 const TRIP_B = "9c858901-8a57-4791-81fe-4c455b099bc9";
@@ -78,6 +79,7 @@ describe("TripGroupController (integration)", () => {
     createTripGroup: jest.Mock;
     assignToGroup: jest.Mock;
     findById: jest.Mock;
+    findManyByGroupId: jest.Mock;
     update: jest.Mock;
     runInTransaction: jest.Mock;
     runTripWriteTransaction: jest.Mock;
@@ -89,6 +91,7 @@ describe("TripGroupController (integration)", () => {
       createTripGroup: jest.fn().mockResolvedValue({ id: GROUP_ID }),
       assignToGroup: jest.fn().mockResolvedValue(2),
       findById: jest.fn().mockResolvedValue(null),
+      findManyByGroupId: jest.fn().mockResolvedValue([]),
       update: jest.fn(),
       runInTransaction: jest.fn(),
       runTripWriteTransaction: jest.fn(),
@@ -114,12 +117,13 @@ describe("TripGroupController (integration)", () => {
         // Not exercised here; the Trips these tests build require no automatic
         // property. It only has to exist for TripService to be constructible.
         /*
-         * Editing a waiting time recalculates; nothing in this suite does, so
-         * the recalculation only has to exist for TripService to be built.
+         * Grouping asks which legs changed and reprices the CLOSED ones. The
+         * Trips here are OPEN and of no Combination, so the double's real rule
+         * answers "none" and nothing is recalculated.
          */
         {
           provide: PricingRecalculationService,
-          useValue: { recalculate: jest.fn() },
+          useValue: stubPricingRecalculation(),
         },
         {
           provide: AutomaticFlatPropertyService,

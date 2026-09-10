@@ -230,6 +230,37 @@ Administrator applies new configuration.
 The Trip's status is never touched. A CLOSED Trip stays CLOSED: the price of a
 finished job may change, the fact that it is finished may not.
 
+## Automatic recalculation after grouping or ungrouping
+
+A Trip's Combination leg is decided by its GROUP, and the leg decides the
+Backload and which leg owes TAR. Grouping (`POST /trip-groups`) and ungrouping
+(`PATCH /trips/{id}/group`) write only `tripGroupId`, so they are a pricing
+input that the Trip's own row does not show.
+
+After the group change has COMMITTED, the Trips whose leg it changed are
+recalculated — the same recalculation as above, one Trip per call:
+
+Which Trips: the pricing domain compares every affected Trip's leg before and
+after the change with `combinationLegOf`, the rule the Engine prices with.
+Forming or splitting a manual group changes nobody's leg and reprices nothing.
+Grouping one order's two legs reprices both. Taking one leg out of a genuine
+pair reprices BOTH, because the leg left behind is no longer a Combination
+either. Trips outside the group are never touched.
+
+Only CLOSED Trips: an OPEN Trip is priced when it closes, from whatever group it
+is in by then, exactly as before.
+
+After the commit, never inside the transaction: the Engine reads the Trip and
+its group for itself and must see the new membership.
+
+The failure contract below applies unchanged: the group change is kept, and a
+leg that cannot be priced answers with `pricing: null` and a reason code. The
+Ritten list refetches after either action, so both legs show their new prices.
+
+Historical Trips already priced on a stale group are NOT repaired
+automatically; they are repriced the next time they are grouped, ungrouped or
+otherwise recalculated.
+
 ## The failure contract
 
 The underlying write and the recalculation are separate concerns, and a pricing

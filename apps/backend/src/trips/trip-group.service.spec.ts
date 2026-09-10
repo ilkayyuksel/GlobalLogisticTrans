@@ -72,6 +72,7 @@ describe("TripService grouping", () => {
     createTripGroup: jest.Mock;
     assignToGroup: jest.Mock;
     findById: jest.Mock;
+    findManyByGroupId: jest.Mock;
     update: jest.Mock;
     runInTransaction: jest.Mock;
   };
@@ -83,6 +84,8 @@ describe("TripService grouping", () => {
       createTripGroup: jest.fn().mockResolvedValue({ id: GROUP_ID }),
       assignToGroup: jest.fn().mockResolvedValue(2),
       findById: jest.fn(),
+      // Unlinking reads the group it leaves; these Trips form no Combination.
+      findManyByGroupId: jest.fn().mockResolvedValue([]),
       update: jest.fn(),
       runInTransaction: jest.fn((work: (r: unknown) => Promise<unknown>) =>
         work(repository),

@@ -117,3 +117,36 @@ export function combinationLegOf(
 export function isGenuineCombination(leg: CombinationLeg): boolean {
   return leg === CombinationLeg.DELIVERY || leg === CombinationLeg.COLLECTION;
 }
+
+/**
+ * The Trips whose leg a change of group membership re-classified.
+ *
+ * ── WHY PRICING HAS TO BE TOLD ──────────────────────────────────────────────
+ * A Trip's leg follows from the group it is in, and the leg decides what the
+ * Trip is charged: the Backload, and which leg owes TAR. Grouping and
+ * ungrouping write nothing but `tripGroupId`, so a Trip that was already priced
+ * keeps the answer its PREVIOUS group gave until something prices it again.
+ * These are the Trips for which that answer is no longer true.
+ *
+ * `before` and `after` are the SAME Trips, as they were and as they are:
+ * every Trip the change touched and every other member of the groups involved,
+ * because a leg is decided by the whole group and not by the Trip alone.
+ *
+ * A Trip whose leg did not change is left out. Forming or splitting a manual
+ * group moves nobody from NONE, so it reprices nothing; splitting a genuine
+ * pair moves BOTH legs, because a lone leg is no longer a Combination either.
+ * Nothing here is a second definition — both sides are `combinationLegOf`.
+ * ────────────────────────────────────────────────────────────────────────────
+ */
+export function tripsWhoseLegChanged(
+  before: readonly CombinationMember[],
+  after: readonly CombinationMember[],
+): string[] {
+  const legBefore = new Map(
+    before.map((trip) => [trip.id, combinationLegOf(trip, before)]),
+  );
+
+  return after
+    .filter((trip) => combinationLegOf(trip, after) !== legBefore.get(trip.id))
+    .map((trip) => trip.id);
+}

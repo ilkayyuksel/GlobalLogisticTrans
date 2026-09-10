@@ -1,6 +1,7 @@
 import { Trip, TripStatus } from "@prisma/client";
 
 import { AppLoggerService } from "../logger/app-logger.service";
+import { stubPricingRecalculation } from "../pricing-engine/pricing-recalculation.double";
 import { TripRepository } from "./trip.repository";
 import { TripService } from "./trip.service";
 
@@ -120,9 +121,7 @@ function buildService(stored: Row[]) {
    * with nothing to report; `tar-nummer-recalculation.spec.ts` covers what it
    * does.
    */
-  const recalculation = {
-    recalculate: jest.fn().mockResolvedValue({ pricing: null, reasonCode: null }),
-  };
+  const recalculation = stubPricingRecalculation();
 
   const service = new TripService(
     repository as unknown as TripRepository,

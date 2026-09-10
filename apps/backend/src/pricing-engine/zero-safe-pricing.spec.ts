@@ -729,6 +729,88 @@ describe("the two legs of a Combination", () => {
     });
   });
 
+  /**
+   * ── THE SAME LEG, IN AND OUT OF ITS COMBINATION ──────────────────────────
+   * What a regrouping's recalculation produces. The Engine prices a Trip from
+   * the group it is in at the time, so the legs below are priced once grouped
+   * and once alone: Backload follows the group, and every TAR rule stays the
+   * rule it already was — a stated number, the leg allocation, a manual TAR.
+   */
+  describe("repriced after grouping or ungrouping", () => {
+    const MANUAL = {
+      customPropertyId: TAR_ID,
+      name: "TAR",
+      pricingComponentId: null,
+      defaultPrice: "20.00",
+    };
+    const alone = (leg: TripReadView) => ({ ...leg, tripGroupId: null });
+
+    it("prices a standalone CLOSED leg with no Backload", async () => {
+      const pricing = await legAmounts(alone(DELIVERY), { members: [] });
+
+      expect(pricing.backload).toBe("0.00");
+    });
+
+    it("gives a delivery leg its €50 once grouped, and keeps its TAR", async () => {
+      const grouped = await legAmounts(DELIVERY);
+      const ungrouped = await legAmounts(alone(DELIVERY), { members: [] });
+
+      expect(grouped.backload).toBe("50.00");
+      expect(ungrouped.backload).toBe("0.00");
+      // The number is stated either way, so the TAR is charged either way.
+      expect(grouped.others).toBe("20.00");
+      expect(ungrouped.others).toBe("20.00");
+    });
+
+    /*
+     * The one TAR rule a Combination changes: its collection leg owes none.
+     * Ungrouped it is an ordinary Trip again, and an ordinary Trip that states
+     * a number is charged — the existing rule, not a new one.
+     */
+    it("applies the ordinary TAR rule to a collection leg once it stands alone", async () => {
+      const grouped = await legAmounts(COLLECTION);
+      const ungrouped = await legAmounts(alone(COLLECTION), { members: [] });
+
+      expect(grouped.others).toBe("0.00");
+      expect(ungrouped.others).toBe("20.00");
+      expect(ungrouped.backload).toBe("0.00");
+    });
+
+    it("keeps a manual TAR whatever the grouping", async () => {
+      const unnumbered = { ...COLLECTION, tarNummer: null };
+      const members = [DELIVERY, unnumbered];
+      const grouped = await legAmounts(unnumbered, {
+        members,
+        assignments: [MANUAL],
+      });
+      const ungrouped = await legAmounts(alone(unnumbered), {
+        members: [],
+        assignments: [MANUAL],
+      });
+
+      expect(grouped.others).toBe("20.00");
+      expect(ungrouped.others).toBe("20.00");
+      expect(grouped.backload).toBe("50.00");
+      expect(ungrouped.backload).toBe("0.00");
+    });
+
+    it("moves nothing but the Backload when a leg leaves", async () => {
+      const grouped = await legAmounts(DELIVERY);
+      const ungrouped = await legAmounts(alone(DELIVERY), { members: [] });
+
+      expect({ ...ungrouped, backload: grouped.backload, totaal: grouped.totaal, components: grouped.components }).toEqual(grouped);
+      expect(Number(grouped.totaal) - Number(ungrouped.totaal)).toBe(50);
+    });
+
+    it("gives both legs €50 when they run on different days", async () => {
+      const dayTwo = { ...COLLECTION, planningDate: "2026-09-11" };
+      const members = [DELIVERY, dayTwo];
+
+      expect((await legAmounts(DELIVERY, { members })).backload).toBe("50.00");
+      expect((await legAmounts(dayTwo, { members })).backload).toBe("50.00");
+    });
+  });
+
   /** Two Trips of DIFFERENT documents in one group are a manual group. */
   it("charges no Backload to a manual group", async () => {
     const other = { ...COLLECTION, pdfDocumentId: "pdf-other" };

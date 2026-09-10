@@ -6,6 +6,7 @@ import {
   toEffectivePricingDto,
 } from "../trip-pricing/dto/effective-pricing.dto";
 import { EffectivePricingService } from "../trip-pricing/effective-pricing.service";
+import { CombinationMember, tripsWhoseLegChanged } from "./combination-leg";
 import { PricingEngineException } from "./exceptions/pricing-engine.exceptions";
 import { PricingEngineService } from "./pricing-engine.service";
 
@@ -116,6 +117,26 @@ export class PricingRecalculationService {
     } catch (error: unknown) {
       return { pricing: null, reasonCode: this.reportFailure(tripId, error) };
     }
+  }
+
+  /**
+   * Which Trips a change of group membership left priced on a stale leg.
+   *
+   * Grouping and ungrouping are the one pricing input a Trip does not carry in
+   * its own row: its leg is decided by the OTHER members of its group. So the
+   * caller cannot tell which Trips to recalculate from the Trip it changed, and
+   * must not decide it with a Combination rule of its own. It hands over the
+   * Trips of the affected groups as they were and as they are, and the pricing
+   * domain answers from `combinationLegOf` — the rule the Engine prices with.
+   *
+   * It only answers. Recalculating stays one `recalculate` call per Trip, so
+   * the failure contract above applies to every one of them unchanged.
+   */
+  tripsAffectedByRegrouping(
+    before: readonly CombinationMember[],
+    after: readonly CombinationMember[],
+  ): string[] {
+    return tripsWhoseLegChanged(before, after);
   }
 
   /**

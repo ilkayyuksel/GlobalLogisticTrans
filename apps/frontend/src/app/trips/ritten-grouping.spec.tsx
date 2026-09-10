@@ -415,6 +415,42 @@ describe("Ritten selection and grouping", () => {
         await screen.findByText(/does not belong to a group/),
       ).toBeInTheDocument();
     });
+
+    /*
+     * Ungrouping reprices BOTH legs on the backend: the one taken out and the
+     * one left behind. The response carries only the first, so the other leg's
+     * new amounts arrive the way every mutation's do — with the one list
+     * refetch that follows it. No row asks for its own pricing.
+     */
+    it("refetches the list once, so both legs show their repriced amounts", async () => {
+      respondWith(requestMock, {
+        trips: buildPage([buildTrip({ tripGroupId: GROUP_ID })]),
+        groupMembers: [buildTrip({ tripGroupId: GROUP_ID })],
+      });
+      renderRitten();
+      await screen.findByRole("table");
+
+      const dialog = await openCombination();
+      const listsBefore = listCalls(requestMock).length;
+
+      await userEvent.click(
+        (
+          await within(dialog).findAllByRole("button", {
+            name: "Loskoppelen van groep",
+          })
+        )[0],
+      );
+
+      await screen.findByText("Rit losgekoppeld van de groep");
+      await waitFor(() => {
+        expect(listCalls(requestMock).length).toBeGreaterThan(listsBefore);
+      });
+      expect(
+        requestMock.mock.calls.filter(([path]) =>
+          String(path).startsWith("/api/v1/trip-pricing"),
+        ),
+      ).toHaveLength(0);
+    });
   });
 
   describe("the group dialog", () => {

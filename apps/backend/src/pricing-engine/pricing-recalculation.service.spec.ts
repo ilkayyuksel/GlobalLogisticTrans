@@ -248,6 +248,31 @@ describe("PricingRecalculationService", () => {
     });
   });
 
+  /**
+   * The caller asks which Trips a regrouping affected; the answer comes from
+   * the Combination rule, and asking prices nothing.
+   */
+  describe("which Trips a regrouping affects", () => {
+    const before = [
+      { id: "a", tripGroupId: null, pdfDocumentId: "d", direction: "DELIVERY" as const },
+      { id: "b", tripGroupId: null, pdfDocumentId: "d", direction: "COLLECTION" as const },
+    ];
+    const after = before.map((trip) => ({ ...trip, tripGroupId: "g" }));
+
+    it("names the legs whose Combination the change created", () => {
+      expect(recalculation.tripsAffectedByRegrouping(before, after)).toEqual([
+        "a",
+        "b",
+      ]);
+    });
+
+    it("prices nothing by answering", () => {
+      recalculation.tripsAffectedByRegrouping(before, after);
+
+      expect(engine.calculateAndStore).not.toHaveBeenCalled();
+    });
+  });
+
   describe("a recalculation that failed unexpectedly", () => {
     beforeEach(() => {
       engine.calculateAndStore.mockRejectedValue(
