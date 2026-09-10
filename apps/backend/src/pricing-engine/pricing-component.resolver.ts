@@ -127,18 +127,20 @@ export class PricingComponentResolver {
   /**
    * Applies the automatic property — TAR — to the Trips that owe it.
    *
-   * ── WHY THE ASSIGNMENTS ARE OVERRULED, NOT TRUSTED ────────────────────────
-   * The automatic property is removed from the assignments first and then added
-   * back only where the rule says it belongs. Doing it in that order is what
-   * makes every starting state produce the same answer:
+   * ── THE AUTOMATIC CHARGE IS ADDED BESIDE THE ASSIGNMENTS ──────────────────
+   * It used to REPLACE any assignment of the same property, so that a tick
+   * could never produce a second charge. That is reversed: a manual TAR is an
+   * EXTRA the business wants, and the two are now independent amounts for
+   * independent reasons.
    *
-   *   nobody assigned it            -> it is applied anyway
-   *   somebody assigned it          -> it is applied once, not twice
-   *   it sits on the wrong leg      -> it moves to the right one
-   *   it sits on both legs          -> one charge, on the delivery
+   *   nobody assigned it            -> the automatic charge applies, once
+   *   an operator assigned it       -> BOTH apply: automatic + manual
+   *   no `tar_nummer` but assigned  -> the manual charge alone
+   *   the same-day rule withheld it -> the manual charge alone
    *
-   * The operator therefore never has to tick it, and a stale tick left over
-   * from before this rule existed cannot produce a second charge.
+   * The operator still never has to tick it to get the automatic one, and this
+   * step still decides the automatic charge alone — assigning TAR by hand
+   * changes nothing about whether the Trip owes the automatic one.
    *
    * Only NEW calculations are affected. A stored snapshot is a record of what
    * was charged and is never rewritten by a rule change; a reprocess is how an
@@ -156,10 +158,19 @@ export class PricingComponentResolver {
     rules: PricingRuleConfiguration,
     assigned: readonly PricingCustomPropertyInput[],
   ): Promise<PricingCustomPropertyInput[]> {
-    const withoutIt = assigned.filter(
-      (property) =>
-        property.customPropertyId !== rules.automaticCustomPropertyId,
-    );
+    /*
+     * ── A MANUAL TAR IS KEPT, NOT STRIPPED ────────────────────────────────
+     * This used to remove every assignment of the automatic property before
+     * deciding, so a stale tick could not produce a second charge. The business
+     * now WANTS that second charge: an operator may assign TAR deliberately as
+     * an EXTRA, on top of whatever the Engine applies from the `tar_nummer`.
+     *
+     * So the assignments pass through untouched and the automatic line is added
+     * BESIDE them. A Trip carrying both ends up with two contributions of the
+     * configured amount, which is the point — €20 automatic plus €20 manual is
+     * €40, and neither suppresses the other.
+     */
+    const manual = [...assigned];
 
     const leg = await this.resolveCombinationLeg(trip);
 
@@ -177,7 +188,7 @@ export class PricingComponentResolver {
     }
 
     if (leg === CombinationLeg.COLLECTION) {
-      return withoutIt;
+      return manual;
     }
 
     /*
@@ -207,7 +218,7 @@ export class PricingComponentResolver {
     const tarNummer = meaningfulTarNummer(trip.tarNummer);
 
     if (tarNummer === null) {
-      return withoutIt;
+      return manual;
     }
 
     /*
@@ -245,11 +256,11 @@ export class PricingComponentResolver {
           // The NUMBER is business data and is never logged.
         });
 
-        return withoutIt;
+        return manual;
       }
     }
 
-    return [...withoutIt, await this.automaticProperty(rules)];
+    return [...manual, await this.automaticProperty(rules)];
   }
 
   /** The configured automatic property, as the calculator reads any other. */

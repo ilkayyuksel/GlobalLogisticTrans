@@ -26,9 +26,15 @@ import { FLAT_CUSTOM_PROPERTY_NAME } from "../trips/flat-container-rule";
  *      added later is covered without touching this file.
  *
  *   2. THE AUTOMATIC PROPERTY. TAR is applied by the Pricing Engine itself,
- *      once on a standalone Trip and once on a Combination's DELIVERY leg. It
- *      is never stored as an assignment, so an operator picking it would create
- *      a second, contradictory row.
+ *      once on a standalone Trip and once on a Combination's DELIVERY leg.
+ *
+ *      It is still classified here — it is system-OWNED, and deleting the row
+ *      `AUTOMATIC_CUSTOM_PROPERTY_ID` points at would take that rule with it —
+ *      but it is no longer un-assignable. The business needs an EXTRA TAR: a
+ *      second charge an operator adds deliberately, on top of the automatic
+ *      one. A manual assignment is therefore NOT a contradictory duplicate any
+ *      more; it is its own charge, and `isManuallyAssignable` is what separates
+ *      the two questions.
  *
  *   3. THE CONTAINER-TYPE PROPERTY. Flat is written by
  *      `AutomaticFlatPropertyService` from the container type: a 20FL is a flat
@@ -94,6 +100,49 @@ export function isSystemManagedProperty(
   property: ClassifiableCustomProperty,
 ): boolean {
   return systemManagedReasonFor(property) !== null;
+}
+
+/**
+ * The reasons that also forbid an operator from ASSIGNING the property.
+ *
+ * ── WHY THIS IS NARROWER THAN "SYSTEM-MANAGED" ──────────────────────────────
+ * Being system-managed and being un-assignable used to be the same statement.
+ * They are not, and TAR is why.
+ *
+ * TAR is still system-owned in every sense that matters elsewhere: the Pricing
+ * Engine applies it automatically from a stated `tar_nummer`,
+ * `AUTOMATIC_CUSTOM_PROPERTY_ID` points at this exact row, and deleting it
+ * would take that rule with it — so it stays undeletable, and the BASIS sheet
+ * still does not list it among the properties an operator chose.
+ *
+ * What changed is that the business needs an EXTRA TAR charge: a second,
+ * deliberate TAR on top of the automatic one, which an operator adds by hand.
+ * The two are independent amounts for independent reasons, and neither
+ * suppresses the other.
+ *
+ * ROUTE_PRICED and CONTAINER_TYPE keep the old rule in full. Toll and Tunnel
+ * are decided by the route — assigning one by hand would contradict the route
+ * configuration rather than add to it — and Flat is written from the container
+ * type, so a manual copy would be a second row the rule then fights over.
+ */
+const UNASSIGNABLE_REASONS: readonly SystemManagedReason[] = [
+  "ROUTE_PRICED",
+  "CONTAINER_TYPE",
+];
+
+/**
+ * Whether an operator may assign this property to a Trip by hand.
+ *
+ * The one place that question is answered. The assignment endpoint enforces it,
+ * the response DTO publishes it, and the picker reads that — so the browser
+ * never restates the rule and the two cannot drift.
+ */
+export function isManuallyAssignable(
+  property: ClassifiableCustomProperty,
+): boolean {
+  const reason = systemManagedReasonFor(property);
+
+  return reason === null || !UNASSIGNABLE_REASONS.includes(reason);
 }
 
 /** What to tell an operator who tried to assign one by hand. */

@@ -1,0 +1,887 @@
+{
+ "trips": [
+  {
+   "id": "cccccccc-0000-4000-8000-000000000001",
+   "pdfDocumentId": "541134f6-4757-4cd1-aff0-5a2087626c92",
+   "tripGroupId": null,
+   "vehicleId": null,
+   "driverId": null,
+   "status": "CLOSED",
+   "isLooseTrip": false,
+   "isPaid": false,
+   "direction": null,
+   "bookingNumber": "ZZTM0000001",
+   "containerNumber": "ZZTMC000001",
+   "containerType": "45PH",
+   "terminal": "Quay 869",
+   "destinationCity": "Lokeren",
+   "destinationCountry": "Belgium",
+   "originalPlanningDate": "2026-12-01",
+   "planningDate": "2026-12-01",
+   "startTime": null,
+   "endTime": null,
+   "executionDatetime": null,
+   "waitingTimeStart": null,
+   "waitingTimeEnd": null,
+   "waitingTimeMinutes": 0,
+   "distanceKm": null,
+   "tarNummer": null,
+   "internalNotes": null,
+   "vehicle": null,
+   "effectiveDriver": null,
+   "latestUpdate": null,
+   "costConfirmation": null,
+   "pricing": {
+    "tarief": "0.00",
+    "brandstof": "0.00",
+    "backload": "0.00",
+    "tol": "0.00",
+    "tunnel": "0.00",
+    "others": "0.00",
+    "ek": "0.00",
+    "totaal": "0.00",
+    "components": [
+     {
+      "componentCode": "BASE_PRICE",
+      "engineAmount": "0.00",
+      "effectiveAmount": "0.00",
+      "source": "ENGINE"
+     },
+     {
+      "componentCode": "FUEL_SURCHARGE",
+      "engineAmount": "0.00",
+      "effectiveAmount": "0.00",
+      "source": "ENGINE"
+     }
+    ]
+   },
+   "reasonCode": null,
+   "route": {
+    "from": "Quay 869",
+    "to": "Lokeren"
+   },
+   "customProperties": [],
+   "createdAt": "2026-09-09T22:40:11.403Z",
+   "updatedAt": "2026-09-09T22:40:26.212Z"
+  },
+  {
+   "id": "cccccccc-0000-4000-8000-000000000002",
+   "pdfDocumentId": "541134f6-4757-4cd1-aff0-5a2087626c92",
+   "tripGroupId": null,
+   "vehicleId": null,
+   "driverId": null,
+   "status": "CLOSED",
+   "isLooseTrip": false,
+   "isPaid": false,
+   "direction": null,
+   "bookingNumber": "ZZTM0000002",
+   "containerNumber": "ZZTMC000002",
+   "containerType": "45PH",
+   "terminal": "Quay 869",
+   "destinationCity": "Lokeren",
+   "destinationCountry": "Belgium",
+   "originalPlanningDate": "2026-12-01",
+   "planningDate": "2026-12-01",
+   "startTime": null,
+   "endTime": null,
+   "executionDatetime": null,
+   "waitingTimeStart": null,
+   "waitingTimeEnd": null,
+   "waitingTimeMinutes": 0,
+   "distanceKm": null,
+   "tarNummer": "TARB",
+   "internalNotes": null,
+   "vehicle": null,
+   "effectiveDriver": null,
+   "latestUpdate": null,
+   "costConfirmation": null,
+   "pricing": {
+    "tarief": "0.00",
+    "brandstof": "0.00",
+    "backload": "0.00",
+    "tol": "0.00",
+    "tunnel": "0.00",
+    "others": "50.00",
+    "ek": "0.00",
+    "totaal": "50.00",
+    "components": [
+     {
+      "componentCode": "BASE_PRICE",
+      "engineAmount": "0.00",
+      "effectiveAmount": "0.00",
+      "source": "ENGINE"
+     },
+     {
+      "componentCode": "CUSTOM_PROPERTY",
+      "engineAmount": "50.00",
+      "effectiveAmount": "50.00",
+      "source": "ENGINE"
+     },
+     {
+      "componentCode": "FUEL_SURCHARGE",
+      "engineAmount": "0.00",
+      "effectiveAmount": "0.00",
+      "source": "ENGINE"
+     }
+    ]
+   },
+   "reasonCode": null,
+   "route": {
+    "from": "Quay 869",
+    "to": "Lokeren"
+   },
+   "customProperties": [],
+   "createdAt": "2026-09-09T22:40:14.903Z",
+   "updatedAt": "2026-09-09T22:40:25.400Z"
+  },
+  {
+   "id": "cccccccc-0000-4000-8000-000000000003",
+   "pdfDocumentId": "541134f6-4757-4cd1-aff0-5a2087626c92",
+   "tripGroupId": null,
+   "vehicleId": null,
+   "driverId": null,
+   "status": "CLOSED",
+   "isLooseTrip": false,
+   "isPaid": false,
+   "direction": null,
+   "bookingNumber": "ZZTM0000003",
+   "containerNumber": "ZZTMC000003",
+   "containerType": "45PH",
+   "terminal": "Quay 869",
+   "destinationCity": "Lokeren",
+   "destinationCountry": "Belgium",
+   "originalPlanningDate": "2026-12-01",
+   "planningDate": "2026-12-01",
+   "startTime": null,
+   "endTime": null,
+   "executionDatetime": null,
+   "waitingTimeStart": null,
+   "waitingTimeEnd": null,
+   "waitingTimeMinutes": 0,
+   "distanceKm": null,
+   "tarNummer": null,
+   "internalNotes": null,
+   "vehicle": null,
+   "effectiveDriver": null,
+   "latestUpdate": null,
+   "costConfirmation": null,
+   "pricing": {
+    "tarief": "0.00",
+    "brandstof": "0.00",
+    "backload": "0.00",
+    "tol": "0.00",
+    "tunnel": "0.00",
+    "others": "50.00",
+    "ek": "0.00",
+    "totaal": "50.00",
+    "components": [
+     {
+      "componentCode": "BASE_PRICE",
+      "engineAmount": "0.00",
+      "effectiveAmount": "0.00",
+      "source": "ENGINE"
+     },
+     {
+      "componentCode": "CUSTOM_PROPERTY",
+      "engineAmount": "50.00",
+      "effectiveAmount": "50.00",
+      "source": "ENGINE"
+     },
+     {
+      "componentCode": "FUEL_SURCHARGE",
+      "engineAmount": "0.00",
+      "effectiveAmount": "0.00",
+      "source": "ENGINE"
+     }
+    ]
+   },
+   "reasonCode": null,
+   "route": {
+    "from": "Quay 869",
+    "to": "Lokeren"
+   },
+   "customProperties": [
+    {
+     "id": "4446fdcc-7873-4ee4-b53e-4c2f85b3936a",
+     "name": "TAR",
+     "isActive": true
+    }
+   ],
+   "createdAt": "2026-09-09T22:40:18.251Z",
+   "updatedAt": "2026-09-09T22:40:26.691Z"
+  },
+  {
+   "id": "cccccccc-0000-4000-8000-000000000004",
+   "pdfDocumentId": "541134f6-4757-4cd1-aff0-5a2087626c92",
+   "tripGroupId": null,
+   "vehicleId": null,
+   "driverId": null,
+   "status": "CLOSED",
+   "isLooseTrip": false,
+   "isPaid": false,
+   "direction": null,
+   "bookingNumber": "ZZTM0000004",
+   "containerNumber": "ZZTMC000004",
+   "containerType": "45PH",
+   "terminal": "Quay 869",
+   "destinationCity": "Lokeren",
+   "destinationCountry": "Belgium",
+   "originalPlanningDate": "2026-12-01",
+   "planningDate": "2026-12-01",
+   "startTime": null,
+   "endTime": null,
+   "executionDatetime": null,
+   "waitingTimeStart": null,
+   "waitingTimeEnd": null,
+   "waitingTimeMinutes": 0,
+   "distanceKm": null,
+   "tarNummer": "TARD",
+   "internalNotes": null,
+   "vehicle": null,
+   "effectiveDriver": null,
+   "latestUpdate": null,
+   "costConfirmation": null,
+   "pricing": {
+    "tarief": "0.00",
+    "brandstof": "0.00",
+    "backload": "0.00",
+    "tol": "0.00",
+    "tunnel": "0.00",
+    "others": "100.00",
+    "ek": "0.00",
+    "totaal": "100.00",
+    "components": [
+     {
+      "componentCode": "BASE_PRICE",
+      "engineAmount": "0.00",
+      "effectiveAmount": "0.00",
+      "source": "ENGINE"
+     },
+     {
+      "componentCode": "CUSTOM_PROPERTY",
+      "engineAmount": "100.00",
+      "effectiveAmount": "100.00",
+      "source": "ENGINE"
+     },
+     {
+      "componentCode": "FUEL_SURCHARGE",
+      "engineAmount": "0.00",
+      "effectiveAmount": "0.00",
+      "source": "ENGINE"
+     }
+    ]
+   },
+   "reasonCode": null,
+   "route": {
+    "from": "Quay 869",
+    "to": "Lokeren"
+   },
+   "customProperties": [
+    {
+     "id": "4446fdcc-7873-4ee4-b53e-4c2f85b3936a",
+     "name": "TAR",
+     "isActive": true
+    }
+   ],
+   "createdAt": "2026-09-09T22:40:21.595Z",
+   "updatedAt": "2026-09-09T22:40:27.099Z"
+  },
+  {
+   "id": "cccccccc-0000-4000-8000-000000000005",
+   "pdfDocumentId": "541134f6-4757-4cd1-aff0-5a2087626c92",
+   "tripGroupId": null,
+   "vehicleId": null,
+   "driverId": null,
+   "status": "CLOSED",
+   "isLooseTrip": false,
+   "isPaid": false,
+   "direction": null,
+   "bookingNumber": "ZZTM0000005",
+   "containerNumber": "ZZTMC000005",
+   "containerType": "45PH",
+   "terminal": "Quay 869",
+   "destinationCity": "Lokeren",
+   "destinationCountry": "Belgium",
+   "originalPlanningDate": "2026-12-01",
+   "planningDate": "2026-12-01",
+   "startTime": null,
+   "endTime": null,
+   "executionDatetime": null,
+   "waitingTimeStart": null,
+   "waitingTimeEnd": null,
+   "waitingTimeMinutes": 0,
+   "distanceKm": null,
+   "tarNummer": "TARB",
+   "internalNotes": null,
+   "vehicle": null,
+   "effectiveDriver": null,
+   "latestUpdate": null,
+   "costConfirmation": null,
+   "pricing": {
+    "tarief": "0.00",
+    "brandstof": "0.00",
+    "backload": "0.00",
+    "tol": "0.00",
+    "tunnel": "0.00",
+    "others": "50.00",
+    "ek": "0.00",
+    "totaal": "50.00",
+    "components": [
+     {
+      "componentCode": "BASE_PRICE",
+      "engineAmount": "0.00",
+      "effectiveAmount": "0.00",
+      "source": "ENGINE"
+     },
+     {
+      "componentCode": "CUSTOM_PROPERTY",
+      "engineAmount": "50.00",
+      "effectiveAmount": "50.00",
+      "source": "ENGINE"
+     },
+     {
+      "componentCode": "FUEL_SURCHARGE",
+      "engineAmount": "0.00",
+      "effectiveAmount": "0.00",
+      "source": "ENGINE"
+     }
+    ]
+   },
+   "reasonCode": null,
+   "route": {
+    "from": "Quay 869",
+    "to": "Lokeren"
+   },
+   "customProperties": [
+    {
+     "id": "4446fdcc-7873-4ee4-b53e-4c2f85b3936a",
+     "name": "TAR",
+     "isActive": true
+    }
+   ],
+   "createdAt": "2026-09-09T22:40:24.877Z",
+   "updatedAt": "2026-09-09T22:40:27.521Z"
+  }
+ ],
+ "snapshots": [
+  {
+   "pricing": {
+    "id": "70479c76-557c-4075-a65d-0d88067726b2",
+    "tripId": "cccccccc-0000-4000-8000-000000000002",
+    "totalPrice": "50.00",
+    "currency": "EUR",
+    "calculatedAt": "2026-09-09T22:40:25.584Z",
+    "pricingEngineVersion": "1.0.0",
+    "pricingRuleVersion": "2026.1",
+    "calculationStatus": "CALCULATED",
+    "notes": null,
+    "createdAt": "2026-09-09T22:40:25.593Z",
+    "updatedAt": "2026-09-09T22:40:25.593Z"
+   },
+   "items": [
+    {
+     "id": "391e9de4-5596-4adc-9946-b8ab63c478e5",
+     "tripPricingId": "70479c76-557c-4075-a65d-0d88067726b2",
+     "pricingComponentId": "2fde0804-1fd2-4fbb-a86f-f8fb92eec966",
+     "pricingComponentCode": "BASE_PRICE",
+     "customPropertyId": null,
+     "description": "Quay 869 - Lokeren",
+     "amount": "0.00",
+     "currency": "EUR",
+     "calculationOrder": 1,
+     "quantity": null,
+     "unitPrice": null,
+     "notes": null,
+     "createdAt": "2026-09-09T22:40:25.600Z",
+     "updatedAt": "2026-09-09T22:40:25.600Z"
+    },
+    {
+     "id": "30b95418-c18b-471e-9a19-f1c8be015931",
+     "tripPricingId": "70479c76-557c-4075-a65d-0d88067726b2",
+     "pricingComponentId": "5cc6b1d6-c23f-4d1f-b0ea-782cc792bf53",
+     "pricingComponentCode": "FUEL_SURCHARGE",
+     "customPropertyId": null,
+     "description": "Fuel 15%",
+     "amount": "0.00",
+     "currency": "EUR",
+     "calculationOrder": 3,
+     "quantity": null,
+     "unitPrice": "15.00",
+     "notes": null,
+     "createdAt": "2026-09-09T22:40:25.600Z",
+     "updatedAt": "2026-09-09T22:40:25.600Z"
+    },
+    {
+     "id": "966c690c-83e1-4908-a31b-ddfe82701af4",
+     "tripPricingId": "70479c76-557c-4075-a65d-0d88067726b2",
+     "pricingComponentId": "9eef38fb-123f-46bc-9815-3224bf8d6f6b",
+     "pricingComponentCode": "CUSTOM_PROPERTY",
+     "customPropertyId": "4446fdcc-7873-4ee4-b53e-4c2f85b3936a",
+     "description": "TAR",
+     "amount": "50.00",
+     "currency": "EUR",
+     "calculationOrder": 7,
+     "quantity": null,
+     "unitPrice": null,
+     "notes": null,
+     "createdAt": "2026-09-09T22:40:25.600Z",
+     "updatedAt": "2026-09-09T22:40:25.600Z"
+    }
+   ]
+  },
+  {
+   "pricing": {
+    "id": "ae412a31-bd98-4899-ac76-396075ccf847",
+    "tripId": "cccccccc-0000-4000-8000-000000000001",
+    "totalPrice": "0.00",
+    "currency": "EUR",
+    "calculatedAt": "2026-09-09T22:40:26.240Z",
+    "pricingEngineVersion": "1.0.0",
+    "pricingRuleVersion": "2026.1",
+    "calculationStatus": "CALCULATED",
+    "notes": null,
+    "createdAt": "2026-09-09T22:40:26.243Z",
+    "updatedAt": "2026-09-09T22:40:26.243Z"
+   },
+   "items": [
+    {
+     "id": "da84ac02-be9e-4929-90d7-fc14e6c790b8",
+     "tripPricingId": "ae412a31-bd98-4899-ac76-396075ccf847",
+     "pricingComponentId": "2fde0804-1fd2-4fbb-a86f-f8fb92eec966",
+     "pricingComponentCode": "BASE_PRICE",
+     "customPropertyId": null,
+     "description": "Quay 869 - Lokeren",
+     "amount": "0.00",
+     "currency": "EUR",
+     "calculationOrder": 1,
+     "quantity": null,
+     "unitPrice": null,
+     "notes": null,
+     "createdAt": "2026-09-09T22:40:26.245Z",
+     "updatedAt": "2026-09-09T22:40:26.245Z"
+    },
+    {
+     "id": "7b8048a3-b50c-42fc-8d93-11b5a026aaf7",
+     "tripPricingId": "ae412a31-bd98-4899-ac76-396075ccf847",
+     "pricingComponentId": "5cc6b1d6-c23f-4d1f-b0ea-782cc792bf53",
+     "pricingComponentCode": "FUEL_SURCHARGE",
+     "customPropertyId": null,
+     "description": "Fuel 15%",
+     "amount": "0.00",
+     "currency": "EUR",
+     "calculationOrder": 3,
+     "quantity": null,
+     "unitPrice": "15.00",
+     "notes": null,
+     "createdAt": "2026-09-09T22:40:26.245Z",
+     "updatedAt": "2026-09-09T22:40:26.245Z"
+    }
+   ]
+  },
+  {
+   "pricing": {
+    "id": "64f00972-7517-4470-8f0d-baf6c1cb0ba7",
+    "tripId": "cccccccc-0000-4000-8000-000000000003",
+    "totalPrice": "50.00",
+    "currency": "EUR",
+    "calculatedAt": "2026-09-09T22:40:47.303Z",
+    "pricingEngineVersion": "1.0.0",
+    "pricingRuleVersion": "2026.1",
+    "calculationStatus": "CALCULATED",
+    "notes": null,
+    "createdAt": "2026-09-09T22:40:26.720Z",
+    "updatedAt": "2026-09-09T22:40:47.307Z"
+   },
+   "items": [
+    {
+     "id": "3c405ff4-4dff-47ea-95f5-be6c0a1f13ce",
+     "tripPricingId": "64f00972-7517-4470-8f0d-baf6c1cb0ba7",
+     "pricingComponentId": "2fde0804-1fd2-4fbb-a86f-f8fb92eec966",
+     "pricingComponentCode": "BASE_PRICE",
+     "customPropertyId": null,
+     "description": "Quay 869 - Lokeren",
+     "amount": "0.00",
+     "currency": "EUR",
+     "calculationOrder": 1,
+     "quantity": null,
+     "unitPrice": null,
+     "notes": null,
+     "createdAt": "2026-09-09T22:40:47.311Z",
+     "updatedAt": "2026-09-09T22:40:47.311Z"
+    },
+    {
+     "id": "38a24204-b781-4905-8470-aa3783bf1d96",
+     "tripPricingId": "64f00972-7517-4470-8f0d-baf6c1cb0ba7",
+     "pricingComponentId": "5cc6b1d6-c23f-4d1f-b0ea-782cc792bf53",
+     "pricingComponentCode": "FUEL_SURCHARGE",
+     "customPropertyId": null,
+     "description": "Fuel 15%",
+     "amount": "0.00",
+     "currency": "EUR",
+     "calculationOrder": 3,
+     "quantity": null,
+     "unitPrice": "15.00",
+     "notes": null,
+     "createdAt": "2026-09-09T22:40:47.311Z",
+     "updatedAt": "2026-09-09T22:40:47.311Z"
+    },
+    {
+     "id": "e00a8399-a0ee-4f49-9bd2-ca6a1806d112",
+     "tripPricingId": "64f00972-7517-4470-8f0d-baf6c1cb0ba7",
+     "pricingComponentId": "9eef38fb-123f-46bc-9815-3224bf8d6f6b",
+     "pricingComponentCode": "CUSTOM_PROPERTY",
+     "customPropertyId": "4446fdcc-7873-4ee4-b53e-4c2f85b3936a",
+     "description": "TAR",
+     "amount": "50.00",
+     "currency": "EUR",
+     "calculationOrder": 7,
+     "quantity": null,
+     "unitPrice": null,
+     "notes": null,
+     "createdAt": "2026-09-09T22:40:47.311Z",
+     "updatedAt": "2026-09-09T22:40:47.311Z"
+    }
+   ]
+  },
+  {
+   "pricing": {
+    "id": "2902669c-9c7d-4440-9baf-0498e2929d12",
+    "tripId": "cccccccc-0000-4000-8000-000000000004",
+    "totalPrice": "100.00",
+    "currency": "EUR",
+    "calculatedAt": "2026-09-09T22:40:47.787Z",
+    "pricingEngineVersion": "1.0.0",
+    "pricingRuleVersion": "2026.1",
+    "calculationStatus": "CALCULATED",
+    "notes": null,
+    "createdAt": "2026-09-09T22:40:27.123Z",
+    "updatedAt": "2026-09-09T22:40:47.789Z"
+   },
+   "items": [
+    {
+     "id": "2adb25eb-fc6f-4636-98fb-aeb2eaf98427",
+     "tripPricingId": "2902669c-9c7d-4440-9baf-0498e2929d12",
+     "pricingComponentId": "2fde0804-1fd2-4fbb-a86f-f8fb92eec966",
+     "pricingComponentCode": "BASE_PRICE",
+     "customPropertyId": null,
+     "description": "Quay 869 - Lokeren",
+     "amount": "0.00",
+     "currency": "EUR",
+     "calculationOrder": 1,
+     "quantity": null,
+     "unitPrice": null,
+     "notes": null,
+     "createdAt": "2026-09-09T22:40:47.792Z",
+     "updatedAt": "2026-09-09T22:40:47.792Z"
+    },
+    {
+     "id": "b77039fe-55f7-4047-bcfb-15e0b1e63c37",
+     "tripPricingId": "2902669c-9c7d-4440-9baf-0498e2929d12",
+     "pricingComponentId": "5cc6b1d6-c23f-4d1f-b0ea-782cc792bf53",
+     "pricingComponentCode": "FUEL_SURCHARGE",
+     "customPropertyId": null,
+     "description": "Fuel 15%",
+     "amount": "0.00",
+     "currency": "EUR",
+     "calculationOrder": 3,
+     "quantity": null,
+     "unitPrice": "15.00",
+     "notes": null,
+     "createdAt": "2026-09-09T22:40:47.792Z",
+     "updatedAt": "2026-09-09T22:40:47.792Z"
+    },
+    {
+     "id": "c392ab8a-2187-471b-b910-db39b06c5139",
+     "tripPricingId": "2902669c-9c7d-4440-9baf-0498e2929d12",
+     "pricingComponentId": "9eef38fb-123f-46bc-9815-3224bf8d6f6b",
+     "pricingComponentCode": "CUSTOM_PROPERTY",
+     "customPropertyId": "4446fdcc-7873-4ee4-b53e-4c2f85b3936a",
+     "description": "TAR",
+     "amount": "50.00",
+     "currency": "EUR",
+     "calculationOrder": 7,
+     "quantity": null,
+     "unitPrice": null,
+     "notes": null,
+     "createdAt": "2026-09-09T22:40:47.792Z",
+     "updatedAt": "2026-09-09T22:40:47.792Z"
+    },
+    {
+     "id": "e10e426c-5fea-41c4-ab11-8eb410412515",
+     "tripPricingId": "2902669c-9c7d-4440-9baf-0498e2929d12",
+     "pricingComponentId": "9eef38fb-123f-46bc-9815-3224bf8d6f6b",
+     "pricingComponentCode": "CUSTOM_PROPERTY",
+     "customPropertyId": "4446fdcc-7873-4ee4-b53e-4c2f85b3936a",
+     "description": "TAR",
+     "amount": "50.00",
+     "currency": "EUR",
+     "calculationOrder": 7,
+     "quantity": null,
+     "unitPrice": null,
+     "notes": null,
+     "createdAt": "2026-09-09T22:40:47.792Z",
+     "updatedAt": "2026-09-09T22:40:47.792Z"
+    }
+   ]
+  },
+  {
+   "pricing": {
+    "id": "ac20a9f6-24f5-4af6-b5c5-4c3771254799",
+    "tripId": "cccccccc-0000-4000-8000-000000000005",
+    "totalPrice": "50.00",
+    "currency": "EUR",
+    "calculatedAt": "2026-09-09T22:40:48.223Z",
+    "pricingEngineVersion": "1.0.0",
+    "pricingRuleVersion": "2026.1",
+    "calculationStatus": "CALCULATED",
+    "notes": null,
+    "createdAt": "2026-09-09T22:40:27.548Z",
+    "updatedAt": "2026-09-09T22:40:48.226Z"
+   },
+   "items": [
+    {
+     "id": "6715a814-bf54-4fd0-a3f6-beeb82b63912",
+     "tripPricingId": "ac20a9f6-24f5-4af6-b5c5-4c3771254799",
+     "pricingComponentId": "2fde0804-1fd2-4fbb-a86f-f8fb92eec966",
+     "pricingComponentCode": "BASE_PRICE",
+     "customPropertyId": null,
+     "description": "Quay 869 - Lokeren",
+     "amount": "0.00",
+     "currency": "EUR",
+     "calculationOrder": 1,
+     "quantity": null,
+     "unitPrice": null,
+     "notes": null,
+     "createdAt": "2026-09-09T22:40:48.229Z",
+     "updatedAt": "2026-09-09T22:40:48.229Z"
+    },
+    {
+     "id": "bd1ed89a-6af8-4bbd-8b1c-88ef536917b7",
+     "tripPricingId": "ac20a9f6-24f5-4af6-b5c5-4c3771254799",
+     "pricingComponentId": "5cc6b1d6-c23f-4d1f-b0ea-782cc792bf53",
+     "pricingComponentCode": "FUEL_SURCHARGE",
+     "customPropertyId": null,
+     "description": "Fuel 15%",
+     "amount": "0.00",
+     "currency": "EUR",
+     "calculationOrder": 3,
+     "quantity": null,
+     "unitPrice": "15.00",
+     "notes": null,
+     "createdAt": "2026-09-09T22:40:48.229Z",
+     "updatedAt": "2026-09-09T22:40:48.229Z"
+    },
+    {
+     "id": "3971ab8d-dc39-4e59-8323-b945766076be",
+     "tripPricingId": "ac20a9f6-24f5-4af6-b5c5-4c3771254799",
+     "pricingComponentId": "9eef38fb-123f-46bc-9815-3224bf8d6f6b",
+     "pricingComponentCode": "CUSTOM_PROPERTY",
+     "customPropertyId": "4446fdcc-7873-4ee4-b53e-4c2f85b3936a",
+     "description": "TAR",
+     "amount": "50.00",
+     "currency": "EUR",
+     "calculationOrder": 7,
+     "quantity": null,
+     "unitPrice": null,
+     "notes": null,
+     "createdAt": "2026-09-09T22:40:48.229Z",
+     "updatedAt": "2026-09-09T22:40:48.229Z"
+    }
+   ]
+  }
+ ],
+ "catalog": [
+  {
+   "id": "df9ad49e-ded9-482a-9f67-b78fa15f8657",
+   "name": "y",
+   "description": "y",
+   "pricingComponentId": null,
+   "defaultPrice": null,
+   "displayOrder": 1,
+   "color": null,
+   "isActive": false,
+   "isSystemManaged": false,
+   "isAssignable": true,
+   "createdAt": "2026-08-19T21:46:47.572Z",
+   "updatedAt": "2026-08-19T21:46:50.393Z"
+  },
+  {
+   "id": "4446fdcc-7873-4ee4-b53e-4c2f85b3936a",
+   "name": "TAR",
+   "description": null,
+   "pricingComponentId": null,
+   "defaultPrice": "50.00",
+   "displayOrder": 2,
+   "color": null,
+   "isActive": true,
+   "isSystemManaged": true,
+   "isAssignable": true,
+   "createdAt": "2026-09-02T20:59:36.917Z",
+   "updatedAt": "2026-09-02T20:59:36.917Z"
+  },
+  {
+   "id": "fc84b48a-126b-40a0-8535-868065978754",
+   "name": "Flat",
+   "description": null,
+   "pricingComponentId": null,
+   "defaultPrice": "20.00",
+   "displayOrder": 3,
+   "color": null,
+   "isActive": true,
+   "isSystemManaged": true,
+   "isAssignable": false,
+   "createdAt": "2026-09-02T20:59:46.119Z",
+   "updatedAt": "2026-09-02T20:59:46.119Z"
+  },
+  {
+   "id": "da50aef4-4aa9-45b4-baec-aa5845435709",
+   "name": "Toll",
+   "description": "Marks a Trip as owing the toll configured for its route. The amount comes from the route configuration, never from this property.",
+   "pricingComponentId": "948ab29d-6879-4448-a365-24fbc1183a32",
+   "defaultPrice": null,
+   "displayOrder": 4,
+   "color": null,
+   "isActive": true,
+   "isSystemManaged": true,
+   "isAssignable": false,
+   "createdAt": "2026-09-02T21:54:11.055Z",
+   "updatedAt": "2026-09-02T21:54:11.055Z"
+  },
+  {
+   "id": "aa4ff82d-ac3e-428b-a475-07b4a7627879",
+   "name": "Tunnel",
+   "description": "Marks a Trip as owing the tunnel charge configured for its route. The amount comes from the route configuration, never from this property.",
+   "pricingComponentId": "fb520155-7877-4819-ba83-7fbed0ae441e",
+   "defaultPrice": null,
+   "displayOrder": 5,
+   "color": null,
+   "isActive": true,
+   "isSystemManaged": true,
+   "isAssignable": false,
+   "createdAt": "2026-09-02T21:54:11.189Z",
+   "updatedAt": "2026-09-02T21:54:11.189Z"
+  }
+ ],
+ "settings": [
+  {
+   "id": "ec73e210-a5d8-45c9-aa3a-49ad4699ccac",
+   "category": "PRICING",
+   "key": "AUTOMATIC_CUSTOM_PROPERTY_ID",
+   "value": "4446fdcc-7873-4ee4-b53e-4c2f85b3936a",
+   "valueType": "STRING",
+   "description": "The Custom Property the Engine applies without anyone assigning it — TAR. Stored as the property's id so the AMOUNT stays the one configured on the property itself.",
+   "defaultValue": null,
+   "isActive": true,
+   "createdAt": "2026-09-02T20:59:56.294Z",
+   "updatedAt": "2026-09-02T20:59:56.294Z"
+  },
+  {
+   "id": "019937b6-0606-4bb7-a806-4545ac6ac0b7",
+   "category": "PRICING",
+   "key": "COMBINATION_SURCHARGE",
+   "value": "50.00",
+   "valueType": "DECIMAL",
+   "description": "Charged on EACH leg of a genuine two-Trip Combination. A manual Trip group is not a Combination and never attracts it.",
+   "defaultValue": "50.00",
+   "isActive": true,
+   "createdAt": "2026-09-02T20:59:12.338Z",
+   "updatedAt": "2026-09-02T20:59:12.338Z"
+  },
+  {
+   "id": "5436c3a8-ffae-4e0c-bb61-8593eb81e008",
+   "category": "PRICING",
+   "key": "DISTANCE_RATE_PER_KM",
+   "value": "2.75",
+   "valueType": "DECIMAL",
+   "description": "Price per kilometre, read only by the DISTANCE_BASED strategy. Configured so switching strategy does not require configuration first.",
+   "defaultValue": "2.75",
+   "isActive": true,
+   "createdAt": "2026-09-02T20:59:12.363Z",
+   "updatedAt": "2026-09-02T20:59:12.363Z"
+  },
+  {
+   "id": "62fde43e-ad8a-4b49-96f6-cda72b736df6",
+   "category": "PRICING",
+   "key": "FUEL_PERCENTAGE",
+   "value": "15",
+   "valueType": "DECIMAL",
+   "description": "Percentage applied to the Base Price only, never to any other component. The rate that applied on the day is stored on each pricing snapshot, so changing this never restates a finished Trip.",
+   "defaultValue": "15",
+   "isActive": true,
+   "createdAt": "2026-09-02T20:59:12.333Z",
+   "updatedAt": "2026-09-02T20:59:12.333Z"
+  },
+  {
+   "id": "330f3281-e46b-443d-bc38-d62b8af0702f",
+   "category": "PRICING",
+   "key": "PRICING_RULE_VERSION",
+   "value": "2026.1",
+   "valueType": "STRING",
+   "description": "The ruleset version stamped onto every snapshot this configuration produces. An administrator bumps it when the pricing rules change, so it travels with the rules it describes.",
+   "defaultValue": "2026.1",
+   "isActive": true,
+   "createdAt": "2026-09-02T20:59:12.367Z",
+   "updatedAt": "2026-09-02T20:59:12.367Z"
+  },
+  {
+   "id": "1f85312b-8f01-46f7-b802-e6dd5a2435b8",
+   "category": "PRICING",
+   "key": "PRICING_STRATEGY",
+   "value": "ROUTE_BASED",
+   "valueType": "STRING",
+   "description": "How the Base Price is derived: ROUTE_BASED reads the configured route price, DISTANCE_BASED multiplies the Trip's distance by the configured rate.",
+   "defaultValue": "ROUTE_BASED",
+   "isActive": true,
+   "createdAt": "2026-09-02T20:59:12.318Z",
+   "updatedAt": "2026-09-02T20:59:12.318Z"
+  },
+  {
+   "id": "b7f05dbf-4afa-478c-b01c-c71049e85f44",
+   "category": "PRICING",
+   "key": "WAITING_TIME_BLOCK_MINUTES",
+   "value": "15",
+   "valueType": "INTEGER",
+   "description": "The block chargeable waiting time is rounded up into. Every block that is STARTED is charged in full.",
+   "defaultValue": "15",
+   "isActive": true,
+   "createdAt": "2026-09-02T20:59:12.353Z",
+   "updatedAt": "2026-09-02T20:59:12.353Z"
+  },
+  {
+   "id": "8b6ab012-11e6-4ce4-949c-b4159277d359",
+   "category": "PRICING",
+   "key": "WAITING_TIME_BLOCK_PRICE",
+   "value": "13.75",
+   "valueType": "DECIMAL",
+   "description": "The price of one started waiting-time block.",
+   "defaultValue": "13.75",
+   "isActive": true,
+   "createdAt": "2026-09-02T20:59:12.358Z",
+   "updatedAt": "2026-09-02T20:59:12.358Z"
+  },
+  {
+   "id": "96e43bca-542c-4217-978a-11171a6da5f9",
+   "category": "PRICING",
+   "key": "WAITING_TIME_FREE_MINUTES",
+   "value": "120",
+   "valueType": "INTEGER",
+   "description": "The allowance subtracted before waiting time is charged. Distinct from the threshold below; both apply.",
+   "defaultValue": "120",
+   "isActive": true,
+   "createdAt": "2026-09-02T20:59:12.344Z",
+   "updatedAt": "2026-09-02T20:59:12.344Z"
+  },
+  {
+   "id": "06451c9a-680a-4a0a-8129-6b1ce025163b",
+   "category": "PRICING",
+   "key": "WAITING_TIME_THRESHOLD_MINUTES",
+   "value": "150",
+   "valueType": "INTEGER",
+   "description": "The wait at which charging begins at all. A shorter wait costs nothing even when it already exceeds the free allowance.",
+   "defaultValue": "150",
+   "isActive": true,
+   "createdAt": "2026-09-02T20:59:12.349Z",
+   "updatedAt": "2026-09-02T20:59:12.349Z"
+  }
+ ]
+}

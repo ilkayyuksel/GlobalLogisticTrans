@@ -5,7 +5,9 @@ import { CustomPropertyService } from "../custom-properties/custom-property.serv
 import { AppLoggerService } from "../logger/app-logger.service";
 import {
   SYSTEM_MANAGED_EXPLANATION,
+  isManuallyAssignable,
   systemManagedReasonFor,
+  type SystemManagedReason,
 } from "../custom-properties/system-managed-property";
 import { PricingRecalculationService } from "../pricing-engine/pricing-recalculation.service";
 import {
@@ -259,17 +261,24 @@ export class TripCustomPropertyService {
     }
 
     /*
-     * A system-managed property is not the operator's to assign: the route, the
-     * container type or the Engine has already decided it. The picker does not
-     * offer them, and this is the same rule enforced where it cannot be
-     * bypassed — a stale browser tab, a script, or a client written later.
+     * Some properties are not the operator's to assign: the ROUTE decides Toll
+     * and Tunnel, and the CONTAINER TYPE decides Flat, so a manual copy would
+     * contradict a rule rather than add to it. The picker does not offer them,
+     * and this is the same rule enforced where it cannot be bypassed — a stale
+     * browser tab, a script, or a client written later.
+     *
+     * TAR is deliberately NOT among them any more. It is still system-owned —
+     * the Engine applies it automatically and the row is undeletable — but an
+     * operator may now assign it as an EXTRA charge, which is a decision only
+     * they can make. See `isManuallyAssignable`, which is the one place that
+     * distinction lives.
      *
      * Deliberately only on the way IN. Removing an assignment made before this
      * rule existed stays possible, and no stored row is touched.
      */
     const reason = systemManagedReasonFor(customProperty);
 
-    if (reason !== null) {
+    if (!isManuallyAssignable(customProperty)) {
       this.logger.warn("Rejected manual assignment of a system-managed property", {
         customPropertyId,
         reason,
@@ -277,7 +286,7 @@ export class TripCustomPropertyService {
 
       throw new SystemManagedCustomPropertyException(
         customProperty.name,
-        SYSTEM_MANAGED_EXPLANATION[reason],
+        SYSTEM_MANAGED_EXPLANATION[reason as SystemManagedReason],
       );
     }
   }

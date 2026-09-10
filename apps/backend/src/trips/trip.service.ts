@@ -23,8 +23,9 @@ import {
 import { UpdateTripDto } from "./dto/update-trip.dto";
 import { TripClosedEvent } from "./events/trip-closed.event";
 import { toContainerIdentity } from "./document-trip-matching";
-import { changesWaitingTimeWindow, toWaitingTimeWrite } from "./waiting-window";
+import { toWaitingTimeWrite } from "./waiting-window";
 import { ImportTripsCommand } from "./import-trips.command";
+import { changesPricingInput } from "./billable-fields";
 import {
   AssignmentSubject,
   DeletedTripCannotBeLooseException,
@@ -389,27 +390,25 @@ export class TripService {
   /**
    * The updated Trip, priced again when the update touched a pricing input.
    *
-   * ── WHY WAITING TIME AND NOT EVERY FIELD ────────────────────────────────
-   * The waiting-time window is the one input on this endpoint that an operator
-   * edits AFTER the work is finished and that the Pricing Engine bills from.
-   * Changing it must leave the Trip's stored pricing current, and the operator
-   * must see the new Others and Totaal in the answer to their own request
-   * rather than in a later refresh.
+   * ── WHICH FIELDS COUNT ───────────────────────────────────────────────────
+   * The ones on this endpoint that the Pricing Engine bills from and that an
+   * operator edits AFTER the work is finished: the waiting-time window and the
+   * TAR-nummer. `changesPricingInput` names them once, and explains why the
+   * TAR-nummer had to join the list.
    *
    * Every other field here is either not a pricing input at all — a container
    * number, a vehicle, a note — or belongs to a Trip that is still being
    * planned, where the price is produced when it closes.
    *
-   * The window is treated as changed when it was SENT, which is the same test
-   * `toWaitingTimeWrite` uses to decide whether this update is about waiting
-   * time at all. Recalculating a window that was re-sent unchanged costs one
-   * calculation and produces the same snapshot; missing a real change would
-   * leave the money describing the previous window.
+   * The recalculation is the SAME one closing performs: both reach the one
+   * Engine entry point that calculates and stores a snapshot, so a Trip edited
+   * while CLOSED and a Trip reopened and closed again are priced by one rule,
+   * same-day TAR rule included, and cannot disagree. This service still knows
+   * only the recalculation entry point, never the Engine itself.
    *
    * ── AND WHY THE STATUS IS NEVER TOUCHED ─────────────────────────────────
-   * A CLOSED Trip stays CLOSED. The price of a finished job may change; the
-   * fact that it is finished may not, and there is no CLOSED -> OPEN anywhere
-   * in this system.
+   * A CLOSED Trip stays CLOSED. The price of a finished job may change; whether
+   * it is finished is changed only through the status endpoint.
    */
   private async respondToUpdate(
     updated: Trip,
@@ -417,7 +416,7 @@ export class TripService {
   ): Promise<TripResponseDto> {
     const response = await this.toResponse(updated);
 
-    if (!changesWaitingTimeWindow(dto)) {
+    if (!changesPricingInput(dto)) {
       return response;
     }
 

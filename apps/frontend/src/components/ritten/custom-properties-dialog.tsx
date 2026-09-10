@@ -137,7 +137,13 @@ export function CustomPropertiesDialog({
    * editor on the row, not a property in this list.
    */
   const available = (assignable.data ?? []).filter(
-    (property) => !assignedIds.has(property.id) && !property.isSystemManaged,
+    /*
+     * `isAssignable` is the BACKEND's answer, not a rule restated here. It is
+     * narrower than "not system-managed": TAR is system-owned and still
+     * offered, because an operator may add an EXTRA TAR charge on top of the
+     * automatic one, while Toll, Tunnel and Flat stay closed.
+     */
+    (property) => !assignedIds.has(property.id) && property.isAssignable,
   );
 
   /**

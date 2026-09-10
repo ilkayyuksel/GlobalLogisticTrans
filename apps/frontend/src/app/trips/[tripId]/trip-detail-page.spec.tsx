@@ -213,6 +213,7 @@ function buildCustomProperty(): TripCustomProperty {
       defaultPrice: "35.00",
       isActive: true,
     isSystemManaged: true,
+    isAssignable: false,
     },
     assignedAt: "2026-08-01T00:00:00.000Z",
   };

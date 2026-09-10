@@ -3,7 +3,10 @@ import { CustomProperty } from "@prisma/client";
 
 import { MONEY_DECIMAL_PLACES } from "../../common/dto/money";
 import { PaginationMetaDto } from "../../common/dto/pagination-meta.dto";
-import { isSystemManagedProperty } from "../system-managed-property";
+import {
+  isManuallyAssignable,
+  isSystemManagedProperty,
+} from "../system-managed-property";
 
 /**
  * Public shape of a CustomProperty.
@@ -57,6 +60,16 @@ export class CustomPropertyResponseDto {
   })
   isSystemManaged!: boolean;
 
+  @ApiProperty({
+    description:
+      "Whether an operator may assign this property to a Trip by hand. " +
+      "Narrower than the negation of isSystemManaged: TAR is system-owned — " +
+      "the Engine applies it automatically and the row cannot be deleted — " +
+      "yet it IS assignable, because the business needs an extra manual TAR " +
+      "charge on top of the automatic one. Toll, Tunnel and Flat stay closed.",
+  })
+  isAssignable!: boolean;
+
   @ApiProperty({ format: "date-time" })
   createdAt!: Date;
 
@@ -89,6 +102,7 @@ export function toCustomPropertyResponse(
     color: property.color,
     isActive: property.isActive,
     isSystemManaged: isSystemManagedProperty(property),
+    isAssignable: isManuallyAssignable(property),
     createdAt: property.createdAt,
     updatedAt: property.updatedAt,
   };

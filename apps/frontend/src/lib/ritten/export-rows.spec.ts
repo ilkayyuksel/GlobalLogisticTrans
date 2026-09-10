@@ -782,3 +782,55 @@ describe("toCostsLabel", () => {
     expect(toCostsLabel(lines)).toBe("35.00 + 7.50");
   });
 });
+
+/**
+ * ── COMBI EN KOST CARRIES THE COMBINATION SURCHARGE ─────────────────────────
+ * The office sheet prints each Combination leg with its surcharge in this
+ * column — `50.00`, or `50.00+137.50` when the leg also waited — and the export
+ * used to leave it out. The amount is the Engine's own COMBINATION line, per
+ * Trip; the export never decides whether a Trip is part of a Combination.
+ */
+describe("the Combination surcharge in COMBI EN KOST", () => {
+  const MANUAL = toManualPropertyIds([
+    { id: "prop-1", pricingComponentId: null, isSystemManaged: false },
+  ] as never);
+
+  function costsOf(...lines: ReturnType<typeof line>[]): string {
+    return toBasicRow(buildTrip(), snapshotOf(...lines), MANUAL, "Wachttijd")
+      .costs;
+  }
+
+  it("prints a leg's surcharge", () => {
+    expect(costsOf(line("BASE_PRICE", "300.00"), line("COMBINATION", "50.00"))).toBe(
+      "50.00",
+    );
+  });
+
+  it("puts it before the properties and the waiting time", () => {
+    expect(
+      costsOf(
+        line("COMBINATION", "50.00"),
+        line("CUSTOM_PROPERTY", "35.00", "prop-1"),
+        line("WAITING_TIME", "137.50"),
+      ),
+    ).toBe("50.00 + 35.00 + 137.50");
+  });
+
+  /** A standalone Trip has no COMBINATION line, so nothing is added. */
+  it("adds nothing to a Trip with no surcharge line", () => {
+    expect(costsOf(line("BASE_PRICE", "300.00"), line("WAITING_TIME", "25.00"))).toBe(
+      "25.00",
+    );
+  });
+
+  /** A configured zero is a real line, and the sheet says so. */
+  it("prints a zero surcharge the Engine stored", () => {
+    expect(costsOf(line("COMBINATION", "0.00"))).toBe("0.00");
+  });
+
+  it("leaves the cell empty for an unpriced Trip", () => {
+    expect(
+      toBasicRow(buildTrip(), null, MANUAL, "Wachttijd").costs,
+    ).toBe("");
+  });
+});

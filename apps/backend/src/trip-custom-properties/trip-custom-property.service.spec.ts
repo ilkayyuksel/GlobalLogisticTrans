@@ -505,7 +505,7 @@ describe("TripCustomPropertyService — manual assignment of a system property",
 
   it.each([
     ["a route-priced property", { name: "Toll", pricingComponentId: "toll-component" }],
-    ["the automatic property", { name: "TAR", pricingComponentId: null }],
+    ["the other route-priced property", { name: "Tunnel", pricingComponentId: "tunnel-component" }],
     ["the container-type property", { name: "Flat", pricingComponentId: null }],
   ])("refuses %s", async (_label, property) => {
     const { service, repository } = serviceRefusing(property);
@@ -516,6 +516,58 @@ describe("TripCustomPropertyService — manual assignment of a system property",
 
     // Nothing was written.
     expect(repository.create).not.toHaveBeenCalled();
+  });
+
+  /**
+   * ── TAR IS THE EXCEPTION, AND ONLY TAR ────────────────────────────────────
+   * It used to be refused here with the other three. The business needs an
+   * EXTRA TAR charge — a second, deliberate one on top of whatever the Engine
+   * applies from the `tar_nummer` — and only an operator can decide that, so
+   * the assignment has to be accepted.
+   *
+   * It remains system-OWNED in every other sense: the Engine still applies the
+   * automatic charge, `AUTOMATIC_CUSTOM_PROPERTY_ID` still points at this row,
+   * and the row still cannot be deleted. See `isManuallyAssignable`, which is
+   * the one place the two questions are told apart.
+   */
+  it("accepts the automatic property, which is now an extra charge", async () => {
+    const { service, repository } = serviceRefusing({
+      name: "TAR",
+      pricingComponentId: null,
+    });
+
+    // The harness was built for a path that never reached `create`.
+    repository.create.mockResolvedValue({
+      id: "assignment-1",
+      tripId: TRIP_ID,
+      customPropertyId: "property-id",
+      isAutomatic: false,
+      createdAt: new Date("2026-08-17T00:00:00Z"),
+      updatedAt: new Date("2026-08-17T00:00:00Z"),
+      customProperty: {
+        id: "property-id",
+        name: "TAR",
+        pricingComponentId: null,
+        defaultPrice: null,
+        description: null,
+        displayOrder: 1,
+        color: null,
+        isActive: true,
+        createdAt: new Date("2026-08-17T00:00:00Z"),
+        updatedAt: new Date("2026-08-17T00:00:00Z"),
+      },
+    } as never);
+
+    await service.assign({ tripId: TRIP_ID, customPropertyId: "property-id" });
+
+    expect(repository.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tripId: TRIP_ID,
+        customPropertyId: "property-id",
+        // An operator's decision, so it is never withdrawn by a rule.
+        isAutomatic: false,
+      }),
+    );
   });
 
   it("says why, so an operator knows where the value comes from", async () => {

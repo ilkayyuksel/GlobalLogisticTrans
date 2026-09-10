@@ -491,21 +491,21 @@ describe("a whole BASIS workbook", () => {
   });
 
   /**
-   * Backload is not a BASIS column — that sheet's "COMBI EN KOST" holds the
-   * Custom Property amounts. The per-leg surcharge is verified in the PRICING
-   * workbook, which has a Backload column of its own; see below.
+   * Each leg's Backload is in COMBI EN KOST, first.
+   *
+   * This test used to assert the opposite — "keeps Backload out of the BASIS
+   * Kosten column" — on the assumption that the column held only Custom
+   * Property amounts. The office sheet the export reproduces
+   * (`docs/07-excels/29-06-2026.xlsx`) prints every Combination leg's
+   * surcharge there (`50.00`, `50.00+137.50`), so the assumption was wrong and
+   * a leg the Engine priced at €50 left the sheet with an empty cell.
    */
-  it("keeps Backload out of the BASIS Kosten column", async () => {
+  it("prints each leg's Backload in the BASIS Kosten column", async () => {
     const sheet = await fullSheet();
 
-    /*
-     * Leg A shows 50.00 — that is TAR's amount, which is a Custom Property
-     * line. Leg B carries the SAME €50 Backload and nothing else, and its
-     * Kosten cell is empty: the surcharge belongs to the pricing export's own
-     * Backload column, which is where it is verified below.
-     */
-    expect(sheet.getRow(FIRST_ROW + 1).getCell(8).value).toBe("50.00");
-    expect(sheet.getRow(FIRST_ROW + 2).getCell(8).value ?? "").toBe("");
+    // Leg A: its Backload, then its TAR. Leg B: its own Backload alone.
+    expect(sheet.getRow(FIRST_ROW + 1).getCell(8).value).toBe("50.00 + 50.00");
+    expect(sheet.getRow(FIRST_ROW + 2).getCell(8).value).toBe("50.00");
   });
 
   describe("the group colours", () => {

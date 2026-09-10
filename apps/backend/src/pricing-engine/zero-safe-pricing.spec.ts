@@ -94,6 +94,7 @@ describe("a CLOSED Trip on an unconfigured route", () => {
   let assignments: { findByTripId: jest.Mock };
   let customProperties: { findById: jest.Mock };
   let costConfirmations: { findForTrip: jest.Mock };
+  let tarCharges: { hasBeenChargedToday: jest.Mock };
   let snapshotWriter: {
     findExistingSnapshot: jest.Mock;
     writeSnapshot: jest.Mock;
@@ -142,6 +143,8 @@ describe("a CLOSED Trip on an unconfigured route", () => {
       resolveDistanceRatePerKm: jest.fn(),
     } as unknown as PricingRuleResolver;
 
+    tarCharges = { hasBeenChargedToday: jest.fn().mockResolvedValue(false) };
+
     engine = new PricingEngineService(
       trips as unknown as TripReadService,
       ruleResolver,
@@ -152,7 +155,7 @@ describe("a CLOSED Trip on an unconfigured route", () => {
         trips as unknown as TripReadService,
         ruleResolver,
         // Nothing has been charged today unless a test says so.
-        { hasBeenChargedToday: jest.fn().mockResolvedValue(false) } as never,
+        tarCharges as never,
         appLogger,
       ),
       new RouteCostResolver(routeCosts as never, appLogger),
@@ -314,6 +317,96 @@ describe("a CLOSED Trip on an unconfigured route", () => {
   });
 
   /**
+   * ── THE AUTOMATIC TAR AND THE MANUAL ONE ──────────────────────────────────
+   * Two independent charges of the SAME configured property. The automatic one
+   * follows from a stated `tar_nummer` and the same-day rule; the manual one is
+   * an EXTRA an operator assigns deliberately. Run through the real calculator
+   * chain, so what is asserted is the Others and Totaal a screen would show.
+   */
+  describe("the automatic and the manual TAR", () => {
+    const MANUAL_TAR = {
+      customPropertyId: TAR_ID,
+      name: "TAR",
+      pricingComponentId: null,
+      defaultPrice: "20.00",
+    };
+
+    function tarLines(lines: readonly { customPropertyId: string | null }[]) {
+      return lines.filter((line) => line.customPropertyId === TAR_ID);
+    }
+
+    it("charges the automatic one alone", async () => {
+      const pricing = await amounts();
+
+      expect(pricing.others).toBe("20.00");
+      expect(pricing.totaal).toBe("20.00");
+    });
+
+    it("charges a manual one alone on a Trip with no number", async () => {
+      trips.findById.mockResolvedValue(buildTrip({ tarNummer: null }));
+      assignments.findByTripId.mockResolvedValue([MANUAL_TAR]);
+
+      const pricing = await amounts();
+
+      expect(pricing.others).toBe("20.00");
+      expect(pricing.totaal).toBe("20.00");
+    });
+
+    /** The case the rule exists for: €20 + €20, neither suppressing the other. */
+    it("charges both when both apply", async () => {
+      assignments.findByTripId.mockResolvedValue([MANUAL_TAR]);
+
+      const { lines } = await engine.calculate(TRIP_ID);
+      const pricing = await amounts();
+
+      expect(tarLines(lines)).toHaveLength(2);
+      expect(pricing.others).toBe("40.00");
+      expect(pricing.totaal).toBe("40.00");
+    });
+
+    /** The same-day rule withholds the automatic charge and nothing else. */
+    it("keeps the manual one when the same-day rule withholds the automatic one", async () => {
+      tarCharges.hasBeenChargedToday.mockResolvedValue(true);
+      assignments.findByTripId.mockResolvedValue([MANUAL_TAR]);
+
+      const { lines } = await engine.calculate(TRIP_ID);
+
+      expect(tarLines(lines)).toHaveLength(1);
+      expect((await amounts()).others).toBe("20.00");
+    });
+
+    it("charges nothing when the rule withholds it and nobody assigned it", async () => {
+      tarCharges.hasBeenChargedToday.mockResolvedValue(true);
+
+      expect((await amounts()).others).toBe("0.00");
+    });
+
+    /**
+     * A manual assignment never makes the automatic one MORE likely: on a Trip
+     * with no number the automatic charge is still absent, and the manual line
+     * is the only one.
+     */
+    it("does not make the automatic one apply", async () => {
+      trips.findById.mockResolvedValue(buildTrip({ tarNummer: "   " }));
+      assignments.findByTripId.mockResolvedValue([MANUAL_TAR]);
+
+      const { lines } = await engine.calculate(TRIP_ID);
+
+      expect(tarLines(lines)).toHaveLength(1);
+    });
+
+    /** The same-day lookup is about the automatic charge only. */
+    it("asks the same-day question only when a number is stated", async () => {
+      trips.findById.mockResolvedValue(buildTrip({ tarNummer: null }));
+      assignments.findByTripId.mockResolvedValue([MANUAL_TAR]);
+
+      await engine.calculate(TRIP_ID);
+
+      expect(tarCharges.hasBeenChargedToday).not.toHaveBeenCalled();
+    });
+  });
+
+  /**
    * ── AN OVERRIDE ON A ZERO TARIEF ──────────────────────────────────────────
    * The reason the fuel rate is stored on its own line. The ratio
    * `fuel / base` would be 0/0 here and could name no percentage, so a
@@ -459,8 +552,17 @@ describe("the two legs of a Combination", () => {
     direction: TripDirection.COLLECTION,
   });
 
+  interface LegOptions {
+    /** Both legs as the group read returns them; defaults to the pair above. */
+    readonly members?: readonly TripReadView[];
+    /** The leg's own Custom Property assignments. */
+    readonly assignments?: readonly unknown[];
+    /** Whether the same-day rule finds the number already charged. */
+    readonly chargedToday?: boolean;
+  }
+
   /** The eight amounts of one leg, through the real chain. */
-  async function legAmounts(leg: TripReadView) {
+  async function legAmounts(leg: TripReadView, options: LegOptions = {}) {
     const logger = {
       setContext: jest.fn(),
       log: jest.fn(),
@@ -470,7 +572,7 @@ describe("the two legs of a Combination", () => {
 
     const trips = {
       findById: jest.fn().mockResolvedValue(leg),
-      findByGroupId: jest.fn().mockResolvedValue([DELIVERY, COLLECTION]),
+      findByGroupId: jest.fn().mockResolvedValue(options.members ?? [DELIVERY, COLLECTION]),
     } as unknown as TripReadService;
 
     const ruleResolver = {
@@ -483,7 +585,7 @@ describe("the two legs of a Combination", () => {
       ruleResolver,
       new PricingComponentResolver(
         { findActiveRoute: jest.fn().mockResolvedValue(null) } as never,
-        { findByTripId: jest.fn().mockResolvedValue([]) } as never,
+        { findByTripId: jest.fn().mockResolvedValue(options.assignments ?? []) } as never,
         {
           findById: jest.fn().mockResolvedValue({
             id: TAR_ID,
@@ -494,7 +596,11 @@ describe("the two legs of a Combination", () => {
         } as never,
         trips,
         ruleResolver,
-        { hasBeenChargedToday: jest.fn().mockResolvedValue(false) } as never,
+        {
+          hasBeenChargedToday: jest
+            .fn()
+            .mockResolvedValue(options.chargedToday ?? false),
+        } as never,
         logger,
       ),
       new RouteCostResolver(
@@ -559,5 +665,82 @@ describe("the two legs of a Combination", () => {
 
     expect(tarTotal).toBe(20);
     expect(backloadTotal).toBe(100);
+  });
+
+  /**
+   * ── BACKLOAD IS PER LEG, AND NOTHING ELSE MOVES IT ────────────────────────
+   * TAR allocation and Backload are two separate rules. Whatever TAR does on a
+   * leg — absent, blocked by the same-day rule, assigned by hand — each leg of
+   * a genuine Combination carries its own €50, and its Totaal includes it.
+   */
+  describe("Backload, whatever TAR does", () => {
+    const MANUAL_TAR = {
+      customPropertyId: TAR_ID,
+      name: "TAR",
+      pricingComponentId: null,
+      defaultPrice: "20.00",
+    };
+
+    it("stays €50 per leg when neither leg states a number", async () => {
+      const delivery = { ...DELIVERY, tarNummer: null };
+      const collection = { ...COLLECTION, tarNummer: null };
+      const members = [delivery, collection];
+
+      expect((await legAmounts(delivery, { members })).backload).toBe("50.00");
+      expect((await legAmounts(collection, { members })).backload).toBe("50.00");
+    });
+
+    it("stays €50 when the same-day rule withholds the TAR", async () => {
+      const pricing = await legAmounts(DELIVERY, { chargedToday: true });
+
+      expect(pricing.others).toBe("0.00");
+      expect(pricing.backload).toBe("50.00");
+    });
+
+    it("stays €50 on a leg that was given a manual TAR", async () => {
+      const pricing = await legAmounts(COLLECTION, { assignments: [MANUAL_TAR] });
+
+      expect(pricing.others).toBe("20.00");
+      expect(pricing.backload).toBe("50.00");
+    });
+
+    it("is part of each leg's Totaal", async () => {
+      // An unconfigured route prices the base at zero, so Totaal is
+      // Backload plus whatever TAR the leg owes.
+      expect((await legAmounts(DELIVERY)).totaal).toBe("70.00");
+      expect((await legAmounts(COLLECTION)).totaal).toBe("50.00");
+    });
+  });
+
+  describe("Backload, wherever and whenever the legs run", () => {
+    it("stays €50 per leg when the legs run on different days", async () => {
+      const collection = { ...COLLECTION, planningDate: "2026-09-01" };
+      const members = [DELIVERY, collection];
+
+      expect((await legAmounts(DELIVERY, { members })).backload).toBe("50.00");
+      expect((await legAmounts(collection, { members })).backload).toBe("50.00");
+    });
+
+    it("stays €50 per leg when the legs run different routes", async () => {
+      const collection = { ...COLLECTION, destinationCity: "Lokeren" };
+      const members = [DELIVERY, collection];
+
+      expect((await legAmounts(collection, { members })).backload).toBe("50.00");
+    });
+  });
+
+  /** Two Trips of DIFFERENT documents in one group are a manual group. */
+  it("charges no Backload to a manual group", async () => {
+    const other = { ...COLLECTION, pdfDocumentId: "pdf-other" };
+
+    expect((await legAmounts(DELIVERY, { members: [DELIVERY, other] })).backload).toBe(
+      "0.00",
+    );
+  });
+
+  it("charges no Backload to a standalone Trip", async () => {
+    const standalone = { ...DELIVERY, tripGroupId: null };
+
+    expect((await legAmounts(standalone, { members: [] })).backload).toBe("0.00");
   });
 });

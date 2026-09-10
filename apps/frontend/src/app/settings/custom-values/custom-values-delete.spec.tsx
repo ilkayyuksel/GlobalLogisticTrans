@@ -39,6 +39,7 @@ const ORDINARY: CustomProperty = {
   defaultPrice: "25.00",
   isActive: true,
   isSystemManaged: false,
+  isAssignable: true,
 };
 
 /** TAR: the Pricing Engine applies it, so the system owns the row. */
@@ -50,6 +51,7 @@ const SYSTEM_MANAGED: CustomProperty = {
   defaultPrice: "35.00",
   isActive: true,
   isSystemManaged: true,
+  isAssignable: false,
 };
 
 function page(items: CustomProperty[]): Paginated<CustomProperty> {

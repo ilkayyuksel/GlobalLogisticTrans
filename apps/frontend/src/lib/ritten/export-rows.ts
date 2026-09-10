@@ -147,7 +147,23 @@ export function toPricingRow(
  * The amounts are stored ones, joined; they are never added together.
  */
 export function toCostsLabel(lines: PricedTripLines): string {
-  const amounts = [...lines.customPropertyAmounts];
+  /*
+   * ── THE COMBINATION SURCHARGE COMES FIRST, AND IT WAS MISSING ─────────────
+   * The column is called COMBI EN KOST, and the office sheet this export
+   * reproduces (`docs/07-excels/29-06-2026.xlsx`) prints each leg of a
+   * Combination with its surcharge there — `50.00`, or `50.00+137.50` when the
+   * leg also waited. This function listed only the Custom Properties and the
+   * waiting time, so a Combination leg the Engine had priced at €50 left the
+   * sheet with an empty cell.
+   *
+   * The amount is the Engine's own stored COMBINATION line, per Trip — each
+   * leg carries its own — and nothing here decides whether a Trip is part of a
+   * Combination. No line, no amount.
+   */
+  const amounts: number[] =
+    lines.combination === null ? [] : [lines.combination];
+
+  amounts.push(...lines.customPropertyAmounts);
 
   if (lines.waitingTime !== null) {
     amounts.push(lines.waitingTime);

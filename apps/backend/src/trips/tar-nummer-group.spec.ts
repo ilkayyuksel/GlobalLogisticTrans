@@ -114,7 +114,15 @@ function buildService(stored: Row[]) {
     error: jest.fn(),
   };
 
-  const recalculation = { recalculate: jest.fn() };
+  /*
+   * A TAR-nummer edit reprices the Trip, because the number is a pricing input.
+   * This file is about which ROWS are written, so the recalculation answers
+   * with nothing to report; `tar-nummer-recalculation.spec.ts` covers what it
+   * does.
+   */
+  const recalculation = {
+    recalculate: jest.fn().mockResolvedValue({ pricing: null, reasonCode: null }),
+  };
 
   const service = new TripService(
     repository as unknown as TripRepository,

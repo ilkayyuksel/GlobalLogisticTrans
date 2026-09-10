@@ -20,12 +20,12 @@ const TRIP_ID = "3f2504e0-4f89-41d3-9a0c-0305e82c3301";
 /**
  * Editing a waiting-time window reprices the Trip.
  *
- * ── WHY THIS ONE FIELD ──────────────────────────────────────────────────────
- * The window is the only input on the Trip update endpoint that an operator
- * edits AFTER the work is finished and that the Pricing Engine bills from. So
- * it is the only one that recalculates, and the assertions below pin that down
- * in both directions: a waiting-time edit reprices, a container-number edit
- * does not.
+ * ── WHY THIS FIELD ──────────────────────────────────────────────────────────
+ * The window is one of the two inputs on the Trip update endpoint that an
+ * operator edits AFTER the work is finished and that the Pricing Engine bills
+ * from; the other is the TAR-nummer, covered in `tar-nummer-recalculation.spec`.
+ * The assertions below pin the window down in both directions: a waiting-time
+ * edit reprices, a container-number edit does not.
  *
  * ── AND WHAT THE ANSWER CARRIES ─────────────────────────────────────────────
  * The recalculated pricing, or nothing at all with a reason. Never the figures

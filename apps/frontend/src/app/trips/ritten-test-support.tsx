@@ -373,7 +373,21 @@ export function respondWith(
     }
 
     if (path === "/api/v1/custom-properties") {
-      return Promise.resolve(page(responses.availableCustomProperties ?? []));
+      /*
+       * `isAssignable` defaults to true, because an ordinary manual property is
+       * what almost every fixture means and the real API says so for one. It is
+       * the BACKEND's classification and the picker filters on it, so a spec
+       * about a property the operator may NOT assign — Flat, Toll, Tunnel —
+       * states `isAssignable: false` for itself.
+       */
+      return Promise.resolve(
+        page(
+          (responses.availableCustomProperties ?? []).map((property) => ({
+            isAssignable: true,
+            ...(property as Record<string, unknown>),
+          })),
+        ),
+      );
     }
 
     if (path.startsWith("/api/v1/trip-custom-properties/trip/")) {

@@ -128,8 +128,17 @@ describe("CustomPropertyService", () => {
         "displayOrder",
         "id",
         "isActive",
-        // Derived rather than stored: whether the SYSTEM decides this property,
-        // which is what tells a client not to offer it for manual assignment.
+        /*
+         * Two derived flags, and they are NOT each other's negation.
+         *
+         * `isSystemManaged` says the system owns the property — it decides the
+         * amount, and the row cannot be deleted. `isAssignable` says an
+         * operator may still put it on a Trip by hand. TAR is both: the Engine
+         * applies it automatically AND an operator may add an extra one, which
+         * is why the picker reads the second flag rather than negating the
+         * first.
+         */
+        "isAssignable",
         "isSystemManaged",
         "name",
         "pricingComponentId",

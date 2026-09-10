@@ -465,6 +465,15 @@ export interface CustomProperty {
    * No rule is duplicated here.
    */
   isSystemManaged: boolean;
+  /**
+   * Whether an operator may assign this property to a Trip by hand.
+   *
+   * Narrower than `!isSystemManaged`, and the backend decides both. TAR is
+   * system-owned — the Engine applies it automatically and the row cannot be
+   * deleted — yet it IS assignable, because the business needs an extra manual
+   * TAR charge on top of the automatic one. Toll, Tunnel and Flat stay closed.
+   */
+  isAssignable: boolean;
 }
 
 export interface TripCustomProperty {

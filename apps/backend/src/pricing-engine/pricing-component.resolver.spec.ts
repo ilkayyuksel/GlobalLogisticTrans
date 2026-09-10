@@ -380,7 +380,13 @@ describe("PricingComponentResolver", () => {
        * A stale tick from before this rule existed must not resurrect the
        * charge: the assignments are overruled, not trusted.
        */
-      it("ignores a manual assignment when no number is stated", async () => {
+      /**
+       * A manual TAR is an EXTRA charge and stands on its own. It used to be
+       * stripped here — the automatic rule overruled every assignment of the
+       * same property — and the business now wants the operator's deliberate
+       * one kept, whether or not the Trip states a number.
+       */
+      it("keeps a manual assignment when no number is stated", async () => {
         tripCustomProperties.findByTripId.mockResolvedValue([
           {
             customPropertyId: AUTOMATIC_PROPERTY_ID,
@@ -390,7 +396,10 @@ describe("PricingComponentResolver", () => {
           },
         ]);
 
-        expect(await resolve(buildTrip({ tarNummer: null }))).toEqual([]);
+        const resolved = await resolve(buildTrip({ tarNummer: null }));
+
+        expect(resolved).toHaveLength(1);
+        expect(resolved[0].customPropertyId).toBe(AUTOMATIC_PROPERTY_ID);
       });
 
       /** Other properties are untouched by the TAR precondition. */
@@ -523,8 +532,26 @@ describe("PricingComponentResolver", () => {
       ]);
     });
 
-    it("charges it once when it was also assigned by hand", async () => {
+    /**
+     * TWICE when it was also assigned by hand: the automatic charge and the
+     * operator's extra one are independent amounts for independent reasons.
+     * €20 + €20 = €40, and neither suppresses the other.
+     */
+    it("charges it twice when it was also assigned by hand", async () => {
       tripCustomProperties.findByTripId.mockResolvedValue([assignment(AUTOMATIC_PROPERTY_ID, "TAR", null, "20.00")]);
+
+      const resolved = await resolve();
+
+      expect(
+        resolved.filter(
+          (property) => property.customPropertyId === AUTOMATIC_PROPERTY_ID,
+        ),
+      ).toHaveLength(2);
+    });
+
+    /** Assigning it by hand changes nothing about the automatic decision. */
+    it("still applies the automatic charge on its own", async () => {
+      tripCustomProperties.findByTripId.mockResolvedValue([]);
 
       const resolved = await resolve();
 
@@ -719,26 +746,54 @@ describe("PricingComponentResolver", () => {
       ).toHaveLength(1);
     });
 
-    it("ignores a stale assignment left on the collection leg", async () => {
+    /**
+     * The ALLOCATION is unchanged: the collection leg never owes the automatic
+     * charge. What it may now carry is an operator's own extra TAR, which is a
+     * decision about that leg and not a second automatic charge — so the
+     * property is present, but only once, and the delivery leg still owes its
+     * automatic one independently.
+     */
+    it("gives the collection leg only what was assigned to it", async () => {
       groupOf(DELIVERY_LEG, COLLECTION_LEG);
       tripCustomProperties.findByTripId.mockResolvedValue([assignment(AUTOMATIC_PROPERTY_ID, "TAR", null, "20.00")]);
+
+      const collection = await resolve(COLLECTION_LEG);
+
+      expect(
+        collection.filter(
+          (property) => property.customPropertyId === AUTOMATIC_PROPERTY_ID,
+        ),
+      ).toHaveLength(1);
+    });
+
+    /** With nothing assigned, the collection leg owes nothing at all. */
+    it("charges the collection leg nothing when it was assigned nothing", async () => {
+      groupOf(DELIVERY_LEG, COLLECTION_LEG);
+      tripCustomProperties.findByTripId.mockResolvedValue([]);
 
       expect(hasAutomatic(await resolve(COLLECTION_LEG))).toBe(false);
     });
 
-    it("charges once when both legs were assigned it by hand", async () => {
+    /**
+     * Both legs assigned it by hand: each keeps its own extra, and only the
+     * DELIVERY leg additionally owes the automatic one. So the pair carries
+     * three contributions, not two automatic ones — a manual assignment can
+     * never create a second automatic charge.
+     */
+    it("adds the automatic charge only to the delivery leg", async () => {
       groupOf(DELIVERY_LEG, COLLECTION_LEG);
       tripCustomProperties.findByTripId.mockResolvedValue([assignment(AUTOMATIC_PROPERTY_ID, "TAR", null, "20.00")]);
 
       const delivery = await resolve(DELIVERY_LEG);
       const collection = await resolve(COLLECTION_LEG);
 
-      expect(hasAutomatic(collection)).toBe(false);
-      expect(
-        delivery.filter(
+      const countOn = (resolved: { customPropertyId: string }[]) =>
+        resolved.filter(
           (property) => property.customPropertyId === AUTOMATIC_PROPERTY_ID,
-        ),
-      ).toHaveLength(1);
+        ).length;
+
+      expect(countOn(delivery)).toBe(2);
+      expect(countOn(collection)).toBe(1);
     });
 
     it("charges once when neither leg was assigned it", async () => {
