@@ -1,0 +1,522 @@
+{
+ "view": "week",
+ "anchor": "2025-05-22",
+ "query": {
+  "planningDateFrom": "2025-05-19",
+  "planningDateTo": "2025-05-25",
+  "sortBy": "licensePlate",
+  "sortDirection": "asc"
+ },
+ "trips": [
+  {
+   "id": "ae1fae1b-fda0-43c8-b82a-c3868b9f44bb",
+   "pdfDocumentId": "d18cbd4f-5b08-4c28-b9c7-8abc351f3cc0",
+   "tripGroupId": "2ee5a9b9-6994-46c3-92c9-76ff7211a5dd",
+   "vehicleId": null,
+   "driverId": null,
+   "status": "CLOSED",
+   "isLooseTrip": false,
+   "isPaid": false,
+   "direction": "COLLECTION",
+   "bookingNumber": "ANRBEL2603249",
+   "containerNumber": null,
+   "containerType": "45RH",
+   "terminal": "PSA Quay 869",
+   "destinationCity": "Warneton",
+   "destinationCountry": "Belgium",
+   "originalPlanningDate": "2025-05-22",
+   "planningDate": "2025-05-23",
+   "startTime": "07:00:00",
+   "endTime": "15:00:00",
+   "executionDatetime": null,
+   "waitingTimeStart": "07:00:00",
+   "waitingTimeEnd": "10:00:00",
+   "waitingTimeMinutes": 180,
+   "distanceKm": null,
+   "tarNummer": null,
+   "internalNotes": null,
+   "vehicle": null,
+   "effectiveDriver": null,
+   "latestUpdate": null,
+   "costConfirmation": null,
+   "pricing": {
+    "tarief": "0.00",
+    "brandstof": "0.00",
+    "backload": "50.00",
+    "tol": "0.00",
+    "tunnel": "0.00",
+    "others": "55.00",
+    "ek": "0.00",
+    "totaal": "105.00",
+    "components": [
+     {
+      "componentCode": "BASE_PRICE",
+      "engineAmount": "0.00",
+      "effectiveAmount": "0.00",
+      "source": "ENGINE"
+     },
+     {
+      "componentCode": "COMBINATION",
+      "engineAmount": "50.00",
+      "effectiveAmount": "50.00",
+      "source": "ENGINE"
+     },
+     {
+      "componentCode": "FUEL_SURCHARGE",
+      "engineAmount": "0.00",
+      "effectiveAmount": "0.00",
+      "source": "ENGINE"
+     },
+     {
+      "componentCode": "WAITING_TIME",
+      "engineAmount": "55.00",
+      "effectiveAmount": "55.00",
+      "source": "ENGINE"
+     }
+    ]
+   },
+   "reasonCode": null,
+   "route": {
+    "from": "Warneton",
+    "to": "Quay 869"
+   },
+   "customProperties": [],
+   "createdAt": "2026-09-10T13:22:11.863Z",
+   "updatedAt": "2026-09-10T13:26:54.662Z"
+  },
+  {
+   "id": "ecf9aea5-8373-4337-88c2-82239c43e82d",
+   "pdfDocumentId": "d18cbd4f-5b08-4c28-b9c7-8abc351f3cc0",
+   "tripGroupId": "2ee5a9b9-6994-46c3-92c9-76ff7211a5dd",
+   "vehicleId": null,
+   "driverId": null,
+   "status": "CLOSED",
+   "isLooseTrip": false,
+   "isPaid": false,
+   "direction": "DELIVERY",
+   "bookingNumber": "DUBANR2598395",
+   "containerNumber": "PVDU3013260",
+   "containerType": "45RH",
+   "terminal": "Quay 869",
+   "destinationCity": "Kallo",
+   "destinationCountry": "Belgium",
+   "originalPlanningDate": "2025-05-22",
+   "planningDate": "2025-05-22",
+   "startTime": "08:00:00",
+   "endTime": "12:00:00",
+   "executionDatetime": null,
+   "waitingTimeStart": null,
+   "waitingTimeEnd": null,
+   "waitingTimeMinutes": null,
+   "distanceKm": null,
+   "tarNummer": "TARXD1",
+   "internalNotes": null,
+   "vehicle": null,
+   "effectiveDriver": null,
+   "latestUpdate": null,
+   "costConfirmation": null,
+   "pricing": {
+    "tarief": "0.00",
+    "brandstof": "0.00",
+    "backload": "50.00",
+    "tol": "0.00",
+    "tunnel": "0.00",
+    "others": "50.00",
+    "ek": "0.00",
+    "totaal": "100.00",
+    "components": [
+     {
+      "componentCode": "BASE_PRICE",
+      "engineAmount": "0.00",
+      "effectiveAmount": "0.00",
+      "source": "ENGINE"
+     },
+     {
+      "componentCode": "COMBINATION",
+      "engineAmount": "50.00",
+      "effectiveAmount": "50.00",
+      "source": "ENGINE"
+     },
+     {
+      "componentCode": "CUSTOM_PROPERTY",
+      "engineAmount": "50.00",
+      "effectiveAmount": "50.00",
+      "source": "ENGINE"
+     },
+     {
+      "componentCode": "FUEL_SURCHARGE",
+      "engineAmount": "0.00",
+      "effectiveAmount": "0.00",
+      "source": "ENGINE"
+     }
+    ]
+   },
+   "reasonCode": null,
+   "route": {
+    "from": "Quay 869",
+    "to": "Kallo"
+   },
+   "customProperties": [],
+   "createdAt": "2026-09-10T13:22:11.855Z",
+   "updatedAt": "2026-09-10T13:26:54.797Z"
+  }
+ ],
+ "snapshots": [
+  {
+   "pricing": {
+    "id": "20fe5b38-1d81-4b03-813a-66055d34daf8",
+    "tripId": "ae1fae1b-fda0-43c8-b82a-c3868b9f44bb",
+    "totalPrice": "105.00",
+    "currency": "EUR",
+    "calculatedAt": "2026-09-10T13:26:54.718Z",
+    "pricingEngineVersion": "1.0.0",
+    "pricingRuleVersion": "2026.1",
+    "calculationStatus": "CALCULATED",
+    "notes": null,
+    "createdAt": "2026-09-10T13:22:18.870Z",
+    "updatedAt": "2026-09-10T13:26:54.723Z"
+   },
+   "items": [
+    {
+     "id": "a051fadf-a0b6-407f-b553-d59f5d61d688",
+     "tripPricingId": "20fe5b38-1d81-4b03-813a-66055d34daf8",
+     "pricingComponentId": "2fde0804-1fd2-4fbb-a86f-f8fb92eec966",
+     "pricingComponentCode": "BASE_PRICE",
+     "customPropertyId": null,
+     "description": "PSA Quay 869 - Warneton",
+     "amount": "0.00",
+     "currency": "EUR",
+     "calculationOrder": 1,
+     "quantity": null,
+     "unitPrice": null,
+     "notes": null,
+     "createdAt": "2026-09-10T13:26:54.728Z",
+     "updatedAt": "2026-09-10T13:26:54.728Z"
+    },
+    {
+     "id": "f2972bc6-f0f4-4922-9766-e78aa437e209",
+     "tripPricingId": "20fe5b38-1d81-4b03-813a-66055d34daf8",
+     "pricingComponentId": "4e34bbf7-fd6d-40f7-a0f6-555c0fa4701c",
+     "pricingComponentCode": "COMBINATION",
+     "customPropertyId": null,
+     "description": "Combination surcharge",
+     "amount": "50.00",
+     "currency": "EUR",
+     "calculationOrder": 2,
+     "quantity": null,
+     "unitPrice": null,
+     "notes": null,
+     "createdAt": "2026-09-10T13:26:54.728Z",
+     "updatedAt": "2026-09-10T13:26:54.728Z"
+    },
+    {
+     "id": "c4667bcd-15b5-4543-bb17-efd4673888c1",
+     "tripPricingId": "20fe5b38-1d81-4b03-813a-66055d34daf8",
+     "pricingComponentId": "5cc6b1d6-c23f-4d1f-b0ea-782cc792bf53",
+     "pricingComponentCode": "FUEL_SURCHARGE",
+     "customPropertyId": null,
+     "description": "Fuel 15%",
+     "amount": "0.00",
+     "currency": "EUR",
+     "calculationOrder": 3,
+     "quantity": null,
+     "unitPrice": "15.00",
+     "notes": null,
+     "createdAt": "2026-09-10T13:26:54.728Z",
+     "updatedAt": "2026-09-10T13:26:54.728Z"
+    },
+    {
+     "id": "d1cf0bde-3b16-47a5-afdf-67ce2c69b82e",
+     "tripPricingId": "20fe5b38-1d81-4b03-813a-66055d34daf8",
+     "pricingComponentId": "f3b0d316-fe49-43e8-bbcc-716ffa6cc09b",
+     "pricingComponentCode": "WAITING_TIME",
+     "customPropertyId": null,
+     "description": "60 billable minutes",
+     "amount": "55.00",
+     "currency": "EUR",
+     "calculationOrder": 4,
+     "quantity": "4.00",
+     "unitPrice": "13.75",
+     "notes": null,
+     "createdAt": "2026-09-10T13:26:54.728Z",
+     "updatedAt": "2026-09-10T13:26:54.728Z"
+    }
+   ]
+  },
+  {
+   "pricing": {
+    "id": "e54eebcf-4e50-43bb-b4e8-7ccab8206671",
+    "tripId": "ecf9aea5-8373-4337-88c2-82239c43e82d",
+    "totalPrice": "100.00",
+    "currency": "EUR",
+    "calculatedAt": "2026-09-10T13:26:54.847Z",
+    "pricingEngineVersion": "1.0.0",
+    "pricingRuleVersion": "2026.1",
+    "calculationStatus": "CALCULATED",
+    "notes": null,
+    "createdAt": "2026-09-10T13:22:18.674Z",
+    "updatedAt": "2026-09-10T13:26:54.850Z"
+   },
+   "items": [
+    {
+     "id": "3d6386ea-429d-4919-b25b-73a20881e2e0",
+     "tripPricingId": "e54eebcf-4e50-43bb-b4e8-7ccab8206671",
+     "pricingComponentId": "2fde0804-1fd2-4fbb-a86f-f8fb92eec966",
+     "pricingComponentCode": "BASE_PRICE",
+     "customPropertyId": null,
+     "description": "Quay 869 - Kallo",
+     "amount": "0.00",
+     "currency": "EUR",
+     "calculationOrder": 1,
+     "quantity": null,
+     "unitPrice": null,
+     "notes": null,
+     "createdAt": "2026-09-10T13:26:54.853Z",
+     "updatedAt": "2026-09-10T13:26:54.853Z"
+    },
+    {
+     "id": "d8ef8a93-8884-490f-b245-62a7712b79b9",
+     "tripPricingId": "e54eebcf-4e50-43bb-b4e8-7ccab8206671",
+     "pricingComponentId": "4e34bbf7-fd6d-40f7-a0f6-555c0fa4701c",
+     "pricingComponentCode": "COMBINATION",
+     "customPropertyId": null,
+     "description": "Combination surcharge",
+     "amount": "50.00",
+     "currency": "EUR",
+     "calculationOrder": 2,
+     "quantity": null,
+     "unitPrice": null,
+     "notes": null,
+     "createdAt": "2026-09-10T13:26:54.853Z",
+     "updatedAt": "2026-09-10T13:26:54.853Z"
+    },
+    {
+     "id": "dd412183-be9e-4d76-86ed-46871f8eeffd",
+     "tripPricingId": "e54eebcf-4e50-43bb-b4e8-7ccab8206671",
+     "pricingComponentId": "5cc6b1d6-c23f-4d1f-b0ea-782cc792bf53",
+     "pricingComponentCode": "FUEL_SURCHARGE",
+     "customPropertyId": null,
+     "description": "Fuel 15%",
+     "amount": "0.00",
+     "currency": "EUR",
+     "calculationOrder": 3,
+     "quantity": null,
+     "unitPrice": "15.00",
+     "notes": null,
+     "createdAt": "2026-09-10T13:26:54.853Z",
+     "updatedAt": "2026-09-10T13:26:54.853Z"
+    },
+    {
+     "id": "0ec2365e-498d-4007-9c97-f7411bbd2d3c",
+     "tripPricingId": "e54eebcf-4e50-43bb-b4e8-7ccab8206671",
+     "pricingComponentId": "9eef38fb-123f-46bc-9815-3224bf8d6f6b",
+     "pricingComponentCode": "CUSTOM_PROPERTY",
+     "customPropertyId": "4446fdcc-7873-4ee4-b53e-4c2f85b3936a",
+     "description": "TAR",
+     "amount": "50.00",
+     "currency": "EUR",
+     "calculationOrder": 7,
+     "quantity": null,
+     "unitPrice": null,
+     "notes": null,
+     "createdAt": "2026-09-10T13:26:54.853Z",
+     "updatedAt": "2026-09-10T13:26:54.853Z"
+    }
+   ]
+  }
+ ],
+ "catalog": [
+  {
+   "id": "df9ad49e-ded9-482a-9f67-b78fa15f8657",
+   "name": "y",
+   "description": "y",
+   "pricingComponentId": null,
+   "defaultPrice": null,
+   "displayOrder": 1,
+   "color": null,
+   "isActive": false,
+   "isSystemManaged": false,
+   "isAssignable": true,
+   "createdAt": "2026-08-19T21:46:47.572Z",
+   "updatedAt": "2026-08-19T21:46:50.393Z"
+  },
+  {
+   "id": "4446fdcc-7873-4ee4-b53e-4c2f85b3936a",
+   "name": "TAR",
+   "description": null,
+   "pricingComponentId": null,
+   "defaultPrice": "50.00",
+   "displayOrder": 2,
+   "color": null,
+   "isActive": true,
+   "isSystemManaged": true,
+   "isAssignable": true,
+   "createdAt": "2026-09-02T20:59:36.917Z",
+   "updatedAt": "2026-09-02T20:59:36.917Z"
+  },
+  {
+   "id": "fc84b48a-126b-40a0-8535-868065978754",
+   "name": "Flat",
+   "description": null,
+   "pricingComponentId": null,
+   "defaultPrice": "20.00",
+   "displayOrder": 3,
+   "color": null,
+   "isActive": true,
+   "isSystemManaged": true,
+   "isAssignable": false,
+   "createdAt": "2026-09-02T20:59:46.119Z",
+   "updatedAt": "2026-09-02T20:59:46.119Z"
+  },
+  {
+   "id": "da50aef4-4aa9-45b4-baec-aa5845435709",
+   "name": "Toll",
+   "description": "Marks a Trip as owing the toll configured for its route. The amount comes from the route configuration, never from this property.",
+   "pricingComponentId": "948ab29d-6879-4448-a365-24fbc1183a32",
+   "defaultPrice": null,
+   "displayOrder": 4,
+   "color": null,
+   "isActive": true,
+   "isSystemManaged": true,
+   "isAssignable": false,
+   "createdAt": "2026-09-02T21:54:11.055Z",
+   "updatedAt": "2026-09-02T21:54:11.055Z"
+  },
+  {
+   "id": "aa4ff82d-ac3e-428b-a475-07b4a7627879",
+   "name": "Tunnel",
+   "description": "Marks a Trip as owing the tunnel charge configured for its route. The amount comes from the route configuration, never from this property.",
+   "pricingComponentId": "fb520155-7877-4819-ba83-7fbed0ae441e",
+   "defaultPrice": null,
+   "displayOrder": 5,
+   "color": null,
+   "isActive": true,
+   "isSystemManaged": true,
+   "isAssignable": false,
+   "createdAt": "2026-09-02T21:54:11.189Z",
+   "updatedAt": "2026-09-02T21:54:11.189Z"
+  }
+ ],
+ "settings": [
+  {
+   "id": "ec73e210-a5d8-45c9-aa3a-49ad4699ccac",
+   "category": "PRICING",
+   "key": "AUTOMATIC_CUSTOM_PROPERTY_ID",
+   "value": "4446fdcc-7873-4ee4-b53e-4c2f85b3936a",
+   "valueType": "STRING",
+   "description": "The Custom Property the Engine applies without anyone assigning it — TAR. Stored as the property's id so the AMOUNT stays the one configured on the property itself.",
+   "defaultValue": null,
+   "isActive": true,
+   "createdAt": "2026-09-02T20:59:56.294Z",
+   "updatedAt": "2026-09-02T20:59:56.294Z"
+  },
+  {
+   "id": "019937b6-0606-4bb7-a806-4545ac6ac0b7",
+   "category": "PRICING",
+   "key": "COMBINATION_SURCHARGE",
+   "value": "50.00",
+   "valueType": "DECIMAL",
+   "description": "Charged on EACH leg of a genuine two-Trip Combination. A manual Trip group is not a Combination and never attracts it.",
+   "defaultValue": "50.00",
+   "isActive": true,
+   "createdAt": "2026-09-02T20:59:12.338Z",
+   "updatedAt": "2026-09-02T20:59:12.338Z"
+  },
+  {
+   "id": "5436c3a8-ffae-4e0c-bb61-8593eb81e008",
+   "category": "PRICING",
+   "key": "DISTANCE_RATE_PER_KM",
+   "value": "2.75",
+   "valueType": "DECIMAL",
+   "description": "Price per kilometre, read only by the DISTANCE_BASED strategy. Configured so switching strategy does not require configuration first.",
+   "defaultValue": "2.75",
+   "isActive": true,
+   "createdAt": "2026-09-02T20:59:12.363Z",
+   "updatedAt": "2026-09-02T20:59:12.363Z"
+  },
+  {
+   "id": "62fde43e-ad8a-4b49-96f6-cda72b736df6",
+   "category": "PRICING",
+   "key": "FUEL_PERCENTAGE",
+   "value": "15",
+   "valueType": "DECIMAL",
+   "description": "Percentage applied to the Base Price only, never to any other component. The rate that applied on the day is stored on each pricing snapshot, so changing this never restates a finished Trip.",
+   "defaultValue": "15",
+   "isActive": true,
+   "createdAt": "2026-09-02T20:59:12.333Z",
+   "updatedAt": "2026-09-02T20:59:12.333Z"
+  },
+  {
+   "id": "330f3281-e46b-443d-bc38-d62b8af0702f",
+   "category": "PRICING",
+   "key": "PRICING_RULE_VERSION",
+   "value": "2026.1",
+   "valueType": "STRING",
+   "description": "The ruleset version stamped onto every snapshot this configuration produces. An administrator bumps it when the pricing rules change, so it travels with the rules it describes.",
+   "defaultValue": "2026.1",
+   "isActive": true,
+   "createdAt": "2026-09-02T20:59:12.367Z",
+   "updatedAt": "2026-09-02T20:59:12.367Z"
+  },
+  {
+   "id": "1f85312b-8f01-46f7-b802-e6dd5a2435b8",
+   "category": "PRICING",
+   "key": "PRICING_STRATEGY",
+   "value": "ROUTE_BASED",
+   "valueType": "STRING",
+   "description": "How the Base Price is derived: ROUTE_BASED reads the configured route price, DISTANCE_BASED multiplies the Trip's distance by the configured rate.",
+   "defaultValue": "ROUTE_BASED",
+   "isActive": true,
+   "createdAt": "2026-09-02T20:59:12.318Z",
+   "updatedAt": "2026-09-02T20:59:12.318Z"
+  },
+  {
+   "id": "b7f05dbf-4afa-478c-b01c-c71049e85f44",
+   "category": "PRICING",
+   "key": "WAITING_TIME_BLOCK_MINUTES",
+   "value": "15",
+   "valueType": "INTEGER",
+   "description": "The block chargeable waiting time is rounded up into. Every block that is STARTED is charged in full.",
+   "defaultValue": "15",
+   "isActive": true,
+   "createdAt": "2026-09-02T20:59:12.353Z",
+   "updatedAt": "2026-09-02T20:59:12.353Z"
+  },
+  {
+   "id": "8b6ab012-11e6-4ce4-949c-b4159277d359",
+   "category": "PRICING",
+   "key": "WAITING_TIME_BLOCK_PRICE",
+   "value": "13.75",
+   "valueType": "DECIMAL",
+   "description": "The price of one started waiting-time block.",
+   "defaultValue": "13.75",
+   "isActive": true,
+   "createdAt": "2026-09-02T20:59:12.358Z",
+   "updatedAt": "2026-09-02T20:59:12.358Z"
+  },
+  {
+   "id": "96e43bca-542c-4217-978a-11171a6da5f9",
+   "category": "PRICING",
+   "key": "WAITING_TIME_FREE_MINUTES",
+   "value": "120",
+   "valueType": "INTEGER",
+   "description": "The allowance subtracted before waiting time is charged. Distinct from the threshold below; both apply.",
+   "defaultValue": "120",
+   "isActive": true,
+   "createdAt": "2026-09-02T20:59:12.344Z",
+   "updatedAt": "2026-09-02T20:59:12.344Z"
+  },
+  {
+   "id": "06451c9a-680a-4a0a-8129-6b1ce025163b",
+   "category": "PRICING",
+   "key": "WAITING_TIME_THRESHOLD_MINUTES",
+   "value": "150",
+   "valueType": "INTEGER",
+   "description": "The wait at which charging begins at all. A shorter wait costs nothing even when it already exceeds the free allowance.",
+   "defaultValue": "150",
+   "isActive": true,
+   "createdAt": "2026-09-02T20:59:12.349Z",
+   "updatedAt": "2026-09-02T20:59:12.349Z"
+  }
+ ]
+}

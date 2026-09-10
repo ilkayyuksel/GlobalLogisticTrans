@@ -816,6 +816,34 @@ describe("the Combination surcharge in COMBI EN KOST", () => {
     ).toBe("50.00 + 35.00 + 137.50");
   });
 
+  /**
+   * A manual group - two Trips of different documents grouped by an operator -
+   * is not a Combination, so the Engine stores no COMBINATION line for it. The
+   * export follows the snapshot, not the group: no line, no amount.
+   */
+  it("adds nothing for a grouped Trip whose snapshot has no surcharge", () => {
+    expect(
+      toBasicRow(
+        buildTrip({ tripGroupId: "manual-group" }),
+        snapshotOf(line("BASE_PRICE", "300.00")),
+        MANUAL,
+        "Wachttijd",
+      ).costs,
+    ).toBe("");
+  });
+
+  /** A leg is exported on its own snapshot; its partner's absence changes nothing. */
+  it("prints a leg's surcharge without its partner in the export", () => {
+    expect(
+      toBasicRow(
+        buildTrip({ tripGroupId: "genuine-group", planningDate: "2026-09-11" }),
+        snapshotOf(line("COMBINATION", "50.00")),
+        MANUAL,
+        "Wachttijd",
+      ).costs,
+    ).toBe("50.00");
+  });
+
   /** A standalone Trip has no COMBINATION line, so nothing is added. */
   it("adds nothing to a Trip with no surcharge line", () => {
     expect(costsOf(line("BASE_PRICE", "300.00"), line("WAITING_TIME", "25.00"))).toBe(
