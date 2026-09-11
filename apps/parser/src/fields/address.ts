@@ -3,6 +3,7 @@ import {
   COUNTRY_BY_POSTCODE_PREFIX,
   countryFromName,
   isCountryName,
+  isSubdivisionCode,
   splitTrailingCountry,
 } from "./country";
 import { COLUMN_TOLERANCE, Fragment, ROW_TOLERANCE } from "../text/extract";
@@ -157,6 +158,11 @@ const BARE_POSTCODE_LINE = new RegExp(
  * address line identifiable as the city.
  */
 const BRACKETED_POSTCODE = /^\[(\d{4,5})\]$/;
+
+/** The postcode the block opens with in brackets, or null when it opens otherwise. */
+function bracketedPostcodeOf(block: readonly Fragment[]): string | null {
+  return BRACKETED_POSTCODE.exec(block[0]?.text.trim() ?? "")?.[1] ?? null;
+}
 
 /** The bracket, a company, a street and the city: anything less is truncated. */
 const MINIMUM_ADDRESS_LINES = 4;
@@ -431,7 +437,12 @@ function readCountryLine(block: readonly Fragment[]): ReadPlace | null {
      * never from the number. Either order of the two is read; see
      * `cityWithoutPostcode`.
      */
-    const city = toCityName(cityWithoutPostcode(cityLine));
+    const city = toCityName(
+      cityWithoutPostcode(cityLine, {
+        ownPostcode: bracketedPostcodeOf(block),
+        country,
+      }),
+    );
 
     /*
      * A city carries no digits; a street does — `Ketenislaan 1`, `Rue de Kan
@@ -501,7 +512,7 @@ function readPostcodeCountryLine(block: readonly Fragment[]): ReadPlace | null {
       continue;
     }
 
-    const city = cityAbove(block, index);
+    const city = cityAbove(block, index, country);
 
     return city === null ? null : { city, country, lastLineIndex: index };
   }
@@ -541,11 +552,17 @@ function countryOnPostcodeLine(line: string): string | null {
 function cityAbove(
   block: readonly Fragment[],
   postcodeLineIndex: number,
+  country: string,
 ): string | null {
+  const context: CityLineContext = {
+    ownPostcode: bracketedPostcodeOf(block),
+    country,
+  };
+
   for (let index = postcodeLineIndex - 1; index >= 0; index -= 1) {
-    // The same two layouts `readCountryLine` accepts: the city may carry its
+    // The same layouts `readCountryLine` accepts: the city may carry its
     // postcode on either side of the name. The two readers must agree.
-    const line = toCityName(cityWithoutPostcode(block[index].text));
+    const line = toCityName(cityWithoutPostcode(block[index].text, context));
 
     // The same postcode printed on a line of its own says nothing new.
     if (POSTCODE_ONLY_LINE.test(line)) {
@@ -617,12 +634,84 @@ const CITY_THEN_POSTCODE =
   /^(.+?)\s*,\s*(?:[A-Za-z]{1,2}\s*-\s*)?\d{4,5}(?:\s?[A-Z]{2})?\s*,?\s*$/;
 
 /**
+ * The city first and the block's OWN postcode last, with no comma between —
+ * and, optionally, a subdivision code in the middle:
+ *
+ *     [2920]
+ *     VERMEIREN NV
+ *     VERMEIRENPLEIN 1-15
+ *     KALMTHOUT VAN 2920       <- city, province code, postcode
+ *     BELGIUM
+ *
+ * `VAN` is the ISO 3166-2 code of the province of Antwerp. `CITY_THEN_POSTCODE`
+ * needs its comma, so this line kept its digits, the digit guard refused it as
+ * a possible street, and the order was reported as having no readable city.
+ *
+ * ── THE NUMBER MUST BE THE BLOCK'S OWN POSTCODE ─────────────────────────────
+ * Without a comma, "words then four digits" is also a street with a long house
+ * number, and a real order prints one: `Kruipin Harbour 1145`. So the trailing
+ * number is accepted only when it IS the postcode the block opens with in
+ * brackets — evidence the document gives, not an assumption about digits.
+ *
+ * ── A WORD IS A CODE ONLY IF THE STATED COUNTRY HAS IT ──────────────────────
+ * A short capitalised word before the postcode may equally be the end of a
+ * name — `KAPELLE OP DEN BOS`, `BERG EN DAL`. It is set aside only when it is a
+ * subdivision code of the country the block states (`isSubdivisionCode`). When
+ * it is shaped like a code but the country has no such code, the line could be
+ * read either way, so it is refused rather than cut at a guessed word. A single
+ * word is always the name: `SPA 4900` is Spa.
+ */
+const CITY_THEN_OWN_POSTCODE =
+  /^(?<name>[A-Za-z].*?)\s+(?<postcode>\d{4,5})\s*,?\s*$/;
+
+/** A word shaped like a subdivision code: `VAN`, `NB`. */
+const CODE_SHAPED_WORD = /^[A-Z]{2,3}$/;
+
+/** What a city line is read against: the block it sits in. */
+interface CityLineContext {
+  /** The postcode the block opens with in brackets: `[2920]`. */
+  readonly ownPostcode: string | null;
+  /** The country the block states, which decides what a subdivision code is. */
+  readonly country: string | null;
+}
+
+/** The name on a `CITY [CODE] POSTCODE` line, or null when it is not one. */
+function cityBeforeOwnPostcode(
+  line: string,
+  context: CityLineContext,
+): string | null {
+  const match = CITY_THEN_OWN_POSTCODE.exec(line.trim());
+
+  if (
+    !match?.groups ||
+    context.ownPostcode === null ||
+    match.groups.postcode !== context.ownPostcode
+  ) {
+    return null;
+  }
+
+  const name = match.groups.name;
+  const words = name.split(/\s+/);
+  const lastWord = words[words.length - 1];
+
+  if (words.length > 1 && isSubdivisionCode(context.country, lastWord)) {
+    return words.slice(0, -1).join(" ");
+  }
+
+  if (words.length > 1 && CODE_SHAPED_WORD.test(lastWord)) {
+    return null;
+  }
+
+  return name;
+}
+
+/**
  * The city a line names, with its postcode removed whichever side it sits on.
  *
- * One helper for both layouts, so the two readers that need it cannot disagree
+ * One helper for every layout, so the two readers that need it cannot disagree
  * about what counts as a city line.
  */
-function cityWithoutPostcode(line: string): string {
+function cityWithoutPostcode(line: string, context: CityLineContext): string {
   const postcodeFirst = POSTCODE_THEN_CITY.exec(line);
 
   if (postcodeFirst) {
@@ -633,7 +722,13 @@ function cityWithoutPostcode(line: string): string {
 
   const postcodeLast = CITY_THEN_POSTCODE.exec(line);
 
-  return postcodeLast ? postcodeLast[1] : line;
+  if (postcodeLast) {
+    return postcodeLast[1];
+  }
+
+  // Unchanged when it is not that layout either, so the digit guard the caller
+  // applies still refuses a street.
+  return cityBeforeOwnPostcode(line, context) ?? line;
 }
 
 /**
@@ -1224,9 +1319,15 @@ function statesNoPlace(block: readonly Fragment[]): boolean {
   }
 
   const candidates = block.slice(MINIMUM_ADDRESS_LINES - 1);
+  // No country: the question here is only whether letters remain, and a name
+  // keeps its letters whether or not a code is set aside from it.
+  const context: CityLineContext = {
+    ownPostcode: bracketedPostcodeOf(block),
+    country: null,
+  };
 
   return candidates.every((fragment) => {
-    const withoutPostcode = cityWithoutPostcode(fragment.text.trim());
+    const withoutPostcode = cityWithoutPostcode(fragment.text.trim(), context);
 
     return !/[A-Za-z]/.test(withoutPostcode);
   });

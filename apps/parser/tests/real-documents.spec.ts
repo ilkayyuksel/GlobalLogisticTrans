@@ -632,6 +632,47 @@ const PARSED_DOCUMENTS: readonly ExpectedDocument[] = [
   },
   {
     /*
+     * BUG — the city, a subdivision code and the block's own postcode on ONE
+     * line, with no comma between them:
+     *
+     *   [2920]
+     *   VERMEIREN NV
+     *   VERMEIRENPLEIN 1-15
+     *   KALMTHOUT VAN 2920
+     *   BELGIUM
+     *
+     * `VAN` is the ISO 3166-2 code of the province of Antwerp. The city-first
+     * form the parser knew needs a comma (`Moerdijk, 4782 PP ,`), so this line
+     * kept its digits, the digit guard refused it as a possible street, and the
+     * order was reported as having no readable city.
+     *
+     * The reading rests on two things the document states: the number is the
+     * block's own `[2920]`, and `VAN` is a code of the country printed below it.
+     */
+    file: "BUG-CITY/transportorder1378572.pdf",
+    pageCount: 2,
+    layout: "SINGLE_TWO_PAGE",
+    documentStatus: "PLANNED",
+    trips: [
+      {
+        bookingNumber: "ANRCRK2802449",
+        direction: "COLLECTION",
+        containerType: "20ST",
+        containerNumber: null,
+        terminal: "PSA Quay 869",
+        destinationCity: "Kalmthout",
+        destinationCountry: "Belgium",
+        date: "2026-09-14",
+        startTime: "08:00",
+        endTime: "08:00",
+        groupKey: null,
+        page: 1,
+        addressSection: "LOADING 1",
+      },
+    ],
+  },
+  {
+    /*
      * BUG — a country-prefixed postcode carrying the Dutch letter pair, with
      * the city on the SAME line:
      *
@@ -1288,7 +1329,19 @@ describe("an uploaded document in storage", () => {
     expect(Array.isArray(uploads)).toBe(true);
   });
 
-  it.each(uploads)("%s parses into at least one trip", async (name) => {
+  /*
+   * `.each` refuses an empty table, and a fresh clone has no uploads — the
+   * folder holds customer documents and is deliberately not committed. So with
+   * none, both cases are declared once as SKIPPED under a name that says why,
+   * rather than failing the suite over data this checkout was never meant to
+   * have.
+   */
+  const eachUpload =
+    uploads.length > 0
+      ? it.each(uploads)
+      : it.skip.each(["(no uploaded PDFs in storage/pdf)"]);
+
+  eachUpload("%s parses into at least one trip", async (name) => {
     const result = await parse(
       new Uint8Array(readFileSync(join(UPLOAD_DIRECTORY, name))),
     );
@@ -1306,7 +1359,7 @@ describe("an uploaded document in storage", () => {
     }
   });
 
-  it.each(uploads)("%s parses identically twice", async (name) => {
+  eachUpload("%s parses identically twice", async (name) => {
     const bytes = readFileSync(join(UPLOAD_DIRECTORY, name));
     const first = await parse(new Uint8Array(bytes));
     const second = await parse(new Uint8Array(bytes));
@@ -1394,6 +1447,28 @@ describe("the variations these documents actually contain", () => {
  * ────────────────────────────────────────────────────────────────────────────
  */
 describe("the addresses that had no readable city line", () => {
+  /**
+   * `KALMTHOUT VAN 2920` — the city, a province code and the block's own
+   * postcode on one line. A trip carries the city and the country; the company,
+   * the street and the postcode stay in `rawAddress` exactly as printed, since
+   * the parser has no separate fields for them.
+   */
+  it("reads a city followed by a subdivision code and its own postcode", async () => {
+    const result = await parseFixture("BUG-CITY/transportorder1378572.pdf");
+
+    if (!result.ok) throw new Error(`expected a parse: ${result.message}`);
+    const [trip] = result.trips;
+
+    expect(trip.destinationCity).toBe("Kalmthout");
+    expect(trip.destinationCountry).toBe("Belgium");
+    expect(trip.raw.rawAddress).toBe(
+      "[2920] VERMEIREN NV VERMEIRENPLEIN 1-15 KALMTHOUT VAN 2920 BELGIUM",
+    );
+    expect(trip.raw.rawAddress).toContain("VERMEIREN NV");
+    expect(trip.raw.rawAddress).toContain("VERMEIRENPLEIN 1-15");
+    expect(trip.raw.rawAddress).toContain("[2920]");
+  });
+
   it("reads a bare postcode and city with no country stated anywhere", async () => {
     const result = await parseFixture("BUG-CITY/transportorder1370334.pdf");
 

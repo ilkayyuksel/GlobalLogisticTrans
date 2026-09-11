@@ -48,6 +48,47 @@ const COUNTRY_BY_PRINTED_NAME: Readonly<Record<string, string>> = {
   netherlands: "Netherlands",
 };
 
+/**
+ * The subdivision codes an address may print between its city and postcode.
+ *
+ *     KALMTHOUT VAN 2920       <- `VAN` is the province of Antwerp
+ *
+ * ISO 3166-2, keyed by the stored country name. The address reader sets such a
+ * word aside only when it is a code of the country the block STATES, because a
+ * short capitalised word is otherwise just as likely to be the end of a name —
+ * `KAPELLE OP DEN BOS`, `BERG EN DAL`. A code this table does not know is
+ * therefore never read as one, and a line that depends on it is refused rather
+ * than cut at a guessed word.
+ *
+ * Only a country whose documents have printed one is listed. Adding another is
+ * one line here, like every other country decision.
+ */
+const SUBDIVISION_CODES_BY_COUNTRY: Readonly<
+  Record<string, ReadonlySet<string>>
+> = {
+  // The ten provinces and the three regions (ISO 3166-2:BE).
+  Belgium: new Set([
+    "VAN", "VBR", "VLI", "VOV", "VWV",
+    "WBR", "WHT", "WLG", "WLX", "WNA",
+    "BRU", "VLG", "WAL",
+  ]),
+};
+
+/**
+ * Whether `word`, exactly as printed, is a subdivision code of `country`.
+ *
+ * Exact case: a code is printed in capitals, and `van` in `Hoek van Holland` is
+ * part of a name. Always false when no country is stated, since a code means
+ * nothing without the country it belongs to.
+ */
+export function isSubdivisionCode(country: string | null, word: string): boolean {
+  if (country === null) {
+    return false;
+  }
+
+  return SUBDIVISION_CODES_BY_COUNTRY[country]?.has(word) ?? false;
+}
+
 /** The stored country name for a printed one, or null when unrecognised. */
 export function countryFromName(printed: string): string | null {
   return COUNTRY_BY_PRINTED_NAME[printed.trim().toLocaleLowerCase()] ?? null;

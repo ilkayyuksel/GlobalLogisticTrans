@@ -740,7 +740,19 @@ describe("an uploaded document, through the real import pipeline", () => {
     expect(Array.isArray(uploads)).toBe(true);
   });
 
-  it.each(uploads)("%s imports into OPEN, unpriced Trips", async (name) => {
+  /*
+   * `.each` refuses an empty table, and a fresh clone has no uploads — the
+   * folder holds customer documents and is deliberately not committed. So with
+   * none, the case is declared once as SKIPPED under a name that says why,
+   * rather than failing the suite over data this checkout was never meant to
+   * have. The parser's `real-documents.spec.ts` does the same.
+   */
+  const eachUpload =
+    uploads.length > 0
+      ? it.each(uploads)
+      : it.skip.each(["(no uploaded PDFs in storage/pdf)"]);
+
+  eachUpload("%s imports into OPEN, unpriced Trips", async (name) => {
     const result = await harness.importer.import(
       new Uint8Array(readFileSync(join(UPLOAD_DIRECTORY, name))),
       name,
