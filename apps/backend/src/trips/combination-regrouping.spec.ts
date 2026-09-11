@@ -482,4 +482,32 @@ describe("ungrouping reprices the legs it takes out of a Combination", () => {
     expect(removed.pricing).toBeNull();
     expect(removed.reasonCode).toBe(NO_ROUTE_PRICE);
   });
+
+  /**
+   * ── REPAIRING A PAIR PRICED BEFORE THIS EXISTED ───────────────────────────
+   * A leg the older code grouped after it had closed still carries a price with
+   * no Backload: nothing about the Trip changes on its own, so nothing reprices
+   * it. An operator restores it through the group actions — take both legs
+   * out, group them again — and each step reprices what it re-classified.
+   *
+   * Both legs have to leave first. A Trip still in a group cannot join another
+   * one, and the collection leg stays behind in the old group, alone.
+   */
+  it("corrects a stale pair when both legs are unlinked and grouped again", async () => {
+    const { service, recalculated, answers } = harness(PAIR);
+
+    await service.removeFromGroup(DELIVERY.id);
+    expect(recalculated().sort()).toEqual([COLLECTION.id, DELIVERY.id]);
+
+    // Alone in the old group it was no Combination, and without it neither.
+    await service.removeFromGroup(COLLECTION.id);
+    expect(recalculated()).toHaveLength(2);
+
+    const regrouped = await service.createGroup([DELIVERY.id, COLLECTION.id]);
+
+    expect(recalculated()).toHaveLength(4);
+    expect(backloadOf(regrouped, DELIVERY.id)).toBe("50.00");
+    expect(backloadOf(regrouped, COLLECTION.id)).toBe("50.00");
+    expect(answers.get(COLLECTION.id)?.pricing?.backload).toBe("50.00");
+  });
 });
