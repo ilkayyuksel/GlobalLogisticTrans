@@ -1,9 +1,18 @@
 import { ApiProperty, ApiPropertyOptional } from "@nestjs/swagger";
-import { Maintenance, MaintenanceStatus, Vehicle } from "@prisma/client";
+import {
+  Maintenance,
+  MaintenanceCompletion,
+  MaintenanceStatus,
+  Vehicle,
+} from "@prisma/client";
 
 import { toIsoDate } from "../../common/dates";
 import { MONEY_DECIMAL_PLACES } from "../../common/dto/money";
 import { PaginationMetaDto } from "../../common/dto/pagination-meta.dto";
+import {
+  MaintenanceUrgencyLevel,
+  maintenanceUrgency,
+} from "../maintenance-urgency";
 
 /**
  * Public shape of a maintenance record.
@@ -37,6 +46,21 @@ export class MaintenanceVehicleSummaryDto {
   isActive!: boolean;
 }
 
+export class MaintenanceUrgencyDto {
+  @ApiProperty({
+    enum: Object.values(MaintenanceUrgencyLevel),
+    description:
+      "OVERDUE when the planned date has passed, TODAY when it is today, UPCOMING when it is still to come.",
+  })
+  level!: MaintenanceUrgencyLevel;
+
+  @ApiProperty({
+    description: "Calendar days past the planned date. Zero unless OVERDUE.",
+    example: 4,
+  })
+  daysOverdue!: number;
+}
+
 export class MaintenanceResponseDto {
   @ApiProperty({ format: "uuid" })
   id!: string;
@@ -57,7 +81,12 @@ export class MaintenanceResponseDto {
   @ApiPropertyOptional({ nullable: true, example: "Onderhoud" })
   maintenanceType!: string | null;
 
-  @ApiProperty({ format: "date", example: "2026-08-14" })
+  @ApiProperty({
+    format: "date",
+    example: "2026-08-14",
+    description:
+      "The day the work was done or is planned for. For a PLANNED record, its current planning.",
+  })
   maintenanceDate!: string;
 
   @ApiProperty()
@@ -90,11 +119,58 @@ export class MaintenanceResponseDto {
   @ApiPropertyOptional({ nullable: true })
   notes!: string | null;
 
+  @ApiPropertyOptional({
+    type: MaintenanceUrgencyDto,
+    nullable: true,
+    description:
+      "How pressing the record is today, decided from its status and maintenance date only. Null for any status but PLANNED. Mileage never plays a part.",
+  })
+  urgency!: MaintenanceUrgencyDto | null;
+
   @ApiProperty()
   createdAt!: Date;
 
   @ApiProperty()
   updatedAt!: Date;
+}
+
+/** One carried-out cycle, as it was when it was completed. */
+export class MaintenanceCompletionDto {
+  @ApiProperty({ format: "uuid" })
+  id!: string;
+
+  @ApiProperty({
+    format: "date",
+    description: "The date the record was planned for when this cycle was done.",
+  })
+  plannedDate!: string;
+
+  @ApiProperty({ format: "date", description: "The day the work was done." })
+  completedOn!: string;
+
+  @ApiProperty({
+    format: "date",
+    description: "The date the record was planned again for.",
+  })
+  nextMaintenanceDate!: string;
+
+  @ApiPropertyOptional({ nullable: true })
+  notes!: string | null;
+
+  @ApiPropertyOptional({ nullable: true, example: "Onderhoud" })
+  maintenanceType!: string | null;
+
+  @ApiProperty()
+  description!: string;
+
+  @ApiProperty({ description: "When the completion was registered." })
+  createdAt!: Date;
+}
+
+/** One record with its full history, oldest completion first. */
+export class MaintenanceDetailDto extends MaintenanceResponseDto {
+  @ApiProperty({ type: [MaintenanceCompletionDto] })
+  completions!: MaintenanceCompletionDto[];
 }
 
 export class PaginatedMaintenanceDto {
@@ -109,8 +185,14 @@ export type MaintenanceWithVehicle = Maintenance & {
   vehicle: Vehicle | null;
 };
 
+export type MaintenanceWithHistory = MaintenanceWithVehicle & {
+  completions: MaintenanceCompletion[];
+};
+
+/** `today` is the UTC midnight the urgency is decided against. */
 export function toMaintenanceResponse(
   maintenance: MaintenanceWithVehicle,
+  today: Date,
 ): MaintenanceResponseDto {
   return {
     id: maintenance.id,
@@ -139,7 +221,33 @@ export function toMaintenanceResponse(
         : toIsoDate(maintenance.nextMaintenanceDate),
     nextMaintenanceMileage: maintenance.nextMaintenanceMileage,
     notes: maintenance.notes,
+    urgency: maintenanceUrgency(maintenance, today),
     createdAt: maintenance.createdAt,
     updatedAt: maintenance.updatedAt,
+  };
+}
+
+export function toMaintenanceDetail(
+  maintenance: MaintenanceWithHistory,
+  today: Date,
+): MaintenanceDetailDto {
+  return {
+    ...toMaintenanceResponse(maintenance, today),
+    completions: maintenance.completions.map(toCompletionResponse),
+  };
+}
+
+function toCompletionResponse(
+  completion: MaintenanceCompletion,
+): MaintenanceCompletionDto {
+  return {
+    id: completion.id,
+    plannedDate: toIsoDate(completion.plannedDate),
+    completedOn: toIsoDate(completion.completedOn),
+    nextMaintenanceDate: toIsoDate(completion.nextMaintenanceDate),
+    notes: completion.notes,
+    maintenanceType: completion.maintenanceType,
+    description: completion.description,
+    createdAt: completion.createdAt,
   };
 }

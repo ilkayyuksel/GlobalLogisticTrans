@@ -21,6 +21,23 @@ process.env.NEXT_PUBLIC_API_URL = "http://backend.test";
  * nobody is signed in, and `access-token.spec.ts` and `api-authorization.spec.ts`
  * test the real module and the real header without this mock.
  */
+/**
+ * jsdom's Blob predates `Blob.arrayBuffer()`, which every browser the app
+ * supports has had for years. The PDF viewer reads the fetched document through
+ * it, so without this shim the specs would test a Blob no browser ships. It
+ * reads through jsdom's own FileReader, so the bytes are the Blob's real bytes.
+ */
+if (typeof Blob.prototype.arrayBuffer !== "function") {
+  Blob.prototype.arrayBuffer = function arrayBuffer(this: Blob) {
+    return new Promise<ArrayBuffer>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result as ArrayBuffer);
+      reader.onerror = () => reject(reader.error);
+      reader.readAsArrayBuffer(this);
+    });
+  };
+}
+
 jest.mock("@/lib/auth/access-token", () => ({
   getAccessToken: jest.fn(async () => null),
   forgetAccessToken: jest.fn(),

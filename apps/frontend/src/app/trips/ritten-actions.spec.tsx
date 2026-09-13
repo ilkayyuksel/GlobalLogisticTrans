@@ -605,4 +605,77 @@ describe("Ritten row actions", () => {
       },
     );
   });
+
+  /**
+   * ── ICONS, WITH THE WORD KEPT ─────────────────────────────────────────────
+   * The row actions are icons now, so the column stays narrow. Each still
+   * carries its word twice — as the tooltip (`title`, this table's convention
+   * for icon buttons) and inside its accessible name — and each keeps the
+   * colour its worded button had.
+   * ──────────────────────────────────────────────────────────────────────────
+   */
+  describe("as icon buttons", () => {
+    function expectIconOnly(button: HTMLElement) {
+      expect(button.querySelector("svg")).not.toBeNull();
+      expect(button.textContent?.trim()).toBe("");
+    }
+
+    it("shows Afwerken as an icon with its word as the tooltip", async () => {
+      await showTrip();
+
+      const button = actionButton("Afwerken") as HTMLElement;
+
+      expectIconOnly(button);
+      expect(button).toHaveAttribute("title", "Afwerken");
+      expect(button).toHaveAttribute("aria-label", "Afwerken ANRDUB2602247");
+      expect(button.className).toMatch(/text-primary/);
+    });
+
+    it("shows Heropenen as an icon with its word as the tooltip", async () => {
+      await showTrip({ status: "CLOSED" });
+
+      const button = actionButton("Heropenen") as HTMLElement;
+
+      expectIconOnly(button);
+      expect(button).toHaveAttribute("title", "Heropenen");
+      expect(button).toHaveAttribute("aria-label", "Heropenen ANRDUB2602247");
+      expect(button.className).toMatch(/text-primary/);
+    });
+
+    it("shows Verwijderen as an icon in the danger colour", async () => {
+      await showTrip();
+
+      const button = actionButton("Verwijderen") as HTMLElement;
+
+      expectIconOnly(button);
+      expect(button).toHaveAttribute("title", "Verwijderen");
+      expect(button).toHaveAttribute("aria-label", "Verwijderen ANRDUB2602247");
+      expect(button.className).toMatch(/text-danger/);
+    });
+
+    it("shows Versturen as an icon in the success colour", async () => {
+      await showTrip();
+
+      const button = screen.getByRole("button", {
+        name: /PDF naar chauffeur versturen/,
+      });
+
+      await waitFor(() => expect(button).toBeEnabled());
+      expectIconOnly(button);
+      expect(button).toHaveAttribute("title", "Versturen");
+      expect(button.className).toMatch(/text-success/);
+    });
+
+    it("translates the tooltips", async () => {
+      window.localStorage.setItem("tms.language", "tr");
+      await showTrip();
+
+      expect(
+        screen.getByRole("button", { name: "Tamamla ANRDUB2602247" }),
+      ).toHaveAttribute("title", "Tamamla");
+      expect(
+        screen.getByRole("button", { name: "Sil ANRDUB2602247" }),
+      ).toHaveAttribute("title", "Sil");
+    });
+  });
 });

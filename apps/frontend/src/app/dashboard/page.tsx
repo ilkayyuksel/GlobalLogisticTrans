@@ -3,11 +3,11 @@
 import Link from "next/link";
 import { useCallback } from "react";
 
+import { AgendaToday } from "@/components/dashboard/agenda-today";
 import { DriverStatisticsWidget } from "@/components/dashboard/driver-statistics";
 import { MaintenanceWarnings } from "@/components/dashboard/maintenance-warnings";
 import { PdfUpload } from "@/components/dashboard/pdf-upload";
 import { StatCard } from "@/components/dashboard/stat-card";
-import { UnavailableWidget } from "@/components/dashboard/unavailable-widget";
 import { WidgetLink } from "@/components/dashboard/widget-link";
 import { TripStatusBadge } from "@/components/trips/trip-status-badge";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
@@ -21,15 +21,16 @@ import { formatCalendarDate } from "@/lib/calendar/calendar-dates";
 /**
  * The operational homepage.
  *
- * Every figure comes from the backend, counted by the database. The statistics
- * the backend cannot answer — average waiting time, today's calendar — are
- * shown as unavailable rather than approximated in the browser, because a
- * plausible invented number on an operations screen gets acted on.
+ * Every figure comes from the backend, counted by the database.
  *
- * The maintenance warnings are real now: they are the records whose planned
- * next DATE has arrived, decided by the backend. A mileage-based warning is
- * still impossible and the widget says so — nothing here knows a vehicle's
- * current odometer reading.
+ * The Agenda sits in the fourth place of the headline row, where the average
+ * waiting time used to be. It shows today through the calendar's own day
+ * endpoint and grid — the same items, arranged the same way, not a second
+ * dataset.
+ *
+ * The maintenance section is the backend's own top five: overdue work first,
+ * then today's, then the next planned dates — decided from dates and statuses
+ * only, never from kilometres.
  */
 export default function DashboardPage() {
   const t = useTranslation();
@@ -66,15 +67,7 @@ export default function DashboardPage() {
           value={counts.data ? counts.data.thisWeek : null}
           isLoading={counts.isLoading}
         />
-        {/*
-          No backend aggregation exists for this, and averaging it here would
-          mean downloading every Trip to read one column.
-        */}
-        <StatCard
-          labelKey="dashboard.stats.averageWaitingTime"
-          value={null}
-          unavailable
-        />
+        <AgendaToday />
       </section>
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
@@ -165,15 +158,6 @@ export default function DashboardPage() {
         </Card>
 
         <DriverStatisticsWidget />
-      </div>
-
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-        {/* No calendar API exists yet. */}
-        <UnavailableWidget
-          titleKey="dashboard.calendar.title"
-          linkHref="/calendar"
-          linkLabelKey="dashboard.calendar.link"
-        />
       </div>
     </div>
   );

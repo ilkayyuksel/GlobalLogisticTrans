@@ -809,13 +809,55 @@ model Maintenance {
   vehicle Vehicle? @relation(fields: [vehicleId], references: [id], onDelete: Restrict)
   trailer Trailer? @relation(fields: [trailerId], references: [id], onDelete: Restrict)
 
+  /// The cycles of this record that were carried out, oldest first.
+  completions MaintenanceCompletion[]
+
   @@index([vehicleId, maintenanceDate])
   @@index([trailerId, maintenanceDate])
   @@index([status])
   @@index([maintenanceDate])
-  /// Answers the dashboard's only question — what is due — without scanning.
   @@index([nextMaintenanceDate])
   @@map("maintenance")
+}
+
+/// One carried-out cycle of a maintenance record.
+///
+/// Completing maintenance does NOT create a second Maintenance row: the same
+/// record is planned again on the next date and goes back to PLANNED. What
+/// happened in the cycle that just ended is kept here instead, one row per
+/// completion, so the record's history survives its date being moved on.
+///
+/// APPEND-ONLY. A row is written once, inside the transaction that re-plans its
+/// record, and is never updated or deleted — there is deliberately no
+/// `updatedAt`, and the repository exposes no way to change a row.
+///
+/// Every row is a completion: its status was, by definition, COMPLETED.
+model MaintenanceCompletion {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+
+  maintenanceId String @map("maintenance_id") @db.Uuid
+
+  /// The date the record was planned for when this cycle was carried out.
+  plannedDate         DateTime @map("planned_date") @db.Date
+  /// The day the work was actually done. Never in the future.
+  completedOn         DateTime @map("completed_on") @db.Date
+  /// The date the record was planned again for, chosen at completion.
+  nextMaintenanceDate DateTime @map("next_maintenance_date") @db.Date
+  /// The Administrator's extra information about this execution.
+  notes               String?  @db.Text
+
+  /// What the record described when this cycle was completed. Copied, because
+  /// the record itself may be edited for the next cycle.
+  maintenanceType String? @map("maintenance_type") @db.Text
+  description     String  @db.Text
+
+  /// The moment the completion was registered.
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  maintenance Maintenance @relation(fields: [maintenanceId], references: [id], onDelete: Restrict)
+
+  @@index([maintenanceId, completedOn])
+  @@map("maintenance_completion")
 }
 
 // ---------------------------------------------------------------------------
@@ -1174,14 +1216,13 @@ model CalendarEvent {
   @@map("calendar_event")
 }
 
-/// A free-form administrator note. Standalone, with no business relationships,
-/// and may be physically deleted.
+/// A free-form administrator note: its text, and nothing else. Standalone, with
+/// no business relationships, and may be physically deleted.
 model Note {
   id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
 
-  title   String  @db.Text
-  content String  @db.Text
-  color   String? @db.Text
+  /// The note itself: plain text, line breaks kept, never empty.
+  content String @db.Text
 
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)

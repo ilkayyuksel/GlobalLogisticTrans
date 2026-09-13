@@ -1,96 +1,107 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback } from "react";
 
+import { MaintenanceUrgencyBadge } from "@/components/maintenance/maintenance-badges";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { EmptyState, ErrorState, LoadingState } from "@/components/ui/states";
 import { WidgetLink } from "@/components/dashboard/widget-link";
 import { useAsync } from "@/hooks/use-async";
-import { listMaintenance } from "@/lib/api/maintenance";
+import {
+  getMaintenanceAttention,
+  type MaintenanceUrgencyLevel,
+} from "@/lib/api/maintenance";
 import { maintenanceTypeLabel } from "@/lib/maintenance/maintenance-types";
 import { formatCalendarDate } from "@/lib/calendar/calendar-dates";
 import { useTranslation } from "@/lib/i18n/language-provider";
+import { cn } from "@/lib/cn";
 
-/** Enough to act on this morning; the full list is one click away. */
-const WARNING_LIMIT = 5;
+/** A left rule per urgency, so TE LAAT reads as the heaviest row at a glance. */
+const ROW_ACCENTS: Record<MaintenanceUrgencyLevel, string> = {
+  OVERDUE: "border-danger bg-danger/5",
+  TODAY: "border-warning",
+  UPCOMING: "border-transparent",
+};
 
 /**
- * Maintenance that has fallen due.
+ * The maintenance the Administrator should look at first.
  *
- * ── ONE REASON, AND IT IS HONEST ────────────────────────────────────────────
- * Every warning here means the same thing: a PLANNED NEXT DATE has arrived.
- * The backend decides it (`dueOnly`), so the rule lives in one place.
+ * ── THE BACKEND DECIDES ALL OF IT ───────────────────────────────────────────
+ * Which records (planned ones only), in which order (overdue from the oldest
+ * date, then today, then the next dates) and how many (five): one request,
+ * answered by one database query. This widget renders the list as it came and
+ * never re-sorts or re-labels it — each row's TE LAAT / VANDAAG / GEPLAND is the
+ * record's own `urgency`, the same answer its details page shows.
  *
- * There is deliberately no mileage warning. A planned next mileage is stored,
- * but deciding it has been reached needs the vehicle's CURRENT odometer
- * reading — and this system has none, by design in V1. Comparing it against the
- * mileage recorded at the last service would answer a different question and
- * produce warnings that are simply wrong. The footnote says so rather than
- * leaving the absence to be discovered.
+ * Kilometres play no part anywhere in it.
  * ────────────────────────────────────────────────────────────────────────────
+ *
+ * Each row opens the record's details, where it can be completed.
  */
 export function MaintenanceWarnings() {
   const t = useTranslation();
 
-  const warnings = useAsync(
-    useCallback(
-      (signal: AbortSignal) =>
-        listMaintenance({ dueOnly: true, pageSize: WARNING_LIMIT }, signal),
-      [],
-    ),
+  const attention = useAsync(
+    useCallback((signal: AbortSignal) => getMaintenanceAttention(signal), []),
     [],
   );
+
+  const items = attention.data?.items ?? [];
 
   return (
     <Card>
       <CardHeader title={t("maintenance.due.title")} />
 
-      {warnings.isLoading ? <LoadingState label={t("maintenance.loading")} /> : null}
+      {attention.isLoading ? <LoadingState label={t("maintenance.loading")} /> : null}
 
-      {!warnings.isLoading && warnings.error ? (
-        <ErrorState error={warnings.error} onRetry={warnings.reload} />
+      {!attention.isLoading && attention.error ? (
+        <ErrorState error={attention.error} onRetry={attention.reload} />
       ) : null}
 
-      {!warnings.isLoading && !warnings.error && warnings.data?.items.length === 0 ? (
+      {!attention.isLoading && !attention.error && attention.data && items.length === 0 ? (
         <EmptyState title={t("maintenance.due.none")} />
       ) : null}
 
-      {!warnings.isLoading && !warnings.error && warnings.data?.items.length ? (
+      {!attention.isLoading && !attention.error && items.length > 0 ? (
         <ul className="divide-y divide-border">
-          {warnings.data.items.map((record) => (
-            <li key={record.id} className="px-5 py-3">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <span className="text-sm font-medium text-foreground">
-                  {record.vehicle
-                    ? record.vehicle.licensePlate
-                    : t("maintenance.value.empty")}
+          {items.map((record) => (
+            <li key={record.id}>
+              <Link
+                href={`/maintenance/${record.id}`}
+                className={cn(
+                  "flex items-start justify-between gap-3 border-l-4 px-4 py-2.5 hover:bg-hover",
+                  record.urgency ? ROW_ACCENTS[record.urgency.level] : "border-transparent",
+                )}
+              >
+                <span className="min-w-0">
+                  <span className="flex flex-wrap items-center gap-2">
+                    {record.urgency ? (
+                      <MaintenanceUrgencyBadge urgency={record.urgency} />
+                    ) : null}
+                    <span className="text-sm font-semibold text-foreground">
+                      {record.vehicle
+                        ? record.vehicle.licensePlate
+                        : t("maintenance.value.empty")}
+                    </span>
+                  </span>
+                  <span className="mt-0.5 block truncate text-xs text-secondary">
+                    {maintenanceTypeLabel(record.maintenanceType, t) ??
+                      record.description}
+                  </span>
                 </span>
-                <span className="rounded bg-warning/10 px-1.5 py-0.5 text-xs font-semibold text-warning">
-                  {t("maintenance.due.reasonDate")}
-                </span>
-              </div>
 
-              <p className="mt-0.5 text-xs text-secondary">
-                {maintenanceTypeLabel(record.maintenanceType, t) ??
-                  record.description}{" "}
-                ·{" "}
-                {t("maintenance.due.plannedFor")}{" "}
-                <span className="tabular-nums">
-                  {formatCalendarDate(record.nextMaintenanceDate)}
+                <span className="shrink-0 text-sm tabular-nums text-secondary">
+                  {formatCalendarDate(record.maintenanceDate)}
                 </span>
-              </p>
+              </Link>
             </li>
           ))}
         </ul>
       ) : null}
 
       <CardBody className="border-t border-border">
-        <p className="text-[11px] text-muted">
-          {t("maintenance.due.mileageUnknown")}
-        </p>
-        <p className="mt-2">
-          <WidgetLink href="/maintenance" labelKey="maintenance.due.link" />
-        </p>
+        <WidgetLink href="/maintenance" labelKey="maintenance.due.link" />
       </CardBody>
     </Card>
   );

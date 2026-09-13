@@ -2,6 +2,12 @@
 
 import type { Trip } from "@/lib/api/types";
 import type { WhatsAppStatus } from "@/lib/api/whatsapp";
+import {
+  CompleteIcon,
+  DeleteIcon,
+  ReopenIcon,
+  RowActionButton,
+} from "./row-action-button";
 import { SendPdfButton } from "./send-pdf-button";
 import { useTranslation } from "@/lib/i18n/language-provider";
 import { STATUS_LABEL_KEYS, type RittenActions } from "@/lib/ritten/row-actions";
@@ -43,6 +49,12 @@ import { canDelete, primaryRowAction } from "@/lib/trip-actions";
  * AND NOTHING ELSE BELONGS HERE. No edit button, no "more", no second menu by
  * another name. Editing a Trip's less common fields is the Trip detail page's
  * job, which the booking number in every row links to.
+ *
+ * ── ICONS, NOT WORDS ────────────────────────────────────────────────────────
+ * Each action is an icon in the colour its worded button had: a tick to
+ * complete, an arrow turning back to reopen, a cross to delete, an arrow to the
+ * upper right to send. The word is its tooltip and part of its accessible
+ * name, so nothing depends on recognising the icon — see `RowActionButton`.
  * ────────────────────────────────────────────────────────────────────────────
  */
 export function RowLifecycleActions({
@@ -70,11 +82,10 @@ export function RowLifecycleActions({
   const action = primaryRowAction(trip);
 
   /*
-   * The visible label is short — "Afwerken" — because the column is narrow and
-   * the row it sits in says which Trip it belongs to. The ACCESSIBLE name adds
-   * the booking number, so a screen reader does not read out a column of
-   * identical buttons, and so the bulk toolbar's own "Afwerken" stays a
-   * different control from any row's.
+   * The tooltip is one word — "Afwerken" — because the row it sits in says
+   * which Trip it belongs to. The ACCESSIBLE name adds the booking number, so a
+   * screen reader does not read out a column of identical buttons, and so the
+   * bulk toolbar's own "Afwerken" stays a different control from any row's.
    */
   const nameFor = (label: string) =>
     trip.bookingNumber ? `${label} ${trip.bookingNumber}` : label;
@@ -82,9 +93,11 @@ export function RowLifecycleActions({
   return (
     <span className="flex items-center gap-1">
       {action ? (
-        <button
-          type="button"
-          disabled={isBusy}
+        <RowActionButton
+          tone="primary"
+          tooltip={t(STATUS_LABEL_KEYS[action.target])}
+          accessibleName={nameFor(t(STATUS_LABEL_KEYS[action.target]))}
+          isDisabled={isBusy}
           onClick={() => {
             // Reopening asks first — from CANCELLED or CLOSED alike;
             // completing does not.
@@ -104,23 +117,22 @@ export function RowLifecycleActions({
               actions.changeStatus(trip, action.target),
             ).catch(() => undefined);
           }}
-          aria-label={nameFor(t(STATUS_LABEL_KEYS[action.target]))}
-          className="whitespace-nowrap rounded-md border border-primary/40 px-2 py-1 text-xs font-medium text-primary hover:bg-primary/10 disabled:cursor-not-allowed disabled:opacity-40"
         >
-          {t(STATUS_LABEL_KEYS[action.target])}
-        </button>
+          {/* A row only completes or reopens; cancelling is not offered here. */}
+          {action.target === "OPEN" ? <ReopenIcon /> : <CompleteIcon />}
+        </RowActionButton>
       ) : null}
 
       {canDelete(trip) ? (
-        <button
-          type="button"
-          disabled={isBusy}
+        <RowActionButton
+          tone="danger"
+          tooltip={t("ritten.menu.delete")}
+          accessibleName={nameFor(t("ritten.menu.delete"))}
+          isDisabled={isBusy}
           onClick={() => onDelete(trip)}
-          aria-label={nameFor(t("ritten.menu.delete"))}
-          className="whitespace-nowrap rounded-md border border-danger/40 px-2 py-1 text-xs font-medium text-danger hover:bg-danger/10 disabled:cursor-not-allowed disabled:opacity-40"
         >
-          {t("ritten.menu.delete")}
-        </button>
+          <DeleteIcon />
+        </RowActionButton>
       ) : null}
 
       {/*

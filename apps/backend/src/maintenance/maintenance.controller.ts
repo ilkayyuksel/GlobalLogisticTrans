@@ -1,6 +1,7 @@
 import { Body, Controller, Get, Param, Patch, Post, Query } from "@nestjs/common";
 import {
   ApiBadRequestResponse,
+  ApiConflictResponse,
   ApiCreatedResponse,
   ApiNotFoundResponse,
   ApiOkResponse,
@@ -9,10 +10,13 @@ import {
 } from "@nestjs/swagger";
 
 import { VehicleIdParamDto } from "../vehicles/dto/vehicle-id-param.dto";
+import { CompleteMaintenanceDto } from "./dto/complete-maintenance.dto";
 import { CreateMaintenanceDto } from "./dto/create-maintenance.dto";
 import { ListMaintenanceQueryDto } from "./dto/list-maintenance-query.dto";
+import { MaintenanceAttentionDto } from "./dto/maintenance-attention.dto";
 import { MaintenanceIdParamDto } from "./dto/maintenance-id-param.dto";
 import {
+  MaintenanceDetailDto,
   MaintenanceResponseDto,
   PaginatedMaintenanceDto,
 } from "./dto/maintenance-response.dto";
@@ -54,6 +58,18 @@ export class MaintenanceController {
     return this.maintenanceService.summaryForVehicle(params.id);
   }
 
+  /** Declared before ":id" for the same reason. */
+  @Get("attention")
+  @ApiOperation({
+    summary: "Maintenance needing attention, for the Dashboard",
+    description:
+      "At most five PLANNED records, chosen, ordered and limited by the database: overdue ones first (oldest planned date first), then those planned for today, then the next upcoming dates in ascending order; equal dates are ordered by id so the list never reshuffles. Each record carries its `urgency` (OVERDUE with daysOverdue, TODAY or UPCOMING), decided from its status and maintenance date only. COMPLETED, CANCELLED and IN_PROGRESS records are never included, and mileage plays no part.",
+  })
+  @ApiOkResponse({ type: MaintenanceAttentionDto })
+  findAttention(): Promise<MaintenanceAttentionDto> {
+    return this.maintenanceService.findAttention();
+  }
+
   @Get()
   @ApiOperation({
     summary: "List maintenance",
@@ -69,14 +85,41 @@ export class MaintenanceController {
   }
 
   @Get(":id")
-  @ApiOperation({ summary: "Get one maintenance record" })
-  @ApiOkResponse({ type: MaintenanceResponseDto })
+  @ApiOperation({
+    summary: "Get one maintenance record, with its history",
+    description:
+      "The record as it is planned now, plus every completed cycle of it (`completions`), oldest first.",
+  })
+  @ApiOkResponse({ type: MaintenanceDetailDto })
   @ApiBadRequestResponse({ description: "The id is not a valid UUID." })
   @ApiNotFoundResponse({ description: "No maintenance record with that id." })
   findById(
     @Param() params: MaintenanceIdParamDto,
-  ): Promise<MaintenanceResponseDto> {
+  ): Promise<MaintenanceDetailDto> {
     return this.maintenanceService.findById(params.id);
+  }
+
+  @Post(":id/completions")
+  @ApiOperation({
+    summary: "Complete the current cycle and plan the same record again",
+    description:
+      "Appends the cycle that ends to the record's history — the date it was planned for, the completion date (today unless given, never in the future), the extra information and the chosen next date — and moves the SAME record to `nextMaintenanceDate` as PLANNED. No new maintenance record is created. Answers with the record and its full history.",
+  })
+  @ApiCreatedResponse({ type: MaintenanceDetailDto })
+  @ApiBadRequestResponse({
+    description:
+      "No or an invalid next date, a completion date in the future, an over-long note, or an unknown field.",
+  })
+  @ApiNotFoundResponse({ description: "No maintenance record with that id." })
+  @ApiConflictResponse({
+    description:
+      "The record is COMPLETED or CANCELLED, or it changed while it was being completed.",
+  })
+  complete(
+    @Param() params: MaintenanceIdParamDto,
+    @Body() dto: CompleteMaintenanceDto,
+  ): Promise<MaintenanceDetailDto> {
+    return this.maintenanceService.complete(params.id, dto);
   }
 
   @Post()

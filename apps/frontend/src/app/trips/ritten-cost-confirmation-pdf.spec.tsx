@@ -15,6 +15,17 @@ jest.mock("@/lib/api/client", () => ({
   request: jest.fn(),
 }));
 
+// pdf.js needs a real canvas; here only WHICH document is opened matters.
+jest.mock("@/lib/pdf/pdf-renderer", () => ({
+  loadPdf: jest.fn(() =>
+    Promise.resolve({
+      pageCount: 1,
+      renderPage: () => ({ done: Promise.resolve(), cancel: () => undefined }),
+      destroy: () => Promise.resolve(),
+    }),
+  ),
+}));
+
 const requestMock = request as jest.MockedFunction<typeof request>;
 
 /** Built from NEXT_PUBLIC_API_URL, which jest.setup.ts fixes for the suite. */
@@ -145,11 +156,13 @@ describe("the Cost Confirmation document in Ritten", () => {
       await userEvent.click(ccButton() as HTMLElement);
 
       const dialog = await screen.findByRole("dialog");
+      const viewer = await within(dialog).findByRole("region", {
+        name: "PDF-weergave",
+      });
 
-      expect(await within(dialog).findByTitle("PDF-weergave")).toHaveAttribute(
-        "src",
-        "blob:traxo-pdf",
-      );
+      expect(
+        await within(viewer).findByRole("img", { name: "Pagina 1 van 1" }),
+      ).toBeInTheDocument();
     });
 
     /** The confirmation names itself, so the operator sees which one opened. */

@@ -29,9 +29,12 @@ const requestMock = request as jest.MockedFunction<typeof request>;
  * leaving a line that ends in a bare "/" and reads like a stray backslash or an
  * escaped newline. Two lines also make a column of them impossible to scan.
  *
- * The fix is width and `whitespace-nowrap`. THE STORED VALUE IS UNTOUCHED, and
- * these tests assert that too: nothing is stripped, replaced or normalised on
- * its way to the screen or on its way back to the backend.
+ * The fix is `whitespace-nowrap`, in a column exactly as wide as the numbers in
+ * it: an ordinary number fits whole with no space reserved beside it, and an
+ * unusually long one is cut off with an ellipsis rather than widening the whole
+ * table. THE STORED VALUE IS UNTOUCHED, and these tests assert that too:
+ * nothing is stripped, replaced or normalised on its way to the screen or on
+ * its way back to the backend.
  * ────────────────────────────────────────────────────────────────────────────
  */
 
@@ -112,26 +115,39 @@ describe("the container number in the Ritten list", () => {
       expect(containerCell(row, REAL).className).toMatch(/whitespace-nowrap/);
     });
 
-    it("reserves enough width for the format", async () => {
+    /**
+     * Sized to the value, not to a reserved width. The heading asks for no
+     * more than its content (`w-px`), so an ordinary number fits whole with no
+     * empty space beside it.
+     */
+    it("takes the width of the value rather than a fixed one", async () => {
       const row = await show(REAL);
+      const heading = screen.getByRole("columnheader", { name: "Container" });
 
-      expect(containerCell(row, REAL).className).toMatch(/min-w-\[9\.5rem\]/);
+      expect(heading.className).toMatch(/\bw-px\b/);
+      expect(heading.className).not.toMatch(/min-w-/);
+      expect(containerCell(row, REAL).className).not.toMatch(/min-w-|\bw-\[/);
     });
 
-    it("reserves the same width in the heading", async () => {
-      await show(REAL);
+    /** A long value is cut off inside its cell instead of widening the table. */
+    it("caps an unusually long value and keeps the whole of it in the tooltip", async () => {
+      const long = "CNEU 452297/0 AND A FAR LONGER REFERENCE";
+      const row = await show(long);
+      const value = within(row).getByText(long);
 
-      expect(
-        screen.getByRole("columnheader", { name: "Container" }).className,
-      ).toMatch(/min-w-\[9\.5rem\]/);
+      expect(value.className).toMatch(/\btruncate\b/);
+      expect(value.className).toMatch(/max-w-\[8\.5rem\]/);
+      expect(value).toHaveAttribute("title", long);
     });
 
-    /** The table still scrolls sideways rather than squeezing its columns. */
+    /** The table still scrolls sideways when a screen is too narrow for it. */
     it("leaves the table's horizontal scrolling intact", async () => {
       const row = await show(REAL);
       const table = row.closest("table") as HTMLElement;
 
-      expect(table.className).toMatch(/min-w-\[1200px\]/);
+      // As wide as its section, with no fixed minimum of its own.
+      expect(table.className).toMatch(/\bw-full\b/);
+      expect(table.className).not.toMatch(/min-w-/);
       expect(table.parentElement?.className).toMatch(/overflow-x-auto/);
     });
 

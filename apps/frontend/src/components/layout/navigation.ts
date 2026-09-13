@@ -11,6 +11,9 @@ import type { TranslationKey } from "@/lib/i18n/translations";
  * still routable, but it is a detail view of one day rather than a top-level
  * section of the product, and promoting it would put two competing "where are
  * my trips" entries side by side.
+ *
+ * PDF Debug is absent too: it is a developer page, not a section an operator
+ * works in. `/pdf-debug` is still routable for whoever needs it.
  */
 
 export interface NavigationItem {
@@ -26,11 +29,15 @@ export const MAIN_NAVIGATION: readonly NavigationItem[] = [
   { href: "/maintenance", labelKey: "navigation.maintenance" },
   { href: "/calendar", labelKey: "navigation.calendar" },
   { href: "/notes", labelKey: "navigation.notes" },
-  { href: "/pdf-debug", labelKey: "navigation.pdfDebug" },
 ];
 
+/**
+ * Nummerplaten is absent on purpose: a plate is managed where it belongs, on
+ * the Vehicle (Voertuigen) and through the driver assignments, and a second
+ * place in Settings would be a duplicate. `/settings/license-plates` is still
+ * routable — it only points to Voertuigen — but no longer offered here.
+ */
 export const SETTINGS_NAVIGATION: readonly NavigationItem[] = [
-  { href: "/settings/license-plates", labelKey: "navigation.licensePlates" },
   { href: "/settings/custom-values", labelKey: "navigation.customValues" },
   { href: "/settings/pricing", labelKey: "navigation.pricingSettings" },
 ];

@@ -308,6 +308,12 @@ Verwijderd → none. It returns only through restoration.
 
 A row never offers an action the backend would refuse.
 
+In the Ritten list the row actions are compact icon buttons, each in its
+action's own colour: a tick for Afwerken, an arrow turning back for Heropenen, a
+cross for Verwijderen and an arrow to the upper right for Versturen. An icon is
+never the only explanation: every one carries its word as a tooltip (`title`)
+and inside its accessible name (`aria-label`).
+
 The lifecycle action is the ONLY control in its column.
 
 No edit button, no "more", no second menu under another name. Editing a
@@ -341,8 +347,8 @@ focus on a control that is not destructive, and give the destructive button the
 danger tone so it can never be mistaken for the routine action beside it.
 
 Where several rows carry the same action, the accessible name distinguishes
-them: the visible label stays short, and the identifier of the row is added to
-it.
+them: the visible label - or, for an icon, the tooltip - stays short, and the
+identifier of the row is added to the accessible name.
 
 ---
 
@@ -354,8 +360,11 @@ A value that reads as one thing - a container number, a booking, a plate - must
 occupy one line. Browsers break lines at spaces AND at slashes, so an
 identifier like CNEU 452297/0 wraps twice in a narrow column and leaves a line
 ending in a bare slash, which reads as a stray escape character. Give the column
-the width the format needs and stop it wrapping; never alter the value to make
-it fit.
+the width the format needs - an ordinary value such as CNEU4681606, not the
+longest conceivable one - and stop it wrapping; never alter the value to make
+it fit. A value far longer than its format is cut off with an ellipsis inside
+its cell and shown whole in its tooltip and its editor, rather than widening
+the whole table.
 
 Tables are one of the most important components.
 
@@ -688,6 +697,23 @@ Appointments
 
 Drag & Drop (future)
 
+## Day view
+
+- A narrow time column on the left and the day on the right, one horizontal block per
+  hour from 06:00 to 23:00; an item is a coloured block exactly as tall as it lasts.
+- A click (or tap) on an empty hour adds an item starting at that hour; a click on an
+  item opens it to change or delete it. A narrow strip on the right of every hour stays
+  free, so an hour that already holds an item can take another.
+- Overlapping items stand side by side and share the width; an item widens into columns
+  that nothing it overlaps is using. Items are never drawn over each other. When a day
+  needs more columns than fit — on a tablet — the day scrolls sideways rather than making
+  items too narrow to read or tap.
+- Nothing depends on hover.
+- Moving between days reuses the Ritten navigator: previous, next, today and a date
+  picker. Today is marked beside the title.
+- The Dashboard shows today's items with the same grid, compact and read-only, each item
+  linking to itself in the calendar.
+
 ---
 
 # Dashboard
@@ -723,6 +749,25 @@ Zoom
 Download
 
 Open in new tab
+
+## How the viewer draws a PDF
+
+The Ritten viewer (`PdfViewerDialog` → `PdfPages`) draws every page itself
+with pdf.js (`pdfjs-dist`, legacy build) on `<canvas>` elements, scaled to the
+viewer's width and the screen's pixel density.
+
+It deliberately does not use an `<iframe>`, `<embed>` or `<object>`: those hand
+the file to the browser's built-in PDF plugin, which tablet browsers (Android
+Chrome, iPad Safari) do not have — the viewer stayed blank there while the
+download worked.
+
+- The document is fetched once per opening; the download uses the same bytes.
+- Viewing creates no object URL; pdf.js and its worker are loaded only when a
+  viewer first opens, and the document is destroyed when the dialog closes.
+- A file that cannot be drawn shows a message and keeps the download.
+
+Not provided yet: zoom controls, page navigation controls and "open in new
+tab". Pages are shown one below the other, fitted to the viewer's width.
 
 ---
 

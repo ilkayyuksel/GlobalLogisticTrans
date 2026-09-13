@@ -12,7 +12,11 @@ import { listVehicles } from "@/lib/api/vehicles";
 import { useTranslation } from "@/lib/i18n/language-provider";
 
 /**
- * Settings → Nummerplaten.
+ * /settings/license-plates.
+ *
+ * No longer offered in the Settings menu: plates are managed in Voertuigen and
+ * through the driver assignments, and a menu entry here read as a second place
+ * to manage them. The route stays, for anyone who arrives by a direct link.
  *
  * ── WHAT THIS PAGE IS, AND WHAT IT DELIBERATELY IS NOT ──────────────────────
  * A number plate is not a thing this system stores on its own. It is the

@@ -966,8 +966,14 @@ export default function RittenPage() {
     openNotes: setNotesTrip,
   };
 
+  /*
+   * The whole width the page frame offers, with no cap of its own. The Ritten
+   * table is the widest thing in the product, and a fixed maximum made it
+   * scroll sideways on exactly the wide screens that had room for it. The
+   * frame's own margins still apply.
+   */
   return (
-    <div className="mx-auto max-w-[1600px] space-y-4">
+    <div className="w-full space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-xl font-semibold text-foreground">
           {t("ritten.title")}

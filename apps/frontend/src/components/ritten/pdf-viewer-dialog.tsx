@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback } from "react";
 
 import { LoadingState } from "@/components/ui/states";
 import { useAsync } from "@/hooks/use-async";
@@ -9,20 +9,22 @@ import { fetchPdfDocument } from "@/lib/api/pdf-documents";
 import type { Trip } from "@/lib/api/types";
 import { downloadBlob } from "@/lib/download";
 import { useTranslation } from "@/lib/i18n/language-provider";
+import { PdfPages } from "./pdf-pages";
 import { RittenDialog } from "./ritten-dialog";
 
 /**
- * The source transport order, as it was imported.
+ * A stored document — the source transport order, or any later one — as it was
+ * imported.
  *
- * The bytes are fetched ONCE and shown through the browser's own PDF viewer:
- * nothing is parsed here, nothing is re-uploaded, and no copy is kept. The same
- * fetched blob serves the download, so choosing to save it costs no second
- * request.
+ * The bytes are fetched ONCE per opening and drawn by pdf.js (see `PdfPages`),
+ * not handed to the browser's own PDF plugin: tablet browsers have none, and
+ * the viewer used to stay empty there. The same fetched Blob serves the
+ * download, so saving the file costs no second request. Nothing is parsed for
+ * data, re-uploaded or kept after the dialog closes.
  *
- * Fetching rather than pointing an iframe straight at the URL is deliberate: a
+ * Fetching rather than pointing a viewer straight at the URL is deliberate: a
  * failure is then a message an operator can read — "this document's file is
- * missing from storage" — instead of an error envelope rendered inside a viewer
- * frame.
+ * missing from storage" — instead of an error envelope rendered as a page.
  */
 export function PdfViewerDialog({
   trip,
@@ -42,7 +44,6 @@ export function PdfViewerDialog({
   onClose: () => void;
 }) {
   const t = useTranslation();
-  const [objectUrl, setObjectUrl] = useState<string | null>(null);
   // Only reachable for a Trip that has a document: the action that opens this
   // dialog is disabled otherwise.
   const documentId = pdfDocumentId ?? (trip.pdfDocumentId as string);
@@ -54,22 +55,6 @@ export function PdfViewerDialog({
     ),
     [documentId],
   );
-
-  useEffect(() => {
-    if (!document.data) {
-      return;
-    }
-
-    const url = URL.createObjectURL(document.data);
-    setObjectUrl(url);
-
-    // Released when the dialog closes or the document changes; a leaked object
-    // URL holds the whole file in memory for the life of the page.
-    return () => {
-      URL.revokeObjectURL(url);
-      setObjectUrl(null);
-    };
-  }, [document.data]);
 
   return (
     <RittenDialog
@@ -91,13 +76,9 @@ export function PdfViewerDialog({
           </p>
         ) : null}
 
-        {objectUrl ? (
+        {document.data ? (
           <>
-            <iframe
-              src={objectUrl}
-              title={t("ritten.pdf.viewerLabel")}
-              className="h-[70vh] w-full rounded-md border border-border bg-card"
-            />
+            <PdfPages file={document.data} label={t("ritten.pdf.viewerLabel")} />
 
             <button
               type="button"

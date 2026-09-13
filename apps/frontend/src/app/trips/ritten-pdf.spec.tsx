@@ -8,6 +8,7 @@ import {
   respondWith,
 } from "./ritten-test-support";
 import { request } from "@/lib/api/client";
+import { loadPdf } from "@/lib/pdf/pdf-renderer";
 
 jest.mock("@/lib/api/client", () => ({
   ...jest.requireActual("@/lib/api/client"),
@@ -19,7 +20,24 @@ jest.mock("@/lib/calendar/calendar-dates", () => ({
   today: () => "2026-08-13",
 }));
 
+/*
+ * pdf.js draws on a real canvas, which jsdom does not have. The renderer is the
+ * boundary: these tests assert what the viewer asks of it — which bytes, which
+ * pages, and that it is released — and pdf.js itself is proved in a browser.
+ */
+jest.mock("@/lib/pdf/pdf-renderer", () => ({ loadPdf: jest.fn() }));
+
 const requestMock = request as jest.MockedFunction<typeof request>;
+const loadPdfMock = loadPdf as jest.MockedFunction<typeof loadPdf>;
+
+/** A two-page document as pdf.js would hand it over. */
+function loadedPdf() {
+  return {
+    pageCount: 2,
+    renderPage: jest.fn(() => ({ done: Promise.resolve(), cancel: jest.fn() })),
+    destroy: jest.fn(() => Promise.resolve()),
+  };
+}
 
 /** Built from NEXT_PUBLIC_API_URL, which jest.setup.ts fixes for the suite. */
 const CONTENT_URL = "http://backend.test/api/v1/pdf-documents/pdf-1/content";
@@ -27,9 +45,10 @@ const CONTENT_URL = "http://backend.test/api/v1/pdf-documents/pdf-1/content";
 /**
  * Viewing and downloading the source transport order.
  *
- * The bytes come from the backend by document id. Nothing here reads a path,
- * uploads anything again or parses a PDF — the browser's own viewer renders
- * what the backend sent.
+ * The bytes come from the backend by document id, once per opening. Nothing
+ * here reads a path or uploads anything again. The pages are drawn by pdf.js,
+ * not by the browser's own PDF plugin — tablet browsers have none — and the
+ * same bytes serve the download.
  */
 describe("Ritten PDF", () => {
   let fetchMock: jest.Mock;
@@ -37,6 +56,8 @@ describe("Ritten PDF", () => {
 
   beforeEach(() => {
     requestMock.mockReset();
+    loadPdfMock.mockReset();
+    loadPdfMock.mockImplementation(() => Promise.resolve(loadedPdf()));
     window.localStorage.clear();
     clicked = [];
 
@@ -92,20 +113,61 @@ describe("Ritten PDF", () => {
       });
     });
 
-    it("shows it in a viewer", async () => {
+    /** Every page drawn, in order — no browser PDF plugin involved. */
+    it("shows every page in the viewer", async () => {
       renderRitten();
       await chooseAction("PDF bekijken");
 
       const dialog = await screen.findByRole("dialog");
-      const viewer = await within(dialog).findByTitle("PDF-weergave");
+      const viewer = await within(dialog).findByRole("region", {
+        name: "PDF-weergave",
+      });
 
-      expect(viewer).toHaveAttribute("src", "blob:traxo-pdf");
+      expect(
+        (await within(viewer).findAllByRole("img")).map((page) =>
+          page.getAttribute("aria-label"),
+        ),
+      ).toEqual(["Pagina 1 van 2", "Pagina 2 van 2"]);
+      expect(viewer.querySelector("iframe, embed, object")).toBeNull();
       expect(
         within(dialog).getByText(/Transportopdracht — ANRDUB2602247/),
       ).toBeInTheDocument();
     });
 
-    it("offers a download from inside the viewer", async () => {
+    it("draws the bytes the backend sent, and draws each page", async () => {
+      renderRitten();
+      await chooseAction("PDF bekijken");
+      await screen.findAllByRole("img", { name: /Pagina/ });
+
+      const bytes = loadPdfMock.mock.calls[0][0];
+      const document = await loadPdfMock.mock.results[0].value;
+
+      // jsdom has no TextDecoder; the fixture is plain ASCII.
+      expect(String.fromCharCode(...new Uint8Array(bytes))).toBe("%PDF-1.7");
+      expect(document.renderPage.mock.calls.map(([page]: [number]) => page)).toEqual([1, 2]);
+    });
+
+    /** Viewing needs no object URL: nothing is left behind to revoke. */
+    it("creates no object URL to view the file", async () => {
+      renderRitten();
+      await chooseAction("PDF bekijken");
+      await screen.findAllByRole("img", { name: /Pagina/ });
+
+      expect(URL.createObjectURL).not.toHaveBeenCalled();
+    });
+
+    it("shows a loading state until the pages can be drawn", async () => {
+      loadPdfMock.mockReturnValue(new Promise(() => undefined));
+
+      renderRitten();
+      await chooseAction("PDF bekijken");
+
+      const viewer = await screen.findByRole("region", { name: "PDF-weergave" });
+
+      expect(within(viewer).getByRole("status")).toHaveTextContent("PDF laden");
+    });
+
+    it("offers a download from inside the viewer, from the same bytes", async () => {
       renderRitten();
       await chooseAction("PDF bekijken");
 
@@ -115,22 +177,81 @@ describe("Ritten PDF", () => {
       );
 
       expect(clicked).toEqual(["ANRDUB2602247.pdf"]);
+      // One request for the viewer, none for the download.
+      expect(fetchMock).toHaveBeenCalledTimes(1);
     });
 
-    /** The object URL must not outlive the dialog. */
-    it("releases the file when the dialog closes", async () => {
+    /** pdf.js keeps the document in its worker until it is told to let go. */
+    it("releases the document when the dialog closes", async () => {
       renderRitten();
       await chooseAction("PDF bekijken");
 
       const dialog = await screen.findByRole("dialog");
-      await within(dialog).findByTitle("PDF-weergave");
-      await userEvent.click(
-        within(dialog).getByRole("button", { name: "Sluiten" }),
-      );
+      await within(dialog).findAllByRole("img", { name: /Pagina/ });
+      const document = await loadPdfMock.mock.results[0].value;
 
-      await waitFor(() => {
-        expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:traxo-pdf");
+      await userEvent.click(within(dialog).getByRole("button", { name: "Sluiten" }));
+
+      await waitFor(() => expect(document.destroy).toHaveBeenCalledTimes(1));
+    });
+
+    it("opens again after closing, with a fresh document", async () => {
+      renderRitten();
+      await chooseAction("PDF bekijken");
+      let dialog = await screen.findByRole("dialog");
+      await within(dialog).findAllByRole("img", { name: /Pagina/ });
+      await userEvent.click(within(dialog).getByRole("button", { name: "Sluiten" }));
+      await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+
+      await chooseAction("PDF bekijken");
+      dialog = await screen.findByRole("dialog");
+
+      expect(await within(dialog).findAllByRole("img", { name: /Pagina/ })).toHaveLength(2);
+      expect(loadPdfMock).toHaveBeenCalledTimes(2);
+      expect((await loadPdfMock.mock.results[0].value).destroy).toHaveBeenCalled();
+    });
+
+    it("opens each Trip's own document", async () => {
+      respondWith(requestMock, {
+        trips: buildPage([
+          buildTrip(),
+          buildTrip({ id: "trip-2", bookingNumber: "ANRDUB0000002", pdfDocumentId: "pdf-2" }),
+        ]),
       });
+
+      renderRitten();
+      await chooseAction("PDF bekijken");
+      let dialog = await screen.findByRole("dialog");
+      await userEvent.click(within(dialog).getByRole("button", { name: "Sluiten" }));
+      await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+
+      await userEvent.click(
+        await screen.findByRole("button", { name: "PDF bekijken ANRDUB0000002" }),
+      );
+      dialog = await screen.findByRole("dialog");
+
+      expect(within(dialog).getByText(/ANRDUB0000002/)).toBeInTheDocument();
+      expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+        CONTENT_URL,
+        "http://backend.test/api/v1/pdf-documents/pdf-2/content",
+      ]);
+    });
+
+    /** A file the backend served but pdf.js cannot read: say so, keep the download. */
+    it("says so when the PDF cannot be drawn, and still offers the download", async () => {
+      loadPdfMock.mockRejectedValue(new Error("Invalid PDF structure."));
+
+      renderRitten();
+      await chooseAction("PDF bekijken");
+
+      const dialog = await screen.findByRole("dialog");
+
+      expect(
+        await within(dialog).findByText(
+          "Deze PDF kan hier niet worden weergegeven. Download hem om hem te bekijken.",
+        ),
+      ).toBeInTheDocument();
+      expect(within(dialog).getByRole("button", { name: "PDF downloaden" })).toBeEnabled();
     });
   });
 
@@ -169,7 +290,10 @@ describe("Ritten PDF", () => {
       expect(
         await screen.findByText(/is missing/),
       ).toBeInTheDocument();
-      expect(screen.queryByTitle("PDF-weergave")).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole("region", { name: "PDF-weergave" }),
+      ).not.toBeInTheDocument();
+      expect(loadPdfMock).not.toHaveBeenCalled();
     });
 
     it("reports an unknown document", async () => {

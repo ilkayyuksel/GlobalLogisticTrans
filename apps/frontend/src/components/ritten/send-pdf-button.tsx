@@ -10,6 +10,7 @@ import {
   sendUnavailableKey,
   sendUnavailableReason,
 } from "@/lib/ritten/whatsapp-availability";
+import { RowActionButton, SendIcon } from "./row-action-button";
 
 /**
  * "Versturen" — the transport order, to the driver, over WhatsApp.
@@ -67,8 +68,8 @@ export function SendPdfButton({
 
   /*
    * The accessible name says what happens and to whom, because a column of
-   * identical "Versturen" buttons is unusable read aloud. The visible label
-   * stays one word: the column is narrow and the row says which Trip it is.
+   * identical send buttons is unusable read aloud. The tooltip stays one word —
+   * "Versturen" — because the row already says which Trip it is.
    */
   const accessibleName = trip.effectiveDriver
     ? t("ritten.whatsapp.actionFor").replace(
@@ -76,14 +77,17 @@ export function SendPdfButton({
         trip.effectiveDriver.name,
       )
     : t("ritten.whatsapp.action");
+  const word = t(isSending ? "ritten.whatsapp.sending" : "ritten.whatsapp.send");
 
   return (
-    <button
-      type="button"
-      disabled={isDisabled}
-      aria-label={accessibleName}
-      title={explanation ?? undefined}
-      aria-description={explanation ?? undefined}
+    <RowActionButton
+      tone="success"
+      // When it cannot send, the reason is the more useful tooltip.
+      tooltip={explanation ?? word}
+      accessibleName={accessibleName}
+      description={explanation ?? undefined}
+      isDisabled={isDisabled}
+      isBusy={isSending}
       onClick={() => {
         setIsSending(true);
 
@@ -98,9 +102,19 @@ export function SendPdfButton({
           .catch(() => undefined)
           .finally(() => setIsSending(false));
       }}
-      className="whitespace-nowrap rounded-md border border-success/40 px-2 py-1 text-xs font-medium text-success hover:bg-success/10 disabled:cursor-not-allowed disabled:opacity-40"
     >
-      {t(isSending ? "ritten.whatsapp.sending" : "ritten.whatsapp.send")}
-    </button>
+      {isSending ? (
+        <>
+          {/* A spinner while the request runs; the word stays in its text. */}
+          <span
+            aria-hidden="true"
+            className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-success/30 border-t-success"
+          />
+          <span className="sr-only">{word}</span>
+        </>
+      ) : (
+        <SendIcon />
+      )}
+    </RowActionButton>
   );
 }

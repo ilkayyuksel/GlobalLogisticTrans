@@ -23,7 +23,6 @@ import { toCostConfirmationLabel } from "@/lib/trips/cost-confirmation";
 import {
   UPDATED_FIELD_CLASS,
   changedByLatestUpdate,
-  isRevised,
   type UpdatedField,
 } from "@/lib/trips/latest-update";
 import {
@@ -116,6 +115,33 @@ const PRICING_COLUMN_KEYS = [
   "ritten.column.totaal",
 ] as const;
 
+type ColumnKey = (typeof COLUMN_KEYS)[number];
+
+/**
+ * The columns that hold one short value of a fixed shape: a checkbox, a date,
+ * a clock time, a container number, a row of icons.
+ *
+ * Their heading asks for one pixel (`w-px`). A table column never becomes
+ * narrower than its content, so that reads as "exactly as wide as the
+ * content": the room a wide screen adds goes to the columns holding free text —
+ * the vehicle and driver, the status badges, the booking, the terminal, the
+ * address and the custom values — instead of opening gaps between short
+ * values. Their cells keep to one line, or asking for less than the content
+ * would make them wrap.
+ */
+const COMPACT_COLUMN_KEYS: ReadonlySet<ColumnKey> = new Set<ColumnKey>([
+  "ritten.select.row",
+  "ritten.column.date",
+  "ritten.column.start",
+  "ritten.column.end",
+  "ritten.column.container",
+  "ritten.column.containerType",
+  "ritten.column.waitingTime",
+  "ritten.column.pdf",
+  "ritten.column.actions",
+  "ritten.column.costConfirmation",
+]);
+
 export interface RittenTableProps {
   trips: readonly Trip[];
   actions: RittenActions;
@@ -146,8 +172,13 @@ export function RittenTable(props: RittenTableProps) {
   const t = useTranslation();
 
   return (
+    /*
+     * As wide as the section it sits in, with no minimum width of its own: the
+     * columns decide how much room the table needs, and only a screen that
+     * cannot fit even that makes the wrapper scroll sideways.
+     */
     <div className="overflow-x-auto">
-      <table className="w-full min-w-[1200px] text-left text-sm">
+      <table className="w-full text-left text-sm">
         <caption className="sr-only">{t("ritten.rows.title")}</caption>
         <thead className="border-b border-border bg-hover/50 text-xs uppercase tracking-wide text-muted">
           <tr>
@@ -156,10 +187,10 @@ export function RittenTable(props: RittenTableProps) {
                 key={key}
                 scope="col"
                 className={[
-                  "whitespace-nowrap px-3 py-2 font-medium",
-                  // The container column reserves the width its values need;
-                  // see the cell below for why they must not wrap.
-                  key === "ritten.column.container" ? "min-w-[9.5rem]" : "",
+                  // Compact padding: enough to tell neighbouring values
+                  // apart, and no more.
+                  "whitespace-nowrap px-1.5 py-2 font-medium",
+                  COMPACT_COLUMN_KEYS.has(key) ? "w-px" : "",
                 ].join(" ")}
               >
                 {/* The selection column is a control, not a heading. */}
@@ -173,7 +204,8 @@ export function RittenTable(props: RittenTableProps) {
                   <th
                     key={key}
                     scope="col"
-                    className="whitespace-nowrap px-3 py-2 text-right font-medium"
+                    // An amount is as wide as its digits: see COMPACT_COLUMN_KEYS.
+                    className="w-px whitespace-nowrap px-1.5 py-2 text-right font-medium"
                   >
                     {t(key)}
                   </th>
@@ -197,7 +229,7 @@ export function RittenTable(props: RittenTableProps) {
                   COLUMN_KEYS.length +
                   (props.showPricing ? PRICING_COLUMN_KEYS.length : 0)
                 }
-                className="border-b border-border bg-hover/40 px-3 py-1.5 text-left text-xs font-semibold text-secondary"
+                className="border-b border-border bg-hover/40 px-1.5 py-1.5 text-left text-xs font-semibold text-secondary"
               >
                 <span className="flex items-center gap-2">
                   {group.displayColor ? (
@@ -278,7 +310,7 @@ function RittenRow({
           : undefined
       }
     >
-      <td className="px-3 py-2">
+      <td className="px-1.5 py-2">
         <input
           type="checkbox"
           checked={selectedTripIds.has(trip.id)}
@@ -288,7 +320,7 @@ function RittenRow({
         />
       </td>
 
-      <td className="px-3 py-2">
+      <td className="px-1.5 py-2">
         {trip.tripGroupId ? (
           <button
             type="button"
@@ -303,7 +335,12 @@ function RittenRow({
         )}
       </td>
 
-      <td className="px-3 py-2">
+      {/*
+        The badges may stack when the column is narrow, but a badge never breaks
+        its own words: "Niet betaald" split over two lines inside one pill reads
+        as two labels.
+      */}
+      <td className="whitespace-nowrap px-1.5 py-2">
         <span className="flex flex-wrap items-center gap-1">
           <TripStatusBadge
             status={trip.status}
@@ -327,15 +364,11 @@ function RittenRow({
           />
         </span>
         {/*
-          "Bijgewerkt" is DERIVED, and beside the status rather than instead of
-          it: the lifecycle is still OPEN. It says a document changed this Trip
-          after it was planned, which is what the yellow fields below detail.
+          No "Bijgewerkt" tag here. The list shows the lifecycle and the
+          classifications beside it; the fields a document changed are still
+          marked where they are (see `UpdatedValue`), and the Trip detail page
+          still says the Trip was revised.
         */}
-        {isRevised(trip) ? (
-          <span className="mt-1 block text-[11px] font-medium text-warning">
-            {t("ritten.status.revised")}
-          </span>
-        ) : null}
         {/*
           There is deliberately NO "this Trip has no price" marker here.
           Completing a Trip whose route is not configured is legitimate finished
@@ -345,7 +378,7 @@ function RittenRow({
         */}
       </td>
 
-      <td className="px-3 py-2">
+      <td className="px-1.5 py-2">
         <VehicleCell
           trip={trip}
           vehicles={vehicles}
@@ -354,7 +387,7 @@ function RittenRow({
         />
       </td>
 
-      <td className="whitespace-nowrap px-3 py-2 tabular-nums text-secondary">
+      <td className="whitespace-nowrap px-1.5 py-2 tabular-nums text-secondary">
         <InlineCell
           label={t("ritten.edit.planningDate")}
           displayValue={formatCalendarDate(trip.planningDate) ?? empty}
@@ -365,7 +398,7 @@ function RittenRow({
         />
       </td>
 
-      <td className="px-3 py-2 tabular-nums text-secondary">
+      <td className="whitespace-nowrap px-1.5 py-2 tabular-nums text-secondary">
         <UpdatedValue trip={trip} field="startTime">
           <TransportTimeCell
             trip={trip}
@@ -376,7 +409,7 @@ function RittenRow({
           />
         </UpdatedValue>
       </td>
-      <td className="px-3 py-2 tabular-nums text-secondary">
+      <td className="whitespace-nowrap px-1.5 py-2 tabular-nums text-secondary">
         <UpdatedValue trip={trip} field="endTime">
           <TransportTimeCell
             trip={trip}
@@ -389,24 +422,37 @@ function RittenRow({
       </td>
 
       {/*
-        ── ONE LINE, ALWAYS ──────────────────────────────────────────────────
+        ── ONE LINE, AND NO WIDER THAN A CONTAINER NUMBER ────────────────────
         A container number is a single identifier that happens to contain a
         space and a slash: `CNEU 452297/0`. In a narrow column the browser
         breaks it at BOTH — after the space, and after the slash, which leaves a
         line ending in a stray "/" that reads like a typo or an escape
         character. Two lines also make a column of them impossible to scan.
 
-        `whitespace-nowrap` on the cell, and a minimum width that fits the
-        format, so it never wraps. The STORED VALUE IS UNTOUCHED: nothing is
-        stripped, replaced or normalised here — the fix is that the text is
-        allowed the room it needs.
+        So the cell never wraps, and the column is exactly as wide as the
+        numbers in it (see COMPACT_COLUMN_KEYS): an ordinary one — `CNEU4681606`
+        — fits whole, with no space reserved beside it. An unusually long value
+        is cut off with an ellipsis rather than widening the whole table; the
+        complete value stays in the tooltip and in the editor. The STORED VALUE
+        IS UNTOUCHED: nothing is stripped, replaced or normalised here.
         ──────────────────────────────────────────────────────────────────────
       */}
-      <td className="w-[9.5rem] min-w-[9.5rem] whitespace-nowrap px-3 py-2 text-secondary">
+      <td className="whitespace-nowrap px-1.5 py-2 text-secondary">
         <UpdatedValue trip={trip} field="containerNumber">
           <InlineCell
             label={t("ritten.edit.containerNumber")}
-            displayValue={trip.containerNumber ?? empty}
+            displayValue={
+              trip.containerNumber ? (
+                <span
+                  title={trip.containerNumber}
+                  className="block max-w-[8.5rem] truncate"
+                >
+                  {trip.containerNumber}
+                </span>
+              ) : (
+                empty
+              )
+            }
             editValue={trip.containerNumber ?? ""}
             maxLength={CONTAINER_NUMBER_MAX_LENGTH}
             isDisabled={!isEditable || isBusy}
@@ -436,7 +482,7 @@ function RittenRow({
         ) : null}
       </td>
 
-      <td className="px-3 py-2 text-secondary">
+      <td className="whitespace-nowrap px-1.5 py-2 text-secondary">
         <UpdatedValue trip={trip} field="containerType">
           {trip.containerType}
         </UpdatedValue>
@@ -454,7 +500,7 @@ function RittenRow({
         The note travels on the Trip the list already returned, so showing it
         costs no request — not one per row, and not one on hover.
       */}
-      <td className="px-3 py-2">
+      <td className="px-1.5 py-2">
         <HoverNote
           label={t("ritten.notes.label")}
           note={trip.internalNotes}
@@ -528,12 +574,12 @@ function RittenRow({
         </span>
       </td>
 
-      <td className="px-3 py-2 text-secondary">
+      <td className="px-1.5 py-2 text-secondary">
         <UpdatedValue trip={trip} field="terminal">
           {trip.terminal ?? empty}
         </UpdatedValue>
       </td>
-      <td className="px-3 py-2 text-secondary">
+      <td className="px-1.5 py-2 text-secondary">
         <UpdatedValue trip={trip} field="destinationCity">
           <DestinationCell trip={trip} isBusy={isBusy} onSave={save} />
         </UpdatedValue>
@@ -554,7 +600,7 @@ function RittenRow({
         which the Excel export still uses.
       */}
 
-      <td className="px-3 py-2">
+      <td className="px-1.5 py-2">
         <CustomPropertiesCell trip={trip} actions={actions} />
       </td>
 
@@ -562,7 +608,7 @@ function RittenRow({
         The window it was read off, with the duration under it. All three are
         stored now; the backend derives the duration from the two times.
       */}
-      <td className="px-3 py-2 tabular-nums text-secondary">
+      <td className="whitespace-nowrap px-1.5 py-2 tabular-nums text-secondary">
         <WaitingTimeCell
           trip={trip}
           isDisabled={!isEditable || isBusy}
@@ -570,11 +616,11 @@ function RittenRow({
         />
       </td>
 
-      <td className="px-3 py-2">
+      <td className="px-1.5 py-2">
         <PdfCell trip={trip} actions={actions} isBusy={isBusy} />
       </td>
 
-      <td className="px-3 py-2">
+      <td className="px-1.5 py-2">
         <RowLifecycleActions
           trip={trip}
           actions={actions}
@@ -796,14 +842,14 @@ function CostConfirmationCell({
 
   if (!confirmation) {
     return (
-      <td className="whitespace-nowrap px-3 py-2 text-right text-secondary">
+      <td className="whitespace-nowrap px-1.5 py-2 text-right text-secondary">
         {t("ritten.value.empty")}
       </td>
     );
   }
 
   return (
-    <td className="whitespace-nowrap px-3 py-2 text-right">
+    <td className="whitespace-nowrap px-1.5 py-2 text-right">
       <span className="inline-flex items-center gap-1">
         <PdfButton
           label={`${t("ritten.cc.viewPdf")} ${toCostConfirmationLabel(confirmation)}`}

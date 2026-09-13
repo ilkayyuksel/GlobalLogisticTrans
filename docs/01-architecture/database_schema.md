@@ -807,7 +807,7 @@ A maintenance event belonging to exactly one asset — a Vehicle **or** a Traile
 | `trailer_id` | `UUID` | YES | `NULL` | Set only for Trailer maintenance |
 | `status` | `maintenance_status` | NO | — | |
 | `maintenance_type` | `TEXT` | YES | `NULL` | Free text — Onderhoud, Herstelling, Banden. Deliberately not an enum |
-| `maintenance_date` | `DATE` | NO | — | |
+| `maintenance_date` | `DATE` | NO | — | The day the work was done, or is planned for. For a `PLANNED` record: its current planning, the date warnings are decided on |
 | `description` | `TEXT` | NO | — | |
 | `mileage` | `INTEGER` | YES | `NULL` | Odometer reading AT THIS maintenance, entered by the Administrator. Never the vehicle's current mileage |
 | `cost` | `NUMERIC(12,2)` | YES | `NULL` | |
@@ -843,17 +843,63 @@ The conceptual "Asset Type" field is not stored — the asset type is implied by
 | Lookup | `trailer_id`, `maintenance_date` | B-tree | Trailer maintenance history |
 | Lookup | `status` | B-tree | Planned/open maintenance overview |
 | Lookup | `maintenance_date` | B-tree | Scheduling overview |
-| Lookup | `next_maintenance_date` | B-tree | Due-maintenance warnings |
+| Lookup | `next_maintenance_date` | B-tree | Vehicle summary: next planned maintenance |
 
 ### Application-enforced rules
 
 - Records are never reassigned to another asset.
-- Records are immutable after completion.
+- **One record per maintenance cycle.** Completing a record does not create a new one: the
+  same record is planned again on the chosen next date (`maintenance_date` and
+  `next_maintenance_date` both become that date) and returns to `PLANNED`. The cycle that
+  ended is appended to `maintenance_completion`. A completed cycle is immutable.
 - Maintenance history is never removed; work that will not happen is set to `CANCELLED`.
+- **Urgency is decided from `status` and `maintenance_date` only.** A `PLANNED` record
+  planned before today is late by the number of calendar days in between, one planned for
+  today is due today, any other is upcoming. `COMPLETED`, `CANCELLED` and `IN_PROGRESS`
+  records carry no urgency. The Dashboard shows at most five `PLANNED` records ordered by
+  `maintenance_date`, then `id`: late ones oldest first, then today's, then upcoming.
 - **Mileage is entered by hand and is never derived.** The system holds no current odometer
-  reading for a vehicle, so a maintenance is considered due only when `next_maintenance_date`
-  is set and has arrived. `next_maintenance_mileage` is stored and displayed, but whether it
-  has been reached cannot be answered and must never be presented as a warning.
+  reading for a vehicle, so `mileage` and `next_maintenance_mileage` are administrative values:
+  stored and displayed, never used for any warning or priority.
+
+---
+
+## 6.5 `maintenance_completion`
+
+### Purpose
+
+One carried-out cycle of a maintenance record. **Append-only**: a row is written once, in the
+transaction that re-plans its record, and is never updated or deleted. Every row is, by
+definition, a completion — its status was `COMPLETED`.
+
+### Columns
+
+| Column | Type | Nullable | Default | Notes |
+|---|---|---|---|---|
+| `id` | `UUID` | NO | `gen_random_uuid()` | Primary key |
+| `maintenance_id` | `UUID` | NO | — | The record this cycle belongs to |
+| `planned_date` | `DATE` | NO | — | The date the record was planned for when the work was done |
+| `completed_on` | `DATE` | NO | — | The day the work was actually done; never in the future |
+| `next_maintenance_date` | `DATE` | NO | — | The date the record was planned again for |
+| `notes` | `TEXT` | YES | `NULL` | The Administrator's extra information about this execution |
+| `maintenance_type` | `TEXT` | YES | `NULL` | The record's type when the cycle was completed |
+| `description` | `TEXT` | NO | — | The record's description when the cycle was completed |
+| `created_at` | `TIMESTAMPTZ` | NO | `now()` | When the completion was registered |
+
+There is deliberately no `updated_at`.
+
+### Foreign Keys
+
+| Column | References | On Delete |
+|---|---|---|
+| `maintenance_id` | `maintenance(id)` | `RESTRICT` |
+
+### Indexes
+
+| Index | Columns | Type | Purpose |
+|---|---|---|---|
+| PK | `id` | Primary key | |
+| Lookup | `maintenance_id`, `completed_on` | B-tree | One record's history, in order |
 
 ---
 
@@ -1264,6 +1310,9 @@ None.
 ### Application-enforced rules
 
 - May be physically deleted; deletion never affects business data.
+- Agenda items (§4.15, "The Agenda") are single-day: `end_date` is `NULL`, `end_time` is always written, and the item lies between 06:00 and 23:00 with `end_time` after `start_time`. Created without an end, an item is given one hour.
+- `event_type` is written as `OTHER` while the Agenda has no event types.
+- A day is read by `start_date` (indexed) and ordered by `start_time`, `end_time`, `id`.
 
 ---
 
@@ -1278,9 +1327,7 @@ A free-form administrator note. Standalone, with no business relationships.
 | Column | Type | Nullable | Default | Notes |
 |---|---|---|---|---|
 | `id` | `UUID` | NO | `gen_random_uuid()` | Primary key |
-| `title` | `TEXT` | NO | — | |
-| `content` | `TEXT` | NO | — | Unlimited length |
-| `color` | `TEXT` | YES | `NULL` | |
+| `content` | `TEXT` | NO | — | The note: plain text, unlimited length |
 | `created_at` | `TIMESTAMPTZ` | NO | `now()` | |
 | `updated_at` | `TIMESTAMPTZ` | NO | `now()` | |
 
@@ -1302,6 +1349,8 @@ None.
 ### Application-enforced rules
 
 - May be physically deleted; deletion never affects business data.
+- `content` is trimmed and may not be empty; the API accepts at most 50,000 characters per note.
+- A note is its text: the `title` and `color` columns were removed (migration `20260913130000_note_is_text`).
 
 ---
 

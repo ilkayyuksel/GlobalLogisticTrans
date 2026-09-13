@@ -3204,13 +3204,40 @@ Mileage and Next Maintenance Mileage are entered by the Administrator. The syste
 does not track a vehicle's current mileage, so Mileage records what the odometer read
 at that maintenance and nothing more.
 
-## Maintenance Due
+## Maintenance Urgency
 
-A maintenance is due when Next Maintenance Date is set and has arrived.
+Only a PLANNED record is outstanding work, and its Maintenance Date is its current
+planning:
 
-A mileage-based due date cannot be determined, because no current mileage exists for a
-vehicle. Next Maintenance Mileage is stored and displayed as a plan; it never produces a
-warning.
+- planned before today: TE LAAT, by the number of calendar days in between;
+- planned for today: VANDAAG;
+- planned after today: GEPLAND.
+
+COMPLETED, CANCELLED and IN_PROGRESS records carry no warning. Next Maintenance Date is
+not read: on a PLANNED record it is the plan for the cycle after this one.
+
+The Dashboard shows at most five PLANNED records: the late ones from the oldest date,
+then today's, then the upcoming ones in date order.
+
+Mileage and Next Maintenance Mileage are administrative. No current mileage exists for a
+vehicle, so no kilometre value ever produces a warning or a priority.
+
+---
+
+## Completing Maintenance
+
+Completing does not create a new Maintenance record. The same record is planned again
+on the next maintenance date the Administrator chooses and returns to PLANNED, so there
+is always exactly one current planning per maintenance cycle.
+
+The cycle that ended is appended to the record's history (Maintenance Completion): the
+date it was planned for, the day it was done, the extra information entered, and the
+next date chosen. History entries are never changed or removed.
+
+A completion names the planned date of the cycle it completes. A request whose planned
+date the record no longer has — a double submit, or a second open screen after the
+cycle was already completed — is refused with a conflict and writes nothing, so one
+service visit can never be recorded twice.
 
 ---
 
@@ -4082,6 +4109,25 @@ Calendar Events may overlap.
 
 ---
 
+## The Agenda (Day View)
+
+The Agenda shows and edits Calendar Events one day at a time.
+
+- An Agenda item lies within one day, between 06:00 and 23:00. It is stored as a
+  single-day event: Start Date, Start Time and End Time, with no End Date.
+- The title is required. The end is optional when creating: without one, the item lasts
+  exactly one hour. The end must be after the start.
+- Editing changes the title, the start and the end — never the day.
+- Items have no status. An item is planned until it is changed or deleted; deleting
+  removes it.
+- The Agenda has no event types yet; every item is stored with Event Type OTHER.
+- Overlapping items are allowed and are shown side by side.
+- The Dashboard's "Agenda vandaag" asks the same day query, for today.
+- Dates and times are wall-clock values without a timezone, like a Trip's planning date
+  and times.
+
+---
+
 ## Future Considerations
 
 The CalendarEvent entity should support future extensions such as:
@@ -4147,13 +4193,14 @@ Future versions may optionally allow Notes to reference:
 
 ## Stored Information
 
-A Note should contain:
+A Note is its text:
 
-- Title
-- Content
-- Color (optional)
+- Content — plain text, line breaks kept, never empty
 - Created At
 - Updated At
+
+A Note has no title, colour, category, tag, priority, deadline or status. (The title and
+colour columns the first model had were removed: a note is its text.)
 
 ---
 
@@ -4163,7 +4210,14 @@ Notes are independent.
 
 Deleting a Note has no impact on other entities.
 
-Notes may contain unlimited text.
+The database stores a note of any length; the API accepts up to 50,000 characters per
+note, which bounds what a single request can store.
+
+Text that is empty or consists only of whitespace is refused; surrounding whitespace is
+removed before saving.
+
+The Notes page lists every note, the most recently changed first. Adding, changing and
+deleting — after a confirmation — are the whole of the functionality.
 
 ---
 

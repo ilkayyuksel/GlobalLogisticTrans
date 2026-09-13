@@ -4,6 +4,7 @@ import { APP_FILTER, APP_INTERCEPTOR } from "@nestjs/core";
 import { ScheduleModule } from "@nestjs/schedule";
 
 import { AuthModule } from "./auth/auth.module";
+import { CalendarEventModule } from "./calendar-events/calendar-event.module";
 import { EventsModule } from "./common/events/events.module";
 import { AllExceptionsFilter } from "./common/filters/all-exceptions.filter";
 import { ResponseInterceptor } from "./common/interceptors/response.interceptor";
@@ -14,6 +15,7 @@ import { HealthModule } from "./health/health.module";
 import { ImapModule } from "./imap/imap.module";
 import { LoggerModule } from "./logger/logger.module";
 import { MaintenanceModule } from "./maintenance/maintenance.module";
+import { NoteModule } from "./notes/note.module";
 import { PdfDocumentModule } from "./pdf-documents/pdf-document.module";
 import { PdfImportModule } from "./pdf-import/pdf-import.module";
 import { PricingEngineModule } from "./pricing-engine/pricing-engine.module";
@@ -63,6 +65,8 @@ import { WhatsAppModule } from "./whatsapp/whatsapp.module";
     VehicleModule,
     VehicleAssignmentModule,
     MaintenanceModule,
+    CalendarEventModule,
+    NoteModule,
     RoutePricingModule,
     RouteCostModule,
     RouteConfigurationModule,

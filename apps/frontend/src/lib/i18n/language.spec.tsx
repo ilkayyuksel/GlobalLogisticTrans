@@ -81,7 +81,6 @@ describe("language", () => {
     it("uses the product's own Dutch vocabulary", () => {
       expect(TRANSLATIONS.nl["navigation.trips"]).toBe("Ritten");
       expect(TRANSLATIONS.nl["navigation.calendar"]).toBe("Agenda");
-      expect(TRANSLATIONS.nl["navigation.licensePlates"]).toBe("Nummerplaten");
       expect(TRANSLATIONS.nl["navigation.customValues"]).toBe("Custom waarden");
     });
 
@@ -133,7 +132,14 @@ describe("language", () => {
       await userEvent.selectOptions(languageSelect(), "tr");
       await userEvent.click(await screen.findByRole("button", { name: /Ayarlar/ }));
 
-      expect(screen.getByRole("menuitem", { name: "Plakalar" })).toBeInTheDocument();
+      expect(
+        screen.getByRole("menuitem", {
+          name: TRANSLATIONS.tr["navigation.customValues"],
+        }),
+      ).toBeInTheDocument();
+      expect(
+        screen.queryByRole("menuitem", { name: "Custom waarden" }),
+      ).not.toBeInTheDocument();
     });
 
     it("switches back to Dutch", async () => {

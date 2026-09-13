@@ -2,7 +2,37 @@ import { Injectable } from "@nestjs/common";
 import { MaintenanceStatus, Prisma } from "@prisma/client";
 
 import { PrismaService } from "../prisma/prisma.service";
-import { MaintenanceWithVehicle } from "./dto/maintenance-response.dto";
+import {
+  MaintenanceWithHistory,
+  MaintenanceWithVehicle,
+} from "./dto/maintenance-response.dto";
+import {
+  COMPLETABLE_STATUSES,
+  OUTSTANDING_STATUS,
+} from "./maintenance-urgency";
+
+/** Everything a completion writes, decided by the service beforehand. */
+export interface CompleteMaintenanceData {
+  id: string;
+  /**
+   * The date the record was planned for when the service read it. The
+   * completion applies only if the record still has it — see `complete`.
+   */
+  expectedPlannedDate: Date;
+  completedOn: Date;
+  nextMaintenanceDate: Date;
+  notes: string | null;
+  maintenanceType: string | null;
+  description: string;
+}
+
+/** A record's history, oldest cycle first; registration order breaks ties. */
+const COMPLETIONS_IN_ORDER = {
+  orderBy: [
+    { completedOn: "asc" },
+    { createdAt: "asc" },
+  ] satisfies Prisma.MaintenanceCompletionOrderByWithRelationInput[],
+};
 
 export type CreateMaintenanceData = Prisma.MaintenanceUncheckedCreateInput;
 export type UpdateMaintenanceData = Prisma.MaintenanceUncheckedUpdateInput;
@@ -76,10 +106,86 @@ export class MaintenanceRepository {
     return { items, totalItems };
   }
 
-  findById(id: string): Promise<MaintenanceWithVehicle | null> {
+  /** One record, its Vehicle and its whole history, in one query. */
+  findById(id: string): Promise<MaintenanceWithHistory | null> {
     return this.prisma.maintenance.findUnique({
       where: { id },
+      include: { vehicle: true, completions: COMPLETIONS_IN_ORDER },
+    });
+  }
+
+  /**
+   * The outstanding maintenance most in need of attention, with its Vehicle.
+   *
+   * One query, ordered and limited by PostgreSQL. Ascending planned date IS the
+   * priority: every overdue date sorts before today and today before any
+   * future date, so this yields the overdue records oldest first, then today's,
+   * then the upcoming ones soonest first. The id makes equal dates stable.
+   *
+   * Only the status and the date are read — no mileage, and not
+   * `nextMaintenanceDate`, which on a PLANNED record is the cycle after this.
+   */
+  findAttention(take: number): Promise<MaintenanceWithVehicle[]> {
+    return this.prisma.maintenance.findMany({
+      where: { status: OUTSTANDING_STATUS },
       include: { vehicle: true },
+      orderBy: [{ maintenanceDate: "asc" }, { id: "asc" }],
+      take,
+    });
+  }
+
+  /**
+   * Completes the current cycle of one record and plans the SAME record again.
+   *
+   * One transaction, two writes and no new Maintenance row:
+   *   1. the record moves to its next date and back to PLANNED — but only if
+   *      it is still completable and still planned for the date the client
+   *      named. A completion or an edit landing between the service's read and
+   *      this write matches nothing. (A LATER request for the same cycle never
+   *      gets here: the service refuses a planned date the record no longer has.)
+   *   2. the cycle that ended is appended to the history.
+   *
+   * `nextMaintenanceDate` is set to the same date: the plan for the next
+   * maintenance is now the record's own planning, and leaving the old value
+   * would show a date nobody planned any more.
+   *
+   * Resolves null when step 1 matched nothing; nothing has been written then.
+   */
+  complete(data: CompleteMaintenanceData): Promise<MaintenanceWithHistory | null> {
+    return this.prisma.$transaction(async (transaction) => {
+      const replanned = await transaction.maintenance.updateMany({
+        where: {
+          id: data.id,
+          status: { in: [...COMPLETABLE_STATUSES] },
+          maintenanceDate: data.expectedPlannedDate,
+        },
+        data: {
+          status: MaintenanceStatus.PLANNED,
+          maintenanceDate: data.nextMaintenanceDate,
+          nextMaintenanceDate: data.nextMaintenanceDate,
+        },
+      });
+
+      if (replanned.count !== 1) {
+        return null;
+      }
+
+      await transaction.maintenanceCompletion.create({
+        data: {
+          maintenanceId: data.id,
+          plannedDate: data.expectedPlannedDate,
+          completedOn: data.completedOn,
+          nextMaintenanceDate: data.nextMaintenanceDate,
+          notes: data.notes,
+          maintenanceType: data.maintenanceType,
+          description: data.description,
+        },
+      });
+
+      return transaction.maintenance.findUnique({
+        where: { id: data.id },
+        include: { vehicle: true, completions: COMPLETIONS_IN_ORDER },
+      });
     });
   }
 

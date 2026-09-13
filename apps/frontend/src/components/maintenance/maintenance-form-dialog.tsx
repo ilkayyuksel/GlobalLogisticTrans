@@ -363,7 +363,8 @@ export function MaintenanceFormDialog({
   );
 }
 
-function FormError({ error }: { error: unknown }) {
+/** The backend's refusal, with its field-level detail. Shared by both dialogs. */
+export function FormError({ error }: { error: unknown }) {
   const details =
     error instanceof ApiError && Array.isArray(error.details)
       ? (error.details as string[])

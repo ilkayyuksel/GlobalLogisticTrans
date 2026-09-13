@@ -129,7 +129,7 @@ export function PricingCells({
       />
       <ReadOnlyAmountCell amount={pricing?.others ?? null} empty={empty} />
       <ReadOnlyAmountCell amount={pricing?.ek ?? null} empty={empty} />
-      <td className="whitespace-nowrap px-3 py-2 text-right font-medium tabular-nums text-foreground">
+      <td className="whitespace-nowrap px-1.5 py-2 text-right font-medium tabular-nums text-foreground">
         {pricing?.totaal ?? empty}
       </td>
     </>
@@ -150,7 +150,7 @@ function ReadOnlyAmountCell({
   empty: string;
 }) {
   return (
-    <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums text-secondary">
+    <td className="whitespace-nowrap px-1.5 py-2 text-right tabular-nums text-secondary">
       {amount ?? empty}
     </td>
   );
@@ -193,7 +193,7 @@ function EditableAmountCell({
    */
   if (!pricing) {
     return (
-      <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums text-secondary">
+      <td className="whitespace-nowrap px-1.5 py-2 text-right tabular-nums text-secondary">
         {empty}
       </td>
     );
@@ -203,7 +203,7 @@ function EditableAmountCell({
   const isOverridden = isOverriddenComponent(pricing, column.componentCode);
 
   return (
-    <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums text-secondary">
+    <td className="whitespace-nowrap px-1.5 py-2 text-right tabular-nums text-secondary">
       <span className="inline-flex items-center justify-end gap-1">
         <InlineCell
           label={`${label} ${t("ritten.pricing.editLabel")}`}

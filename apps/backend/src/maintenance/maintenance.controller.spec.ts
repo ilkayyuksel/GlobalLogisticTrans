@@ -5,9 +5,16 @@ import {
 } from "@nestjs/common";
 import { APP_FILTER, APP_INTERCEPTOR } from "@nestjs/core";
 import { Test } from "@nestjs/testing";
-import { Maintenance, MaintenanceStatus, Prisma, Vehicle } from "@prisma/client";
+import {
+  Maintenance,
+  MaintenanceCompletion,
+  MaintenanceStatus,
+  Prisma,
+  Vehicle,
+} from "@prisma/client";
 import request from "supertest";
 
+import { addDays, toIsoDate, todayUtc } from "../common/dates";
 import { AllExceptionsFilter } from "../common/filters/all-exceptions.filter";
 import { ResponseInterceptor } from "../common/interceptors/response.interceptor";
 import { AppLoggerService } from "../logger/app-logger.service";
@@ -28,8 +35,13 @@ const VEHICLE = {
 
 function buildMaintenance(
   overrides: Partial<Maintenance> = {},
-): Maintenance & { vehicle: Vehicle | null } {
+  completions: MaintenanceCompletion[] = [],
+): Maintenance & {
+  vehicle: Vehicle | null;
+  completions: MaintenanceCompletion[];
+} {
   return {
+    completions,
     id: MAINTENANCE_ID,
     vehicleId: VEHICLE_ID,
     trailerId: null,
@@ -78,6 +90,8 @@ describe("MaintenanceController (integration)", () => {
     findLatestWithMileageForVehicle: jest.Mock;
     findNextPlannedForVehicle: jest.Mock;
     vehicleExists: jest.Mock;
+    findAttention: jest.Mock;
+    complete: jest.Mock;
   };
 
   beforeEach(async () => {
@@ -93,6 +107,8 @@ describe("MaintenanceController (integration)", () => {
       findLatestWithMileageForVehicle: jest.fn().mockResolvedValue(null),
       findNextPlannedForVehicle: jest.fn().mockResolvedValue(null),
       vehicleExists: jest.fn().mockResolvedValue(true),
+      findAttention: jest.fn().mockResolvedValue([]),
+      complete: jest.fn(),
     };
 
     const logger = {
@@ -536,6 +552,371 @@ describe("MaintenanceController (integration)", () => {
       await request(app.getHttpServer())
         .get(`${BASE}/summary/vehicle/${VEHICLE_ID}`)
         .expect(404);
+    });
+  });
+
+  /** A date `days` from today, as the DATE column holds it. */
+  function day(days: number): Date {
+    return addDays(todayUtc(), days);
+  }
+
+  function planned(days: number, overrides: Partial<Maintenance> = {}) {
+    return buildMaintenance({
+      status: MaintenanceStatus.PLANNED,
+      maintenanceDate: day(days),
+      ...overrides,
+    });
+  }
+
+  describe("the Dashboard's attention list", () => {
+    function attention() {
+      return request(app.getHttpServer()).get(`${BASE}/attention`);
+    }
+
+    /** The literal path must not be read as a record id. */
+    it("is its own route, not a malformed id", async () => {
+      await attention().expect(200);
+
+      expect(repository.findById).not.toHaveBeenCalled();
+    });
+
+    it("asks the database for at most five records", async () => {
+      await attention().expect(200);
+
+      expect(repository.findAttention).toHaveBeenCalledWith(5);
+    });
+
+    it("states the day it judged against", async () => {
+      const response = await attention().expect(200);
+
+      expect(response.body.data.today).toBe(toIsoDate(todayUtc()));
+    });
+
+    it("labels every record from its date and status, in the database's order", async () => {
+      repository.findAttention.mockResolvedValue([
+        planned(-4, { id: "a" }),
+        planned(-1, { id: "b" }),
+        planned(0, { id: "c" }),
+        planned(2, { id: "d" }),
+      ]);
+
+      const response = await attention().expect(200);
+
+      expect(
+        response.body.data.items.map(
+          (item: { id: string; urgency: unknown }) => [item.id, item.urgency],
+        ),
+      ).toEqual([
+        ["a", { level: "OVERDUE", daysOverdue: 4 }],
+        ["b", { level: "OVERDUE", daysOverdue: 1 }],
+        ["c", { level: "TODAY", daysOverdue: 0 }],
+        ["d", { level: "UPCOMING", daysOverdue: 0 }],
+      ]);
+    });
+
+    it("names each record's vehicle", async () => {
+      repository.findAttention.mockResolvedValue([planned(0)]);
+
+      const response = await attention().expect(200);
+
+      expect(response.body.data.items[0].vehicle.licensePlate).toBe("1-ABC-123");
+    });
+
+    /** Kilometres are administrative; they never move a record's urgency. */
+    it("gives records on one date the same urgency whatever their mileage", async () => {
+      repository.findAttention.mockResolvedValue([
+        planned(-2, { id: "low", mileage: 1_000, nextMaintenanceMileage: 2_000 }),
+        planned(-2, { id: "high", mileage: 900_000, nextMaintenanceMileage: 10 }),
+      ]);
+
+      const response = await attention().expect(200);
+
+      expect(response.body.data.items[0].urgency).toEqual(
+        response.body.data.items[1].urgency,
+      );
+    });
+
+    it("says so when nothing is planned", async () => {
+      const response = await attention().expect(200);
+
+      expect(response.body.data.items).toEqual([]);
+    });
+  });
+
+  describe("one record's history", () => {
+    function completion(
+      id: string,
+      completedOn: string,
+      nextMaintenanceDate: string,
+    ): MaintenanceCompletion {
+      return {
+        id,
+        maintenanceId: MAINTENANCE_ID,
+        plannedDate: new Date(`${completedOn}T00:00:00.000Z`),
+        completedOn: new Date(`${completedOn}T00:00:00.000Z`),
+        nextMaintenanceDate: new Date(`${nextMaintenanceDate}T00:00:00.000Z`),
+        notes: id === "first" ? "Olie + filters vervangen" : null,
+        maintenanceType: "Onderhoud",
+        description: "Grote beurt",
+        createdAt: new Date(`${completedOn}T12:00:00.000Z`),
+      };
+    }
+
+    it("comes with the record, in the order the database gave it", async () => {
+      repository.findById.mockResolvedValue(
+        buildMaintenance({ status: MaintenanceStatus.PLANNED }, [
+          completion("first", "2026-09-14", "2027-03-14"),
+          completion("second", "2027-03-14", "2027-09-14"),
+        ]),
+      );
+
+      const response = await request(app.getHttpServer())
+        .get(`${BASE}/${MAINTENANCE_ID}`)
+        .expect(200);
+
+      expect(response.body.data.completions).toEqual([
+        expect.objectContaining({
+          id: "first",
+          completedOn: "2026-09-14",
+          nextMaintenanceDate: "2027-03-14",
+          notes: "Olie + filters vervangen",
+          maintenanceType: "Onderhoud",
+        }),
+        expect.objectContaining({
+          id: "second",
+          completedOn: "2027-03-14",
+          nextMaintenanceDate: "2027-09-14",
+          notes: null,
+        }),
+      ]);
+    });
+
+    it("is empty for a record never completed", async () => {
+      const response = await request(app.getHttpServer())
+        .get(`${BASE}/${MAINTENANCE_ID}`)
+        .expect(200);
+
+      expect(response.body.data.completions).toEqual([]);
+    });
+
+    it("carries the same urgency the Dashboard would show", async () => {
+      repository.findById.mockResolvedValue(planned(-3));
+
+      const response = await request(app.getHttpServer())
+        .get(`${BASE}/${MAINTENANCE_ID}`)
+        .expect(200);
+
+      expect(response.body.data.urgency).toEqual({
+        level: "OVERDUE",
+        daysOverdue: 3,
+      });
+    });
+  });
+
+  describe("completing", () => {
+    /** Names the cycle `planned(-4)` holds, as the dialog would, unless overridden. */
+    function complete(body: Record<string, unknown>) {
+      return request(app.getHttpServer())
+        .post(`${BASE}/${MAINTENANCE_ID}/completions`)
+        .send({ plannedDate: toIsoDate(day(-4)), ...body });
+    }
+
+    /** What the database holds after the transaction: one record, re-planned. */
+    function replanned(data: {
+      expectedPlannedDate: Date;
+      completedOn: Date;
+      nextMaintenanceDate: Date;
+      notes: string | null;
+      maintenanceType: string | null;
+      description: string;
+    }) {
+      return buildMaintenance(
+        {
+          status: MaintenanceStatus.PLANNED,
+          maintenanceDate: data.nextMaintenanceDate,
+          nextMaintenanceDate: data.nextMaintenanceDate,
+        },
+        [
+          {
+            id: "completion-1",
+            maintenanceId: MAINTENANCE_ID,
+            plannedDate: data.expectedPlannedDate,
+            completedOn: data.completedOn,
+            nextMaintenanceDate: data.nextMaintenanceDate,
+            notes: data.notes,
+            maintenanceType: data.maintenanceType,
+            description: data.description,
+            createdAt: new Date(),
+          },
+        ],
+      );
+    }
+
+    beforeEach(() => {
+      repository.findById.mockResolvedValue(planned(-4));
+      repository.complete.mockImplementation((data) =>
+        Promise.resolve(replanned(data)),
+      );
+    });
+
+    it("completes the cycle of the record that was read", async () => {
+      const next = toIsoDate(day(180));
+
+      await complete({ nextMaintenanceDate: next, notes: "Groot onderhoud" }).expect(201);
+
+      expect(repository.complete).toHaveBeenCalledWith({
+        id: MAINTENANCE_ID,
+        expectedPlannedDate: day(-4),
+        completedOn: todayUtc(),
+        nextMaintenanceDate: day(180),
+        notes: "Groot onderhoud",
+        maintenanceType: "Onderhoud",
+        description: "Grote beurt",
+      });
+    });
+
+    it("creates no new maintenance record", async () => {
+      await complete({ nextMaintenanceDate: toIsoDate(day(180)) }).expect(201);
+
+      expect(repository.create).not.toHaveBeenCalled();
+    });
+
+    it("answers with the same record, PLANNED on its next date, and its history", async () => {
+      const next = toIsoDate(day(180));
+
+      const response = await complete({ nextMaintenanceDate: next }).expect(201);
+
+      expect(response.body.data).toMatchObject({
+        id: MAINTENANCE_ID,
+        status: "PLANNED",
+        maintenanceDate: next,
+        urgency: { level: "UPCOMING", daysOverdue: 0 },
+      });
+      expect(response.body.data.completions).toHaveLength(1);
+      expect(response.body.data.completions[0]).toMatchObject({
+        plannedDate: toIsoDate(day(-4)),
+        completedOn: toIsoDate(todayUtc()),
+        nextMaintenanceDate: next,
+      });
+    });
+
+    /** A late cycle completed today: the history keeps the real dates. */
+    it("keeps a late cycle's planned date apart from its completion date", async () => {
+      await complete({
+        completedOn: toIsoDate(day(-1)),
+        nextMaintenanceDate: toIsoDate(day(180)),
+      }).expect(201);
+
+      expect(repository.complete).toHaveBeenCalledWith(
+        expect.objectContaining({
+          expectedPlannedDate: day(-4),
+          completedOn: day(-1),
+        }),
+      );
+    });
+
+    it("stores no note when none is given", async () => {
+      await complete({ nextMaintenanceDate: toIsoDate(day(10)) }).expect(201);
+
+      expect(repository.complete).toHaveBeenCalledWith(
+        expect.objectContaining({ notes: null }),
+      );
+    });
+
+    it("stores a blank note as no note", async () => {
+      await complete({ nextMaintenanceDate: toIsoDate(day(10)), notes: "   " }).expect(201);
+
+      expect(repository.complete).toHaveBeenCalledWith(
+        expect.objectContaining({ notes: null }),
+      );
+    });
+
+    /** Edge cases the Administrator may choose: the urgency shows what they mean. */
+    it.each([
+      ["today", 0, "TODAY"],
+      ["in the past", -2, "OVERDUE"],
+    ])("accepts a next date %s", async (_case, days, level) => {
+      const response = await complete({
+        nextMaintenanceDate: toIsoDate(day(days)),
+      }).expect(201);
+
+      expect(response.body.data.urgency.level).toBe(level);
+    });
+
+    it("completes work already IN_PROGRESS as well", async () => {
+      repository.findById.mockResolvedValue(
+        planned(0, { status: MaintenanceStatus.IN_PROGRESS }),
+      );
+
+      await complete({
+        plannedDate: toIsoDate(day(0)),
+        nextMaintenanceDate: toIsoDate(day(30)),
+      }).expect(201);
+
+      expect(repository.complete).toHaveBeenCalled();
+    });
+
+    it.each([
+      ["no planned date", { plannedDate: undefined, nextMaintenanceDate: "2027-03-14" }],
+      ["an impossible planned date", { plannedDate: "2026-02-30", nextMaintenanceDate: "2027-03-14" }],
+      ["no next date", {}],
+      ["an empty next date", { nextMaintenanceDate: "" }],
+      ["an impossible next date", { nextMaintenanceDate: "2027-02-31" }],
+      ["an impossible completion date", { nextMaintenanceDate: "2027-03-14", completedOn: "2026-13-01" }],
+      ["an over-long note", { nextMaintenanceDate: "2027-03-14", notes: "x".repeat(2001) }],
+      ["an unknown field", { nextMaintenanceDate: "2027-03-14", status: "COMPLETED" }],
+    ])("refuses %s", async (_case, body) => {
+      await complete(body).expect(400);
+
+      expect(repository.complete).not.toHaveBeenCalled();
+    });
+
+    it("refuses a completion date in the future", async () => {
+      await complete({
+        completedOn: toIsoDate(day(1)),
+        nextMaintenanceDate: toIsoDate(day(180)),
+      }).expect(400);
+
+      expect(repository.complete).not.toHaveBeenCalled();
+    });
+
+    it.each([MaintenanceStatus.COMPLETED, MaintenanceStatus.CANCELLED])(
+      "refuses a %s record, which has no open cycle",
+      async (status) => {
+        repository.findById.mockResolvedValue(planned(0, { status }));
+
+        await complete({
+          plannedDate: toIsoDate(day(0)),
+          nextMaintenanceDate: toIsoDate(day(30)),
+        }).expect(409);
+
+        expect(repository.complete).not.toHaveBeenCalled();
+      },
+    );
+
+    it("refuses a record that changed while it was being completed", async () => {
+      repository.complete.mockResolvedValue(null);
+
+      await complete({ nextMaintenanceDate: toIsoDate(day(30)) }).expect(409);
+    });
+
+    /**
+     * A double submit, or a second open tab: the first request already moved
+     * the record to its next date, and this one still names the cycle it ended.
+     * Found at runtime — two simultaneous requests both answered 201.
+     */
+    it("refuses a planned date the record no longer has, and writes nothing", async () => {
+      repository.findById.mockResolvedValue(planned(180));
+
+      await complete({ nextMaintenanceDate: toIsoDate(day(360)) }).expect(409);
+
+      expect(repository.complete).not.toHaveBeenCalled();
+    });
+
+    it("reports an unknown record as 404", async () => {
+      repository.findById.mockResolvedValue(null);
+
+      await complete({ nextMaintenanceDate: toIsoDate(day(30)) }).expect(404);
     });
   });
 

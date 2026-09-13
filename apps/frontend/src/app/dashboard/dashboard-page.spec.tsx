@@ -3,14 +3,24 @@ import userEvent from "@testing-library/user-event";
 
 import DashboardPage from "./page";
 import { ApiError } from "@/lib/api/client";
+import {
+  getCalendarDay,
+  type CalendarDay,
+  type CalendarEvent,
+} from "@/lib/api/calendar-events";
 import { uploadTransportOrderPdfs } from "@/lib/api/imports";
 import {
   getDriverStatistics,
   type DriverStatistics,
 } from "@/lib/api/driver-statistics";
-import { listMaintenance, type Maintenance } from "@/lib/api/maintenance";
+import {
+  getMaintenanceAttention,
+  listMaintenance,
+  type Maintenance,
+} from "@/lib/api/maintenance";
 import { type ListTripsParams, listTrips } from "@/lib/api/trips";
 import type { Paginated, Trip } from "@/lib/api/types";
+import { today } from "@/lib/calendar/calendar-dates";
 import { LanguageProvider } from "@/lib/i18n/language-provider";
 import { ThemeProvider } from "@/lib/theme/theme-provider";
 
@@ -27,11 +37,17 @@ jest.mock("@/lib/api/imports", () => ({
 jest.mock("@/lib/api/maintenance", () => ({
   ...jest.requireActual("@/lib/api/maintenance"),
   listMaintenance: jest.fn(),
+  getMaintenanceAttention: jest.fn(),
 }));
 
 jest.mock("@/lib/api/driver-statistics", () => ({
   ...jest.requireActual("@/lib/api/driver-statistics"),
   getDriverStatistics: jest.fn(),
+}));
+
+jest.mock("@/lib/api/calendar-events", () => ({
+  ...jest.requireActual("@/lib/api/calendar-events"),
+  getCalendarDay: jest.fn(),
 }));
 
 const listTripsMock = listTrips as jest.MockedFunction<typeof listTrips>;
@@ -44,6 +60,40 @@ const listMaintenanceMock = listMaintenance as jest.MockedFunction<
 const driverStatisticsMock = getDriverStatistics as jest.MockedFunction<
   typeof getDriverStatistics
 >;
+const attentionMock = getMaintenanceAttention as jest.MockedFunction<
+  typeof getMaintenanceAttention
+>;
+
+const calendarDayMock = getCalendarDay as jest.MockedFunction<
+  typeof getCalendarDay
+>;
+
+/** The backend's top five, exactly as it answers. */
+function attention(items: Maintenance[] = []) {
+  return { today: "2026-09-14", items };
+}
+
+/** Today's Agenda, as the calendar's day endpoint answers it. */
+function agendaDay(items: CalendarEvent[] = []): CalendarDay {
+  return { date: today(), dayStart: "06:00", dayEnd: "23:00", items };
+}
+
+function agendaItem(
+  id: string,
+  title: string,
+  start: string,
+  end: string,
+): CalendarEvent {
+  return {
+    id,
+    title,
+    date: today(),
+    startTime: `${start}:00`,
+    endTime: `${end}:00`,
+    createdAt: "2026-09-13T08:00:00.000Z",
+    updatedAt: "2026-09-13T08:00:00.000Z",
+  };
+}
 
 /** The windows come from the backend; the widget never works them out. */
 const PERIOD: DriverStatistics["period"] = {
@@ -70,16 +120,17 @@ function buildWarning(overrides: Partial<Maintenance> = {}): Maintenance {
       displayColor: "#2563eb",
       isActive: true,
     },
-    status: "COMPLETED",
+    status: "PLANNED",
     maintenanceType: "Onderhoud",
-    maintenanceDate: "2026-01-10",
+    maintenanceDate: "2026-09-10",
     description: "Grote beurt",
     mileage: 245000,
     cost: "1250.50",
     workshop: "Garage Peeters",
-    nextMaintenanceDate: "2026-08-01",
+    nextMaintenanceDate: null,
     nextMaintenanceMileage: 275000,
     notes: null,
+    urgency: { level: "OVERDUE", daysOverdue: 4 },
     createdAt: "2026-01-10T00:00:00.000Z",
     updatedAt: "2026-01-10T00:00:00.000Z",
     ...overrides,
@@ -223,8 +274,12 @@ describe("DashboardPage", () => {
     listTripsMock.mockReset();
     listMaintenanceMock.mockReset();
     listMaintenanceMock.mockResolvedValue(maintenancePage([]));
+    attentionMock.mockReset();
+    attentionMock.mockResolvedValue(attention());
     driverStatisticsMock.mockReset();
     driverStatisticsMock.mockResolvedValue(driverStatistics());
+    calendarDayMock.mockReset();
+    calendarDayMock.mockResolvedValue(agendaDay());
     window.localStorage.clear();
     respondWithCounts({ total: 42, today: 3, week: 11, open: 7, closed: 30 });
   });
@@ -293,29 +348,32 @@ describe("DashboardPage", () => {
       ).toBe(true);
     });
 
-    /**
-     * No backend aggregation exists for this, and averaging it in the browser
-     * would mean downloading every Trip. It must say so rather than show a
-     * number.
-     */
-    it("reports average waiting time as unavailable", async () => {
+    it("no longer shows an average waiting time", async () => {
       renderDashboard();
 
       await waitForCounts();
 
-      expect(
-        within(statCard("Gemiddelde wachttijd")).getByText("Nog niet beschikbaar"),
-      ).toBeInTheDocument();
+      expect(screen.queryByText("Gemiddelde wachttijd")).not.toBeInTheDocument();
     });
 
-    it("never shows zero for a statistic it cannot compute", async () => {
+    /** The same Agenda widget, moved into the fourth place of the headline row. */
+    it("puts the Agenda where the average waiting time was", async () => {
       renderDashboard();
 
       await waitForCounts();
 
-      expect(
-        within(statCard("Gemiddelde wachttijd")).queryByText("0"),
-      ).not.toBeInTheDocument();
+      const headline = statCard("Totaal ritten").parentElement as HTMLElement;
+
+      expect(headline.children).toHaveLength(4);
+      expect(within(headline.children[3] as HTMLElement).getByText("Agenda vandaag")).toBeInTheDocument();
+    });
+
+    it("shows the Agenda once, not twice", async () => {
+      renderDashboard();
+
+      await waitForCounts();
+
+      expect(screen.getAllByText("Agenda vandaag")).toHaveLength(1);
     });
   });
 
@@ -418,109 +476,298 @@ describe("DashboardPage", () => {
     });
   });
 
-  describe("widgets the backend cannot supply yet", () => {
-    it("shows Agenda vandaag as unavailable, with its link", async () => {
-      renderDashboard();
-
-      const widget = (await screen.findByText("Agenda vandaag")).closest(
+  /**
+   * ── TODAY'S AGENDA ──────────────────────────────────────────────────────────
+   * The calendar's own day endpoint, asked for today, drawn by the calendar's
+   * own grid. That the day query returns that one date and nothing of
+   * yesterday or tomorrow is the backend's contract (see the repository spec);
+   * here it is that the Dashboard asks for today only and shows what came back.
+   * ────────────────────────────────────────────────────────────────────────────
+   */
+  describe("today's Agenda", () => {
+    async function agendaSection(): Promise<HTMLElement> {
+      return (await screen.findByText("Agenda vandaag")).closest(
         "section",
       ) as HTMLElement;
+    }
 
-      expect(
-        within(widget).getByText("Nog niet beschikbaar"),
-      ).toBeInTheDocument();
-      expect(
-        within(widget).getByRole("link", { name: /Bekijk agenda/ }),
-      ).toHaveAttribute("href", "/calendar");
-    });
-
-    it("invents no calendar entries", async () => {
+    it("asks the calendar's day endpoint for today, and only today", async () => {
       renderDashboard();
 
-      await screen.findByText("Agenda vandaag");
+      await agendaSection();
+      await waitFor(() => expect(calendarDayMock).toHaveBeenCalled());
 
-      expect(screen.queryByText(/afspraak|vergadering/i)).not.toBeInTheDocument();
+      expect(calendarDayMock.mock.calls.map(([date]) => date)).toEqual([today()]);
+    });
+
+    it("shows today's items in time order, with their times, each linking to the calendar", async () => {
+      calendarDayMock.mockResolvedValue(
+        agendaDay([
+          agendaItem("a", "Vergadering", "09:00", "10:00"),
+          agendaItem("b", "Telefoon", "13:30", "14:00"),
+        ]),
+      );
+
+      renderDashboard();
+      const section = await agendaSection();
+      const items = await within(section).findAllByRole("link", { name: /, \d\d:\d\d–/ });
+
+      expect(items.map((link) => link.getAttribute("aria-label"))).toEqual([
+        "Vergadering, 09:00–10:00",
+        "Telefoon, 13:30–14:00",
+      ]);
+      expect(items[0]).toHaveAttribute("href", `/calendar?date=${today()}&event=a`);
+      expect(within(section).getByText("09:00–10:00")).toBeInTheDocument();
+    });
+
+    it("stands overlapping items side by side", async () => {
+      calendarDayMock.mockResolvedValue(
+        agendaDay([
+          agendaItem("a", "Vergadering", "10:00", "11:00"),
+          agendaItem("b", "Telefoon", "10:30", "12:00"),
+        ]),
+      );
+
+      renderDashboard();
+      const section = await agendaSection();
+      const first = (
+        await within(section).findByRole("link", { name: "Vergadering, 10:00–11:00" })
+      ).parentElement as HTMLElement;
+      const second = within(section).getByRole("link", {
+        name: "Telefoon, 10:30–12:00",
+      }).parentElement as HTMLElement;
+
+      expect([first.style.left, first.style.width]).toEqual(["0%", "50%"]);
+      expect([second.style.left, second.style.width]).toEqual(["50%", "50%"]);
+    });
+
+    it("offers nothing to create: the Dashboard only shows", async () => {
+      calendarDayMock.mockResolvedValue(
+        agendaDay([agendaItem("a", "Vergadering", "09:00", "10:00")]),
+      );
+
+      renderDashboard();
+      const section = await agendaSection();
+
+      await within(section).findByRole("link", { name: "Vergadering, 09:00–10:00" });
+      expect(
+        within(section).queryByRole("button", { name: /Nieuw agenda-item/ }),
+      ).not.toBeInTheDocument();
+    });
+
+    it("says so when there is nothing today", async () => {
+      renderDashboard();
+      const section = await agendaSection();
+
+      expect(
+        await within(section).findByText("Geen agenda-items vandaag."),
+      ).toBeInTheDocument();
+      expect(within(section).getByRole("link", { name: /Bekijk agenda/ })).toHaveAttribute(
+        "href",
+        "/calendar",
+      );
+    });
+
+    it("shows a change made in the calendar on the next visit", async () => {
+      calendarDayMock.mockResolvedValue(
+        agendaDay([agendaItem("a", "Vergadering", "09:00", "10:00")]),
+      );
+      const first = renderDashboard();
+
+      await screen.findByRole("link", { name: "Vergadering, 09:00–10:00" });
+      first.unmount();
+
+      calendarDayMock.mockResolvedValue(
+        agendaDay([agendaItem("a", "Klantbezoek", "09:30", "10:00")]),
+      );
+      renderDashboard();
+
+      expect(
+        await screen.findByRole("link", { name: "Klantbezoek, 09:30–10:00" }),
+      ).toBeInTheDocument();
+      expect(screen.queryByText("Vergadering")).not.toBeInTheDocument();
     });
   });
 
-  describe("the maintenance warnings", () => {
-    async function warningsWidget(): Promise<HTMLElement> {
+  /**
+   * ── THE MAINTENANCE SECTION ─────────────────────────────────────────────────
+   * The backend chooses, orders and limits the list and labels every record;
+   * the widget renders exactly that. So these tests feed backend answers and
+   * assert that nothing is re-sorted, re-labelled or added.
+   * ────────────────────────────────────────────────────────────────────────────
+   */
+  describe("the maintenance section", () => {
+    async function section(): Promise<HTMLElement> {
       return (await screen.findByText("Onderhoudswaarschuwingen")).closest(
         "section",
       ) as HTMLElement;
     }
 
-    /** The backend decides what is due; this widget only asks for it. */
-    it("asks the backend for maintenance that has fallen due", async () => {
-      renderDashboard();
-      await warningsWidget();
+    /** The rows that open a record's details, in the order they are shown. */
+    async function rows(): Promise<HTMLElement[]> {
+      const widget = await section();
 
-      expect(listMaintenanceMock).toHaveBeenCalledWith(
+      await waitFor(() => {
+        expect(within(widget).queryByRole("status")).not.toBeInTheDocument();
+      });
+
+      return within(widget)
+        .queryAllByRole("link")
+        .filter((link) => link.getAttribute("href")?.startsWith("/maintenance/"));
+    }
+
+    function item(
+      id: string,
+      plate: string,
+      maintenanceDate: string,
+      urgency: Maintenance["urgency"],
+    ): Maintenance {
+      return buildWarning({
+        id,
+        maintenanceDate,
+        urgency,
+        vehicle: { id: `v-${id}`, licensePlate: plate, displayColor: "#2563eb", isActive: true },
+      });
+    }
+
+    const LATE_4 = item("late-4", "2 GAS 189", "2026-09-10", { level: "OVERDUE", daysOverdue: 4 });
+    const LATE_2 = item("late-2", "2 GAS 723", "2026-09-12", { level: "OVERDUE", daysOverdue: 2 });
+    const LATE_1 = item("late-1", "2 GAS 724", "2026-09-13", { level: "OVERDUE", daysOverdue: 1 });
+    const TODAY = item("today", "2 GAS 725", "2026-09-14", { level: "TODAY", daysOverdue: 0 });
+    const SOON = item("soon", "2 GAS 727", "2026-09-16", { level: "UPCOMING", daysOverdue: 0 });
+    const LATER = item("later", "2 GAS 728", "2026-09-20", { level: "UPCOMING", daysOverdue: 0 });
+
+    it("asks the backend for its top five, and nothing per row", async () => {
+      attentionMock.mockResolvedValue(attention([LATE_4, TODAY, SOON]));
+
+      renderDashboard();
+      await rows();
+
+      expect(attentionMock).toHaveBeenCalledTimes(1);
+      expect(listMaintenanceMock).not.toHaveBeenCalledWith(
         expect.objectContaining({ dueOnly: true }),
         expect.anything(),
       );
     });
 
-    it("names the vehicle, the work and the planned date", async () => {
-      listMaintenanceMock.mockResolvedValue(maintenancePage([buildWarning()]));
+    it("shows nothing but a notice when nothing is planned", async () => {
+      renderDashboard();
+
+      expect(await rows()).toHaveLength(0);
+      expect(await within(await section()).findByText("Geen gepland onderhoud")).toBeInTheDocument();
+    });
+
+    it("shows one late record as TE LAAT with its days", async () => {
+      attentionMock.mockResolvedValue(attention([LATE_4]));
 
       renderDashboard();
-      const widget = await warningsWidget();
+      const [row] = await rows();
 
-      expect(await within(widget).findByText("1-ABC-123")).toBeInTheDocument();
-      // The row states the kind of work and the date it was planned for.
-      const row = within(widget).getByText("1-ABC-123").closest("li") as HTMLElement;
-
+      expect(row.textContent).toContain("TE LAAT — 4 dagen");
+      expect(row.textContent).toContain("2 GAS 189");
+      expect(row.textContent).toContain("10/09/2026");
       expect(row.textContent).toContain("Onderhoud");
-      expect(row.textContent).toContain("01/08/2026");
     });
 
-    /** Every warning here has the same cause: a planned date has arrived. */
-    it("gives the reason as an expired date", async () => {
-      listMaintenanceMock.mockResolvedValue(maintenancePage([buildWarning()]));
+    it("says 1 dag, not 1 dagen", async () => {
+      attentionMock.mockResolvedValue(attention([LATE_1]));
 
       renderDashboard();
-      const widget = await warningsWidget();
+      const [row] = await rows();
 
-      expect(
-        await within(widget).findByText("Datum verlopen"),
-      ).toBeInTheDocument();
+      expect(row.textContent).toContain("TE LAAT — 1 dag");
+      expect(row.textContent).not.toContain("1 dagen");
     });
 
-    /**
-     * A planned mileage is stored, but nothing knows the vehicle's current
-     * odometer — so no warning may ever claim a mileage was reached.
-     */
-    it("never claims a mileage was reached, and says why", async () => {
-      listMaintenanceMock.mockResolvedValue(maintenancePage([buildWarning()]));
+    it("shows several late records in the backend's order", async () => {
+      attentionMock.mockResolvedValue(attention([LATE_4, LATE_2, LATE_1]));
 
       renderDashboard();
-      const widget = await warningsWidget();
 
-      expect(
-        within(widget).queryByText(/bereikt/),
-      ).not.toBeInTheDocument();
-      expect(
-        within(widget).getByText(/huidige kilometerstand/),
-      ).toBeInTheDocument();
+      expect((await rows()).map((row) => row.getAttribute("href"))).toEqual([
+        "/maintenance/late-4",
+        "/maintenance/late-2",
+        "/maintenance/late-1",
+      ]);
     });
 
-    it("says when nothing is due", async () => {
+    it("shows today's maintenance as VANDAAG", async () => {
+      attentionMock.mockResolvedValue(attention([TODAY]));
+
       renderDashboard();
-      const widget = await warningsWidget();
+      const [row] = await rows();
+
+      expect(row.textContent).toContain("VANDAAG");
+      expect(row.textContent).not.toContain("TE LAAT");
+    });
+
+    it("shows late, today and upcoming together, in that order", async () => {
+      attentionMock.mockResolvedValue(attention([LATE_4, LATE_2, TODAY, SOON, LATER]));
+
+      renderDashboard();
+      const shown = await rows();
 
       expect(
-        await within(widget).findByText("Geen onderhoud verlopen"),
-      ).toBeInTheDocument();
+        shown.map(
+          (row) => row.textContent?.match(/TE LAAT — \d+ dagen?|VANDAAG|GEPLAND/)?.[0],
+        ),
+      ).toEqual([
+        "TE LAAT — 4 dagen",
+        "TE LAAT — 2 dagen",
+        "VANDAAG",
+        "GEPLAND",
+        "GEPLAND",
+      ]);
+    });
+
+    /** Exactly five: the limit is the backend's, and the widget shows them all. */
+    it("shows all five items the backend sends", async () => {
+      attentionMock.mockResolvedValue(attention([LATE_4, LATE_2, TODAY, SOON, LATER]));
+
+      renderDashboard();
+
+      expect(await rows()).toHaveLength(5);
+    });
+
+    it("never re-sorts what the backend sent", async () => {
+      attentionMock.mockResolvedValue(attention([LATER, TODAY, LATE_4]));
+
+      renderDashboard();
+
+      expect((await rows()).map((row) => row.getAttribute("href"))).toEqual([
+        "/maintenance/later",
+        "/maintenance/today",
+        "/maintenance/late-4",
+      ]);
+    });
+
+    it("links every item to the record's details", async () => {
+      attentionMock.mockResolvedValue(attention([LATE_4]));
+
+      renderDashboard();
+      const [row] = await rows();
+
+      expect(row).toHaveAttribute("href", "/maintenance/late-4");
+    });
+
+    it("makes TE LAAT the heaviest warning", async () => {
+      attentionMock.mockResolvedValue(attention([LATE_4, TODAY, SOON]));
+
+      renderDashboard();
+      const [late, today, soon] = await rows();
+
+      expect(late.className).toContain("border-danger");
+      expect(today.className).toContain("border-warning");
+      expect(soon.className).not.toMatch(/border-(danger|warning)/);
     });
 
     it("reports a failed request", async () => {
-      listMaintenanceMock.mockRejectedValue(
+      attentionMock.mockRejectedValue(
         new ApiError("NETWORK_ERROR", "De server is niet bereikbaar.", 0),
       );
 
       renderDashboard();
-      const widget = await warningsWidget();
+      const widget = await section();
 
       expect(
         await within(widget).findByText("De server is niet bereikbaar."),
@@ -529,11 +776,21 @@ describe("DashboardPage", () => {
 
     it("links to the full maintenance list", async () => {
       renderDashboard();
-      const widget = await warningsWidget();
+      const widget = await section();
 
       expect(
         within(widget).getByRole("link", { name: /Bekijk onderhoud/ }),
       ).toHaveAttribute("href", "/maintenance");
+    });
+
+    /** The kilometre notice is gone from the Dashboard, everywhere. */
+    it("shows no kilometre notice anywhere", async () => {
+      attentionMock.mockResolvedValue(attention([LATE_4]));
+
+      renderDashboard();
+      await rows();
+
+      expect(document.body.textContent).not.toMatch(/Kilometerstand-waarschuwingen|huidige kilometerstand/);
     });
   });
 
@@ -566,7 +823,11 @@ describe("Dashboard PDF upload", () => {
     uploadMock.mockReset();
     listMaintenanceMock.mockReset();
     listMaintenanceMock.mockResolvedValue(maintenancePage([]));
+    attentionMock.mockReset();
+    attentionMock.mockResolvedValue(attention());
     driverStatisticsMock.mockResolvedValue(driverStatistics());
+    calendarDayMock.mockReset();
+    calendarDayMock.mockResolvedValue(agendaDay());
     window.localStorage.clear();
     respondWithCounts({ total: 0, today: 0, week: 0, open: 0, closed: 0, recent: [] });
   });

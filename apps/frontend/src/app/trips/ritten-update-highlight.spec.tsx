@@ -134,15 +134,33 @@ describe("the fields the latest update changed", () => {
   });
 });
 
-describe("the derived Bijgewerkt marker", () => {
-  it("appears beside the status of an updated OPEN Trip", async () => {
+/**
+ * ── NO "BIJGEWERKT" TAG IN THE LIST ─────────────────────────────────────────
+ * The list used to put a derived "Bijgewerkt" tag under the status of an
+ * updated OPEN Trip. Only that tag is gone: `latestUpdate` still arrives on the
+ * Trip, the fields it moved are still marked, and the Trip detail page still
+ * reports the revision.
+ * ────────────────────────────────────────────────────────────────────────────
+ */
+describe("the Bijgewerkt tag", () => {
+  it("is not shown beside the status of an updated OPEN Trip", async () => {
     const row = await showTrip({
       status: "OPEN",
       latestUpdate: latestUpdate(["containerNumber"]),
     });
 
     expect(within(row).getByText("Open")).toBeInTheDocument();
-    expect(within(row).getByText("Bijgewerkt")).toBeInTheDocument();
+    expect(within(row).queryByText("Bijgewerkt")).toBeNull();
+  });
+
+  /** Only the tag went: the field the update moved is still marked. */
+  it("leaves the marks on the fields the update moved", async () => {
+    const row = await showTrip({
+      status: "OPEN",
+      latestUpdate: latestUpdate(["containerNumber"]),
+    });
+
+    expect(markAround(row, "MSKU1234567")).not.toBeNull();
   });
 
   /** It is not a status: the lifecycle badge is still the lifecycle. */
@@ -208,7 +226,7 @@ describe("telling the two yellows apart", () => {
 });
 
 describe("presentation", () => {
-  it("translates the marker", async () => {
+  it("shows no Bijgewerkt tag in Turkish either", async () => {
     window.localStorage.setItem("tms.language", "tr");
 
     const row = await showTrip({
@@ -216,7 +234,8 @@ describe("presentation", () => {
       latestUpdate: latestUpdate(["containerNumber"]),
     });
 
-    expect(within(row).getByText("Güncellendi")).toBeInTheDocument();
+    expect(within(row).queryByText("Güncellendi")).toBeNull();
+    expect(markAround(row, "MSKU1234567")).not.toBeNull();
   });
 
   it.each(["light", "dark"])("uses design tokens in %s mode", async (theme) => {
@@ -263,8 +282,8 @@ describe("the marks across a real sequence of updates", () => {
     const row = await showTrip({ latestUpdate: latestUpdate([]) });
 
     expect(row.innerHTML).not.toContain(MARK);
-    // The Trip is still an updated Trip, and still says so.
-    expect(within(row).getByText("Bijgewerkt")).toBeInTheDocument();
+    // Nor a tag: the list no longer shows one. The Trip detail page does.
+    expect(within(row).queryByText("Bijgewerkt")).toBeNull();
   });
 
   /**

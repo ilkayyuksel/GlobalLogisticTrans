@@ -59,8 +59,16 @@ describe("AppShell navigation", () => {
         "Onderhoud",
         "Agenda",
         "Notities",
-        "PDF Debug",
       ]);
+    });
+
+    /** A developer page, not a section: routable, but not in the menu. */
+    it("offers no PDF Debug entry", () => {
+      renderShell();
+
+      expect(
+        within(mainNav()).queryByRole("link", { name: /PDF Debug/ }),
+      ).not.toBeInTheDocument();
     });
 
     it.each([
@@ -71,7 +79,6 @@ describe("AppShell navigation", () => {
       ["Onderhoud", "/maintenance"],
       ["Agenda", "/calendar"],
       ["Notities", "/notes"],
-      ["PDF Debug", "/pdf-debug"],
     ])("links %s to %s", (label, href) => {
       renderShell();
 
@@ -176,7 +183,7 @@ describe("AppShell navigation", () => {
       expect(screen.queryByRole("menu")).not.toBeInTheDocument();
     });
 
-    it("opens on click and lists both settings pages", async () => {
+    it("opens on click and lists the settings pages", async () => {
       renderShell();
 
       await userEvent.click(screen.getByRole("button", { name: /Instellingen/ }));
@@ -184,11 +191,30 @@ describe("AppShell navigation", () => {
       const menu = screen.getByRole("menu");
 
       expect(
-        within(menu).getByRole("menuitem", { name: "Nummerplaten" }),
-      ).toHaveAttribute("href", "/settings/license-plates");
+        within(menu)
+          .getAllByRole("menuitem")
+          .map((item) => item.getAttribute("href")),
+      ).toEqual(["/settings/custom-values", "/settings/pricing"]);
       expect(
         within(menu).getByRole("menuitem", { name: "Custom waarden" }),
       ).toHaveAttribute("href", "/settings/custom-values");
+    });
+
+    /**
+     * Plates are managed on the Vehicle and through the driver assignments; a
+     * Settings entry would be a second place to manage them.
+     */
+    it("offers no Nummerplaten entry", async () => {
+      renderShell();
+
+      await userEvent.click(screen.getByRole("button", { name: /Instellingen/ }));
+
+      const menu = screen.getByRole("menu");
+
+      expect(
+        within(menu).queryByRole("menuitem", { name: /Nummerplaten/ }),
+      ).not.toBeInTheDocument();
+      expect(menu.querySelector('a[href="/settings/license-plates"]')).toBeNull();
     });
 
     /** A closed menu whose links are still tabbable is an accessibility trap. */
@@ -196,7 +222,7 @@ describe("AppShell navigation", () => {
       renderShell();
 
       expect(
-        screen.queryByRole("menuitem", { name: "Nummerplaten" }),
+        screen.queryByRole("menuitem", { name: "Custom waarden" }),
       ).not.toBeInTheDocument();
     });
 
@@ -230,7 +256,7 @@ describe("AppShell navigation", () => {
     });
 
     it("reads as active while a settings page is open", () => {
-      renderShell("/settings/license-plates");
+      renderShell("/settings/custom-values");
 
       expect(
         screen.getByRole("button", { name: /Instellingen/ }),

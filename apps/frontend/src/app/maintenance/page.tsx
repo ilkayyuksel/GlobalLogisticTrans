@@ -2,22 +2,28 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 
+import Link from "next/link";
+
+import { CompleteMaintenanceDialog } from "@/components/maintenance/complete-maintenance-dialog";
+import { MaintenanceStatusBadge } from "@/components/maintenance/maintenance-badges";
 import {
   MAINTENANCE_STATUSES,
   MaintenanceFormDialog,
   statusLabelKey,
 } from "@/components/maintenance/maintenance-form-dialog";
 import { RittenPagination } from "@/components/ritten/ritten-pagination";
-import { Badge, type BadgeTone } from "@/components/ui/badge";
+import { CompleteIcon, RowActionButton } from "@/components/ritten/row-action-button";
 import { EmptyState, ErrorState, LoadingState } from "@/components/ui/states";
 import { useAsync } from "@/hooks/use-async";
 import { useDebounced } from "@/hooks/use-debounced";
 import { userFacingMessage } from "@/lib/api/client";
 import { listActiveVehicles } from "@/lib/api/fleet";
 import {
+  completeMaintenance,
   createMaintenance,
   listMaintenance,
   updateMaintenance,
+  type CompleteMaintenancePayload,
   type CreateMaintenancePayload,
   type Maintenance,
   type MaintenanceStatus,
@@ -42,17 +48,15 @@ import { cn } from "@/lib/cn";
  * exactly as they were entered. Whether a planned MILEAGE has been reached is
  * not shown as due anywhere, because answering that needs a current odometer
  * reading and this system has none.
+ *
+ * The ✓ on a planned record completes its current cycle: the backend keeps
+ * that cycle in the record's history and plans the SAME record again on the
+ * next date, so the list shows the record once, with its new date. "Details"
+ * opens the record with its full history.
  */
 
 const PAGE_SIZE = 25;
 const SEARCH_DEBOUNCE_MS = 300;
-
-const STATUS_TONES: Record<MaintenanceStatus, BadgeTone> = {
-  PLANNED: "info",
-  IN_PROGRESS: "warning",
-  COMPLETED: "success",
-  CANCELLED: "neutral",
-};
 
 interface Feedback {
   readonly messageKey: TranslationKey;
@@ -69,6 +73,7 @@ export default function MaintenancePage() {
   const [page, setPage] = useState(1);
   const [editing, setEditing] = useState<Maintenance | null>(null);
   const [isCreating, setIsCreating] = useState(false);
+  const [completing, setCompleting] = useState<Maintenance | null>(null);
   const [feedback, setFeedback] = useState<Feedback | null>(null);
 
   const debouncedSearch = useDebounced(search, SEARCH_DEBOUNCE_MS);
@@ -132,6 +137,30 @@ export default function MaintenancePage() {
       });
 
       // Rethrown so the form stays open with its values and the detail.
+      throw error;
+    }
+  }
+
+  /** The list is refetched: the record's date and status are the backend's. */
+  async function complete(
+    record: Maintenance,
+    payload: CompleteMaintenancePayload,
+  ): Promise<void> {
+    setFeedback(null);
+
+    try {
+      await completeMaintenance(record.id, payload);
+
+      records.reload();
+      setFeedback({ messageKey: "maintenance.feedback.completed", isError: false });
+    } catch (error: unknown) {
+      setFeedback({
+        messageKey: "maintenance.feedback.failed",
+        detail: userFacingMessage(error),
+        isError: true,
+      });
+
+      // Rethrown so the dialog stays open with what was typed.
       throw error;
     }
   }
@@ -289,6 +318,7 @@ export default function MaintenancePage() {
                         setEditing(record);
                         setIsCreating(false);
                       }}
+                      onComplete={() => setCompleting(record)}
                     />
                   ))}
                 </tbody>
@@ -312,6 +342,15 @@ export default function MaintenancePage() {
           }}
         />
       ) : null}
+
+      {completing ? (
+        <CompleteMaintenanceDialog
+          maintenance={completing}
+          today={today()}
+          onComplete={(payload) => complete(completing, payload)}
+          onClose={() => setCompleting(null)}
+        />
+      ) : null}
     </div>
   );
 }
@@ -319,12 +358,16 @@ export default function MaintenancePage() {
 function MaintenanceRow({
   record,
   onEdit,
+  onComplete,
 }: {
   record: Maintenance;
   onEdit: () => void;
+  onComplete: () => void;
 }) {
   const t = useTranslation();
   const empty = t("maintenance.value.empty");
+  const isCompletable =
+    record.status === "PLANNED" || record.status === "IN_PROGRESS";
 
   return (
     <tr className="border-b border-border align-top last:border-0 hover:bg-hover">
@@ -351,9 +394,7 @@ function MaintenanceRow({
         {maintenanceTypeLabel(record.maintenanceType, t) ?? empty}
       </td>
       <td className="px-3 py-2">
-        <Badge tone={STATUS_TONES[record.status]}>
-          {t(statusLabelKey(record.status))}
-        </Badge>
+        <MaintenanceStatusBadge status={record.status} />
       </td>
       <td className="px-3 py-2 text-secondary">{record.description}</td>
       <td className="px-3 py-2 text-secondary">{record.workshop ?? empty}</td>
@@ -370,13 +411,35 @@ function MaintenanceRow({
         <NextMaintenance record={record} />
       </td>
       <td className="px-3 py-2">
-        <button
-          type="button"
-          onClick={onEdit}
-          className="text-sm font-medium text-primary hover:underline"
-        >
-          {t("maintenance.action.edit")}
-        </button>
+        <span className="flex items-center gap-2">
+          {/* Only planned work, or work under way, has a cycle to complete. */}
+          {isCompletable ? (
+            <RowActionButton
+              tone="primary"
+              tooltip={t("maintenance.action.complete")}
+              accessibleName={`${t("maintenance.action.complete")} ${
+                record.vehicle?.licensePlate ?? ""
+              } ${formatCalendarDate(record.maintenanceDate)}`}
+              isDisabled={false}
+              onClick={onComplete}
+            >
+              <CompleteIcon />
+            </RowActionButton>
+          ) : null}
+          <Link
+            href={`/maintenance/${record.id}`}
+            className="whitespace-nowrap text-sm font-medium text-primary hover:underline"
+          >
+            {t("maintenance.action.details")}
+          </Link>
+          <button
+            type="button"
+            onClick={onEdit}
+            className="text-sm font-medium text-primary hover:underline"
+          >
+            {t("maintenance.action.edit")}
+          </button>
+        </span>
       </td>
     </tr>
   );

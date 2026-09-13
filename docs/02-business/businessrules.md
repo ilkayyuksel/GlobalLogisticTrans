@@ -117,9 +117,11 @@ marked in the planning list and on the Trip page; when a newer update arrives,
 the previous update's fields stop being marked. The mark means "the latest
 update changed this", not "this was changed at some point".
 
-"Bijgewerkt" is a DERIVED marker shown beside the status of an OPEN Trip that
-has such an update. It is not a status: the lifecycle remains Open, Afgewerkt
-and Geannuleerd, and no transition leads to or from "Bijgewerkt".
+"Bijgewerkt" is a DERIVED marker shown on the Trip page beside the status of an
+OPEN Trip that has such an update. The planning list does not show it: there the
+changed fields themselves are marked, and nothing else. It is not a status: the
+lifecycle remains Open, Afgewerkt and Geannuleerd, and no transition leads to or
+from "Bijgewerkt".
 
 ---
 
@@ -436,6 +438,15 @@ Maintenance records are never deleted.
 Maintenance history must remain complete.
 
 Future maintenance reminders are generated from the configured maintenance schedule.
+
+Every maintenance record belongs to one Vehicle (license plate). Completing it does not
+create a new record: the same record is planned again on the next maintenance date and
+returns to Gepland, and the completed cycle is kept in its history — planned date,
+completion date, extra information and the next date chosen.
+
+A Gepland maintenance is TE LAAT when its date has passed (by that many calendar days),
+VANDAAG when it is today, and GEPLAND otherwise. Voltooid, Geannuleerd and In uitvoering
+maintenance produce no warning. Kilometre values never decide a warning.
 
 ---
 

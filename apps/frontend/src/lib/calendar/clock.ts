@@ -110,13 +110,62 @@ export function overlaps(left: TimeRange, right: TimeRange): boolean {
   return left.startMinute < right.endMinute && right.startMinute < left.endMinute;
 }
 
+/** A timed item with the lane it was given among the items it overlaps. */
+export interface LanedRange<TItem> {
+  readonly item: TItem;
+  readonly range: TimeRange;
+  /** 0 is the first lane. */
+  readonly lane: number;
+  /** How many lanes its overlap cluster needs. */
+  readonly laneCount: number;
+  /** Items in the same cluster overlap one another, directly or through a chain. */
+  readonly cluster: number;
+}
+
 /**
- * Positions a set of timed items so that overlapping ones stay visible.
+ * Gives every timed item a lane, so that no two overlapping items share one.
  *
  * Items are grouped into clusters of mutually overlapping ranges, and each
- * cluster is split into as many rows as it needs, so nothing is ever drawn on
- * top of anything else. A card that overlaps nothing gets the full height of
- * its lane.
+ * cluster gets as many lanes as it needs. A lane is reused as soon as its last
+ * item has ended, so nothing is ever drawn on top of anything else. The
+ * planning board lays lanes out as rows; the Agenda lays them out as columns.
+ */
+export function assignLanes<TItem>(
+  items: readonly { item: TItem; range: TimeRange }[],
+): LanedRange<TItem>[] {
+  const ordered = [...items].sort(
+    (left, right) => left.range.startMinute - right.range.startMinute,
+  );
+  const laned: LanedRange<TItem>[] = [];
+
+  toOverlapClusters(ordered).forEach((cluster, clusterIndex) => {
+    const laneEnds: number[] = [];
+    const lanes = cluster.map((entry) => {
+      const free = laneEnds.findIndex((end) => end <= entry.range.startMinute);
+      const lane = free === -1 ? laneEnds.length : free;
+
+      laneEnds[lane] = entry.range.endMinute;
+
+      return lane;
+    });
+
+    cluster.forEach((entry, index) => {
+      laned.push({
+        ...entry,
+        lane: lanes[index],
+        laneCount: laneEnds.length,
+        cluster: clusterIndex,
+      });
+    });
+  });
+
+  return laned;
+}
+
+/**
+ * Positions a set of timed items on the board so that overlapping ones stay
+ * visible: each lane is a row, and a card that overlaps nothing gets the full
+ * height of its lane.
  *
  * Ranges outside the board's hours are clamped to its edges so a Trip starting
  * at 04:00 still appears, pinned to the left, rather than vanishing.
@@ -124,41 +173,11 @@ export function overlaps(left: TimeRange, right: TimeRange): boolean {
 export function layOutRanges<TItem>(
   items: readonly { item: TItem; range: TimeRange }[],
 ): { item: TItem; range: TimeRange; geometry: CardGeometry }[] {
-  const ordered = [...items].sort(
-    (left, right) => left.range.startMinute - right.range.startMinute,
-  );
-
-  const clusters = toOverlapClusters(ordered);
-  const positioned: { item: TItem; range: TimeRange; geometry: CardGeometry }[] =
-    [];
-
-  for (const cluster of clusters) {
-    // Each row holds items that do not overlap each other, so a row can be
-    // reused as soon as its last item has ended.
-    const rowEnds: number[] = [];
-    const laneByIndex = new Map<number, number>();
-
-    cluster.forEach((entry, index) => {
-      const lane = rowEnds.findIndex((end) => end <= entry.range.startMinute);
-      const chosen = lane === -1 ? rowEnds.length : lane;
-
-      rowEnds[chosen] = entry.range.endMinute;
-      laneByIndex.set(index, chosen);
-    });
-
-    cluster.forEach((entry, index) => {
-      positioned.push({
-        ...entry,
-        geometry: {
-          ...toHorizontalGeometry(entry.range),
-          lane: laneByIndex.get(index) ?? 0,
-          laneCount: rowEnds.length,
-        },
-      });
-    });
-  }
-
-  return positioned;
+  return assignLanes(items).map(({ item, range, lane, laneCount }) => ({
+    item,
+    range,
+    geometry: { ...toHorizontalGeometry(range), lane, laneCount },
+  }));
 }
 
 /**

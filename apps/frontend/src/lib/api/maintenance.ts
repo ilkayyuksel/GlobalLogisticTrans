@@ -10,9 +10,13 @@ import type { Paginated } from "./types";
  * plan for the next. Nothing here may compare them to decide that a service is
  * due — that question needs a current reading, and there is none.
  *
- * "Due" therefore means one thing: a planned next DATE has arrived. The backend
- * decides it (`dueOnly`, `isDueByDate`), and this module never re-derives it.
+ * How pressing a record is — TE LAAT, VANDAAG, GEPLAND — is the backend's
+ * answer, carried on every record as `urgency` and decided from the status and
+ * the maintenance date alone. This module never re-derives it.
  * ────────────────────────────────────────────────────────────────────────────
+ *
+ * Completing a record does not create a new one: the backend plans the SAME
+ * record again and keeps the finished cycle in its `completions`.
  *
  * `cost` and `totalCost` are fixed-2 STRINGS, displayed exactly as received.
  * Nothing on this side adds them; the total comes from the summary endpoint,
@@ -26,6 +30,15 @@ export type MaintenanceStatus =
   | "IN_PROGRESS"
   | "COMPLETED"
   | "CANCELLED";
+
+export type MaintenanceUrgencyLevel = "OVERDUE" | "TODAY" | "UPCOMING";
+
+/** Decided by the backend; null for every status but PLANNED. */
+export interface MaintenanceUrgency {
+  level: MaintenanceUrgencyLevel;
+  /** Calendar days past the planned date. Zero unless OVERDUE. */
+  daysOverdue: number;
+}
 
 export interface MaintenanceVehicleSummary {
   id: string;
@@ -51,8 +64,48 @@ export interface Maintenance {
   nextMaintenanceDate: string | null;
   nextMaintenanceMileage: number | null;
   notes: string | null;
+  urgency: MaintenanceUrgency | null;
   createdAt: string;
   updatedAt: string;
+}
+
+/** One carried-out cycle of a record, as it was when it was completed. */
+export interface MaintenanceCompletion {
+  id: string;
+  /** The date the record was planned for when the work was done. */
+  plannedDate: string;
+  completedOn: string;
+  /** The date the record was planned again for. */
+  nextMaintenanceDate: string;
+  notes: string | null;
+  maintenanceType: string | null;
+  description: string;
+  createdAt: string;
+}
+
+/** One record with its full history, oldest cycle first. */
+export interface MaintenanceDetail extends Maintenance {
+  completions: MaintenanceCompletion[];
+}
+
+/** The Dashboard's list: at most five, most pressing first, ordered by the backend. */
+export interface MaintenanceAttention {
+  today: string;
+  items: Maintenance[];
+}
+
+/** Exactly `CompleteMaintenanceDto`. */
+export interface CompleteMaintenancePayload {
+  /**
+   * The planned date of the cycle being completed, as shown. The backend
+   * refuses a date the record no longer has (409), so a double submit cannot
+   * record one cycle twice.
+   */
+  plannedDate: string;
+  /** Defaults to today on the backend; never in the future. */
+  completedOn?: string;
+  nextMaintenanceDate: string;
+  notes?: string | null;
 }
 
 export interface MaintenanceSummary {
@@ -144,6 +197,39 @@ export function updateMaintenance(
   return request<Maintenance>(`${MAINTENANCE_PATH}/${maintenanceId}`, {
     method: "PATCH",
     body: payload,
+    signal,
+  });
+}
+
+export function getMaintenance(
+  maintenanceId: string,
+  signal?: AbortSignal,
+): Promise<MaintenanceDetail> {
+  return request<MaintenanceDetail>(`${MAINTENANCE_PATH}/${maintenanceId}`, {
+    signal,
+  });
+}
+
+/**
+ * Completes the current cycle. The backend plans the same record again on the
+ * next date and answers with it and its whole history.
+ */
+export function completeMaintenance(
+  maintenanceId: string,
+  payload: CompleteMaintenancePayload,
+  signal?: AbortSignal,
+): Promise<MaintenanceDetail> {
+  return request<MaintenanceDetail>(
+    `${MAINTENANCE_PATH}/${maintenanceId}/completions`,
+    { method: "POST", body: payload, signal },
+  );
+}
+
+/** Selected, ordered and limited by the backend — never re-sorted here. */
+export function getMaintenanceAttention(
+  signal?: AbortSignal,
+): Promise<MaintenanceAttention> {
+  return request<MaintenanceAttention>(`${MAINTENANCE_PATH}/attention`, {
     signal,
   });
 }
