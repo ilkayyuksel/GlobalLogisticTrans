@@ -4,8 +4,8 @@ import { CalendarEventRepository } from "./calendar-event.repository";
 
 /**
  * What the Agenda asks of the database, held to its contract. The selection and
- * the ordering of a day happen in PostgreSQL; the runtime check against the real
- * database proves the results.
+ * the ordering of a range happen in PostgreSQL; the runtime check against the
+ * real database proves the results.
  */
 
 const ID = "7b1f4c2e-2d7a-4a55-9a51-0f3c2f1f9d10";
@@ -28,24 +28,41 @@ function prismaDouble(deletedCount = 1) {
 }
 
 describe("CalendarEventRepository", () => {
-  describe("one day", () => {
-    /** Yesterday's and tomorrow's items can never match: the day is one exact DATE. */
-    it("selects by that exact start date and nothing else", async () => {
+  describe("a range of days", () => {
+    /** Both ends included; the day before and the day after can never match. */
+    it("selects by start date, from the first day to the last, both included", async () => {
       const { prisma, repository } = prismaDouble();
 
-      await repository.findForDay(toUtcDate("2026-09-14"));
+      await repository.findForRange(toUtcDate("2026-09-14"), toUtcDate("2026-09-20"));
 
       expect(prisma.calendarEvent.findMany.mock.calls[0][0].where).toEqual({
-        startDate: toUtcDate("2026-09-14"),
+        startDate: {
+          gte: toUtcDate("2026-09-14"),
+          lte: toUtcDate("2026-09-20"),
+        },
       });
     });
 
-    it("lets the database order it: start, then end, then id", async () => {
+    it("reads a single day as a range of one", async () => {
       const { prisma, repository } = prismaDouble();
 
-      await repository.findForDay(toUtcDate("2026-09-14"));
+      await repository.findForRange(toUtcDate("2026-09-14"), toUtcDate("2026-09-14"));
+
+      expect(prisma.calendarEvent.findMany.mock.calls[0][0].where).toEqual({
+        startDate: {
+          gte: toUtcDate("2026-09-14"),
+          lte: toUtcDate("2026-09-14"),
+        },
+      });
+    });
+
+    it("lets the database order it: day, start, end, then id", async () => {
+      const { prisma, repository } = prismaDouble();
+
+      await repository.findForRange(toUtcDate("2026-09-14"), toUtcDate("2026-09-20"));
 
       expect(prisma.calendarEvent.findMany.mock.calls[0][0].orderBy).toEqual([
+        { startDate: "asc" },
         { startTime: "asc" },
         { endTime: "asc" },
         { id: "asc" },

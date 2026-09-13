@@ -42,6 +42,16 @@ export function dayInWeekLabel(isoDate: string, language: Language): string {
   );
 }
 
+/** "ma" — a day's column heading in a week grid, which shows it in capitals. */
+export function weekdayShortLabel(isoDate: string, language: Language): string {
+  return format(isoDate, language, { weekday: "short" });
+}
+
+/** "14" — the day of the month under that heading. */
+export function dayOfMonthLabel(isoDate: string, language: Language): string {
+  return format(isoDate, language, { day: "numeric" });
+}
+
 /** "2 augustus 2026" — a day section inside a month. */
 export function dayInMonthLabel(isoDate: string, language: Language): string {
   return capitalize(

@@ -811,12 +811,22 @@ describe("the two legs of a Combination", () => {
     });
   });
 
-  /** Two Trips of DIFFERENT documents in one group are a manual group. */
-  it("charges no Backload to a manual group", async () => {
+  /**
+   * Two Trips of DIFFERENT documents in one group are a manual group. Since
+   * September 2026 every member of any group carries its own Backload.
+   */
+  it("charges each member of a manual group its own Backload", async () => {
     const other = { ...COLLECTION, pdfDocumentId: "pdf-other" };
+    const members = [DELIVERY, other];
 
-    expect((await legAmounts(DELIVERY, { members: [DELIVERY, other] })).backload).toBe(
-      "0.00",
+    expect((await legAmounts(DELIVERY, { members })).backload).toBe("50.00");
+    expect((await legAmounts(other, { members })).backload).toBe("50.00");
+  });
+
+  /** The member left behind when its partner is unlinked keeps its group. */
+  it("charges the Backload to a Trip left alone in its group", async () => {
+    expect((await legAmounts(DELIVERY, { members: [DELIVERY] })).backload).toBe(
+      "50.00",
     );
   });
 
@@ -824,5 +834,44 @@ describe("the two legs of a Combination", () => {
     const standalone = { ...DELIVERY, tripGroupId: null };
 
     expect((await legAmounts(standalone, { members: [] })).backload).toBe("0.00");
+  });
+
+  /**
+   * ── FLAT AND BACKLOAD DO NOT EXCLUDE EACH OTHER ──────────────────────────
+   * Flat follows the container, Backload the group. A flat rack in a group owes
+   * both; taken out of it, it owes Flat alone. Neither leg states a TAR-nummer,
+   * so Others holds the Flat and nothing else.
+   */
+  describe("Flat alongside the Backload", () => {
+    const AUTOMATIC_FLAT = {
+      customPropertyId: FLAT_ID,
+      name: "Flat",
+      pricingComponentId: null,
+      defaultPrice: "20.00",
+    };
+    const flatRack = { ...DELIVERY, tarNummer: null };
+    const members = [flatRack, { ...COLLECTION, tarNummer: null }];
+
+    it("charges a grouped flat rack its Flat and its own Backload", async () => {
+      const pricing = await legAmounts(flatRack, {
+        members,
+        assignments: [AUTOMATIC_FLAT],
+      });
+
+      expect(pricing.others).toBe("20.00");
+      expect(pricing.backload).toBe("50.00");
+      expect(pricing.totaal).toBe("70.00");
+    });
+
+    it("keeps Flat when the flat rack leaves its group, and drops only the Backload", async () => {
+      const pricing = await legAmounts(
+        { ...flatRack, tripGroupId: null },
+        { members: [], assignments: [AUTOMATIC_FLAT] },
+      );
+
+      expect(pricing.others).toBe("20.00");
+      expect(pricing.backload).toBe("0.00");
+      expect(pricing.totaal).toBe("20.00");
+    });
   });
 });

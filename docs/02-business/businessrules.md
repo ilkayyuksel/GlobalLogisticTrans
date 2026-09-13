@@ -403,6 +403,11 @@ One trip may be moved without affecting the others.
 
 The relationship between trips must always remain visible.
 
+Every trip in a group — an imported Combination or a group made by hand — carries
+its own Combination Surcharge (Backload). Grouping and unlinking reprice the
+CLOSED trips whose group changed immediately; the trip left alone in a group
+keeps its surcharge, the trip taken out loses it.
+
 ---
 
 # 9. Export

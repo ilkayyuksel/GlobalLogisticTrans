@@ -14,11 +14,12 @@ import { buildHarness, type RealDocumentHarness } from "./real-documents.harness
  *
  *   45PH  x19    45OS  x3    45RH  x2    20FL  x1    20ST  none
  *
- * So the rule can be checked against real documents on both sides — 19 orders
- * that must get nothing, and one that must get Flat — but there is no 20ST
- * document in existence here. That branch is covered by the domain tests
- * instead; inventing a PDF to claim parser coverage would prove nothing about
- * a real order.
+ * So the rule can be checked against real documents on both sides — the 45PH
+ * and 45RH orders must get nothing, the 20FL and (since September 2026) the
+ * 45OS orders must get Flat — but there is no 20ST, 40FL, 40OS or 45FL document
+ * in existence here. Those branches are covered by the domain tests instead;
+ * inventing a PDF to claim parser coverage would prove nothing about a real
+ * order.
  *
  * ── THE ONE 20FL DOCUMENT IS A CANCELLATION ─────────────────────────────────
  * `CANCEL/cancelled_transportorder1353889.pdf` is the only flat rack we have,
@@ -45,8 +46,10 @@ const ORDINARY_DOCUMENTS: readonly { file: string; containerType: string }[] = [
   { file: "NEW/2pages.pdf", containerType: "45PH" },
   // Both legs of the Combination, and neither is a flat rack.
   { file: "NEW/combination.pdf", containerType: "45RH" },
-  { file: "UPDATE/transportorder1368223.pdf", containerType: "45OS" },
 ];
+
+/** A real 45OS order: an open side, which carries Flat since September 2026. */
+const OPEN_SIDE_DOCUMENT = "UPDATE/transportorder1368223.pdf";
 
 function readFixture(relativePath: string): Uint8Array {
   return new Uint8Array(readFileSync(join(FIXTURES, relativePath)));
@@ -153,6 +156,28 @@ describe("the automatic Flat property, against the real documents", () => {
         ],
       });
 
+      expect(harness.customProperties[0].customProperty).toMatchObject({
+        name: "Flat",
+      });
+    });
+  });
+
+  describe("the real 45OS order", () => {
+    it("is imported with the automatic Flat property, no manual step needed", async () => {
+      const result = await harness.importer.import(
+        readFixture(OPEN_SIDE_DOCUMENT),
+        OPEN_SIDE_DOCUMENT,
+      );
+
+      expect(result.trips.length).toBeGreaterThan(0);
+      for (const trip of result.trips) {
+        expect(trip.containerType).toBe("45OS");
+      }
+      expect(harness.customProperties).toEqual(
+        result.trips.map((trip) =>
+          expect.objectContaining({ tripId: trip.id, isAutomatic: true }),
+        ),
+      );
       expect(harness.customProperties[0].customProperty).toMatchObject({
         name: "Flat",
       });

@@ -57,10 +57,13 @@ number or date happen to match. Pairing across documents is a business decision,
 not something the import may infer.
 
 Sharing a TripGroup is therefore a CONSEQUENCE of being a Combination and never
-the definition of one. `isGenuineCombination()` must stay independent of
-`trip_group_id`, because a manual TripGroup is a different concept entirely — see
-below — and simplifying the check to "has a group" would price manual groups as
-Combinations.
+the definition of one. The genuine rule (`combinationLegOf`) decides which leg
+owes TAR and whether the importer may pair Trips, and it stays independent of
+`trip_group_id` alone.
+
+The Combination Surcharge (Backload) is a different question with a different
+answer: since September 2026 every Trip in a TripGroup carries its own —
+imported Combination and manual group alike (`carriesCombinationSurcharge`).
 
 When one leg of a Combination already exists and is planned, a later document
 that recreates only the other leg does NOT join it to a Combination: grouping it

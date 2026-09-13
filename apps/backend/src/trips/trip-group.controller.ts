@@ -39,7 +39,7 @@ export class TripGroupController {
   @ApiOperation({
     summary: "Group Trips manually",
     description:
-      "Puts two or more existing Trips into one new group, in a single transaction — either every Trip joins or none does. A manual group is an operational convenience and carries no rule about directions, dates or statuses; it is NOT an imported Combination, which the parser creates from a single document. A Trip that already belongs to a group must be unlinked from it first.",
+      "Puts two or more existing Trips into one new group, in a single transaction — either every Trip joins or none does. A manual group carries no rule about directions, dates or statuses, and it is not an imported Combination for TAR purposes. It does carry the Combination Surcharge: every member is charged its own Backload, and members that are already CLOSED are repriced immediately. A Trip that already belongs to a group must be unlinked from it first.",
   })
   @ApiCreatedResponse({ type: TripGroupResponseDto })
   @ApiBadRequestResponse({

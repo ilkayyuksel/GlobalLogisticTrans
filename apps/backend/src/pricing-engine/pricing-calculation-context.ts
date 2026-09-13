@@ -168,9 +168,9 @@ export interface PricingCalculationContext {
   readonly planningDate: string | null;
 
   /**
-   * Only a leg of a GENUINE Combination is eligible for the Combination
-   * Surcharge. A manual TripGroup is not one: it carries no claim about
-   * pairing, so it must not change what a Trip is charged.
+   * Whether the Trip belongs to a TripGroup, and so carries its own
+   * Combination Surcharge (Backload) — imported Combination and manual group
+   * alike. See `carriesCombinationSurcharge`.
    */
   readonly isCombination: boolean;
   /** Absent waiting time is zero waiting time, not an unknown. */

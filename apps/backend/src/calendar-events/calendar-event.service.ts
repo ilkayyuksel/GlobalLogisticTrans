@@ -1,11 +1,12 @@
 import { Injectable } from "@nestjs/common";
 import { CalendarEvent } from "@prisma/client";
 
-import { toIsoDate, toUtcDate } from "../common/dates";
+import { addDays, toIsoDate, toUtcDate } from "../common/dates";
 import { AppLoggerService } from "../logger/app-logger.service";
 import {
   AGENDA_DAY_END,
   AGENDA_DAY_START,
+  AGENDA_RANGE_MAX_DAYS,
   AgendaSlot,
   agendaSlotProblem,
   minuteOfTimeColumn,
@@ -16,8 +17,8 @@ import {
 } from "./agenda-day";
 import { CalendarEventRepository } from "./calendar-event.repository";
 import {
-  CalendarDayDto,
   CalendarEventResponseDto,
+  CalendarRangeDto,
   toCalendarEventResponse,
 } from "./dto/calendar-event-response.dto";
 import { CreateCalendarEventDto } from "./dto/create-calendar-event.dto";
@@ -26,6 +27,7 @@ import {
   CalendarEventEndNotAfterStartException,
   CalendarEventNotFoundException,
   CalendarEventOutsideAgendaDayException,
+  CalendarRangeInvalidException,
 } from "./exceptions/calendar-event.exceptions";
 
 /**
@@ -55,14 +57,22 @@ export class CalendarEventService {
   }
 
   /**
-   * One day of the Agenda, with the range it is drawn in. The calendar and the
-   * Dashboard both read this — there is no second dataset.
+   * The Agenda over a range of days, with the hours each day is drawn in. The
+   * calendar asks for its week and the Dashboard for today — one dataset.
    */
-  async findDay(date: string): Promise<CalendarDayDto> {
-    const events = await this.repository.findForDay(toUtcDate(date));
+  async findRange(from: string, to: string): Promise<CalendarRangeDto> {
+    const first = toUtcDate(from);
+    const last = toUtcDate(to);
+
+    if (last < first || last > addDays(first, AGENDA_RANGE_MAX_DAYS - 1)) {
+      throw new CalendarRangeInvalidException(from, to);
+    }
+
+    const events = await this.repository.findForRange(first, last);
 
     return {
-      date,
+      from,
+      to,
       dayStart: AGENDA_DAY_START,
       dayEnd: AGENDA_DAY_END,
       items: events.map(toCalendarEventResponse),
@@ -100,9 +110,9 @@ export class CalendarEventService {
   }
 
   /**
-   * The day never changes — the DTO has no date. A start or end left out keeps
-   * its stored value, so moving only the start past the end is refused rather
-   * than silently repaired.
+   * A new day moves the whole item; it stays single-day. A start or end left out
+   * keeps its stored value, so moving only the start past the end is refused
+   * rather than silently repaired.
    */
   async update(
     id: string,
@@ -119,6 +129,7 @@ export class CalendarEventService {
 
     const updated = await this.repository.update(id, {
       ...(dto.title !== undefined ? { title: dto.title } : {}),
+      ...(dto.date !== undefined ? { startDate: toUtcDate(dto.date) } : {}),
       startTime: toTimeColumn(slot.startMinute),
       endTime: toTimeColumn(slot.endMinute),
     });
@@ -126,6 +137,7 @@ export class CalendarEventService {
     this.logger.log("Agenda item updated", {
       calendarEventId: id,
       changedFields: Object.keys(dto),
+      date: toIsoDate(updated.startDate),
       ...slotForLog(slot),
     });
 

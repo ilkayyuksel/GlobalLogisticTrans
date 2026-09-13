@@ -3,7 +3,9 @@ import { TripDirection } from "@prisma/client";
 import {
   CombinationLeg,
   CombinationMember,
+  carriesCombinationSurcharge,
   combinationLegOf,
+  tripsRepricedByRegrouping,
 } from "./combination-leg";
 
 /**
@@ -77,10 +79,10 @@ describe("an ordinary Trip", () => {
 });
 
 /**
- * ── A MANUAL GROUP IS NOT A COMBINATION ─────────────────────────────────────
+ * ── A MANUAL GROUP IS NOT A PAIR ────────────────────────────────────────────
  * An operator may group any Trips at all. That grouping carries no claim about
- * pairing, so each Trip in it stays an ordinary transport — and pays its own
- * charges.
+ * pairing, so for TAR each Trip in it stays an ordinary transport. (It does
+ * carry the Combination Surcharge — see below.)
  * ────────────────────────────────────────────────────────────────────────────
  */
 describe("a manual group", () => {
@@ -156,6 +158,69 @@ describe("a malformed pair", () => {
     expect(combinationLegOf(DELIVERY, [DELIVERY, COLLECTION, third])).toBe(
       CombinationLeg.INVALID,
     );
+  });
+});
+
+/**
+ * ── THE BACKLOAD FOLLOWS THE GROUP ──────────────────────────────────────────
+ * Since September 2026 every Trip in a group carries its own Combination
+ * Surcharge, manual group or imported Combination alike. The genuine rule above
+ * decides TAR only.
+ * ────────────────────────────────────────────────────────────────────────────
+ */
+describe("the Combination Surcharge", () => {
+  it("is carried by both legs of an imported Combination", () => {
+    expect(carriesCombinationSurcharge(DELIVERY)).toBe(true);
+    expect(carriesCombinationSurcharge(COLLECTION)).toBe(true);
+  });
+
+  it("is carried by every member of a manual group, whatever its document", () => {
+    expect(
+      carriesCombinationSurcharge(
+        member({ tripGroupId: GROUP, pdfDocumentId: "pdf-other" }),
+      ),
+    ).toBe(true);
+    expect(
+      carriesCombinationSurcharge(member({ tripGroupId: GROUP, pdfDocumentId: null })),
+    ).toBe(true);
+  });
+
+  it("is not carried by a Trip in no group", () => {
+    expect(carriesCombinationSurcharge(member())).toBe(false);
+  });
+});
+
+describe("which Trips a regrouping reprices", () => {
+  const A = member({ id: "a", pdfDocumentId: "pdf-a" });
+  const B = member({ id: "b", pdfDocumentId: "pdf-b" });
+  const grouped = (trip: CombinationMember) => ({ ...trip, tripGroupId: GROUP });
+
+  it("reprices every Trip that joins a group", () => {
+    expect(
+      tripsRepricedByRegrouping([A, B], [grouped(A), grouped(B)]).sort(),
+    ).toEqual(["a", "b"]);
+  });
+
+  /** The member left behind keeps its group, and with it its surcharge. */
+  it("reprices the Trip taken out of a group, and not the one left behind", () => {
+    const before = [grouped(A), grouped(B)];
+
+    expect(tripsRepricedByRegrouping(before, [A, grouped(B)])).toEqual(["a"]);
+  });
+
+  /** One leg leaves; the other stays grouped but is no longer a leg for TAR. */
+  it("reprices both legs when a genuine pair is split", () => {
+    const after = [{ ...DELIVERY, tripGroupId: null }, COLLECTION];
+
+    expect(
+      tripsRepricedByRegrouping([DELIVERY, COLLECTION], after).sort(),
+    ).toEqual(["trip-collection", "trip-delivery"]);
+  });
+
+  it("reprices nothing when nothing changed", () => {
+    expect(
+      tripsRepricedByRegrouping([DELIVERY, COLLECTION], [DELIVERY, COLLECTION]),
+    ).toEqual([]);
   });
 });
 

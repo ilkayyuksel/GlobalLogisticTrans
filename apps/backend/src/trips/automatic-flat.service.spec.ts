@@ -112,13 +112,13 @@ describe("AutomaticFlatPropertyService", () => {
   }
 
   describe("a Trip that has just been created", () => {
-    it.each(["20FL", "20ST", "20fl"])("assigns Flat for %s", async (type) => {
+    it.each(["20FL", "20ST", "20fl", "45FL", "45OS", " 45os "])("assigns Flat for %s", async (type) => {
       await service.applyToNewTrip(repository, TRIP_ID, type);
 
       expect(flatRow()).toMatchObject({ tripId: TRIP_ID, isAutomatic: true });
     });
 
-    it.each(["45PH", "45OS", "20STUFF", null])(
+    it.each(["45PH", "45RH", "20STUFF", null])(
       "assigns nothing for %p",
       async (type) => {
         await service.applyToNewTrip(repository, TRIP_ID, type);
@@ -184,7 +184,7 @@ describe("AutomaticFlatPropertyService", () => {
       expect(flatRow()).toBeUndefined();
     });
 
-    it.each(["45OS", "45RH", "45PH"])(
+    it.each(["20TK", "45RH", "45PH"])(
       "removes it when the type becomes %s",
       async (type) => {
         given(FLAT_ID, true);

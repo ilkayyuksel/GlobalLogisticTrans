@@ -6,7 +6,7 @@ import {
   toEffectivePricingDto,
 } from "../trip-pricing/dto/effective-pricing.dto";
 import { EffectivePricingService } from "../trip-pricing/effective-pricing.service";
-import { CombinationMember, tripsWhoseLegChanged } from "./combination-leg";
+import { CombinationMember, tripsRepricedByRegrouping } from "./combination-leg";
 import { PricingEngineException } from "./exceptions/pricing-engine.exceptions";
 import { PricingEngineService } from "./pricing-engine.service";
 
@@ -120,14 +120,14 @@ export class PricingRecalculationService {
   }
 
   /**
-   * Which Trips a change of group membership left priced on a stale leg.
+   * Which Trips a change of group membership left priced on a stale answer.
    *
-   * Grouping and ungrouping are the one pricing input a Trip does not carry in
-   * its own row: its leg is decided by the OTHER members of its group. So the
-   * caller cannot tell which Trips to recalculate from the Trip it changed, and
-   * must not decide it with a Combination rule of its own. It hands over the
-   * Trips of the affected groups as they were and as they are, and the pricing
-   * domain answers from `combinationLegOf` — the rule the Engine prices with.
+   * Group membership is a pricing input: it decides the Backload of every Trip
+   * whose group changed, and — through the other members — which leg of a
+   * genuine Combination owes TAR. The caller hands over the Trips of the
+   * affected groups as they were and as they are, and the pricing domain
+   * answers from its own rules (`tripsRepricedByRegrouping`), so no caller
+   * decides with a Combination rule of its own.
    *
    * It only answers. Recalculating stays one `recalculate` call per Trip, so
    * the failure contract above applies to every one of them unchanged.
@@ -136,7 +136,7 @@ export class PricingRecalculationService {
     before: readonly CombinationMember[],
     after: readonly CombinationMember[],
   ): string[] {
-    return tripsWhoseLegChanged(before, after);
+    return tripsRepricedByRegrouping(before, after);
   }
 
   /**

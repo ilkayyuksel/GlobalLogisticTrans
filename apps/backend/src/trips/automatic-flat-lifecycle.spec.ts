@@ -196,7 +196,7 @@ describe("Flat through a Trip's revisions", () => {
   }
 
   describe("a revision that makes the Trip a flat rack", () => {
-    it.each(["20FL", "20ST"])(
+    it.each(["20FL", "20ST", "45FL", "45OS"])(
       "assigns Flat when 45PH becomes %s",
       async (containerType) => {
         await service.applyDocumentRevision(revisionWith(containerType));
@@ -216,7 +216,7 @@ describe("Flat through a Trip's revisions", () => {
   });
 
   describe("a revision that makes it something else", () => {
-    it.each(["45PH", "45OS", "45RH"])(
+    it.each(["45PH", "20TK", "45RH"])(
       "removes the automatic Flat when 20FL becomes %s",
       async (containerType) => {
         trip = buildTrip("20FL");
@@ -228,11 +228,11 @@ describe("Flat through a Trip's revisions", () => {
       },
     );
 
-    it("removes it when 20ST becomes 45OS", async () => {
+    it("removes it when 20ST becomes 45PH", async () => {
       trip = buildTrip("20ST");
       given(FLAT_ID, true);
 
-      await service.applyDocumentRevision(revisionWith("45OS"));
+      await service.applyDocumentRevision(revisionWith("45PH"));
 
       expect(flat()).toBeUndefined();
     });

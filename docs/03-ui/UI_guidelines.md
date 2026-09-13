@@ -697,22 +697,28 @@ Appointments
 
 Drag & Drop (future)
 
-## Day view
+## Week view
 
-- A narrow time column on the left and the day on the right, one horizontal block per
-  hour from 06:00 to 23:00; an item is a coloured block exactly as tall as it lasts.
-- A click (or tap) on an empty hour adds an item starting at that hour; a click on an
-  item opens it to change or delete it. A narrow strip on the right of every hour stays
-  free, so an hour that already holds an item can take another.
-- Overlapping items stand side by side and share the width; an item widens into columns
-  that nothing it overlaps is using. Items are never drawn over each other. When a day
-  needs more columns than fit — on a tablet — the day scrolls sideways rather than making
-  items too narrow to read or tap.
-- Nothing depends on hover.
-- Moving between days reuses the Ritten navigator: previous, next, today and a date
-  picker. Today is marked beside the title.
-- The Dashboard shows today's items with the same grid, compact and read-only, each item
-  linking to itself in the calendar.
+- Seven day columns, Monday to Sunday, each headed by its day and date, with a narrow
+  time column on the left and one horizontal block per hour from 06:00 to 23:00; an item
+  is a coloured block exactly as tall as it lasts.
+- A click (or tap) on an empty hour adds an item on that day, starting at that hour — the
+  start can still be adjusted in the form; a click on an item opens it to change its
+  title, day, start and end, or to delete it. A narrow strip on the right of every hour
+  stays free, so an hour that already holds an item can take another.
+- Overlapping items stand side by side and share the day's width; an item widens into
+  columns that nothing it overlaps is using. Items are never drawn over each other, and
+  items on different days never affect each other.
+- Today's column is marked subtly, with a line at the current local time.
+- When the week needs more width than there is — a tablet in portrait — it scrolls
+  sideways inside its frame, with the day headings and the time column held in place,
+  rather than making items too narrow to read or tap. Nothing depends on hover.
+- Moving between weeks reuses the Ritten navigator: previous, next, this week and a date
+  picker.
+- An item reaching outside 06:00–23:00 — which the backend refuses — would be drawn at
+  the nearest edge with a dashed border, never hidden.
+- The Dashboard shows only today's items, with the same grid for a single day, compact
+  and read-only, each item linking to itself in the calendar.
 
 ---
 

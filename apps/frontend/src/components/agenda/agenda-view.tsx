@@ -10,32 +10,37 @@ import { useAsync } from "@/hooks/use-async";
 import {
   createCalendarEvent,
   deleteCalendarEvent,
-  getCalendarDay,
+  getCalendarRange,
   updateCalendarEvent,
   type CalendarEvent,
 } from "@/lib/api/calendar-events";
 import { toAgendaWindow } from "@/lib/calendar/agenda-layout";
-import { formatCalendarDate, today } from "@/lib/calendar/calendar-dates";
+import {
+  endOfWeek,
+  formatCalendarDate,
+  startOfWeek,
+  weekDays,
+} from "@/lib/calendar/calendar-dates";
 import { toClockLabel } from "@/lib/calendar/clock";
 import { useTranslation } from "@/lib/i18n/language-provider";
 import type { TranslationKey } from "@/lib/i18n/translations";
-import { AgendaDayGrid } from "./agenda-day-grid";
+import { AgendaGrid } from "./agenda-grid";
 import { AgendaItemDialog, type AgendaItemValues } from "./agenda-item-dialog";
 
 type OpenDialog =
-  | { kind: "create"; startTime: string }
+  | { kind: "create"; date: string; startTime: string }
   | { kind: "edit"; item: CalendarEvent }
   | { kind: "delete"; item: CalendarEvent };
 
 /**
- * The Agenda, one day at a time.
+ * The Agenda: a week, Monday to Sunday, as a calendar.
  *
- * The day is the backend's answer — its items and the hours it has — and every
- * change is followed by asking for the day again, so what is drawn is always
- * what is stored. Moving between days uses the same navigator as the Ritten
- * Dag view: previous, next, today and a date picker.
+ * The week is the backend's answer — its items and the hours a day has — and it
+ * is asked for again after every change, so what is drawn is always what is
+ * stored. Moving between weeks uses the Ritten navigator: previous, next, this
+ * week and a date picker.
  *
- * A Dashboard link names a day and an item; the item opens once its day has
+ * A Dashboard link names a day and an item; the item opens once its week has
  * arrived.
  */
 export function AgendaView({
@@ -46,20 +51,20 @@ export function AgendaView({
   initialEventId: string | null;
 }) {
   const t = useTranslation();
-  const [date, setDate] = useState(initialDate);
+  const [anchor, setAnchor] = useState(initialDate);
   const [dialog, setDialog] = useState<OpenDialog | null>(null);
   const [feedbackKey, setFeedbackKey] = useState<TranslationKey | null>(null);
   const linkedEventId = useRef(initialEventId);
+  const from = startOfWeek(anchor);
+  const to = endOfWeek(anchor);
 
-  const day = useAsync(
-    useCallback((signal: AbortSignal) => getCalendarDay(date, signal), [date]),
-    [date],
+  const week = useAsync(
+    useCallback((signal: AbortSignal) => getCalendarRange(from, to, signal), [from, to]),
+    [from, to],
   );
-  // The previous day's answer must never be drawn under the new day's label.
-  const current = day.data?.date === date ? day.data : null;
-  const dayWindow = current
-    ? toAgendaWindow(current.dayStart, current.dayEnd)
-    : null;
+  // The previous week's answer must never be drawn under the new week's dates.
+  const current = week.data?.from === from ? week.data : null;
+  const dayWindow = current ? toAgendaWindow(current.dayStart, current.dayEnd) : null;
 
   useEffect(() => {
     if (!current || !linkedEventId.current) {
@@ -75,20 +80,20 @@ export function AgendaView({
     }
   }, [current]);
 
-  function changeDate(next: string): void {
-    setDate(next);
+  function changeWeek(next: string): void {
+    setAnchor(next);
     setFeedbackKey(null);
   }
 
   function refreshAfter(key: TranslationKey): void {
-    day.reload();
+    week.reload();
     setFeedbackKey(key);
   }
 
   async function create(values: AgendaItemValues): Promise<void> {
     await createCalendarEvent({
       title: values.title,
-      date,
+      date: values.date,
       startTime: values.startTime,
       ...(values.endTime ? { endTime: values.endTime } : {}),
     });
@@ -108,15 +113,8 @@ export function AgendaView({
   return (
     <div className="w-full space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="flex items-center gap-2 text-xl font-semibold text-foreground">
-          {t("page.calendar.title")}
-          {date === today() ? (
-            <span className="rounded-full bg-primary/15 px-2 py-0.5 text-xs font-medium text-primary">
-              {t("agenda.todayBadge")}
-            </span>
-          ) : null}
-        </h1>
-        <PeriodNav view="day" anchor={date} onChange={changeDate} />
+        <h1 className="text-xl font-semibold text-foreground">{t("page.calendar.title")}</h1>
+        <PeriodNav view="week" anchor={anchor} onChange={changeWeek} />
       </div>
 
       <p className="text-xs text-secondary">{t("agenda.hint")}</p>
@@ -130,25 +128,26 @@ export function AgendaView({
         </p>
       ) : null}
 
-      <Card className="px-2">
-        {!current && !day.error ? <LoadingState label={t("agenda.loading")} /> : null}
+      <Card className="overflow-hidden">
+        {!current && !week.error ? <LoadingState label={t("agenda.loading")} /> : null}
 
-        {day.error && !day.isLoading ? (
-          <ErrorState error={day.error} onRetry={day.reload} />
+        {week.error && !week.isLoading ? (
+          <ErrorState error={week.error} onRetry={week.reload} />
         ) : null}
 
         {current && dayWindow ? (
-          <AgendaDayGrid
+          <AgendaGrid
+            days={weekDays(anchor)}
             items={current.items}
             window={dayWindow}
-            label={t("agenda.dayLabel")}
-            onCreateAt={(startTime) => setDialog({ kind: "create", startTime })}
+            label={t("agenda.weekLabel")}
+            onCreateAt={(date, startTime) => setDialog({ kind: "create", date, startTime })}
             onOpen={(item) => setDialog({ kind: "edit", item })}
           />
         ) : null}
 
         {current && !dayWindow ? (
-          <p role="alert" className="px-3 py-6 text-sm text-danger">
+          <p role="alert" className="px-4 py-6 text-sm text-danger">
             {t("agenda.unavailable")}
           </p>
         ) : null}
@@ -156,6 +155,7 @@ export function AgendaView({
 
       {dialog?.kind === "create" ? (
         <AgendaItemDialog
+          date={dialog.date}
           startTime={dialog.startTime}
           onSave={create}
           onClose={() => setDialog(null)}

@@ -46,6 +46,11 @@ const CONTAINER_TYPES_REQUIRING_FLAT: readonly string[] = [
   // here — the match is exact, so neither is affected by this.
   "40FL",
   "40OS",
+  // The forty-five-foot flat rack and open side, which the business confirmed
+  // in September 2026 carry Flat exactly as the others do. Real orders print
+  // them in exactly this form.
+  "45FL",
+  "45OS",
 ];
 
 /**

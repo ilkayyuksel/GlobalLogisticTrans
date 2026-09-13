@@ -6,8 +6,9 @@ import { PrismaService } from "../prisma/prisma.service";
 export type CreateCalendarEventData = Prisma.CalendarEventUncheckedCreateInput;
 export type UpdateCalendarEventData = Prisma.CalendarEventUncheckedUpdateInput;
 
-/** A day reads by start, the shorter item first, and the id keeps it stable. */
-const DAY_ORDER = [
+/** By day, then start, the shorter item first, and the id keeps it stable. */
+const RANGE_ORDER = [
+  { startDate: "asc" },
   { startTime: "asc" },
   { endTime: "asc" },
   { id: "asc" },
@@ -21,15 +22,15 @@ export class CalendarEventRepository {
   constructor(private readonly prisma: PrismaService) {}
 
   /**
-   * Every item on one day, in one query on the `start_date` index, ordered by
-   * PostgreSQL. Agenda items are single-day, so the start date alone decides
-   * which day an item belongs to — the Dashboard's "today" and the calendar's
-   * day are the same question.
+   * Every item whose day lies in the range, both ends included, in one query on
+   * the `start_date` index, ordered by PostgreSQL. Agenda items are single-day,
+   * so the start date alone decides the day — the calendar's week and the
+   * Dashboard's today are the same question over different ranges.
    */
-  findForDay(date: Date): Promise<CalendarEvent[]> {
+  findForRange(from: Date, to: Date): Promise<CalendarEvent[]> {
     return this.prisma.calendarEvent.findMany({
-      where: { startDate: date },
-      orderBy: DAY_ORDER,
+      where: { startDate: { gte: from, lte: to } },
+      orderBy: RANGE_ORDER,
     });
   }
 

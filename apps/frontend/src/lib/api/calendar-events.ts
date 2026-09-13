@@ -3,14 +3,14 @@ import { request } from "./client";
 /**
  * The Agenda endpoints.
  *
- * A day is asked for as a whole — its items AND the hours the Agenda shows —
- * and the calendar and the Dashboard ask the same question, so there is one
- * dataset. Whether an item may exist, and how long it lasts without an end, is
- * the backend's answer.
+ * A stretch of days is asked for as a whole — its items AND the hours a day
+ * shows. The calendar asks for its week and the Dashboard for today: the same
+ * call and the same answer, so there is one dataset. Whether an item may exist,
+ * and how long it lasts without an end, is the backend's answer.
  *
- * The date is "YYYY-MM-DD" and the times "HH:MM:SS", wall-clock values passed
- * through untouched: no Date object ever carries them, so no timezone can move
- * an appointment to another hour or day.
+ * Dates are "YYYY-MM-DD" and times "HH:MM:SS", wall-clock values passed through
+ * untouched: no Date object ever carries them, so no timezone can move an
+ * appointment to another hour or day.
  */
 
 const CALENDAR_EVENTS_PATH = "/api/v1/calendar-events";
@@ -28,13 +28,14 @@ export interface CalendarEvent {
   updatedAt: string;
 }
 
-export interface CalendarDay {
-  date: string;
-  /** The first moment the Agenda shows and accepts, `HH:MM`. */
+export interface CalendarRange {
+  from: string;
+  to: string;
+  /** The first moment a day shows and accepts, `HH:MM`. */
   dayStart: string;
   /** The latest end an item may have, `HH:MM`. */
   dayEnd: string;
-  /** Ordered by the backend: start, then end, then id. */
+  /** Ordered by the backend: day, start, end, id. */
   items: CalendarEvent[];
 }
 
@@ -47,19 +48,26 @@ export interface CreateCalendarEventPayload {
   endTime?: string | null;
 }
 
-/** Exactly `UpdateCalendarEventDto`: the day cannot change. */
+/** Exactly `UpdateCalendarEventDto`. */
 export interface UpdateCalendarEventPayload {
   title?: string;
+  /** Moves the whole item to another day. */
+  date?: string;
   startTime?: string;
   /** Null: one hour after the start. */
   endTime?: string | null;
 }
 
-export function getCalendarDay(
-  date: string,
+/** The items from `from` to `to`, both included — at most a week. */
+export function getCalendarRange(
+  from: string,
+  to: string,
   signal?: AbortSignal,
-): Promise<CalendarDay> {
-  return request<CalendarDay>(CALENDAR_EVENTS_PATH, { query: { date }, signal });
+): Promise<CalendarRange> {
+  return request<CalendarRange>(CALENDAR_EVENTS_PATH, {
+    query: { from, to },
+    signal,
+  });
 }
 
 export function createCalendarEvent(

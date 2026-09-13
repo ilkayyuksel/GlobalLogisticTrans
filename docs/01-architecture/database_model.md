@@ -4109,20 +4109,24 @@ Calendar Events may overlap.
 
 ---
 
-## The Agenda (Day View)
+## The Agenda (Week View)
 
-The Agenda shows and edits Calendar Events one day at a time.
+The Agenda shows and edits Calendar Events a week at a time, Monday to Sunday.
 
 - An Agenda item lies within one day, between 06:00 and 23:00. It is stored as a
   single-day event: Start Date, Start Time and End Time, with no End Date.
 - The title is required. The end is optional when creating: without one, the item lasts
   exactly one hour. The end must be after the start.
-- Editing changes the title, the start and the end — never the day.
+- Editing changes the title, the day, the start and the end; a new day moves the whole
+  item.
 - Items have no status. An item is planned until it is changed or deleted; deleting
   removes it.
 - The Agenda has no event types yet; every item is stored with Event Type OTHER.
-- Overlapping items are allowed and are shown side by side.
-- The Dashboard's "Agenda vandaag" asks the same day query, for today.
+- Overlapping items are allowed and are shown side by side; items on different days
+  never affect each other.
+- The Agenda is read a range of days at a time, at most seven: the calendar asks for its
+  week, and the Dashboard's "Agenda vandaag" asks for today to today — one query, one
+  dataset.
 - Dates and times are wall-clock values without a timezone, like a Trip's planning date
   and times.
 
@@ -4768,11 +4772,17 @@ A record is also created and removed by the automatic Flat rule described below.
 
 ## Automatic Flat assignment
 
-A Trip whose containerType is 20FL or 20ST must carry the Custom Property named
-Flat.
+A Trip whose containerType is 20FL, 20ST, 40FL, 40OS, 45FL or 45OS must carry the
+Custom Property named Flat. (45FL and 45OS were added in September 2026.)
 
 The comparison trims surrounding whitespace and ignores capitalisation. It is an
-exact match on the code: 20FLX, 20STUFF and 45PH require nothing.
+exact match on the code: 20FLX, 20STUFF, 40OSX and 45PH require nothing.
+
+Trips that already existed when a container type was added receive the same
+automatic assignment through a one-time migration
+(`20260913140000_backfill_automatic_flat`). Their stored pricing snapshots are
+not changed by it: an OPEN Trip is priced with Flat when it closes, and a CLOSED
+Trip when it is priced again.
 
 The rule is applied by the Backend on every path that writes a Trip:
 

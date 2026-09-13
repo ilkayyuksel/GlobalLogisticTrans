@@ -44,7 +44,12 @@ export interface AgendaBlock<TItem> {
   readonly columnSpan: number;
   /** How many columns its overlap cluster is divided into. */
   readonly columnCount: number;
+  /** True when the item reaches outside the window and is drawn cut at its edge. */
+  readonly isClipped: boolean;
 }
+
+/** What stays visible of an item lying wholly outside the window, at its edge. */
+const OUTSIDE_SLIVER_MINUTES = 15;
 
 interface TimedItem {
   startTime: string;
@@ -80,7 +85,8 @@ export function hourLabel(hour: number): string {
 }
 
 /**
- * Lays out one day's items within a window.
+ * Lays out one day's items within a window. Each day is laid out on its own, so
+ * items on different days never affect each other's columns.
  *
  * An item whose times cannot be read is left out rather than drawn at an
  * invented time. A range reaching outside the window is clamped to it.
@@ -186,15 +192,37 @@ function columnSpan<TItem>(
 function verticalGeometry(
   range: TimeRange,
   window: AgendaWindow,
-): { topPercent: number; heightPercent: number } {
+): { topPercent: number; heightPercent: number; isClipped: boolean } {
   const span = window.endMinute - window.startMinute;
-  const start = clamp(range.startMinute, window.startMinute, window.endMinute);
-  const end = clamp(range.endMinute, window.startMinute, window.endMinute);
+  const [start, end] = visibleStretch(range, window);
 
   return {
     topPercent: ((start - window.startMinute) / span) * 100,
     heightPercent: ((end - start) / span) * 100,
+    isClipped:
+      range.startMinute < window.startMinute || range.endMinute > window.endMinute,
   };
+}
+
+/**
+ * The part of an item the window can show. An item reaching outside is cut at
+ * the edge; one lying wholly outside keeps a sliver at the nearest edge, so it
+ * is never drawn as nothing. The backend refuses such items — this keeps the
+ * calendar honest should one exist anyway.
+ */
+function visibleStretch(range: TimeRange, window: AgendaWindow): [number, number] {
+  if (range.endMinute <= window.startMinute) {
+    return [window.startMinute, window.startMinute + OUTSIDE_SLIVER_MINUTES];
+  }
+
+  if (range.startMinute >= window.endMinute) {
+    return [window.endMinute - OUTSIDE_SLIVER_MINUTES, window.endMinute];
+  }
+
+  return [
+    clamp(range.startMinute, window.startMinute, window.endMinute),
+    clamp(range.endMinute, window.startMinute, window.endMinute),
+  ];
 }
 
 function clamp(value: number, minimum: number, maximum: number): number {

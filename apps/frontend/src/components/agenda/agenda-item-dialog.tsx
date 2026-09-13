@@ -1,19 +1,23 @@
 "use client";
 
-import { useState, type FormEvent, type ReactNode } from "react";
+import { useState, type FormEvent } from "react";
 
 import { FormError } from "@/components/maintenance/maintenance-form-dialog";
 import { RittenDialog } from "@/components/ritten/ritten-dialog";
+import { FormField } from "@/components/ui/form-field";
 import type { CalendarEvent } from "@/lib/api/calendar-events";
 import { toClockLabel } from "@/lib/calendar/clock";
-import { useTranslation } from "@/lib/i18n/language-provider";
+import { useLanguage, useTranslation } from "@/lib/i18n/language-provider";
 import type { TranslationKey } from "@/lib/i18n/translations";
+import { longDateLabel } from "@/lib/ritten/date-labels";
 
 /** From the backend's create-calendar-event.dto.ts. */
 const TITLE_MAX_LENGTH = 200;
 
 export interface AgendaItemValues {
   title: string;
+  /** `YYYY-MM-DD`. */
+  date: string;
   /** `HH:MM`. */
   startTime: string;
   /** `HH:MM`, or null for the backend's one-hour default. */
@@ -23,17 +27,19 @@ export interface AgendaItemValues {
 /**
  * Adding or changing one Agenda item.
  *
- * Adding starts at the hour that was clicked: the start is shown, not asked.
- * Changing offers the title, the start and the end. The end is optional in both
- * — left empty, the backend gives the item one hour.
+ * Adding starts on the day and at the hour of the block that was clicked: the
+ * day is shown, and the start is filled in but can still be adjusted — to 10:30,
+ * say. Changing offers the title, the day, the start and the end. The end is
+ * optional in both; left empty, the backend gives the item one hour.
  *
- * The two checks made here — a title, an end after the start — are the ones an
- * operator can fix on the spot. The backend repeats them and decides the rest,
- * the hours of the day among them, and its refusal is shown in the form. Nothing
- * is sent before Opslaan, and Annuleren changes nothing.
+ * The checks made here — a title, a day, an end after the start — are the ones
+ * an operator can fix on the spot. The backend repeats them and decides the
+ * rest, the hours of the day among them, and its refusal is shown in the form.
+ * Nothing is sent before Opslaan, and Annuleren changes nothing.
  */
 export function AgendaItemDialog({
   item,
+  date: clickedDate,
   startTime: clickedStartTime,
   onSave,
   onDelete,
@@ -41,7 +47,9 @@ export function AgendaItemDialog({
 }: {
   /** The item being changed; absent when adding. */
   item?: CalendarEvent;
-  /** `HH:MM` — the hour that was clicked, when adding. */
+  /** When adding: the day of the block that was clicked. */
+  date?: string;
+  /** When adding: `HH:MM`, the hour of the block that was clicked. */
   startTime?: string;
   /** Resolves once the backend has stored it. */
   onSave: (values: AgendaItemValues) => Promise<void>;
@@ -50,14 +58,14 @@ export function AgendaItemDialog({
   onClose: () => void;
 }) {
   const t = useTranslation();
+  const { language } = useLanguage();
   const isEditing = item !== undefined;
   const [title, setTitle] = useState(item?.title ?? "");
+  const [date, setDate] = useState(item?.date ?? clickedDate ?? "");
   const [startTime, setStartTime] = useState(
     item ? (toClockLabel(item.startTime) ?? "") : (clickedStartTime ?? ""),
   );
-  const [endTime, setEndTime] = useState(
-    item ? (toClockLabel(item.endTime) ?? "") : "",
-  );
+  const [endTime, setEndTime] = useState(item ? (toClockLabel(item.endTime) ?? "") : "");
   const [problem, setProblem] = useState<TranslationKey | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<unknown>(null);
@@ -67,14 +75,16 @@ export function AgendaItemDialog({
       return "agenda.form.titleRequired";
     }
 
+    if (date === "") {
+      return "agenda.form.dateRequired";
+    }
+
     if (startTime === "") {
       return "agenda.form.startRequired";
     }
 
     // Both are "HH:MM", so text order is time order.
-    return endTime !== "" && endTime <= startTime
-      ? "agenda.form.endAfterStart"
-      : null;
+    return endTime !== "" && endTime <= startTime ? "agenda.form.endAfterStart" : null;
   }
 
   async function submit(event: FormEvent): Promise<void> {
@@ -94,6 +104,7 @@ export function AgendaItemDialog({
     try {
       await onSave({
         title: title.trim(),
+        date,
         startTime,
         endTime: endTime === "" ? null : endTime,
       });
@@ -117,43 +128,56 @@ export function AgendaItemDialog({
       <form onSubmit={submit} noValidate className="space-y-4 px-4 py-3">
         {error ? <FormError error={error} /> : null}
 
-        <Field label={t("agenda.form.title")} htmlFor="agenda-title">
+        <FormField label={t("agenda.form.title")} htmlFor="agenda-title">
           <input
             id="agenda-title"
             type="text"
-            required
             autoComplete="off"
             maxLength={TITLE_MAX_LENGTH}
             value={title}
             onChange={(event) => setTitle(event.target.value)}
             className={inputClass}
           />
-        </Field>
+        </FormField>
+
+        {isEditing ? (
+          <FormField label={t("agenda.form.date")} htmlFor="agenda-date">
+            <input
+              id="agenda-date"
+              type="date"
+              value={date}
+              onChange={(event) => setDate(event.target.value)}
+              className={inputClass}
+            />
+          </FormField>
+        ) : (
+          <div>
+            <p className="mb-1 text-xs font-medium uppercase tracking-wide text-muted">
+              {t("agenda.form.day")}
+            </p>
+            <p className="text-sm font-medium text-foreground">
+              {longDateLabel(date, language)}
+            </p>
+          </div>
+        )}
 
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          {isEditing ? (
-            <Field label={t("agenda.form.startTime")} htmlFor="agenda-start">
-              <input
-                id="agenda-start"
-                type="time"
-                required
-                value={startTime}
-                onChange={(event) => setStartTime(event.target.value)}
-                className={inputClass}
-              />
-            </Field>
-          ) : (
-            <div>
-              <p className="mb-1 text-xs font-medium uppercase tracking-wide text-muted">
-                {t("agenda.form.startTime")}
-              </p>
-              <p className="py-1.5 text-sm font-medium tabular-nums text-foreground">
-                {startTime}
-              </p>
-            </div>
-          )}
+          <FormField label={t("agenda.form.startTime")} htmlFor="agenda-start">
+            <input
+              id="agenda-start"
+              type="time"
+              value={startTime}
+              onChange={(event) => setStartTime(event.target.value)}
+              className={inputClass}
+            />
+          </FormField>
 
-          <Field label={t("agenda.form.endTime")} htmlFor="agenda-end">
+          <FormField
+            label={t("agenda.form.endTime")}
+            htmlFor="agenda-end"
+            hint={t("agenda.form.endOptional")}
+            hintId="agenda-end-hint"
+          >
             <input
               id="agenda-end"
               type="time"
@@ -162,10 +186,7 @@ export function AgendaItemDialog({
               onChange={(event) => setEndTime(event.target.value)}
               className={inputClass}
             />
-            <p id="agenda-end-hint" className="mt-1 text-xs text-secondary">
-              {t("agenda.form.endOptional")}
-            </p>
-          </Field>
+          </FormField>
         </div>
 
         {problem ? (
@@ -203,27 +224,5 @@ export function AgendaItemDialog({
         </div>
       </form>
     </RittenDialog>
-  );
-}
-
-function Field({
-  label,
-  htmlFor,
-  children,
-}: {
-  label: string;
-  htmlFor: string;
-  children: ReactNode;
-}) {
-  return (
-    <div>
-      <label
-        htmlFor={htmlFor}
-        className="mb-1 block text-xs font-medium uppercase tracking-wide text-muted"
-      >
-        {label}
-      </label>
-      {children}
-    </div>
   );
 }

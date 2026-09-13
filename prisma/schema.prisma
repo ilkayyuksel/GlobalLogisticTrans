@@ -581,9 +581,9 @@ model TripCustomProperty {
   /// How this assignment came to exist, and therefore who may withdraw it.
   ///
   /// True means a domain rule put it here — today only the Flat rule, which
-  /// assigns Flat to every Trip whose container type is 20FL or 20ST. Such an
-  /// assignment is maintained by that rule and is removed again when the
-  /// container type stops requiring it.
+  /// assigns Flat to every Trip whose container type requires it (see
+  /// flat-container-rule.ts). Such an assignment is maintained by that rule and
+  /// is removed again when the container type stops requiring it.
   ///
   /// False means a person chose it. A manual assignment is never withdrawn
   /// automatically, and never converted into an automatic one: the operator's

@@ -193,13 +193,29 @@ The Base Price forms the foundation of the pricing calculation.
 
 # Combination Surcharge
 
-Trips belonging to a Combination may receive an additional surcharge.
+The Combination Surcharge — the Backload — is charged to every Trip that belongs
+to a TripGroup: its own surcharge, on its own pricing snapshot. An imported
+Combination and a group an operator made by hand are treated alike, and so is a
+Trip left alone in its group after its partner was unlinked. A Trip in no group
+is charged none.
 
-The surcharge is configurable.
+The surcharge is configurable. The amount is determined through Settings
+(`COMBINATION_SURCHARGE`).
 
-The surcharge amount is determined through Settings.
+A group of two therefore carries two surcharges, one per Trip. Nothing depends on
+the partner Trip — its status, its planning date, or whether it is in the same
+export.
 
-Only Trips belonging to a TripGroup are eligible.
+Group membership is a pricing input. Grouping and unlinking reprice every CLOSED
+Trip whose group changed at once, replacing its snapshot: a Trip that joins a
+group has exactly one surcharge line afterwards, however often it is repriced,
+and a Trip that leaves has none. An OPEN Trip is priced when it closes, from the
+group it is in by then. The Ritten list and the BASIS export only show the stored
+line; neither decides it.
+
+This replaces an earlier rule under which only a genuine Combination — one
+document, two legs — carried the surcharge. The genuine rule still decides where
+TAR belongs; see below.
 
 ---
 
@@ -533,6 +549,9 @@ Both of the following, from persisted data only:
 Trips an operator grouped by hand come from different documents, or from none,
 and are therefore not a Combination. Nothing is inferred from planning dates,
 booking numbers or the order rows appear in.
+
+This decides the TAR allocation only. The Combination Surcharge follows plain
+group membership — see Combination Surcharge above.
 
 If the Trips of one document are grouped but do **not** form exactly one
 DELIVERY and one COLLECTION, the Pricing Engine **refuses to price them**

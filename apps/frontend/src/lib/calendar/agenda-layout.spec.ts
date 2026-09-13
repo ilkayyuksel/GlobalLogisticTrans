@@ -256,3 +256,40 @@ describe("a compact window", () => {
     expect(windowAround([], DAY)).toBeNull();
   });
 });
+
+/**
+ * The backend refuses items outside 06:00–23:00, so none can exist through the
+ * application. Should one exist anyway, it is drawn at the nearest edge with a
+ * dashed border — never hidden.
+ */
+describe("items outside the day's hours", () => {
+  it("marks nothing inside the window", () => {
+    const [block] = layOutAgendaDay([item("a", "10:00", "11:00")], DAY);
+
+    expect(block.isClipped).toBe(false);
+  });
+
+  it("cuts an item reaching before the window at its top edge", () => {
+    const [block] = layOutAgendaDay([item("a", "05:00", "07:00")], DAY);
+
+    expect(block.isClipped).toBe(true);
+    expect(block.topPercent).toBe(0);
+    expect(block.heightPercent).toBeCloseTo(100 / 17, 5);
+  });
+
+  it("keeps a sliver of an item wholly before the window, at the top", () => {
+    const [block] = layOutAgendaDay([item("a", "05:00", "05:30")], DAY);
+
+    expect(block.isClipped).toBe(true);
+    expect(block.topPercent).toBe(0);
+    expect(block.heightPercent).toBeGreaterThan(0);
+  });
+
+  it("keeps a sliver of an item wholly after the window, at the bottom", () => {
+    const [block] = layOutAgendaDay([item("a", "23:15", "23:45")], DAY);
+
+    expect(block.isClipped).toBe(true);
+    expect(block.heightPercent).toBeGreaterThan(0);
+    expect(block.topPercent + block.heightPercent).toBeCloseTo(100, 5);
+  });
+});

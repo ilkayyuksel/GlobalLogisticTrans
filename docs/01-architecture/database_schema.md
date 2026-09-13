@@ -1312,7 +1312,7 @@ None.
 - May be physically deleted; deletion never affects business data.
 - Agenda items (§4.15, "The Agenda") are single-day: `end_date` is `NULL`, `end_time` is always written, and the item lies between 06:00 and 23:00 with `end_time` after `start_time`. Created without an end, an item is given one hour.
 - `event_type` is written as `OTHER` while the Agenda has no event types.
-- A day is read by `start_date` (indexed) and ordered by `start_time`, `end_time`, `id`.
+- A range of days — at most seven — is read by `start_date` (indexed) and ordered by `start_date`, `start_time`, `end_time`, `id`.
 
 ---
 

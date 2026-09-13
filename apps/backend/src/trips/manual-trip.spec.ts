@@ -520,7 +520,7 @@ describe("Manual Trip creation", () => {
         .expect(201);
     }
 
-    it.each(["20FL", "20ST"])("assigns Flat to a %s", async (containerType) => {
+    it.each(["20FL", "20ST", "45FL", "45OS"])("assigns Flat to a %s", async (containerType) => {
       await createWith(containerType);
 
       expect(assignments).toEqual([
@@ -538,7 +538,7 @@ describe("Manual Trip creation", () => {
       expect(assignments).toHaveLength(1);
     });
 
-    it.each(["45PH", "45OS", "20STUFF", null])(
+    it.each(["45PH", "45RH", "20STUFF", null])(
       "assigns nothing for %p",
       async (containerType) => {
         await createWith(containerType);

@@ -20,12 +20,12 @@ import {
 } from "@nestjs/swagger";
 
 import { CalendarEventService } from "./calendar-event.service";
-import { CalendarDayQueryDto } from "./dto/calendar-day-query.dto";
 import { CalendarEventIdParamDto } from "./dto/calendar-event-id-param.dto";
 import {
-  CalendarDayDto,
   CalendarEventResponseDto,
+  CalendarRangeDto,
 } from "./dto/calendar-event-response.dto";
+import { CalendarRangeQueryDto } from "./dto/calendar-range-query.dto";
 import { CreateCalendarEventDto } from "./dto/create-calendar-event.dto";
 import { UpdateCalendarEventDto } from "./dto/update-calendar-event.dto";
 
@@ -39,14 +39,17 @@ export class CalendarEventController {
 
   @Get()
   @ApiOperation({
-    summary: "One day of the Agenda",
+    summary: "The Agenda over a range of days",
     description:
-      "Every item on the given day, ordered by the database — start time, then end time, then id — together with the hours the Agenda shows (`dayStart`–`dayEnd`). The Dashboard asks for today with this same call.",
+      "Every item whose day lies from `from` to `to`, both included — at most seven days — ordered by the database (day, start time, end time, id), together with the hours the Agenda shows (`dayStart`–`dayEnd`). The calendar asks for its week; the Dashboard asks for today to today with this same call.",
   })
-  @ApiOkResponse({ type: CalendarDayDto })
-  @ApiBadRequestResponse({ description: "No date, or not a real calendar date." })
-  findDay(@Query() query: CalendarDayQueryDto): Promise<CalendarDayDto> {
-    return this.calendarEventService.findDay(query.date);
+  @ApiOkResponse({ type: CalendarRangeDto })
+  @ApiBadRequestResponse({
+    description:
+      "A missing or impossible date, `to` before `from`, or more than seven days.",
+  })
+  findRange(@Query() query: CalendarRangeQueryDto): Promise<CalendarRangeDto> {
+    return this.calendarEventService.findRange(query.from, query.to);
   }
 
   @Get(":id")
@@ -79,12 +82,12 @@ export class CalendarEventController {
   @ApiOperation({
     summary: "Change an Agenda item",
     description:
-      "Title, start and end. Omitted fields are unchanged; a null end means one hour after the start. The day cannot be changed — a `date` field is refused.",
+      "Title, day, start and end. Omitted fields are unchanged; a null end means one hour after the start. A new day moves the whole item.",
   })
   @ApiOkResponse({ type: CalendarEventResponseDto })
   @ApiBadRequestResponse({
     description:
-      "An empty title, an invalid time, an end not after the start, an item outside the Agenda's day, or an unknown field.",
+      "An empty title, an impossible day or time, an end not after the start, an item outside the Agenda's day, or an unknown field.",
   })
   @ApiNotFoundResponse({ description: "No Agenda item with that id." })
   update(

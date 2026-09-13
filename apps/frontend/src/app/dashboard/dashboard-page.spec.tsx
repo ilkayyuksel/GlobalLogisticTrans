@@ -4,9 +4,9 @@ import userEvent from "@testing-library/user-event";
 import DashboardPage from "./page";
 import { ApiError } from "@/lib/api/client";
 import {
-  getCalendarDay,
-  type CalendarDay,
+  getCalendarRange,
   type CalendarEvent,
+  type CalendarRange,
 } from "@/lib/api/calendar-events";
 import { uploadTransportOrderPdfs } from "@/lib/api/imports";
 import {
@@ -20,7 +20,7 @@ import {
 } from "@/lib/api/maintenance";
 import { type ListTripsParams, listTrips } from "@/lib/api/trips";
 import type { Paginated, Trip } from "@/lib/api/types";
-import { today } from "@/lib/calendar/calendar-dates";
+import { addDays, today } from "@/lib/calendar/calendar-dates";
 import { LanguageProvider } from "@/lib/i18n/language-provider";
 import { ThemeProvider } from "@/lib/theme/theme-provider";
 
@@ -47,7 +47,7 @@ jest.mock("@/lib/api/driver-statistics", () => ({
 
 jest.mock("@/lib/api/calendar-events", () => ({
   ...jest.requireActual("@/lib/api/calendar-events"),
-  getCalendarDay: jest.fn(),
+  getCalendarRange: jest.fn(),
 }));
 
 const listTripsMock = listTrips as jest.MockedFunction<typeof listTrips>;
@@ -64,8 +64,8 @@ const attentionMock = getMaintenanceAttention as jest.MockedFunction<
   typeof getMaintenanceAttention
 >;
 
-const calendarDayMock = getCalendarDay as jest.MockedFunction<
-  typeof getCalendarDay
+const calendarRangeMock = getCalendarRange as jest.MockedFunction<
+  typeof getCalendarRange
 >;
 
 /** The backend's top five, exactly as it answers. */
@@ -73,9 +73,9 @@ function attention(items: Maintenance[] = []) {
   return { today: "2026-09-14", items };
 }
 
-/** Today's Agenda, as the calendar's day endpoint answers it. */
-function agendaDay(items: CalendarEvent[] = []): CalendarDay {
-  return { date: today(), dayStart: "06:00", dayEnd: "23:00", items };
+/** Today's Agenda, as the calendar's endpoint answers today to today. */
+function agendaDay(items: CalendarEvent[] = []): CalendarRange {
+  return { from: today(), to: today(), dayStart: "06:00", dayEnd: "23:00", items };
 }
 
 function agendaItem(
@@ -278,8 +278,8 @@ describe("DashboardPage", () => {
     attentionMock.mockResolvedValue(attention());
     driverStatisticsMock.mockReset();
     driverStatisticsMock.mockResolvedValue(driverStatistics());
-    calendarDayMock.mockReset();
-    calendarDayMock.mockResolvedValue(agendaDay());
+    calendarRangeMock.mockReset();
+    calendarRangeMock.mockResolvedValue(agendaDay());
     window.localStorage.clear();
     respondWithCounts({ total: 42, today: 3, week: 11, open: 7, closed: 30 });
   });
@@ -491,17 +491,72 @@ describe("DashboardPage", () => {
       ) as HTMLElement;
     }
 
-    it("asks the calendar's day endpoint for today, and only today", async () => {
+    it("asks the calendar's endpoint for today to today, and nothing wider", async () => {
       renderDashboard();
 
       await agendaSection();
-      await waitFor(() => expect(calendarDayMock).toHaveBeenCalled());
+      await waitFor(() => expect(calendarRangeMock).toHaveBeenCalled());
 
-      expect(calendarDayMock.mock.calls.map(([date]) => date)).toEqual([today()]);
+      expect(calendarRangeMock.mock.calls.map(([from, to]) => [from, to])).toEqual([
+        [today(), today()],
+      ]);
+    });
+
+    /** Yesterday's and tomorrow's items are never drawn, even if they arrived. */
+    it("shows only today's items", async () => {
+      calendarRangeMock.mockResolvedValue(
+        agendaDay([
+          { ...agendaItem("y", "Gisteren-item", "09:00", "10:00"), date: addDays(today(), -1) },
+          agendaItem("t", "Vandaag-item", "09:00", "10:00"),
+          { ...agendaItem("m", "Morgen-item", "09:00", "10:00"), date: addDays(today(), 1) },
+        ]),
+      );
+
+      renderDashboard();
+      const section = await agendaSection();
+
+      expect(
+        await within(section).findByRole("link", { name: "Vandaag-item, 09:00–10:00" }),
+      ).toBeInTheDocument();
+      expect(within(section).queryByText("Gisteren-item")).not.toBeInTheDocument();
+      expect(within(section).queryByText("Morgen-item")).not.toBeInTheDocument();
+    });
+
+    it("puts today's items in time order, whatever order they arrive in", async () => {
+      calendarRangeMock.mockResolvedValue(
+        agendaDay([
+          agendaItem("late", "Telefoon", "13:30", "14:00"),
+          agendaItem("early", "Vergadering", "09:00", "10:00"),
+        ]),
+      );
+
+      renderDashboard();
+      const section = await agendaSection();
+      const items = await within(section).findAllByRole("link", { name: /, \d\d:\d\d–/ });
+
+      expect(items.map((link) => link.getAttribute("aria-label"))).toEqual([
+        "Vergadering, 09:00–10:00",
+        "Telefoon, 13:30–14:00",
+      ]);
+    });
+
+    it("draws no week: a single day, without day headings", async () => {
+      calendarRangeMock.mockResolvedValue(
+        agendaDay([agendaItem("a", "Vergadering", "09:00", "10:00")]),
+      );
+
+      renderDashboard();
+      const section = await agendaSection();
+
+      await within(section).findByRole("link", { name: "Vergadering, 09:00–10:00" });
+      expect(
+        within(section).getAllByRole("group").filter((group) => group.hasAttribute("aria-current")),
+      ).toHaveLength(1);
+      expect(within(section).queryByText("Weekagenda")).not.toBeInTheDocument();
     });
 
     it("shows today's items in time order, with their times, each linking to the calendar", async () => {
-      calendarDayMock.mockResolvedValue(
+      calendarRangeMock.mockResolvedValue(
         agendaDay([
           agendaItem("a", "Vergadering", "09:00", "10:00"),
           agendaItem("b", "Telefoon", "13:30", "14:00"),
@@ -521,7 +576,7 @@ describe("DashboardPage", () => {
     });
 
     it("stands overlapping items side by side", async () => {
-      calendarDayMock.mockResolvedValue(
+      calendarRangeMock.mockResolvedValue(
         agendaDay([
           agendaItem("a", "Vergadering", "10:00", "11:00"),
           agendaItem("b", "Telefoon", "10:30", "12:00"),
@@ -542,7 +597,7 @@ describe("DashboardPage", () => {
     });
 
     it("offers nothing to create: the Dashboard only shows", async () => {
-      calendarDayMock.mockResolvedValue(
+      calendarRangeMock.mockResolvedValue(
         agendaDay([agendaItem("a", "Vergadering", "09:00", "10:00")]),
       );
 
@@ -569,7 +624,7 @@ describe("DashboardPage", () => {
     });
 
     it("shows a change made in the calendar on the next visit", async () => {
-      calendarDayMock.mockResolvedValue(
+      calendarRangeMock.mockResolvedValue(
         agendaDay([agendaItem("a", "Vergadering", "09:00", "10:00")]),
       );
       const first = renderDashboard();
@@ -577,7 +632,7 @@ describe("DashboardPage", () => {
       await screen.findByRole("link", { name: "Vergadering, 09:00–10:00" });
       first.unmount();
 
-      calendarDayMock.mockResolvedValue(
+      calendarRangeMock.mockResolvedValue(
         agendaDay([agendaItem("a", "Klantbezoek", "09:30", "10:00")]),
       );
       renderDashboard();
@@ -826,8 +881,8 @@ describe("Dashboard PDF upload", () => {
     attentionMock.mockReset();
     attentionMock.mockResolvedValue(attention());
     driverStatisticsMock.mockResolvedValue(driverStatistics());
-    calendarDayMock.mockReset();
-    calendarDayMock.mockResolvedValue(agendaDay());
+    calendarRangeMock.mockReset();
+    calendarRangeMock.mockResolvedValue(agendaDay());
     window.localStorage.clear();
     respondWithCounts({ total: 0, today: 0, week: 0, open: 0, closed: 0, recent: [] });
   });

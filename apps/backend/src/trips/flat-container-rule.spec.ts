@@ -12,11 +12,11 @@ import {
  * writing the rule that would have been wrong.
  */
 describe("requiresFlatProperty", () => {
-  it.each(["20FL", "20ST"])("requires it for %s", (containerType) => {
+  it.each(["20FL", "20ST", "40FL", "40OS", "45FL", "45OS"])("requires it for %s", (containerType) => {
     expect(requiresFlatProperty(containerType)).toBe(true);
   });
 
-  it.each(["45PH", "45OS", "45RH", "20TK", "20RF"])(
+  it.each(["45PH", "45RH", "20TK", "20RF", "45OSX", "45F"])(
     "does not require it for %s",
     (containerType) => {
       expect(requiresFlatProperty(containerType)).toBe(false);

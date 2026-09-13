@@ -1,4 +1,4 @@
-import { tripsWhoseLegChanged } from "./combination-leg";
+import { tripsRepricedByRegrouping } from "./combination-leg";
 import {
   PricingRecalculationOutcome,
   PricingRecalculationService,
@@ -25,9 +25,9 @@ export function stubPricingRecalculation(
   return {
     recalculate: jest.fn().mockResolvedValue(outcome),
     // The real rule, not a canned answer: which Trips a regrouping affects is
-    // the Combination rule itself, and a double that guessed would let a test
-    // pass for a group the Engine would price differently.
-    tripsAffectedByRegrouping: jest.fn(tripsWhoseLegChanged),
+    // the pricing domain's rule itself, and a double that guessed would let a
+    // test pass for a group the Engine would price differently.
+    tripsAffectedByRegrouping: jest.fn(tripsRepricedByRegrouping),
   } as unknown as PricingRecalculationService & {
     recalculate: jest.Mock;
     tripsAffectedByRegrouping: jest.Mock;

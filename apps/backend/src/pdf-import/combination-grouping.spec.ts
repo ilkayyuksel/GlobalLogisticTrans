@@ -4,12 +4,12 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
-import {
-  CombinationLeg,
-  combinationLegOf,
-  isGenuineCombination,
-} from "../pricing-engine/combination-leg";
+import { CombinationLeg, combinationLegOf } from "../pricing-engine/combination-leg";
 import { buildHarness, type RealDocumentHarness } from "./real-documents.harness";
+
+/** A leg of a genuine pair: the delivery or the collection of one document. */
+const isPairLeg = (leg: CombinationLeg): boolean =>
+  leg === CombinationLeg.DELIVERY || leg === CombinationLeg.COLLECTION;
 
 /**
  * Every genuine Combination belongs to exactly one TripGroup.
@@ -127,7 +127,7 @@ describe("a genuine Combination and its TripGroup", () => {
         CombinationLeg.COLLECTION,
         CombinationLeg.DELIVERY,
       ]);
-      expect(legs.every(isGenuineCombination)).toBe(true);
+      expect(legs.every(isPairLeg)).toBe(true);
     });
 
     /** Both legs came from one document, which is what makes it genuine. */
@@ -176,7 +176,7 @@ describe("a genuine Combination and its TripGroup", () => {
       await harness.importer.import(read(COMBINATION), COMBINATION);
       await harness.importer.import(read(COMBINATION), COMBINATION);
 
-      expect(legsOf(harness).every(isGenuineCombination)).toBe(true);
+      expect(legsOf(harness).every(isPairLeg)).toBe(true);
     });
 
     /** The same document arriving as a revision behaves the same way. */
@@ -209,7 +209,7 @@ describe("a genuine Combination and its TripGroup", () => {
     it("is a genuine Combination for pricing", async () => {
       await harness.importer.revise(read(COMBINATION), COMBINATION);
 
-      expect(legsOf(harness).every(isGenuineCombination)).toBe(true);
+      expect(legsOf(harness).every(isPairLeg)).toBe(true);
     });
   });
 
@@ -264,7 +264,7 @@ describe("a genuine Combination and its TripGroup", () => {
 
       const legs = legsOf(harness);
 
-      expect(legs.filter(isGenuineCombination)).toHaveLength(2);
+      expect(legs.filter(isPairLeg)).toHaveLength(2);
       expect(legs.filter((leg) => leg === CombinationLeg.NONE)).toHaveLength(1);
     });
   });
@@ -316,7 +316,7 @@ describe("a genuine Combination and its TripGroup", () => {
 
       for (const member of members) {
         expect(combinationLegOf(member, members)).toBe(CombinationLeg.NONE);
-        expect(isGenuineCombination(combinationLegOf(member, members))).toBe(
+        expect(isPairLeg(combinationLegOf(member, members))).toBe(
           false,
         );
       }

@@ -25,17 +25,43 @@ jest.mock("next/navigation", () => ({
 }));
 
 const requestMock = request as jest.MockedFunction<typeof request>;
+/** A Monday: the week shown first is 14–20 September 2026. */
 const TODAY = "2026-09-14";
+const TUESDAY_ISO = "2026-09-15";
 const PATH = "/api/v1/calendar-events";
+/** One hour of the 06:00–23:00 day, as a percentage of its height. */
+const HOUR = 100 / 17;
+const MONDAY = "Maandag 14 september";
+const TUESDAY = "Dinsdag 15 september";
+const WEDNESDAY = "Woensdag 16 september";
+const THURSDAY = "Donderdag 17 september";
+
+/** Every browser API Jest fakes except the clock, so the page's own timers still run. */
+const ALL_BUT_DATE = [
+  "hrtime",
+  "nextTick",
+  "performance",
+  "queueMicrotask",
+  "requestAnimationFrame",
+  "cancelAnimationFrame",
+  "requestIdleCallback",
+  "cancelIdleCallback",
+  "setImmediate",
+  "clearImmediate",
+  "setInterval",
+  "clearInterval",
+  "setTimeout",
+  "clearTimeout",
+] as const;
 
 type Init = {
   method?: string;
-  query?: { date?: string };
+  query?: { from?: string; to?: string };
   body?: Record<string, string | null | undefined>;
 };
 
-/** The fake backend's store, by day. */
-let days: Record<string, CalendarEvent[]>;
+/** The fake backend's store, every day at once. */
+let items: CalendarEvent[];
 /** When set, the next write fails the way the backend would refuse it. */
 let refusal: ApiError | null;
 let createdCount: number;
@@ -43,9 +69,9 @@ let createdCount: number;
 function event(
   id: string,
   title: string,
+  date: string,
   start: string,
   end: string,
-  date = TODAY,
 ): CalendarEvent {
   return {
     id,
@@ -69,12 +95,15 @@ function fakeBackend(path: string, init: Init = {}): Promise<unknown> {
   const method = init.method ?? "GET";
 
   if (method === "GET" && path === PATH) {
-    const date = init.query?.date ?? "";
-    const items = [...(days[date] ?? [])].sort((left, right) =>
-      left.startTime.localeCompare(right.startTime),
-    );
+    const from = init.query?.from ?? "";
+    const to = init.query?.to ?? "";
+    const inRange = items
+      .filter((item) => item.date >= from && item.date <= to)
+      .sort((left, right) =>
+        `${left.date}${left.startTime}`.localeCompare(`${right.date}${right.startTime}`),
+      );
 
-    return Promise.resolve({ date, dayStart: "06:00", dayEnd: "23:00", items });
+    return Promise.resolve({ from, to, dayStart: "06:00", dayEnd: "23:00", items: inRange });
   }
 
   if (refusal) {
@@ -90,44 +119,43 @@ function fakeBackend(path: string, init: Init = {}): Promise<unknown> {
     const created = event(
       `new-${createdCount}`,
       String(body.title),
+      String(body.date),
       start,
       body.endTime ?? oneHourAfter(start),
-      String(body.date),
     );
 
-    days[created.date] = [...(days[created.date] ?? []), created];
+    items.push(created);
 
     return Promise.resolve(created);
   }
 
   const id = path.slice(PATH.length + 1);
-  const found = Object.values(days)
-    .flat()
-    .find((item) => item.id === id);
+  const index = items.findIndex((item) => item.id === id);
 
-  if (!found) {
+  if (index === -1) {
     return Promise.reject(new ApiError("NOT_FOUND", "No such Agenda item.", 404));
   }
 
   if (method === "PATCH") {
+    const found = items[index];
     const start = body.startTime ?? found.startTime.slice(0, 5);
     const end =
       body.endTime === null ? oneHourAfter(start) : (body.endTime ?? found.endTime.slice(0, 5));
-    const changed = {
+
+    items[index] = {
       ...found,
       title: body.title ?? found.title,
+      date: body.date ?? found.date,
       startTime: `${start}:00`,
       endTime: `${end}:00`,
     };
 
-    days[found.date] = days[found.date].map((item) => (item.id === id ? changed : item));
-
-    return Promise.resolve(changed);
+    return Promise.resolve(items[index]);
   }
 
-  days[found.date] = days[found.date].filter((item) => item.id !== id);
+  const [removed] = items.splice(index, 1);
 
-  return Promise.resolve(found);
+  return Promise.resolve(removed);
 }
 
 function writes(method: "POST" | "PATCH" | "DELETE") {
@@ -136,10 +164,11 @@ function writes(method: "POST" | "PATCH" | "DELETE") {
   );
 }
 
-function dayRequests(): string[] {
+/** Every range the page asked for, as "from..to". */
+function weekRequests(): string[] {
   return requestMock.mock.calls
     .filter(([path, init]) => path === PATH && !(init as Init | undefined)?.method)
-    .map(([, init]) => String((init as Init).query?.date));
+    .map(([, init]) => `${(init as Init).query?.from}..${(init as Init).query?.to}`);
 }
 
 function renderAgenda(): Promise<HTMLElement> {
@@ -151,12 +180,17 @@ function renderAgenda(): Promise<HTMLElement> {
     </ThemeProvider>,
   );
 
-  return screen.findByRole("group", { name: "Dagagenda" });
+  return screen.findByRole("group", { name: "Weekagenda" });
 }
 
-async function clickHour(time: string): Promise<HTMLElement> {
+/** One day's column. */
+function day(name: string): HTMLElement {
+  return screen.getByRole("group", { name });
+}
+
+async function clickSlot(dayName: string, time: string): Promise<HTMLElement> {
   await userEvent.click(
-    await screen.findByRole("button", { name: `Nieuw agenda-item om ${time}` }),
+    await screen.findByRole("button", { name: `Nieuw agenda-item — ${dayName}, ${time}` }),
   );
 
   return screen.findByRole("dialog", { name: "Nieuw agenda-item" });
@@ -167,139 +201,230 @@ async function blockOf(name: string): Promise<HTMLElement> {
   return (await screen.findByRole("button", { name })).parentElement as HTMLElement;
 }
 
-function setTime(dialog: HTMLElement, label: string, value: string): void {
+function setField(dialog: HTMLElement, label: string, value: string): void {
   fireEvent.change(within(dialog).getByLabelText(label), { target: { value } });
 }
 
-describe("the Agenda", () => {
+async function save(dialog: HTMLElement): Promise<void> {
+  await userEvent.click(within(dialog).getByRole("button", { name: "Opslaan" }));
+}
+
+describe("the Agenda, a week calendar", () => {
   beforeEach(() => {
     requestMock.mockReset();
     requestMock.mockImplementation((...args: unknown[]) =>
       fakeBackend(args[0] as string, args[1] as Init | undefined),
     );
-    days = {};
+    items = [];
     refusal = null;
     createdCount = 0;
     mockSearchParams = new URLSearchParams();
     window.localStorage.clear();
   });
 
-  describe("the day", () => {
-    it("opens on today, as the backend answers it", async () => {
+  describe("the week", () => {
+    it("opens on the current week, Monday to Sunday, asked of the backend at once", async () => {
       await renderAgenda();
 
-      expect(dayRequests()).toEqual([TODAY]);
-      expect(screen.getByText("Maandag 14 september 2026")).toBeInTheDocument();
-      expect(screen.getByText("Vandaag", { selector: "h1 span" })).toBeInTheDocument();
+      expect(weekRequests()).toEqual(["2026-09-14..2026-09-20"]);
+      expect(screen.getByText("14 – 20 september 2026")).toBeInTheDocument();
+
+      for (const name of [
+        MONDAY,
+        TUESDAY,
+        WEDNESDAY,
+        THURSDAY,
+        "Vrijdag 18 september",
+        "Zaterdag 19 september",
+        "Zondag 20 september",
+      ]) {
+        expect(day(name)).toBeInTheDocument();
+      }
     });
 
-    it("has an hour block for every hour from 06:00 to 22:00, ending at 23:00", async () => {
-      const grid = await renderAgenda();
+    it("gives every day an hour block from 06:00 to 22:00, the last ending at 23:00", async () => {
+      const week = await renderAgenda();
 
       expect(
-        within(grid).getAllByRole("button", { name: /^Nieuw agenda-item om/ }),
+        within(day(WEDNESDAY)).getAllByRole("button", { name: /^Nieuw agenda-item/ }),
       ).toHaveLength(17);
       expect(
-        within(grid).getByRole("button", { name: "Nieuw agenda-item om 06:00" }),
+        within(week).getAllByRole("button", { name: /^Nieuw agenda-item/ }),
+      ).toHaveLength(7 * 17);
+      expect(
+        screen.getByRole("button", { name: `Nieuw agenda-item — ${MONDAY}, 06:00` }),
       ).toBeInTheDocument();
       expect(
-        within(grid).getByRole("button", { name: "Nieuw agenda-item om 22:00" }),
+        screen.getByRole("button", { name: `Nieuw agenda-item — ${MONDAY}, 22:00` }),
       ).toBeInTheDocument();
-      expect(
-        within(grid).queryByRole("button", { name: "Nieuw agenda-item om 23:00" }),
-      ).not.toBeInTheDocument();
-      expect(within(grid).getByText("06:00")).toBeInTheDocument();
-      expect(within(grid).getByText("23:00")).toBeInTheDocument();
+      expect(within(week).getByText("06:00")).toBeInTheDocument();
+      expect(within(week).getByText("23:00")).toBeInTheDocument();
     });
 
-    it("moves to the next and previous day, and back to today", async () => {
+    it("marks today, and only today", async () => {
+      await renderAgenda();
+
+      expect(day(MONDAY)).toHaveAttribute("aria-current", "date");
+      expect(day(TUESDAY)).not.toHaveAttribute("aria-current");
+    });
+
+    it("moves to the next and previous week, and back to this week", async () => {
       await renderAgenda();
 
       await userEvent.click(screen.getByRole("button", { name: "Volgende" }));
-      await waitFor(() => expect(dayRequests()).toContain("2026-09-15"));
-      expect(await screen.findByText("Dinsdag 15 september 2026")).toBeInTheDocument();
-      expect(screen.queryByText("Vandaag", { selector: "h1 span" })).not.toBeInTheDocument();
+      expect(await screen.findByText("21 – 27 september 2026")).toBeInTheDocument();
+      expect(day("Maandag 21 september")).not.toHaveAttribute("aria-current");
 
       await userEvent.click(screen.getByRole("button", { name: "Vorige" }));
       await userEvent.click(screen.getByRole("button", { name: "Vorige" }));
-      await waitFor(() => expect(dayRequests()).toContain("2026-09-13"));
+      expect(await screen.findByText("7 – 13 september 2026")).toBeInTheDocument();
 
-      await userEvent.click(screen.getByRole("button", { name: "Vandaag" }));
-      await waitFor(() => expect(dayRequests().at(-1)).toBe(TODAY));
+      await userEvent.click(screen.getByRole("button", { name: "Deze week" }));
+      expect(await screen.findByText("14 – 20 september 2026")).toBeInTheDocument();
+
+      expect(weekRequests()).toEqual([
+        "2026-09-14..2026-09-20",
+        "2026-09-21..2026-09-27",
+        "2026-09-14..2026-09-20",
+        "2026-09-07..2026-09-13",
+        "2026-09-14..2026-09-20",
+      ]);
     });
 
-    it("shows only the selected day's items", async () => {
-      days["2026-09-13"] = [event("y", "Gisteren", "09:00", "10:00", "2026-09-13")];
-      days[TODAY] = [event("t", "Vandaag-item", "09:00", "10:00")];
-      days["2026-09-15"] = [event("m", "Morgen", "09:00", "10:00", "2026-09-15")];
-
+    it("keeps its date boundaries across a month", async () => {
+      mockSearchParams = new URLSearchParams("date=2026-10-01");
       await renderAgenda();
 
+      expect(weekRequests()).toEqual(["2026-09-28..2026-10-04"]);
+      expect(screen.getByText("28 september – 4 oktober 2026")).toBeInTheDocument();
+      expect(day("Woensdag 30 september")).toBeInTheDocument();
+      expect(day("Donderdag 1 oktober")).toBeInTheDocument();
+    });
+
+    it("keeps seven days across the end of summer time", async () => {
+      mockSearchParams = new URLSearchParams("date=2026-10-25");
+      await renderAgenda();
+
+      expect(weekRequests()).toEqual(["2026-10-19..2026-10-25"]);
+      expect(day("Maandag 19 oktober")).toBeInTheDocument();
+      expect(day("Zondag 25 oktober")).toBeInTheDocument();
+    });
+
+    it("shows each item on its own day only", async () => {
+      items = [
+        event("a", "Vergadering", TODAY, "10:00", "11:00"),
+        event("b", "Keuring", "2026-09-16", "14:00", "15:00"),
+        event("c", "Volgende week", "2026-09-21", "10:00", "11:00"),
+      ];
+      await renderAgenda();
+
+      const monday = day(MONDAY);
+
       expect(
-        await screen.findByRole("button", { name: "Vandaag-item, 09:00–10:00" }),
+        await within(monday).findByRole("button", { name: "Vergadering, 10:00–11:00" }),
       ).toBeInTheDocument();
-      expect(screen.queryByText("Gisteren")).not.toBeInTheDocument();
-      expect(screen.queryByText("Morgen")).not.toBeInTheDocument();
+      expect(within(monday).queryByText("Keuring")).not.toBeInTheDocument();
+      expect(
+        within(day(WEDNESDAY)).getByRole("button", { name: "Keuring, 14:00–15:00" }),
+      ).toBeInTheDocument();
+      expect(screen.queryByText("Volgende week")).not.toBeInTheDocument();
     });
   });
 
   describe("adding an item", () => {
-    it("starts at the hour that was clicked and, without an end, lasts one hour", async () => {
+    it("clicking Monday 08:00 adds an item on Monday at 08:00", async () => {
       await renderAgenda();
-      const dialog = await clickHour("10:00");
+      const dialog = await clickSlot(MONDAY, "08:00");
 
-      expect(within(dialog).getByText("10:00")).toBeInTheDocument();
+      expect(within(dialog).getByText("Maandag 14 september 2026")).toBeInTheDocument();
+      expect(within(dialog).getByLabelText("Starttijd")).toHaveValue("08:00");
 
-      await userEvent.type(within(dialog).getByLabelText("Titel"), "Vergadering");
-      await userEvent.click(within(dialog).getByRole("button", { name: "Opslaan" }));
+      await userEvent.type(within(dialog).getByLabelText("Titel"), "Overleg");
+      await save(dialog);
 
       await waitFor(() => expect(writes("POST")).toHaveLength(1));
       expect(writes("POST")[0]).toEqual([
         PATH,
         expect.objectContaining({
           method: "POST",
-          body: { title: "Vergadering", date: TODAY, startTime: "10:00" },
+          body: { title: "Overleg", date: TODAY, startTime: "08:00" },
         }),
       ]);
       expect(
-        await screen.findByRole("button", { name: "Vergadering, 10:00–11:00" }),
+        await within(day(MONDAY)).findByRole("button", { name: "Overleg, 08:00–09:00" }),
       ).toBeInTheDocument();
       expect(screen.getByText("Agenda-item toegevoegd.")).toBeInTheDocument();
     });
 
-    it("draws a one-hour item exactly one hour tall, at its hour", async () => {
-      days[TODAY] = [event("a", "Vergadering", "10:00", "11:00")];
+    it("clicking Wednesday 14:00 adds an item on Wednesday at 14:00", async () => {
       await renderAgenda();
+      const dialog = await clickSlot(WEDNESDAY, "14:00");
 
-      const block = await blockOf("Vergadering, 10:00–11:00");
-
-      expect(parseFloat(block.style.top)).toBeCloseTo((4 * 100) / 17, 3);
-      expect(parseFloat(block.style.height)).toBeCloseTo(100 / 17, 3);
-    });
-
-    it("sends the end that was chosen", async () => {
-      await renderAgenda();
-      const dialog = await clickHour("10:00");
-
-      await userEvent.type(within(dialog).getByLabelText("Titel"), "Vergadering");
-      setTime(dialog, "Eindtijd", "11:30");
-      await userEvent.click(within(dialog).getByRole("button", { name: "Opslaan" }));
+      await userEvent.type(within(dialog).getByLabelText("Titel"), "Telefoon");
+      await save(dialog);
 
       await waitFor(() => expect(writes("POST")).toHaveLength(1));
       expect(writes("POST")[0][1]).toMatchObject({
-        body: { title: "Vergadering", date: TODAY, startTime: "10:00", endTime: "11:30" },
+        body: { title: "Telefoon", date: "2026-09-16", startTime: "14:00" },
       });
       expect(
-        await screen.findByRole("button", { name: "Vergadering, 10:00–11:30" }),
+        await within(day(WEDNESDAY)).findByRole("button", { name: "Telefoon, 14:00–15:00" }),
       ).toBeInTheDocument();
+      expect(within(day(MONDAY)).queryByText("Telefoon")).not.toBeInTheDocument();
+    });
+
+    it("draws an item without an end exactly one hour tall", async () => {
+      await renderAgenda();
+      const dialog = await clickSlot(MONDAY, "10:00");
+
+      await userEvent.type(within(dialog).getByLabelText("Titel"), "Vergadering");
+      await save(dialog);
+
+      const block = await blockOf("Vergadering, 10:00–11:00");
+
+      expect(parseFloat(block.style.top)).toBeCloseTo(4 * HOUR, 3);
+      expect(parseFloat(block.style.height)).toBeCloseTo(HOUR, 3);
+    });
+
+    it("sends the end that was chosen and draws its duration", async () => {
+      await renderAgenda();
+      const dialog = await clickSlot(MONDAY, "14:00");
+
+      await userEvent.type(within(dialog).getByLabelText("Titel"), "Werkoverleg");
+      setField(dialog, "Eindtijd", "16:00");
+      await save(dialog);
+
+      await waitFor(() => expect(writes("POST")).toHaveLength(1));
+      expect(writes("POST")[0][1]).toMatchObject({
+        body: { title: "Werkoverleg", date: TODAY, startTime: "14:00", endTime: "16:00" },
+      });
+      expect(parseFloat((await blockOf("Werkoverleg, 14:00–16:00")).style.height)).toBeCloseTo(
+        2 * HOUR,
+        3,
+      );
+    });
+
+    it("lets the clicked start be adjusted, to 10:30 say", async () => {
+      await renderAgenda();
+      const dialog = await clickSlot(MONDAY, "10:00");
+
+      await userEvent.type(within(dialog).getByLabelText("Titel"), "Telefoon");
+      setField(dialog, "Starttijd", "10:30");
+      setField(dialog, "Eindtijd", "12:00");
+      await save(dialog);
+
+      await waitFor(() => expect(writes("POST")).toHaveLength(1));
+      expect(writes("POST")[0][1]).toMatchObject({
+        body: { date: TODAY, startTime: "10:30", endTime: "12:00" },
+      });
     });
 
     it("requires a title", async () => {
       await renderAgenda();
-      const dialog = await clickHour("10:00");
+      const dialog = await clickSlot(MONDAY, "10:00");
 
       await userEvent.type(within(dialog).getByLabelText("Titel"), "   ");
-      await userEvent.click(within(dialog).getByRole("button", { name: "Opslaan" }));
+      await save(dialog);
 
       expect(within(dialog).getByRole("alert")).toHaveTextContent("Vul een titel in.");
       expect(writes("POST")).toHaveLength(0);
@@ -307,11 +432,11 @@ describe("the Agenda", () => {
 
     it.each(["09:30", "10:00"])("refuses an end of %s for a 10:00 start", async (end) => {
       await renderAgenda();
-      const dialog = await clickHour("10:00");
+      const dialog = await clickSlot(MONDAY, "10:00");
 
       await userEvent.type(within(dialog).getByLabelText("Titel"), "Vergadering");
-      setTime(dialog, "Eindtijd", end);
-      await userEvent.click(within(dialog).getByRole("button", { name: "Opslaan" }));
+      setField(dialog, "Eindtijd", end);
+      await save(dialog);
 
       expect(within(dialog).getByRole("alert")).toHaveTextContent(
         "De eindtijd moet na de starttijd liggen.",
@@ -326,11 +451,11 @@ describe("the Agenda", () => {
         400,
       );
       await renderAgenda();
-      const dialog = await clickHour("22:00");
+      const dialog = await clickSlot(MONDAY, "22:00");
 
       await userEvent.type(within(dialog).getByLabelText("Titel"), "Laat");
-      setTime(dialog, "Eindtijd", "23:30");
-      await userEvent.click(within(dialog).getByRole("button", { name: "Opslaan" }));
+      setField(dialog, "Eindtijd", "23:30");
+      await save(dialog);
 
       expect(await within(dialog).findByRole("alert")).toHaveTextContent(
         /between 06:00 and 23:00/,
@@ -340,7 +465,7 @@ describe("the Agenda", () => {
 
     it("sends nothing when cancelled", async () => {
       await renderAgenda();
-      const dialog = await clickHour("10:00");
+      const dialog = await clickSlot(MONDAY, "10:00");
 
       await userEvent.type(within(dialog).getByLabelText("Titel"), "Vergadering");
       await userEvent.click(within(dialog).getByRole("button", { name: "Annuleren" }));
@@ -348,27 +473,95 @@ describe("the Agenda", () => {
       expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
       expect(writes("POST")).toHaveLength(0);
     });
+  });
 
-    /** An occupied hour still takes a new item: the hour block stays reachable. */
-    it("adds a second item in an hour that already has one", async () => {
-      days[TODAY] = [event("a", "Vergadering", "10:00", "11:00")];
+  describe("durations and overlap", () => {
+    it("draws a 30-minute item half as tall, and a 2-hour item twice as tall, as an hour", async () => {
+      items = [
+        event("h", "Half uur", TODAY, "08:00", "08:30"),
+        event("u", "Uur", TUESDAY_ISO, "08:00", "09:00"),
+        event("t", "Twee uur", "2026-09-16", "08:00", "10:00"),
+      ];
       await renderAgenda();
-      const dialog = await clickHour("10:00");
 
-      await userEvent.type(within(dialog).getByLabelText("Titel"), "Telefoon");
-      await userEvent.click(within(dialog).getByRole("button", { name: "Opslaan" }));
+      const half = parseFloat((await blockOf("Half uur, 08:00–08:30")).style.height);
+      const hour = parseFloat((await blockOf("Uur, 08:00–09:00")).style.height);
+      const two = parseFloat((await blockOf("Twee uur, 08:00–10:00")).style.height);
+
+      expect(half).toBeCloseTo(hour / 2, 3);
+      expect(two).toBeCloseTo(hour * 2, 3);
+    });
+
+    it("stands 10:00–11:00 and 10:30–12:00 side by side", async () => {
+      items = [
+        event("a", "Vergadering", TODAY, "10:00", "11:00"),
+        event("b", "Telefoon", TODAY, "10:30", "12:00"),
+      ];
+      await renderAgenda();
 
       const first = await blockOf("Vergadering, 10:00–11:00");
-      const second = await blockOf("Telefoon, 10:00–11:00");
+      const second = await blockOf("Telefoon, 10:30–12:00");
 
       expect([first.style.left, first.style.width]).toEqual(["0%", "50%"]);
       expect([second.style.left, second.style.width]).toEqual(["50%", "50%"]);
+    });
+
+    it("divides the width in three for three items at the same time", async () => {
+      items = [
+        event("a", "Item A", TODAY, "10:00", "11:00"),
+        event("b", "Item B", TODAY, "10:00", "11:00"),
+        event("c", "Item C", TODAY, "10:00", "11:00"),
+      ];
+      await renderAgenda();
+
+      const lefts = await Promise.all(
+        ["Item A", "Item B", "Item C"].map(async (title) =>
+          (await blockOf(`${title}, 10:00–11:00`)).style.left,
+        ),
+      );
+
+      expect(new Set(lefts).size).toBe(3);
+    });
+
+    it("keeps items that only meet at the whole width", async () => {
+      items = [
+        event("a", "Vergadering", TODAY, "10:00", "11:00"),
+        event("b", "Telefoon", TODAY, "11:00", "12:00"),
+      ];
+      await renderAgenda();
+
+      expect((await blockOf("Vergadering, 10:00–11:00")).style.width).toBe("100%");
+      expect((await blockOf("Telefoon, 11:00–12:00")).style.width).toBe("100%");
+    });
+
+    it("never lets items on different days affect each other", async () => {
+      items = [
+        event("a", "Maandag-item", TODAY, "10:00", "11:00"),
+        event("b", "Dinsdag-item", TUESDAY_ISO, "10:00", "11:00"),
+      ];
+      await renderAgenda();
+
+      expect((await blockOf("Maandag-item, 10:00–11:00")).style.width).toBe("100%");
+      expect((await blockOf("Dinsdag-item, 10:00–11:00")).style.width).toBe("100%");
+    });
+
+    /** An occupied hour still takes a new item: the hour block stays reachable. */
+    it("adds a second item in an hour that already has one", async () => {
+      items = [event("a", "Vergadering", TODAY, "10:00", "11:00")];
+      await renderAgenda();
+      const dialog = await clickSlot(MONDAY, "10:00");
+
+      await userEvent.type(within(dialog).getByLabelText("Titel"), "Telefoon");
+      await save(dialog);
+
+      expect((await blockOf("Telefoon, 10:00–11:00")).style.left).toBe("50%");
+      expect((await blockOf("Vergadering, 10:00–11:00")).style.left).toBe("0%");
     });
   });
 
   describe("changing an item", () => {
     beforeEach(() => {
-      days[TODAY] = [event("a", "Vergadering", "10:00", "11:00")];
+      items = [event("a", "Vergadering", TODAY, "10:00", "11:00")];
     });
 
     async function openItem(): Promise<HTMLElement> {
@@ -380,10 +573,11 @@ describe("the Agenda", () => {
       return screen.findByRole("dialog", { name: "Agenda-item bewerken" });
     }
 
-    it("opens with its title, start and end", async () => {
+    it("opens with its title, day, start and end", async () => {
       const dialog = await openItem();
 
       expect(within(dialog).getByLabelText("Titel")).toHaveValue("Vergadering");
+      expect(within(dialog).getByLabelText("Startdatum")).toHaveValue(TODAY);
       expect(within(dialog).getByLabelText("Starttijd")).toHaveValue("10:00");
       expect(within(dialog).getByLabelText("Eindtijd")).toHaveValue("11:00");
     });
@@ -393,14 +587,14 @@ describe("the Agenda", () => {
 
       await userEvent.clear(within(dialog).getByLabelText("Titel"));
       await userEvent.type(within(dialog).getByLabelText("Titel"), "Klantbezoek");
-      await userEvent.click(within(dialog).getByRole("button", { name: "Opslaan" }));
+      await save(dialog);
 
       await waitFor(() => expect(writes("PATCH")).toHaveLength(1));
       expect(writes("PATCH")[0]).toEqual([
         `${PATH}/a`,
         expect.objectContaining({
           method: "PATCH",
-          body: { title: "Klantbezoek", startTime: "10:00", endTime: "11:00" },
+          body: { title: "Klantbezoek", date: TODAY, startTime: "10:00", endTime: "11:00" },
         }),
       ]);
       expect(
@@ -411,11 +605,9 @@ describe("the Agenda", () => {
     it("moves the start", async () => {
       const dialog = await openItem();
 
-      setTime(dialog, "Starttijd", "10:30");
-      await userEvent.click(within(dialog).getByRole("button", { name: "Opslaan" }));
+      setField(dialog, "Starttijd", "10:30");
+      await save(dialog);
 
-      await waitFor(() => expect(writes("PATCH")).toHaveLength(1));
-      expect(writes("PATCH")[0][1]).toMatchObject({ body: { startTime: "10:30" } });
       expect(
         await screen.findByRole("button", { name: "Vergadering, 10:30–11:00" }),
       ).toBeInTheDocument();
@@ -424,36 +616,33 @@ describe("the Agenda", () => {
     it("changes the end", async () => {
       const dialog = await openItem();
 
-      setTime(dialog, "Eindtijd", "12:00");
-      await userEvent.click(within(dialog).getByRole("button", { name: "Opslaan" }));
+      setField(dialog, "Eindtijd", "12:00");
+      await save(dialog);
 
-      await waitFor(() => expect(writes("PATCH")).toHaveLength(1));
-      expect(writes("PATCH")[0][1]).toMatchObject({ body: { endTime: "12:00" } });
       expect(
         await screen.findByRole("button", { name: "Vergadering, 10:00–12:00" }),
       ).toBeInTheDocument();
     });
 
-    it("keeps the item on its day", async () => {
+    it("moves the item to another day of the week", async () => {
       const dialog = await openItem();
 
-      setTime(dialog, "Starttijd", "08:00");
-      setTime(dialog, "Eindtijd", "09:00");
-      await userEvent.click(within(dialog).getByRole("button", { name: "Opslaan" }));
+      setField(dialog, "Startdatum", "2026-09-17");
+      await save(dialog);
 
       await waitFor(() => expect(writes("PATCH")).toHaveLength(1));
-      expect(writes("PATCH")[0][1]).not.toHaveProperty("body.date");
+      expect(writes("PATCH")[0][1]).toMatchObject({ body: { date: "2026-09-17" } });
       expect(
-        await screen.findByRole("button", { name: "Vergadering, 08:00–09:00" }),
+        await within(day(THURSDAY)).findByRole("button", { name: "Vergadering, 10:00–11:00" }),
       ).toBeInTheDocument();
-      expect(new Set(dayRequests())).toEqual(new Set([TODAY]));
+      expect(within(day(MONDAY)).queryByText("Vergadering")).not.toBeInTheDocument();
     });
 
     it("refuses an end before the start", async () => {
       const dialog = await openItem();
 
-      setTime(dialog, "Eindtijd", "09:00");
-      await userEvent.click(within(dialog).getByRole("button", { name: "Opslaan" }));
+      setField(dialog, "Eindtijd", "09:00");
+      await save(dialog);
 
       expect(within(dialog).getByRole("alert")).toHaveTextContent(
         "De eindtijd moet na de starttijd liggen.",
@@ -476,7 +665,7 @@ describe("the Agenda", () => {
 
   describe("deleting an item", () => {
     beforeEach(() => {
-      days[TODAY] = [event("a", "Vergadering", "10:00", "11:00")];
+      items = [event("a", "Vergadering", TODAY, "10:00", "11:00")];
     });
 
     async function askToDelete(): Promise<HTMLElement> {
@@ -499,12 +688,10 @@ describe("the Agenda", () => {
       expect(writes("DELETE")).toHaveLength(0);
     });
 
-    it("removes it from the Agenda", async () => {
+    it("removes it from the calendar", async () => {
       const confirmation = await askToDelete();
 
-      await userEvent.click(
-        within(confirmation).getByRole("button", { name: "Verwijderen" }),
-      );
+      await userEvent.click(within(confirmation).getByRole("button", { name: "Verwijderen" }));
 
       await waitFor(() => expect(writes("DELETE")).toHaveLength(1));
       expect(writes("DELETE")[0][0]).toBe(`${PATH}/a`);
@@ -513,7 +700,6 @@ describe("the Agenda", () => {
           screen.queryByRole("button", { name: "Vergadering, 10:00–11:00" }),
         ).not.toBeInTheDocument(),
       );
-      expect(screen.getByText("Agenda-item verwijderd.")).toBeInTheDocument();
     });
 
     it("keeps it when the confirmation is cancelled", async () => {
@@ -528,63 +714,63 @@ describe("the Agenda", () => {
     });
   });
 
-  describe("overlapping items", () => {
-    it("stands 10:00–11:00 and 10:30–12:00 side by side", async () => {
-      days[TODAY] = [
-        event("a", "Vergadering", "10:00", "11:00"),
-        event("b", "Telefoon", "10:30", "12:00"),
-      ];
-      await renderAgenda();
+  it("keeps what was added in another week", async () => {
+    await renderAgenda();
 
-      const first = await blockOf("Vergadering, 10:00–11:00");
-      const second = await blockOf("Telefoon, 10:30–12:00");
+    await userEvent.click(screen.getByRole("button", { name: "Volgende" }));
+    await screen.findByText("21 – 27 september 2026");
+    const dialog = await clickSlot("Dinsdag 22 september", "09:00");
+    await userEvent.type(within(dialog).getByLabelText("Titel"), "Planning");
+    await save(dialog);
+    await screen.findByRole("button", { name: "Planning, 09:00–10:00" });
 
-      expect([first.style.left, first.style.width]).toEqual(["0%", "50%"]);
-      expect([second.style.left, second.style.width]).toEqual(["50%", "50%"]);
-      expect(parseFloat(second.style.height)).toBeCloseTo(
-        parseFloat(first.style.height) * 1.5,
-        3,
-      );
-    });
+    await userEvent.click(screen.getByRole("button", { name: "Deze week" }));
+    await screen.findByText("14 – 20 september 2026");
+    expect(screen.queryByText("Planning")).not.toBeInTheDocument();
 
-    it("gives items that only meet the whole width each", async () => {
-      days[TODAY] = [
-        event("a", "Vergadering", "10:00", "11:00"),
-        event("b", "Telefoon", "11:00", "12:00"),
-      ];
-      await renderAgenda();
-
-      const first = await blockOf("Vergadering, 10:00–11:00");
-      const second = await blockOf("Telefoon, 11:00–12:00");
-
-      expect([first.style.left, first.style.width]).toEqual(["0%", "100%"]);
-      expect([second.style.left, second.style.width]).toEqual(["0%", "100%"]);
-    });
+    await userEvent.click(screen.getByRole("button", { name: "Volgende" }));
+    expect(
+      await within(await waitFor(() => day("Dinsdag 22 september"))).findByRole("button", {
+        name: "Planning, 09:00–10:00",
+      }),
+    ).toBeInTheDocument();
   });
 
-  it("opens the day and the item a Dashboard link names", async () => {
-    days["2026-09-20"] = [event("e1", "Keuring", "08:00", "09:00", "2026-09-20")];
-    mockSearchParams = new URLSearchParams("date=2026-09-20&event=e1");
+  it("opens the week and the item a Dashboard link names", async () => {
+    items = [event("e1", "Keuring", "2026-09-16", "08:00", "09:00")];
+    mockSearchParams = new URLSearchParams("date=2026-09-16&event=e1");
 
     await renderAgenda();
     const dialog = await screen.findByRole("dialog", { name: "Agenda-item bewerken" });
 
     expect(within(dialog).getByLabelText("Titel")).toHaveValue("Keuring");
-    expect(dayRequests()).toEqual(["2026-09-20"]);
+    expect(weekRequests()).toEqual(["2026-09-14..2026-09-20"]);
   });
 
-  /** Wall-clock values from the backend are drawn as they are, at the day's edges too. */
-  it("shows the day's first and last hour exactly as the backend sent them", async () => {
-    days[TODAY] = [
-      event("a", "Vroeg", "06:00", "07:00"),
-      event("b", "Laat", "22:00", "23:00"),
-    ];
-    await renderAgenda();
+  describe("the current time", () => {
+    afterEach(() => {
+      jest.useRealTimers();
+    });
 
-    const early = await blockOf("Vroeg, 06:00–07:00");
-    const late = await blockOf("Laat, 22:00–23:00");
+    it("draws a line at the local time, in today's column only", async () => {
+      jest.useFakeTimers({ now: new Date(2026, 8, 14, 10, 30), doNotFake: [...ALL_BUT_DATE] });
 
-    expect(parseFloat(early.style.top)).toBe(0);
-    expect(parseFloat(late.style.top) + parseFloat(late.style.height)).toBeCloseTo(100, 3);
+      await renderAgenda();
+      const lines = document.querySelectorAll<HTMLElement>("[data-agenda-now]");
+
+      expect(lines).toHaveLength(1);
+      expect(day(MONDAY).contains(lines[0])).toBe(true);
+      expect(parseFloat(lines[0].style.top)).toBeCloseTo(4.5 * HOUR, 3);
+    });
+
+    it("draws no line in another week", async () => {
+      jest.useFakeTimers({ now: new Date(2026, 8, 14, 10, 30), doNotFake: [...ALL_BUT_DATE] });
+
+      await renderAgenda();
+      await userEvent.click(screen.getByRole("button", { name: "Volgende" }));
+      await screen.findByText("21 – 27 september 2026");
+
+      expect(document.querySelectorAll("[data-agenda-now]")).toHaveLength(0);
+    });
   });
 });

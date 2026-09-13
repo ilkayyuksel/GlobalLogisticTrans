@@ -18,7 +18,9 @@ import { CalendarEventRepository } from "./calendar-event.repository";
 import { CalendarEventService } from "./calendar-event.service";
 
 const EVENT_ID = "7b1f4c2e-2d7a-4a55-9a51-0f3c2f1f9d10";
+/** A Monday; its week runs to Sunday 20 September. */
 const DAY = "2026-09-14";
+const WEEK_END = "2026-09-20";
 const BASE = "/api/v1/calendar-events";
 
 function row(overrides: Partial<CalendarEvent> = {}): CalendarEvent {
@@ -46,7 +48,7 @@ function row(overrides: Partial<CalendarEvent> = {}): CalendarEvent {
 describe("CalendarEventController (integration)", () => {
   let app: INestApplication;
   let repository: {
-    findForDay: jest.Mock;
+    findForRange: jest.Mock;
     findById: jest.Mock;
     create: jest.Mock;
     update: jest.Mock;
@@ -55,7 +57,7 @@ describe("CalendarEventController (integration)", () => {
 
   beforeEach(async () => {
     repository = {
-      findForDay: jest.fn().mockResolvedValue([]),
+      findForRange: jest.fn().mockResolvedValue([]),
       findById: jest.fn().mockResolvedValue(row()),
       create: jest.fn((data: object) =>
         Promise.resolve(row(data as Partial<CalendarEvent>)),
@@ -108,6 +110,10 @@ describe("CalendarEventController (integration)", () => {
     await app.close();
   });
 
+  function range(query: Record<string, string>) {
+    return request(app.getHttpServer()).get(BASE).query(query);
+  }
+
   function create(body: Record<string, unknown>) {
     return request(app.getHttpServer())
       .post(BASE)
@@ -123,25 +129,24 @@ describe("CalendarEventController (integration)", () => {
     return mock.mock.calls[0][argument] as Record<string, unknown>;
   }
 
-  describe("one day", () => {
-    it("answers the day's items with the hours the Agenda shows", async () => {
-      repository.findForDay.mockResolvedValue([
+  describe("a range of days", () => {
+    it("answers the week's items with the hours each day shows", async () => {
+      repository.findForRange.mockResolvedValue([
         row(),
         row({
           id: "0d6c2d0a-1d47-4d7c-8a11-5a1a8a3c2b99",
           title: "Telefoon",
-          startTime: toUtcTime("10:30"),
-          endTime: toUtcTime("12:00"),
+          startDate: toUtcDate("2026-09-16"),
+          startTime: toUtcTime("14:00"),
+          endTime: toUtcTime("15:30"),
         }),
       ]);
 
-      const response = await request(app.getHttpServer())
-        .get(BASE)
-        .query({ date: DAY })
-        .expect(200);
+      const response = await range({ from: DAY, to: WEEK_END }).expect(200);
 
       expect(response.body.data).toEqual({
-        date: DAY,
+        from: DAY,
+        to: WEEK_END,
         dayStart: "06:00",
         dayEnd: "23:00",
         items: [
@@ -153,27 +158,44 @@ describe("CalendarEventController (integration)", () => {
           }),
           expect.objectContaining({
             title: "Telefoon",
-            startTime: "10:30:00",
-            endTime: "12:00:00",
+            date: "2026-09-16",
+            startTime: "14:00:00",
+            endTime: "15:30:00",
           }),
         ],
       });
     });
 
-    it("asks the repository for exactly that day", async () => {
-      await request(app.getHttpServer()).get(BASE).query({ date: DAY }).expect(200);
+    it("asks the repository for exactly that range", async () => {
+      await range({ from: DAY, to: WEEK_END }).expect(200);
 
-      expect(repository.findForDay).toHaveBeenCalledWith(toUtcDate(DAY));
+      expect(repository.findForRange).toHaveBeenCalledWith(
+        toUtcDate(DAY),
+        toUtcDate(WEEK_END),
+      );
+    });
+
+    /** The Dashboard's question: today, and only today. */
+    it("answers a single day", async () => {
+      await range({ from: DAY, to: DAY }).expect(200);
+
+      expect(repository.findForRange).toHaveBeenCalledWith(
+        toUtcDate(DAY),
+        toUtcDate(DAY),
+      );
     });
 
     it.each([
-      ["no date", {}],
-      ["an impossible date", { date: "2026-02-30" }],
-      ["a timestamp", { date: "2026-09-14T10:00:00Z" }],
+      ["no start", { to: WEEK_END }],
+      ["no end", { from: DAY }],
+      ["an impossible day", { from: "2026-02-30", to: "2026-03-01" }],
+      ["a timestamp", { from: "2026-09-14T10:00:00Z", to: WEEK_END }],
+      ["an end before the start", { from: WEEK_END, to: DAY }],
+      ["eight days", { from: DAY, to: "2026-09-21" }],
     ])("refuses %s", async (_case, query) => {
-      await request(app.getHttpServer()).get(BASE).query(query).expect(400);
+      await range(query).expect(400);
 
-      expect(repository.findForDay).not.toHaveBeenCalled();
+      expect(repository.findForRange).not.toHaveBeenCalled();
     });
   });
 
@@ -214,15 +236,20 @@ describe("CalendarEventController (integration)", () => {
 
     /** One DATE and two TIMEs, stored as given: a single-day item with no event type to choose. */
     it("stores the day and the wall-clock times exactly", async () => {
-      await create({ title: "  Vergadering  ", startTime: "07:00", endTime: "08:15" }).expect(201);
+      await create({
+        title: "  Vergadering  ",
+        date: "2026-09-16",
+        startTime: "14:00",
+        endTime: "15:15",
+      }).expect(201);
 
       expect(stored(repository.create)).toEqual({
         title: "Vergadering",
         eventType: "OTHER",
-        startDate: new Date("2026-09-14T00:00:00.000Z"),
-        startTime: new Date("1970-01-01T07:00:00.000Z"),
+        startDate: new Date("2026-09-16T00:00:00.000Z"),
+        startTime: new Date("1970-01-01T14:00:00.000Z"),
         endDate: null,
-        endTime: new Date("1970-01-01T08:15:00.000Z"),
+        endTime: new Date("1970-01-01T15:15:00.000Z"),
       });
     });
 
@@ -284,7 +311,7 @@ describe("CalendarEventController (integration)", () => {
   });
 
   describe("editing", () => {
-    it("changes the title and keeps the times", async () => {
+    it("changes the title and keeps the day and the times", async () => {
       await patch({ title: "Vergadering met klant" }).expect(200);
 
       expect(stored(repository.update, 1)).toEqual({
@@ -325,18 +352,26 @@ describe("CalendarEventController (integration)", () => {
       });
     });
 
-    /** The day is not editable: the item stays where it was. */
-    it("keeps the item on its day", async () => {
+    it("moves the item to another day, times and all", async () => {
+      const response = await patch({ date: "2026-09-17" }).expect(200);
+
+      expect(stored(repository.update, 1)).toEqual({
+        startDate: toUtcDate("2026-09-17"),
+        startTime: toUtcTime("10:00"),
+        endTime: toUtcTime("11:00"),
+      });
+      expect(response.body.data).toMatchObject({
+        date: "2026-09-17",
+        startTime: "10:00:00",
+        endTime: "11:00:00",
+      });
+    });
+
+    it("keeps the day when none is given", async () => {
       await patch({ startTime: "08:00", endTime: "09:00" }).expect(200);
 
       expect(stored(repository.update, 1)).not.toHaveProperty("startDate");
       expect(stored(repository.update, 1)).not.toHaveProperty("endDate");
-    });
-
-    it("refuses a new day", async () => {
-      await patch({ date: "2026-09-15" }).expect(400);
-
-      expect(repository.update).not.toHaveBeenCalled();
     });
 
     it("refuses a start moved past the stored end", async () => {
@@ -361,6 +396,9 @@ describe("CalendarEventController (integration)", () => {
       ["an empty title", { title: "" }],
       ["a null title", { title: null }],
       ["a null start", { startTime: null }],
+      ["an impossible day", { date: "2026-02-30" }],
+      ["a null day", { date: null }],
+      ["an unknown field", { color: "#ff0000" }],
     ])("refuses %s", async (_case, body) => {
       await patch(body).expect(400);
 
@@ -426,28 +464,29 @@ describe("CalendarEventController (integration)", () => {
 
   /**
    * Nothing is converted through a local time, so the server's zone cannot move
-   * an item to another day or hour. Jest cannot switch the process's zone from
-   * inside a test; this pins the exact UTC-anchored values, which any local-time
-   * conversion breaks on a machine outside UTC. Run the file with TZ set to
-   * check another zone.
+   * an item to another day or hour, or a week to other dates. Jest cannot switch
+   * the process's zone from inside a test; this pins the exact UTC-anchored
+   * values, which any local-time conversion breaks on a machine outside UTC.
+   * Run the file with TZ set to check another zone.
    */
-  it("stores and answers 14/09 07:00–08:00 without moving it", async () => {
-    repository.findForDay.mockResolvedValue([
+  it("stores and answers 14/09 07:00–08:00, and the week's dates, without moving them", async () => {
+    repository.findForRange.mockResolvedValue([
       row({ startTime: toUtcTime("07:00"), endTime: toUtcTime("08:00") }),
     ]);
 
     await create({ startTime: "07:00" }).expect(201);
-    const day = await request(app.getHttpServer())
-      .get(BASE)
-      .query({ date: DAY })
-      .expect(200);
+    const week = await range({ from: DAY, to: WEEK_END }).expect(200);
 
     expect(stored(repository.create)).toMatchObject({
       startDate: new Date("2026-09-14T00:00:00.000Z"),
       startTime: new Date("1970-01-01T07:00:00.000Z"),
       endTime: new Date("1970-01-01T08:00:00.000Z"),
     });
-    expect(day.body.data.items[0]).toMatchObject({
+    expect(repository.findForRange).toHaveBeenCalledWith(
+      new Date("2026-09-14T00:00:00.000Z"),
+      new Date("2026-09-20T00:00:00.000Z"),
+    );
+    expect(week.body.data.items[0]).toMatchObject({
       date: DAY,
       startTime: "07:00:00",
       endTime: "08:00:00",

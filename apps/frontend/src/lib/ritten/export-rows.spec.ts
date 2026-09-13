@@ -817,9 +817,9 @@ describe("the Combination surcharge in COMBI EN KOST", () => {
   });
 
   /**
-   * A manual group - two Trips of different documents grouped by an operator -
-   * is not a Combination, so the Engine stores no COMBINATION line for it. The
-   * export follows the snapshot, not the group: no line, no amount.
+   * The export follows the snapshot, never the group: a grouped Trip whose
+   * stored snapshot has no COMBINATION line shows no amount. Whether a Trip
+   * carries the surcharge is the Engine's decision; the sheet only shows it.
    */
   it("adds nothing for a grouped Trip whose snapshot has no surcharge", () => {
     expect(
@@ -842,6 +842,41 @@ describe("the Combination surcharge in COMBI EN KOST", () => {
         "Wachttijd",
       ).costs,
     ).toBe("50.00");
+  });
+
+  /** Every group member is priced on its own snapshot, manual group or not. */
+  it("prints a manual-group member's own stored surcharge", () => {
+    expect(
+      toBasicRow(
+        buildTrip({ tripGroupId: "manual-group" }),
+        snapshotOf(line("BASE_PRICE", "100.00"), line("COMBINATION", "50.00")),
+        MANUAL,
+        "Wachttijd",
+      ).costs,
+    ).toBe("50.00");
+  });
+
+  /** Taken out of its group, the Trip is repriced without the line — and so is the sheet. */
+  it("prints no surcharge once the ungrouped Trip's new snapshot has none", () => {
+    expect(
+      toBasicRow(
+        buildTrip({ tripGroupId: null }),
+        snapshotOf(line("BASE_PRICE", "100.00"), line("WAITING_TIME", "55.00")),
+        MANUAL,
+        "Wachttijd",
+      ).costs,
+    ).toBe("55.00");
+  });
+
+  /** Flat and the surcharge are independent lines; neither hides the other. */
+  it("prints the surcharge before an automatic Flat", () => {
+    expect(
+      costsOf(
+        line("BASE_PRICE", "100.00"),
+        line("COMBINATION", "50.00"),
+        line("CUSTOM_PROPERTY", "20.00", "prop-flat"),
+      ),
+    ).toBe("50.00 + 20.00");
   });
 
   /** A standalone Trip has no COMBINATION line, so nothing is added. */

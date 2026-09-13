@@ -3,10 +3,7 @@ import { Prisma, Trip, TripDirection, TripStatus } from "@prisma/client";
 import { DomainEventBus } from "../common/events/domain-event-bus";
 import { DriverService } from "../drivers/driver.service";
 import { AppLoggerService } from "../logger/app-logger.service";
-import {
-  combinationLegOf,
-  isGenuineCombination,
-} from "../pricing-engine/combination-leg";
+import { carriesCombinationSurcharge } from "../pricing-engine/combination-leg";
 import { stubPricingRecalculation } from "../pricing-engine/pricing-recalculation.double";
 import type { PricingRecalculationOutcome } from "../pricing-engine/pricing-recalculation.service";
 import { toEffectivePricingDto } from "../trip-pricing/dto/effective-pricing.dto";
@@ -18,25 +15,28 @@ import { TripRepository } from "./trip.repository";
 import { TripService } from "./trip.service";
 
 /**
- * Grouping and ungrouping reprice the legs whose Combination they changed.
+ * Grouping and ungrouping reprice the Trips whose group they changed.
  *
- * ── THE GAP THIS CLOSES ─────────────────────────────────────────────────────
- * A Trip's leg is decided by its group, and the leg decides the Backload and
- * which leg owes TAR. Grouping and ungrouping used to write `tripGroupId` and
- * nothing else, which left two stale prices behind, both reproduced on a real
- * stack before this was written:
+ * ── THE RULE ────────────────────────────────────────────────────────────────
+ * Since September 2026 every Trip in a group carries its own Combination
+ * Surcharge — €50, on its own snapshot — whatever kind of group it is, whenever
+ * it closed, and whatever its partner is doing. Group membership is therefore a
+ * pricing input, and grouping and ungrouping write nothing but `tripGroupId`, so
+ * without a recalculation two stale prices were left behind:
  *
- *   a leg CLOSED before it joined a genuine Combination kept a price with no
- *   Backload, while its partner — closed afterwards — carried €50;
+ *   a Trip CLOSED before it joined a group kept a price with no Backload;
+ *   a Trip taken OUT of a group kept its €50.
  *
- *   a leg taken OUT of a Combination kept its €50, as did the leg left behind.
+ * The member left behind in a group keeps its €50; only the Trip that leaves
+ * loses it. A split genuine pair still reprices the leg left behind, because
+ * its TAR leg changed — and that recalculation keeps its Backload.
  *
  * ── HOW THE ENGINE IS FAKED HERE, AND WHY ────────────────────────────────────
- * The recalculation answers with the REAL Combination rule applied to the
- * group as it is stored AT THE MOMENT it is called. So a recalculation that ran
- * before the membership was written would answer with the old group, and the
- * Backload assertions below would fail — the tests prove the ordering, not
- * just that a call happened.
+ * The recalculation answers with the REAL surcharge rule applied to the Trip as
+ * it is stored AT THE MOMENT it is called. So a recalculation that ran before
+ * the membership was written would answer with the old group, and the Backload
+ * assertions below would fail — the tests prove the ordering, not just that a
+ * call happened.
  * ────────────────────────────────────────────────────────────────────────────
  */
 
@@ -128,7 +128,7 @@ interface Harness {
   readonly journal: string[];
   /** The group each Trip was in at the moment it was recalculated. */
   readonly groupAtRecalculation: Map<string, string | null>;
-  /** What each recalculation answered, by Trip id. */
+  /** What each recalculation answered, by Trip id — the latest one wins. */
   readonly answers: Map<string, PricingRecalculationOutcome>;
   readonly recalculated: () => string[];
 }
@@ -191,12 +191,13 @@ function harness(
       journal.push(`recalculate ${id}`);
       groupAtRecalculation.set(id, find(id).tripGroupId);
 
-      // The real rule, over the group exactly as it is stored right now.
-      const leg = combinationLegOf(find(id), stored);
+      // The real surcharge rule, over the Trip exactly as it is stored now.
       const answer: PricingRecalculationOutcome =
         failWith === null
           ? {
-              pricing: pricing(isGenuineCombination(leg) ? "50.00" : null),
+              pricing: pricing(
+                carriesCombinationSurcharge(find(id)) ? "50.00" : null,
+              ),
               reasonCode: null,
             }
           : { pricing: null, reasonCode: failWith };
@@ -259,9 +260,9 @@ function backloadOf(
   );
 }
 
-describe("grouping reprices the legs it turns into a Combination", () => {
+describe("grouping reprices every CLOSED Trip that joins a group", () => {
   describe("two CLOSED legs of one order", () => {
-    it("reprices both, so each carries its €50 Backload", async () => {
+    it("reprices both, so each carries its own €50 Backload", async () => {
       const { service, recalculated } = harness([
         DELIVERY,
         COLLECTION,
@@ -334,10 +335,10 @@ describe("grouping reprices the legs it turns into a Combination", () => {
     });
   });
 
-  describe("a CLOSED leg grouped with an OPEN one", () => {
+  describe("a CLOSED Trip grouped with an OPEN one", () => {
     /*
-     * The OPEN leg is priced when it closes, from the group it is in by then —
-     * the existing lifecycle. Only the finished leg has a price to keep current.
+     * The OPEN Trip is priced when it closes, from the group it is in by then —
+     * the existing lifecycle. Only the finished Trip has a price to keep current.
      */
     it("reprices the CLOSED leg and leaves the OPEN one to its own close", async () => {
       const open = { ...COLLECTION, status: TripStatus.OPEN };
@@ -352,16 +353,17 @@ describe("grouping reprices the legs it turns into a Combination", () => {
   });
 
   describe("a manual group", () => {
-    it("reprices nobody: Trips of different orders are no Combination", async () => {
+    it("reprices every CLOSED member, and each carries its own €50", async () => {
       const { service, recalculated } = harness([DELIVERY, STRANGER]);
 
       const grouped = await service.createGroup([DELIVERY.id, STRANGER.id]);
 
-      expect(recalculated()).toEqual([]);
-      expect(backloadOf(grouped, DELIVERY.id)).toBe("0.00");
+      expect(recalculated().sort()).toEqual([DELIVERY.id, STRANGER.id].sort());
+      expect(backloadOf(grouped, DELIVERY.id)).toBe("50.00");
+      expect(backloadOf(grouped, STRANGER.id)).toBe("50.00");
     });
 
-    it("reprices only the pair when a genuine pair joins a larger manual group", async () => {
+    it("reprices every CLOSED member when a genuine pair joins a larger group", async () => {
       const { service, recalculated } = harness([
         DELIVERY,
         COLLECTION,
@@ -370,7 +372,19 @@ describe("grouping reprices the legs it turns into a Combination", () => {
 
       await service.createGroup([DELIVERY.id, COLLECTION.id, STRANGER.id]);
 
-      expect(recalculated().sort()).toEqual([COLLECTION.id, DELIVERY.id]);
+      expect(recalculated().sort()).toEqual(
+        [COLLECTION.id, DELIVERY.id, STRANGER.id].sort(),
+      );
+    });
+
+    it("leaves an OPEN member to its own close", async () => {
+      const open = { ...STRANGER, status: TripStatus.OPEN };
+      const { service, recalculated } = harness([DELIVERY, open]);
+
+      const grouped = await service.createGroup([DELIVERY.id, open.id]);
+
+      expect(recalculated()).toEqual([DELIVERY.id]);
+      expect(backloadOf(grouped, DELIVERY.id)).toBe("50.00");
     });
   });
 
@@ -390,13 +404,14 @@ describe("grouping reprices the legs it turns into a Combination", () => {
   });
 });
 
-describe("ungrouping reprices the legs it takes out of a Combination", () => {
+describe("ungrouping reprices the Trip taken out", () => {
   const PAIR = [
     { ...DELIVERY, tripGroupId: GROUP_ID },
     { ...COLLECTION, tripGroupId: GROUP_ID },
   ];
 
-  it("reprices the removed leg AND the leg left behind", async () => {
+  /** The other leg's TAR leg changed, so it is priced again too. */
+  it("reprices the removed leg AND the leg left behind of a genuine pair", async () => {
     const { service, recalculated } = harness([...PAIR, UNRELATED]);
 
     await service.removeFromGroup(DELIVERY.id);
@@ -414,15 +429,14 @@ describe("ungrouping reprices the legs it takes out of a Combination", () => {
     expect(removed.pricing?.backload).toBe("0.00");
   });
 
-  /** A lone leg is not a Combination, so its partner's €50 goes too. */
-  it("takes the €50 off the leg left behind", async () => {
+  /** Still in its group, so still charged: only the Trip that leaves loses it. */
+  it("keeps the €50 on the leg left behind", async () => {
     const { service, groupAtRecalculation, answers } = harness(PAIR);
 
     await service.removeFromGroup(DELIVERY.id);
 
-    // Still in the group — but alone in it, which is no Combination.
     expect(groupAtRecalculation.get(COLLECTION.id)).toBe(GROUP_ID);
-    expect(answers.get(COLLECTION.id)?.pricing?.backload).toBe("0.00");
+    expect(answers.get(COLLECTION.id)?.pricing?.backload).toBe("50.00");
   });
 
   it("prices only after the removal has committed", async () => {
@@ -434,13 +448,14 @@ describe("ungrouping reprices the legs it takes out of a Combination", () => {
     expect(journal.slice(2)).toHaveLength(2);
   });
 
-  it("reprices nobody when a stranger leaves a group that still holds the pair", async () => {
+  it("reprices only the stranger when it leaves a group that still holds the pair", async () => {
     const withStranger = [...PAIR, { ...STRANGER, tripGroupId: GROUP_ID }];
     const { service, recalculated } = harness(withStranger);
 
-    await service.removeFromGroup(STRANGER.id);
+    const removed = await service.removeFromGroup(STRANGER.id);
 
-    expect(recalculated()).toEqual([]);
+    expect(recalculated()).toEqual([STRANGER.id]);
+    expect(removed.pricing?.backload).toBe("0.00");
   });
 
   it("reprices the pair, not the stranger, when a leg leaves a three-Trip group", async () => {
@@ -461,16 +476,31 @@ describe("ungrouping reprices the legs it takes out of a Combination", () => {
     expect(recalculated()).toEqual([DELIVERY.id]);
   });
 
-  it("reprices nobody when leaving a manual group", async () => {
+  it("reprices the Trip that leaves a manual group, and not the one left behind", async () => {
     const manual = [
       { ...DELIVERY, tripGroupId: GROUP_ID },
       { ...STRANGER, tripGroupId: GROUP_ID },
     ];
     const { service, recalculated } = harness(manual);
 
+    const removed = await service.removeFromGroup(DELIVERY.id);
+
+    expect(recalculated()).toEqual([DELIVERY.id]);
+    expect(removed.pricing?.backload).toBe("0.00");
+  });
+
+  /** However often a Trip is grouped and ungrouped, its last answer is its group's. */
+  it("leaves no stale €50 after repeated grouping and ungrouping", async () => {
+    const { service, answers } = harness([DELIVERY, STRANGER]);
+
+    await service.createGroup([DELIVERY.id, STRANGER.id]);
+    await service.removeFromGroup(DELIVERY.id);
+    await service.removeFromGroup(STRANGER.id);
+    await service.createGroup([DELIVERY.id, STRANGER.id]);
     await service.removeFromGroup(DELIVERY.id);
 
-    expect(recalculated()).toEqual([]);
+    expect(answers.get(DELIVERY.id)?.pricing?.backload).toBe("0.00");
+    expect(answers.get(STRANGER.id)?.pricing?.backload).toBe("50.00");
   });
 
   it("keeps the removal and reports the reason when a leg cannot be priced", async () => {
@@ -485,10 +515,10 @@ describe("ungrouping reprices the legs it takes out of a Combination", () => {
 
   /**
    * ── REPAIRING A PAIR PRICED BEFORE THIS EXISTED ───────────────────────────
-   * A leg the older code grouped after it had closed still carries a price with
-   * no Backload: nothing about the Trip changes on its own, so nothing reprices
-   * it. An operator restores it through the group actions — take both legs
-   * out, group them again — and each step reprices what it re-classified.
+   * A Trip the older code grouped after it had closed still carries a price
+   * with no Backload: nothing about the Trip changes on its own, so nothing
+   * reprices it. An operator restores it through the group actions — take both
+   * legs out, group them again — and each step reprices what it changed.
    *
    * Both legs have to leave first. A Trip still in a group cannot join another
    * one, and the collection leg stays behind in the old group, alone.
@@ -499,13 +529,14 @@ describe("ungrouping reprices the legs it takes out of a Combination", () => {
     await service.removeFromGroup(DELIVERY.id);
     expect(recalculated().sort()).toEqual([COLLECTION.id, DELIVERY.id]);
 
-    // Alone in the old group it was no Combination, and without it neither.
+    // Leaving its group takes the €50 off the collection leg too.
     await service.removeFromGroup(COLLECTION.id);
-    expect(recalculated()).toHaveLength(2);
+    expect(recalculated()).toHaveLength(3);
+    expect(answers.get(COLLECTION.id)?.pricing?.backload).toBe("0.00");
 
     const regrouped = await service.createGroup([DELIVERY.id, COLLECTION.id]);
 
-    expect(recalculated()).toHaveLength(4);
+    expect(recalculated()).toHaveLength(5);
     expect(backloadOf(regrouped, DELIVERY.id)).toBe("50.00");
     expect(backloadOf(regrouped, COLLECTION.id)).toBe("50.00");
     expect(answers.get(COLLECTION.id)?.pricing?.backload).toBe("50.00");

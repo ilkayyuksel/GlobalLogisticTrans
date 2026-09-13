@@ -45,10 +45,13 @@ export class CalendarEventResponseDto {
   updatedAt!: Date;
 }
 
-/** One day of the Agenda, with the hours it is drawn in. */
-export class CalendarDayDto {
+/** The Agenda over a range of days, with the hours each day is drawn in. */
+export class CalendarRangeDto {
   @ApiProperty({ format: "date", example: "2026-09-14" })
-  date!: string;
+  from!: string;
+
+  @ApiProperty({ format: "date", example: "2026-09-20" })
+  to!: string;
 
   @ApiProperty({
     description: "The first moment the Agenda shows and accepts.",
@@ -65,7 +68,7 @@ export class CalendarDayDto {
   @ApiProperty({
     type: [CalendarEventResponseDto],
     description:
-      "The day's items, ordered by the database: start time, then end time, then id.",
+      "The range's items, ordered by the database: day, start time, end time, then id.",
   })
   items!: CalendarEventResponseDto[];
 }

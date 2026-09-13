@@ -21,6 +21,12 @@ export const AGENDA_DAY_END = "23:00";
 /** How long an item lasts when no end is given. */
 export const DEFAULT_DURATION_MINUTES = 60;
 
+/**
+ * The most days one request may ask for: the week the calendar shows. It also
+ * bounds what a single query reads.
+ */
+export const AGENDA_RANGE_MAX_DAYS = 7;
+
 const MINUTES_PER_HOUR = 60;
 
 export interface AgendaSlot {

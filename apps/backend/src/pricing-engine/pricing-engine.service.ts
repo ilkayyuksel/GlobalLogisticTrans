@@ -3,7 +3,7 @@ import { PricingCalculationStatus, TripStatus } from "@prisma/client";
 
 import { AppLoggerService } from "../logger/app-logger.service";
 import { TripReadService, TripReadView } from "../trips/trip-read.service";
-import { isGenuineCombination } from "./combination-leg";
+import { carriesCombinationSurcharge } from "./combination-leg";
 import {
   NegativeTotalPriceException,
   TripNotFoundForPricingException,
@@ -270,14 +270,6 @@ export class PricingEngineService {
     const assignedCustomProperties =
       await this.componentResolver.resolveAssignedCustomProperties(trip, rules);
 
-    /*
-     * Eligibility for the Combination Surcharge, from the SAME rule that
-     * decides where TAR belongs. Group membership alone would charge it to a
-     * manual group, which is an operator convenience and makes no claim about
-     * pairing — see combination-leg.ts.
-     */
-    const combinationLeg =
-      await this.componentResolver.resolveCombinationLeg(trip);
     const routeCosts = await this.routeCostResolver.resolve(trip.id, route);
 
     // Both halves of every route-priced component are now known, so a gap
@@ -305,7 +297,13 @@ export class PricingEngineService {
       bookingNumber: trip.bookingNumber,
       tripStatus: trip.status,
       planningDate: trip.planningDate,
-      isCombination: isGenuineCombination(combinationLeg),
+      /*
+       * The Backload follows group membership: every Trip in a group carries
+       * its own, whatever kind of group it is and whenever it joined. Which leg
+       * of a genuine Combination owes TAR is a separate question, answered
+       * while the custom properties are resolved — see combination-leg.ts.
+       */
+      isCombination: carriesCombinationSurcharge(trip),
       waitingTimeMinutes: trip.waitingTimeMinutes ?? NO_WAITING_TIME_MINUTES,
       route,
       baseSource,

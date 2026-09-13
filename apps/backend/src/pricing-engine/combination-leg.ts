@@ -1,27 +1,33 @@
 import { TripDirection } from "@prisma/client";
 
 /**
- * Whether a Trip is a leg of a GENUINE Combination, and which one.
+ * Two questions a Trip's group answers, kept apart on purpose.
  *
- * ── WHY THIS IS NOT SIMPLY "HAS A GROUP" ────────────────────────────────────
- * Two different things share the TripGroup table. A Combination comes from ONE
- * transport order that printed two legs — an outbound delivery and a return
- * collection — and means something to pricing. A manual group is an operator
- * convenience: any Trips at all, tied together for their own reasons, carrying
- * no claim about directions or pairing.
+ * ── DOES THIS TRIP CARRY THE COMBINATION SURCHARGE? ─────────────────────────
+ * Group membership, and nothing else. Every Trip in a TripGroup — an imported
+ * Combination or a group an operator made by hand, closed before or after it
+ * joined, alone in its group or not — carries its own Backload on its own
+ * snapshot. A group of two is two surcharges, never one shared between them.
+ * See `carriesCombinationSurcharge`.
  *
- * Only the first is a Combination, so only the first may change what a Trip is
- * charged. The evidence that separates them is persisted and needs no guessing:
- * the legs of a Combination were created from the SAME PdfDocument, because one
- * document produced both. Trips an operator grouped by hand come from different
- * documents, or from none.
+ * This reverses an earlier rule under which only a genuine Combination (below)
+ * carried the surcharge and a manual group was priced as ordinary Trips. The
+ * business changed that in September 2026.
+ *
+ * ── WHICH LEG OF A GENUINE COMBINATION IS IT, FOR TAR? ──────────────────────
+ * A genuine Combination is ONE transport order that printed two legs — an
+ * outbound delivery and a return collection. It decides where the automatic
+ * TAR belongs: once per pair, on one leg. The evidence is persisted and needs
+ * no guessing: the legs of a Combination were created from the SAME
+ * PdfDocument. Trips an operator grouped by hand come from different documents,
+ * or from none, and are legs of nothing.
  *
  * Nothing here reads a planning date, a row order, a booking number or the
  * order the trips happen to arrive in.
  * ────────────────────────────────────────────────────────────────────────────
  */
 
-/** The minimum a Trip must expose for this rule to be applied to it. */
+/** The minimum a Trip must expose for these rules to be applied to it. */
 export interface CombinationMember {
   readonly id: string;
   readonly tripGroupId: string | null;
@@ -37,7 +43,7 @@ export const CombinationLeg = {
   DELIVERY: "DELIVERY",
   /** The return leg: from the customer back to the quay. */
   COLLECTION: "COLLECTION",
-  /** Not part of a Combination at all — an ordinary Trip, or a manual group. */
+  /** Not part of a genuine Combination — an ordinary Trip, or a manual group. */
   NONE: "NONE",
   /**
    * The Trips of one document are grouped but do not form one delivery and one
@@ -50,14 +56,29 @@ export type CombinationLeg =
   (typeof CombinationLeg)[keyof typeof CombinationLeg];
 
 /**
- * Which leg of a genuine Combination `trip` is.
+ * Whether a Trip carries the Combination Surcharge — the Backload.
+ *
+ * A Trip in a group does; a Trip in none does not. The member left behind when
+ * its partner is unlinked is still in its group and keeps it; only the Trip
+ * that leaves goes back to none. The one place this is decided: the Engine
+ * prices with it, and the BASIS export and the Rittenlijst only show the
+ * stored result.
+ */
+export function carriesCombinationSurcharge(
+  trip: Pick<CombinationMember, "tripGroupId">,
+): boolean {
+  return trip.tripGroupId !== null;
+}
+
+/**
+ * Which leg of a genuine Combination `trip` is, for TAR allocation.
  *
  * `groupMembers` is every Trip sharing its group, including the Trip itself.
  *
  * The three outcomes that matter:
  *
  *   NONE      no group, or a group whose members came from elsewhere — the
- *             manual case. Priced as an ordinary Trip.
+ *             manual case. TAR is decided as for an ordinary Trip.
  *   DELIVERY  the outbound leg of a document's pair.
  *   COLLECTION the return leg of the same pair.
  *
@@ -75,7 +96,7 @@ export function combinationLegOf(
   }
 
   // The legs of one order came from one document. Anything else in the group
-  // was put there by hand and says nothing about this Trip.
+  // was put there by hand and says nothing about this Trip's leg.
   const fromSameDocument = groupMembers.filter(
     (member) =>
       member.tripGroupId === trip.tripGroupId &&
@@ -83,8 +104,8 @@ export function combinationLegOf(
   );
 
   if (fromSameDocument.length < LEGS_PER_COMBINATION) {
-    // One Trip of a document, grouped with Trips from other documents: this is
-    // a manual group, and the Trip is priced as an ordinary one.
+    // One Trip of a document, grouped with Trips from other documents: a
+    // manual group, and no leg of a pair.
     return CombinationLeg.NONE;
   }
 
@@ -106,37 +127,15 @@ export function combinationLegOf(
 }
 
 /**
- * Whether this Trip is a leg of a genuine Combination.
+ * The Trips whose TAR leg a change of group membership re-classified.
  *
- * The eligibility test for every charge that follows from pairing — the
- * Combination Surcharge among them. Deliberately NOT "has a group": a manual
- * group is an operator convenience and carries no claim about pairing, so it
- * must not change what a Trip is charged. INVALID is excluded too; a malformed
- * pair is reported by the caller rather than priced on a guess.
- */
-export function isGenuineCombination(leg: CombinationLeg): boolean {
-  return leg === CombinationLeg.DELIVERY || leg === CombinationLeg.COLLECTION;
-}
-
-/**
- * The Trips whose leg a change of group membership re-classified.
- *
- * ── WHY PRICING HAS TO BE TOLD ──────────────────────────────────────────────
- * A Trip's leg follows from the group it is in, and the leg decides what the
- * Trip is charged: the Backload, and which leg owes TAR. Grouping and
- * ungrouping write nothing but `tripGroupId`, so a Trip that was already priced
- * keeps the answer its PREVIOUS group gave until something prices it again.
- * These are the Trips for which that answer is no longer true.
- *
- * `before` and `after` are the SAME Trips, as they were and as they are:
- * every Trip the change touched and every other member of the groups involved,
+ * `before` and `after` are the SAME Trips, as they were and as they are: every
+ * Trip the change touched and every other member of the groups involved,
  * because a leg is decided by the whole group and not by the Trip alone.
  *
- * A Trip whose leg did not change is left out. Forming or splitting a manual
- * group moves nobody from NONE, so it reprices nothing; splitting a genuine
- * pair moves BOTH legs, because a lone leg is no longer a Combination either.
- * Nothing here is a second definition — both sides are `combinationLegOf`.
- * ────────────────────────────────────────────────────────────────────────────
+ * Splitting a genuine pair moves BOTH legs, because a lone leg is no longer a
+ * leg of anything. Nothing here is a second definition — both sides are
+ * `combinationLegOf`.
  */
 export function tripsWhoseLegChanged(
   before: readonly CombinationMember[],
@@ -148,5 +147,38 @@ export function tripsWhoseLegChanged(
 
   return after
     .filter((trip) => combinationLegOf(trip, after) !== legBefore.get(trip.id))
+    .map((trip) => trip.id);
+}
+
+/**
+ * The Trips a change of group membership left priced on a stale answer.
+ *
+ * ── WHY PRICING HAS TO BE TOLD ──────────────────────────────────────────────
+ * Grouping and ungrouping write nothing but `tripGroupId`, so a Trip that was
+ * already priced keeps the answer its PREVIOUS group gave until something
+ * prices it again. Two answers can go stale:
+ *
+ *   the Backload  every Trip whose group changed — joining a group adds it,
+ *                 leaving one removes it;
+ *   the TAR leg   every Trip whose leg changed, which can include a member
+ *                 whose own group did not: splitting a genuine pair leaves the
+ *                 other leg an ordinary Trip for TAR, though it keeps its
+ *                 Backload because it is still in its group.
+ *
+ * `before` and `after` are the SAME Trips, as they were and as they are.
+ * ────────────────────────────────────────────────────────────────────────────
+ */
+export function tripsRepricedByRegrouping(
+  before: readonly CombinationMember[],
+  after: readonly CombinationMember[],
+): string[] {
+  const groupBefore = new Map(before.map((trip) => [trip.id, trip.tripGroupId]));
+  const legChanged = new Set(tripsWhoseLegChanged(before, after));
+
+  return after
+    .filter(
+      (trip) =>
+        legChanged.has(trip.id) || groupBefore.get(trip.id) !== trip.tripGroupId,
+    )
     .map((trip) => trip.id);
 }

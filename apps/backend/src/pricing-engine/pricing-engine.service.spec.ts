@@ -571,8 +571,12 @@ describe("PricingEngineService", () => {
       },
     );
 
+    /*
+     * The Backload follows group membership, not the genuine pairing rule: a
+     * Trip in a manual group (leg NONE) is charged it like any other member.
+     */
     it.each([CombinationLeg.NONE, CombinationLeg.INVALID])(
-      "does not treat a Trip whose leg is %s as a Combination",
+      "treats a grouped Trip as a Combination for the surcharge even when its leg is %s",
       async (leg) => {
         trips.findById.mockResolvedValue(
           buildTrip({ tripGroupId: "group-1" }),
@@ -581,9 +585,17 @@ describe("PricingEngineService", () => {
 
         expect(
           (await engine.prepareCalculation(TRIP_ID)).context.isCombination,
-        ).toBe(false);
+        ).toBe(true);
       },
     );
+
+    it("does not treat a Trip in no group as a Combination", async () => {
+      trips.findById.mockResolvedValue(buildTrip({ tripGroupId: null }));
+
+      expect(
+        (await engine.prepareCalculation(TRIP_ID)).context.isCombination,
+      ).toBe(false);
+    });
 
     it("treats absent waiting time as zero minutes, not as unknown", async () => {
       expect(

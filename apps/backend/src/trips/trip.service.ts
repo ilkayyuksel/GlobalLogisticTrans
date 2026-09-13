@@ -844,12 +844,14 @@ export class TripService {
   /**
    * Puts several Trips into one group, by hand.
    *
-   * ── A MANUAL GROUP IS NOT A COMBINATION ─────────────────────────────────────
-   * A Combination comes from one PDF and means something specific: two legs of
-   * one transport, one collection and one delivery. THIS does not. It is an
-   * operator saying "these belong together", and the system holds no opinion
-   * about how many Trips that is beyond two, which directions they carry, which
-   * days they fall on or which statuses they hold.
+   * ── NO SHAPE RULES, BUT A PRICE ─────────────────────────────────────────────
+   * An imported Combination comes from one PDF: two legs of one transport, one
+   * collection and one delivery. A manual group is an operator saying "these
+   * belong together", and the system holds no opinion about how many Trips that
+   * is beyond two, which directions they carry, which days they fall on or which
+   * statuses they hold. It does carry a price: every member is charged its own
+   * Combination Surcharge exactly as a leg of an imported Combination is, and a
+   * member that is already CLOSED is repriced as soon as it joins.
    *
    * Both kinds are the same row, because the schema has one: `trip_group` has
    * no columns beyond its identity, and adding a type would be inventing a
@@ -948,21 +950,21 @@ export class TripService {
   }
 
   /**
-   * Reprices the CLOSED Trips whose Combination leg a regrouping changed.
+   * Reprices the CLOSED Trips whose pricing a regrouping changed.
    *
    * ── WHY GROUPING IS A PRICING INPUT ─────────────────────────────────────
-   * A Trip's leg is decided by its group, and the leg decides the Backload and
-   * which leg owes TAR. Grouping and ungrouping write only `tripGroupId`, so
-   * without this a Trip closed BEFORE it joined a genuine Combination kept a
-   * price with no Backload, and a leg taken OUT of one kept its €50 — each
-   * until some unrelated edit happened to reprice it.
+   * Group membership decides the Backload of every member, and the members
+   * together decide which leg of a genuine Combination owes TAR. Grouping and
+   * ungrouping write only `tripGroupId`, so without this a Trip closed BEFORE
+   * it joined a group kept a price with no Backload, and a Trip taken OUT of
+   * one kept its €50 — each until some unrelated edit happened to reprice it.
    *
    * ── WHICH TRIPS ─────────────────────────────────────────────────────────
-   * The ones the pricing domain says were re-classified, from its own rule and
-   * nothing here: a manual group formed or split reprices nobody, and a genuine
-   * pair split reprices BOTH legs, since the one left behind is no longer a
-   * Combination either. Of those, only the CLOSED ones — an OPEN Trip is priced
-   * when it closes, from whatever group it is in by then, exactly as before.
+   * The ones the pricing domain names, from its own rules and nothing here:
+   * every Trip whose group changed — each member that joins, the member taken
+   * out — and any Trip whose TAR leg changed with it. A member left behind
+   * keeps its group and its Backload. Of those, only the CLOSED ones — an OPEN
+   * Trip is priced when it closes, from whatever group it is in by then.
    *
    * ── WHEN ────────────────────────────────────────────────────────────────
    * After the group transaction has committed, never inside it: the Engine
@@ -990,7 +992,7 @@ export class TripService {
     }
 
     if (reclassified.size > 0) {
-      this.logger.log("Regrouping changed Combination legs", {
+      this.logger.log("Regrouping changed the pricing of Trips", {
         reclassifiedTripIds: [...reclassified],
         repricedTripIds: [...outcomes.keys()],
       });
