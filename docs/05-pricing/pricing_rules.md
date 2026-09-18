@@ -211,7 +211,9 @@ Trip whose group changed at once, replacing its snapshot: a Trip that joins a
 group has exactly one surcharge line afterwards, however often it is repriced,
 and a Trip that leaves has none. An OPEN Trip is priced when it closes, from the
 group it is in by then. The Ritten list and the BASIS export only show the stored
-line; neither decides it.
+line; neither decides it. In BASIS the amount comes first in COMBI EN KOST
+(`50.00`, or `50.00 + 55.00` with other costs) and INFO says `COMBI` — both
+read from that line, so a Trip without it shows neither.
 
 This replaces an earlier rule under which only a genuine Combination — one
 document, two legs — carried the surcharge. The genuine rule still decides where
@@ -554,9 +556,14 @@ This decides the TAR allocation only. The Combination Surcharge follows plain
 group membership — see Combination Surcharge above.
 
 If the Trips of one document are grouped but do **not** form exactly one
-DELIVERY and one COLLECTION, the Pricing Engine **refuses to price them**
-(`PRICING_INVALID_COMBINATION`) rather than guessing which leg should carry the
-charge. That state is a data fault, not a priceable one.
+DELIVERY and one COLLECTION, they are not a genuine Combination. Each is then
+priced as a member of a manual group: it keeps its own Combination Surcharge and
+owes TAR under the ordinary rule, on its own stated number. The shape is logged
+as the data fault it is.
+
+Pricing used to refuse such a group outright. It no longer does: the Combination
+Surcharge follows plain membership, so refusing took away a charge that was
+never in doubt — and with it the Trip's whole price.
 
 ### The assignments are overruled, not trusted
 

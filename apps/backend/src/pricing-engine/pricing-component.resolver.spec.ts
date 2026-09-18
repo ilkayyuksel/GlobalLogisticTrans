@@ -5,10 +5,7 @@ import { RoutePricingService } from "../route-pricing/route-pricing.service";
 import { CustomPropertyService } from "../custom-properties/custom-property.service";
 import { TripCustomPropertyReadService } from "../trip-custom-properties/trip-custom-property-read.service";
 import { TripReadService, TripReadView } from "../trips/trip-read.service";
-import {
-  InvalidCombinationForPricingException,
-  MissingTripPricingInputException,
-} from "./exceptions/pricing-engine.exceptions";
+import { MissingTripPricingInputException } from "./exceptions/pricing-engine.exceptions";
 import { PricingRuleConfiguration } from "./pricing-calculation-context";
 import { PricingComponentResolver } from "./pricing-component.resolver";
 import { PricingRuleResolver } from "./pricing-rule.resolver";
@@ -861,11 +858,13 @@ describe("PricingComponentResolver", () => {
     });
 
     /*
-     * One document, grouped, and yet not one delivery and one collection. No
-     * real order produces this, so it is refused rather than priced on a guess
-     * about which leg should carry the charge.
+     * One document, grouped, and yet not one delivery and one collection. The
+     * Engine used to refuse the whole calculation here, which since the Backload
+     * follows plain membership took a charge off the Trip that was never in
+     * doubt. The group is not a genuine pair, so each Trip owes TAR on its own
+     * exactly as a member of a manual group does.
      */
-    it("refuses a pair from one document that is not one of each", async () => {
+    it("prices a pair from one document that is not one of each", async () => {
       const twinA = buildTrip({
         id: "trip-twin-a",
         tripGroupId: GROUP_ID,
@@ -880,12 +879,11 @@ describe("PricingComponentResolver", () => {
       });
       groupOf(twinA, twinB);
 
-      await expect(resolve(twinA)).rejects.toBeInstanceOf(
-        InvalidCombinationForPricingException,
-      );
+      expect(hasAutomatic(await resolve(twinA))).toBe(true);
+      expect(hasAutomatic(await resolve(twinB))).toBe(true);
     });
 
-    it("refuses a pair from one document that states no direction", async () => {
+    it("prices a pair from one document that states no direction", async () => {
       const first = buildTrip({
         id: "trip-none-a",
         tripGroupId: GROUP_ID,
@@ -900,12 +898,12 @@ describe("PricingComponentResolver", () => {
       });
       groupOf(first, second);
 
-      await expect(resolve(first)).rejects.toBeInstanceOf(
-        InvalidCombinationForPricingException,
-      );
+      expect(hasAutomatic(await resolve(first))).toBe(true);
+      expect(hasAutomatic(await resolve(second))).toBe(true);
     });
 
-    it("names the group and what it found when it refuses", async () => {
+    /** Whatever shape the group has, the answer is a list — never a refusal. */
+    it("refuses no malformed group at all", async () => {
       const twinA = buildTrip({
         id: "trip-twin-a",
         tripGroupId: GROUP_ID,
@@ -914,7 +912,7 @@ describe("PricingComponentResolver", () => {
       });
       groupOf(twinA, twinA);
 
-      await expect(resolve(twinA)).rejects.toThrow(GROUP_ID);
+      await expect(resolve(twinA)).resolves.toBeInstanceOf(Array);
     });
   });
 });

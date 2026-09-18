@@ -70,8 +70,8 @@ describe("which legs a regrouping changes", () => {
     expect(tripsWhoseLegChanged(before, after)).toEqual([]);
   });
 
-  /** NONE to INVALID is a change too: the Engine refuses to price INVALID. */
-  it("names the legs of a malformed group, which the Engine will refuse", () => {
+  /** NONE to INVALID is a change too: the TAR rule answers differently. */
+  it("names the legs of a malformed group, which the Engine prices as a manual one", () => {
     const secondDelivery = member("delivery-2", {
       direction: TripDirection.DELIVERY,
     });

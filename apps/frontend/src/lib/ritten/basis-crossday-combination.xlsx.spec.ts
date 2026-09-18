@@ -195,12 +195,12 @@ describe("a cross-day Combination, exported per period", () => {
       expect(rows.get(COLLECTION)?.costs).toBe("50.00 + 55.00");
     });
 
-    /** Backload first, then each leg's own TAR or waiting time. */
+    /** COMBI first, beside its Backload, then each leg's own TAR or waiting time. */
     it("keeps TAR and waiting time on their own legs", async () => {
       const rows = await rowsOf(load("week"));
 
-      expect(rows.get(DELIVERY)?.info).toBe("TAR");
-      expect(rows.get(COLLECTION)?.info).toBe("Wachttijd 07:00-10:00");
+      expect(rows.get(DELIVERY)?.info).toBe("COMBI, TAR");
+      expect(rows.get(COLLECTION)?.info).toBe("COMBI, Wachttijd 07:00-10:00");
     });
 
     it("paints both legs with the same group colour", async () => {

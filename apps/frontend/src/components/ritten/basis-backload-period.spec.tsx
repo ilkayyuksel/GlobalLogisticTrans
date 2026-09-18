@@ -67,6 +67,10 @@ const TAR_PROPERTY_ID = "4446fdc0-0000-4000-8000-000000000001";
 const DELIVERY = "DUBANR2598395";
 const COLLECTION = "ANRBEL2603249";
 
+/** Two Trips of different orders that an operator put in one group by hand. */
+const MANUAL_FIRST = "ANRBEL2790836";
+const MANUAL_SECOND = "ANRBEL2792617";
+
 type Line = readonly [code: string, amount: string, customPropertyId?: string];
 
 /** A stored snapshot, shaped exactly as `GET /trip-pricing/snapshots` sends it. */
@@ -313,6 +317,49 @@ describe("BASIS Backload comes from each Trip's own snapshot", () => {
     expect(rows.get(COLLECTION)?.costs).toBe("50.00");
   });
 
+  /*
+   * Two Trips an operator grouped by hand, on ONE day — the case reported as
+   * missing its €50. The export reads each Trip's own snapshot, so both rows
+   * print the amount and say COMBI.
+   */
+  it("1b. same-day manual group, both Trips exported → €50 and COMBI on each", async () => {
+    const first = buildTrip({
+      id: "manual-first",
+      bookingNumber: MANUAL_FIRST,
+      direction: null,
+      tripGroupId: GROUP,
+      pdfDocumentId: "pdf-first",
+      status: "CLOSED",
+      planningDate: DAY_1,
+      originalPlanningDate: DAY_1,
+    });
+    const second = buildTrip({
+      id: "manual-second",
+      bookingNumber: MANUAL_SECOND,
+      direction: null,
+      tripGroupId: GROUP,
+      pdfDocumentId: "pdf-second",
+      status: "CLOSED",
+      planningDate: DAY_1,
+      originalPlanningDate: DAY_1,
+    });
+
+    const rows = await exportBasis(
+      {
+        trips: [first, second],
+        snapshots: [
+          snapshotOf(first.id, COMBINATION_LEG),
+          snapshotOf(second.id, COMBINATION_LEG),
+        ],
+      },
+      "day",
+      DAY_1,
+    );
+
+    expect(rows.get(MANUAL_FIRST)).toMatchObject({ costs: "50.00", info: "COMBI" });
+    expect(rows.get(MANUAL_SECOND)).toMatchObject({ costs: "50.00", info: "COMBI" });
+  });
+
   it("2. cross-day Combination, both days exported → €50 on each", async () => {
     const rows = await exportBasis(pairBackend(DAY_1, DAY_2), "week", DAY_1);
 
@@ -376,7 +423,7 @@ describe("BASIS Backload comes from each Trip's own snapshot", () => {
 
     expect(rows.get(COLLECTION)).toMatchObject({
       costs: "50.00 + 55.00",
-      info: "Wachttijd 07:00-10:00",
+      info: "COMBI, Wachttijd 07:00-10:00",
     });
   });
 
@@ -397,16 +444,16 @@ describe("BASIS Backload comes from each Trip's own snapshot", () => {
       };
     }
 
-    it("DAY 1 only: Backload first, TAR beside it, TAR named in Info", async () => {
+    it("DAY 1 only: Backload first, TAR beside it, COMBI and TAR named in Info", async () => {
       const rows = await exportBasis(tarBackend(), "day", DAY_1);
 
-      expect(rows.get(DELIVERY)).toMatchObject({ costs: "50.00 + 50.00", info: "TAR" });
+      expect(rows.get(DELIVERY)).toMatchObject({ costs: "50.00 + 50.00", info: "COMBI, TAR" });
     });
 
-    it("DAY 2 only: the leg without TAR still prints its €50", async () => {
+    it("DAY 2 only: the leg without TAR still prints its €50 and says COMBI", async () => {
       const rows = await exportBasis(tarBackend(), "day", DAY_2);
 
-      expect(rows.get(COLLECTION)).toMatchObject({ costs: "50.00", info: "" });
+      expect(rows.get(COLLECTION)).toMatchObject({ costs: "50.00", info: "COMBI" });
     });
 
     it("never prints the TAR number", async () => {

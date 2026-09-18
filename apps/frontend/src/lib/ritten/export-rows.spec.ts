@@ -897,3 +897,104 @@ describe("the Combination surcharge in COMBI EN KOST", () => {
     ).toBe("");
   });
 });
+
+/**
+ * ── COMBI IN INFO ───────────────────────────────────────────────────────────
+ * The word behind the Combination amount in COMBI EN KOST, in the same place:
+ * first. Read from the Trip's own stored COMBINATION line like the amount
+ * itself — never from its group, and never from an amount the export expects.
+ */
+describe("COMBI in Info", () => {
+  const NO_MANUAL_PROPERTIES = toManualPropertyIds([]);
+  const TAR_ID = "b36469b0-37ec-40ba-81da-9bc272e05d60";
+  const WAITED = {
+    waitingTimeStart: "07:00:00",
+    waitingTimeEnd: "10:00:00",
+    waitingTimeMinutes: 180,
+  };
+
+  function basicRowOf(
+    trip: ReturnType<typeof buildTrip>,
+    ...lines: ReturnType<typeof line>[]
+  ) {
+    return toBasicRow(trip, snapshotOf(...lines), NO_MANUAL_PROPERTIES, "Wachttijd", TAR_ID);
+  }
+
+  it("says COMBI beside a grouped Trip's stored surcharge", () => {
+    const row = basicRowOf(
+      buildTrip({ tripGroupId: "manual-group" }),
+      line("BASE_PRICE", "100.00"),
+      line("COMBINATION", "50.00"),
+    );
+
+    expect(row.costs).toBe("50.00");
+    expect(row.info).toBe("COMBI");
+  });
+
+  it("puts COMBI first, in the order of the amounts", () => {
+    const row = basicRowOf(
+      buildTrip({ tripGroupId: "manual-group", ...WAITED }),
+      line("COMBINATION", "50.00"),
+      line("WAITING_TIME", "55.00"),
+    );
+
+    expect(row.costs).toBe("50.00 + 55.00");
+    expect(row.info).toBe("COMBI, Wachttijd 07:00-10:00");
+  });
+
+  it("puts a charged TAR after COMBI", () => {
+    const row = basicRowOf(
+      buildTrip({ tripGroupId: "manual-group", tarNummer: "TAR123" }),
+      line("COMBINATION", "50.00"),
+      line("CUSTOM_PROPERTY", "20.00", TAR_ID),
+    );
+
+    expect(row.costs).toBe("50.00 + 20.00");
+    expect(row.info).toBe("COMBI, TAR");
+  });
+
+  /** Flat is system-managed: Info says COMBI and leaves Flat to its amount. */
+  it("says COMBI for a grouped flat rack, and not Flat", () => {
+    const row = basicRowOf(
+      buildTrip({
+        tripGroupId: "manual-group",
+        customProperties: [{ id: "prop-flat", name: "Flat", isActive: true }],
+      }),
+      line("COMBINATION", "50.00"),
+      line("CUSTOM_PROPERTY", "20.00", "prop-flat"),
+    );
+
+    expect(row.costs).toBe("50.00 + 20.00");
+    expect(row.info).toBe("COMBI");
+  });
+
+  it("says COMBI whatever surcharge the Engine stored", () => {
+    const row = basicRowOf(
+      buildTrip({ tripGroupId: "manual-group" }),
+      line("COMBINATION", "75.00"),
+    );
+
+    expect(row.costs).toBe("75.00");
+    expect(row.info).toBe("COMBI");
+  });
+
+  it("says nothing for a grouped Trip whose snapshot has no surcharge", () => {
+    const row = basicRowOf(
+      buildTrip({ tripGroupId: "manual-group" }),
+      line("BASE_PRICE", "100.00"),
+    );
+
+    expect(row.info).toBe("");
+  });
+
+  it("drops COMBI once the ungrouped Trip's new snapshot has no surcharge", () => {
+    const row = basicRowOf(
+      buildTrip({ tripGroupId: null, ...WAITED }),
+      line("BASE_PRICE", "100.00"),
+      line("WAITING_TIME", "55.00"),
+    );
+
+    expect(row.costs).toBe("55.00");
+    expect(row.info).toBe("Wachttijd 07:00-10:00");
+  });
+});

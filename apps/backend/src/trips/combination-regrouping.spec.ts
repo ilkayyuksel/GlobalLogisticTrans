@@ -335,6 +335,24 @@ describe("grouping reprices every CLOSED Trip that joins a group", () => {
     });
   });
 
+  /*
+   * Two Trips of ONE day that an operator groups by hand — the ordinary way a
+   * group is made in the office. A day decides nothing about the Backload;
+   * membership does, and this pins it beside the cross-day case above.
+   */
+  describe("a manual group whose Trips run on the same day", () => {
+    it("reprices both, and both carry €50", async () => {
+      const sameDay = { ...STRANGER, planningDate: DELIVERY.planningDate };
+      const { service, recalculated } = harness([DELIVERY, sameDay]);
+
+      const grouped = await service.createGroup([DELIVERY.id, sameDay.id]);
+
+      expect(recalculated().sort()).toEqual([DELIVERY.id, sameDay.id].sort());
+      expect(backloadOf(grouped, DELIVERY.id)).toBe("50.00");
+      expect(backloadOf(grouped, sameDay.id)).toBe("50.00");
+    });
+  });
+
   describe("a CLOSED Trip grouped with an OPEN one", () => {
     /*
      * The OPEN Trip is priced when it closes, from the group it is in by then —

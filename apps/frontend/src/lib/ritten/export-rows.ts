@@ -241,6 +241,18 @@ export function toInfoLabel(
     names.push(LOOSE_TRIP_MARK);
   }
 
+  /*
+   * ── COMBI, BESIDE ITS AMOUNT ────────────────────────────────────────────
+   * COMBI EN KOST prints the Combination surcharge first, so the word that
+   * explains it comes first here. It is read from the Trip's own stored
+   * COMBINATION line — the line that put the amount in that column — so the
+   * word and the amount always appear together, and nothing here decides
+   * whether a Trip belongs to a Combination: no line, no word.
+   */
+  if (lines.combination !== null) {
+    names.push(COMBINATION_MARK);
+  }
+
   names.push(
     ...trip.customProperties
       .filter((property) => manualPropertyIds.has(property.id))
@@ -284,6 +296,9 @@ export function toInfoLabel(
 
 /** The word the sheet carries for a charged TAR. Never the number. */
 const TAR_MARK = "TAR";
+
+/** The word the sheet carries for a charged Combination surcharge (Backload). */
+const COMBINATION_MARK = "COMBI";
 
 /**
  * Whether the Engine actually charged TAR, read from the stored snapshot.

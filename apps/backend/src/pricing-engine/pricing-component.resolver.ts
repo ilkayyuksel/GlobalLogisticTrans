@@ -13,10 +13,7 @@ import {
   CombinationMember,
   combinationLegOf,
 } from "./combination-leg";
-import {
-  InvalidCombinationForPricingException,
-  MissingTripPricingInputException,
-} from "./exceptions/pricing-engine.exceptions";
+import { MissingTripPricingInputException } from "./exceptions/pricing-engine.exceptions";
 import {
   PricingBaseSource,
   PricingCustomPropertyInput,
@@ -174,17 +171,24 @@ export class PricingComponentResolver {
 
     const leg = await this.resolveCombinationLeg(trip);
 
+    /*
+     * ── A MALFORMED PAIR IS PRICED, NOT REFUSED ─────────────────────────────
+     * The Trips of one document are grouped and yet are not one delivery and
+     * one collection. This used to abort the whole calculation, and since the
+     * Backload became a matter of plain group membership that cost such a Trip
+     * its €50 as well as its TAR — a charge that was never in doubt, because
+     * the Trip is in a group whatever shape the group has.
+     *
+     * So the fault is reported and the Trip is priced: not being a genuine
+     * pair, it owes TAR exactly as a member of a manual group does — its own
+     * stated number, with the same-day rule still preventing one number from
+     * being charged twice.
+     */
     if (leg === CombinationLeg.INVALID) {
-      this.logger.warn("Pricing refused a malformed Combination", {
+      this.logger.warn("A group from one document is not one delivery and one collection", {
         tripId: trip.id,
         tripGroupId: trip.tripGroupId,
       });
-
-      throw new InvalidCombinationForPricingException(
-        trip.id,
-        trip.tripGroupId as string,
-        await this.directionsOfGroup(trip),
-      );
     }
 
     if (leg === CombinationLeg.COLLECTION) {
@@ -306,17 +310,6 @@ export class PricingComponentResolver {
 
   private groupMembers(trip: TripReadView): Promise<CombinationMember[]> {
     return this.trips.findByGroupId(trip.tripGroupId as string);
-  }
-
-  /** For the refusal message, so the fault can be seen without a query. */
-  private async directionsOfGroup(
-    trip: TripReadView,
-  ): Promise<(string | null)[]> {
-    const members = await this.groupMembers(trip);
-
-    return members
-      .filter((member) => member.pdfDocumentId === trip.pdfDocumentId)
-      .map((member) => member.direction);
   }
 
   /**

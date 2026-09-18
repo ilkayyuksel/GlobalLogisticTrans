@@ -837,6 +837,31 @@ describe("the two legs of a Combination", () => {
   });
 
   /**
+   * ── A GROUP OF ONE DOCUMENT THAT IS NOT A PAIR ────────────────────────────
+   * Two Trips of one order, both deliveries. The Engine used to refuse such a
+   * group outright, which since the Backload follows membership cost each Trip
+   * its whole price — including a €50 that was never in doubt. They are not a
+   * genuine pair, so each is priced as a member of a manual group is.
+   */
+  it("charges each Trip of a malformed same-document group its own Backload", async () => {
+    const twin = { ...DELIVERY, id: "trip-twin" };
+    const members = [DELIVERY, twin];
+
+    expect((await legAmounts(DELIVERY, { members })).backload).toBe("50.00");
+    expect((await legAmounts(twin, { members })).backload).toBe("50.00");
+  });
+
+  /** The same group, priced rather than refused: a total, not an exception. */
+  it("still prices the rest of a malformed same-document group's Trip", async () => {
+    const twin = { ...DELIVERY, id: "trip-twin" };
+
+    const pricing = await legAmounts(twin, { members: [DELIVERY, twin] });
+
+    expect(pricing.tarief).toBe("0.00");
+    expect(pricing.totaal).toBe("70.00");
+  });
+
+  /**
    * ── FLAT AND BACKLOAD DO NOT EXCLUDE EACH OTHER ──────────────────────────
    * Flat follows the container, Backload the group. A flat rack in a group owes
    * both; taken out of it, it owes Flat alone. Neither leg states a TAR-nummer,

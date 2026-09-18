@@ -416,8 +416,8 @@ describe("a whole BASIS workbook", () => {
           property("CUSTOM_PROPERTY", "50.00", TAR_ID),
         ),
       ),
-      // 3 — Combination leg B, same group, its OWN Backload, TAR withheld by
-      //     the same-day rule so no line and no word.
+      // 3 — Combination leg B, same group, its OWN Backload (so COMBI), TAR
+      //     withheld by the same-day rule so no TAR line and no TAR word.
       row(
         { tripGroupId: GROUP_A, tarNummer: "TAR123" } as Partial<Trip>,
         snapshotOf(property("COMBINATION", "50.00", null)),
@@ -467,14 +467,15 @@ describe("a whole BASIS workbook", () => {
     expect(sheet.getRow(FIRST_ROW).getCell(9).value).toBe(
       "Aan/Afkoppelen, Chauffeur bellen bij aankomst",
     );
-    expect(sheet.getRow(FIRST_ROW + 1).getCell(9).value).toBe("TAR");
+    expect(sheet.getRow(FIRST_ROW + 1).getCell(9).value).toBe("COMBI, TAR");
   });
 
-  it("says TAR on the charged leg and nothing on the withheld one", async () => {
+  /** Both legs carry their own Backload, so both say COMBI; only one says TAR. */
+  it("says TAR on the charged leg and not on the withheld one", async () => {
     const sheet = await fullSheet();
 
-    expect(sheet.getRow(FIRST_ROW + 1).getCell(9).value).toBe("TAR");
-    expect(sheet.getRow(FIRST_ROW + 2).getCell(9).value ?? "").toBe("");
+    expect(sheet.getRow(FIRST_ROW + 1).getCell(9).value).toBe("COMBI, TAR");
+    expect(sheet.getRow(FIRST_ROW + 2).getCell(9).value).toBe("COMBI");
   });
 
   it("never writes the TAR number anywhere in the sheet", async () => {
