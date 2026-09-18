@@ -34,7 +34,7 @@
  * ────────────────────────────────────────────────────────────────────────────
  */
 
-import { redirectToLogin } from "./login-redirect";
+import { endSession } from "./session-expiry";
 
 const ACCESS_TOKEN_ENDPOINT = "/auth/access-token";
 
@@ -80,6 +80,37 @@ export function forgetAccessToken(): void {
   cached = null;
 }
 
+/**
+ * A token to replace one the backend has just refused.
+ *
+ * ── WHY A REFUSED TOKEN IS NOT THE SAME AS A LOST SESSION ───────────────────
+ * An access token can be refused while the session behind it is perfectly
+ * healthy: it expired a moment after this browser decided it was still usable,
+ * or the tab was asleep when it aged out. The SESSION is what says whether the
+ * operator may carry on, and asking the endpoint again is how that is settled —
+ * it mints a new token from the refresh token, and nobody sees a login screen.
+ *
+ * Null means the endpoint could not produce one. When that was a 401 it has
+ * already ended the session; when it was anything else the caller fails on its
+ * own terms, and nobody is thrown out over a momentary fault.
+ * ────────────────────────────────────────────────────────────────────────────
+ *
+ * `rejected` is the token the backend turned down. If the cache now holds a
+ * different one, a concurrent call has already renewed it and that token is
+ * worth presenting rather than asking for a third.
+ */
+export async function renewAccessToken(
+  rejected: string | null,
+): Promise<string | null> {
+  if (cached && cached.token !== rejected) {
+    return cached.token;
+  }
+
+  cached = null;
+
+  return getAccessToken();
+}
+
 async function fetchAccessToken(): Promise<string | null> {
   let response: Response;
 
@@ -114,7 +145,7 @@ async function fetchAccessToken(): Promise<string | null> {
      * no session has to do.
      */
     if (response.status === UNAUTHORIZED) {
-      redirectToLogin();
+      endSession();
     }
 
     return null;

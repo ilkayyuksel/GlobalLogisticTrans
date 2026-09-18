@@ -36,3 +36,40 @@ describe("redirectToLogin on the server", () => {
     expect(LOGIN_PAGE).toBe("/auth");
   });
 });
+
+/**
+ * ── WHERE THE OPERATOR COMES BACK TO ────────────────────────────────────────
+ * A session that ends while somebody is reading a Trip should not cost them the
+ * Trip. The page they were on travels to the login page as `returnTo`, which is
+ * the parameter the login panel already reads and hands to `/auth/login` — the
+ * same round trip the middleware uses when it turns an unauthenticated request
+ * away. Nothing new is invented here; this only fills it in from the page the
+ * browser is standing on.
+ */
+describe("where a redirect sends the browser", () => {
+  it("carries the page the operator was on", async () => {
+    const { loginDestination } = await import("./login-redirect");
+
+    expect(loginDestination("/trips", "")).toBe(
+      "/auth?returnTo=%2Ftrips",
+    );
+  });
+
+  it("keeps the query string, so a filtered week survives signing in", async () => {
+    const { loginDestination } = await import("./login-redirect");
+
+    expect(loginDestination("/trips", "?view=week&date=2026-09-14")).toBe(
+      "/auth?returnTo=%2Ftrips%3Fview%3Dweek%26date%3D2026-09-14",
+    );
+  });
+
+  /** A flow already running must not be restarted from inside itself. */
+  it.each(["/auth", "/auth/login", "/auth/callback"])(
+    "leaves %s alone",
+    async (pathname) => {
+      const { loginDestination } = await import("./login-redirect");
+
+      expect(loginDestination(pathname, "")).toBeNull();
+    },
+  );
+});

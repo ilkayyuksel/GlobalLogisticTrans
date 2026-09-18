@@ -331,6 +331,42 @@ Responsibilities:
 
 Authorization decisions remain inside the backend.
 
+## Session expiry, and what says a user must sign in again
+
+Two lifetimes are involved and they must not be confused.
+
+The ACCESS TOKEN is short-lived by design. When it runs out, the Auth0 SDK's
+`/auth/access-token` endpoint mints a new one from the refresh token, and the
+operator notices nothing. This is ordinary and must never cost anyone their
+place in the work.
+
+The SESSION is the encrypted cookie that says the browser may ask for a token at
+all. When it has expired or been revoked, no renewal is possible and the
+operator has to sign in again.
+
+There is exactly ONE signal for "sign in again", and it is a 401:
+
+- `/auth/access-token` answers 401 both when the session is missing and when the
+  refresh fails (`SESSION_EXPIRED`, `FAILED_TO_REFRESH_TOKEN`);
+- the backend answers 401 only from `AccessTokenGuard`, which is the only place
+  in the API that raises one. No domain code returns 401, and the API uses no
+  403 at all.
+
+So a 401 — and nothing else — means re-authenticate. A 400, 404, 409, 422, 429,
+500, a timeout or a dropped connection are ordinary failures that pages handle
+themselves; treating any of them as an expired session would throw work away.
+
+A backend 401 is not taken at face value either: the client renews the token
+once and repeats the call, because the usual cause is a token that aged out
+while a tab was asleep. Only when no new token can be had is the session
+actually gone.
+
+When it is gone, the browser goes to `/auth?returnTo=<page>` — the same entry
+page, with the same parameter, that the middleware redirects to when it turns an
+unauthenticated request away — and the operator returns to the page they were on
+after signing in. It happens once however many requests failed together, and the
+client stops sending anything further. See `lib/auth/session-expiry.ts`.
+
 ---
 
 # Database

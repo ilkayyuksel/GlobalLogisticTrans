@@ -41,4 +41,7 @@ if (typeof Blob.prototype.arrayBuffer !== "function") {
 jest.mock("@/lib/auth/access-token", () => ({
   getAccessToken: jest.fn(async () => null),
   forgetAccessToken: jest.fn(),
+  // A renewal that produces nothing, which is what "no session" means. The
+  // real module is exercised by the auth specs, which unmock it.
+  renewAccessToken: jest.fn(async () => null),
 }));

@@ -1,4 +1,5 @@
-import { getAccessToken } from "@/lib/auth/access-token";
+import { getAccessToken, renewAccessToken } from "@/lib/auth/access-token";
+import { endSession, hasSessionEnded } from "@/lib/auth/session-expiry";
 import type { ApiErrorDetail, ApiResponse } from "./types";
 
 /**
@@ -34,6 +35,20 @@ export class ApiError extends Error {
     return this.statusCode === 404;
   }
 }
+
+/**
+ * What this client answers with once authentication is gone.
+ *
+ * Its own code, because it is not a failure of the thing being asked for: the
+ * request was never sent, or was refused because nobody is signed in any more.
+ * Callers that show errors — `useAsync` above all — recognise it and stay quiet,
+ * since the browser is already on its way to the login page and an error panel
+ * would only flash past on the way out.
+ */
+export const SESSION_ENDED_CODE = "SESSION_ENDED";
+
+/** The one status that means "authenticate again"; see `isAuthFailure`. */
+const UNAUTHORIZED = 401;
 
 /** Used when the backend could not be reached or spoke unexpectedly. */
 const NETWORK_ERROR_CODE = "NETWORK_ERROR";
@@ -101,15 +116,52 @@ export async function request<TData>(
   path: string,
   options: RequestOptions = {},
 ): Promise<TData> {
+  /*
+   * Once the session has ended nothing is sent at all. The browser is already
+   * navigating to the login page, and every request started in the seconds
+   * before it gets there could only add another 401 to a pile nobody will read.
+   *
+   * This is what actually stops a page that polls or reloads: the call fails
+   * immediately, locally, instead of producing traffic.
+   */
+  if (hasSessionEnded()) {
+    throw sessionEndedError();
+  }
+
+  return attempt<TData>(path, options, true);
+}
+
+/**
+ * One journey to the backend, with a single second chance at authentication.
+ *
+ * `mayRenew` is false on that second chance, so a token the backend keeps
+ * refusing produces two attempts and then a decision — never a loop.
+ */
+async function attempt<TData>(
+  path: string,
+  options: RequestOptions,
+  mayRenew: boolean,
+): Promise<TData> {
   const url = buildUrl(path, options.query);
   const method = options.method ?? "GET";
+  const token = await getAccessToken();
+
+  /*
+   * Asking for the token can itself end the session: the endpoint answers 401
+   * when the refresh token is gone, and says so through `endSession`. There is
+   * then nothing worth sending, and ten widgets discovering this together send
+   * nothing between them.
+   */
+  if (hasSessionEnded()) {
+    throw sessionEndedError();
+  }
 
   let response: Response;
 
   try {
     response = await fetch(url, {
       method,
-      headers: await requestHeaders(options.body),
+      headers: requestHeaders(options.body, token),
       body: requestBody(options.body),
       signal: options.signal,
     });
@@ -123,7 +175,78 @@ export async function request<TData>(
     throw new ApiError(NETWORK_ERROR_CODE, NETWORK_ERROR_MESSAGE, 0);
   }
 
-  return unwrap<TData>(response);
+  try {
+    return await unwrap<TData>(response);
+  } catch (error: unknown) {
+    if (!isAuthFailure(error)) {
+      throw error;
+    }
+
+    return authenticationFailed<TData>(path, options, token, mayRenew);
+  }
+}
+
+/**
+ * The backend refused the token. Decide whether that ends the session.
+ *
+ * ── WHY A RENEWAL COMES FIRST ───────────────────────────────────────────────
+ * An access token expiring is ordinary and must never cost an operator their
+ * place: it happens to every long shift, and to every tab that was asleep while
+ * the token aged out. The endpoint mints a new one from the refresh token, and
+ * the request goes again with it — the interrupted page simply finishes
+ * loading.
+ *
+ * Only when no new token can be had is the session actually gone, and only then
+ * is the browser sent to sign in. `endSession` is what makes that one
+ * navigation however many requests arrive here together.
+ *
+ * ── RETRYING A WRITE IS SAFE ────────────────────────────────────────────────
+ * The guard runs before any handler, so a 401 means the backend rejected the
+ * request without doing it. There is nothing to have happened twice.
+ */
+async function authenticationFailed<TData>(
+  path: string,
+  options: RequestOptions,
+  rejected: string | null,
+  mayRenew: boolean,
+): Promise<TData> {
+  if (mayRenew) {
+    const renewed = await renewAccessToken(rejected);
+
+    // A token identical to the refused one would fail identically; asking again
+    // with it would only spend a second request to learn the same thing.
+    if (renewed !== null && renewed !== rejected) {
+      return attempt<TData>(path, options, false);
+    }
+  }
+
+  endSession();
+
+  throw sessionEndedError();
+}
+
+/** The backend's "authenticate again". Its guard is the only source of a 401. */
+function isAuthFailure(error: unknown): boolean {
+  return error instanceof ApiError && error.statusCode === UNAUTHORIZED;
+}
+
+function sessionEndedError(): ApiError {
+  return new ApiError(
+    SESSION_ENDED_CODE,
+    "Your session has ended. Taking you to the sign-in page.",
+    UNAUTHORIZED,
+  );
+}
+
+/**
+ * Whether a failure is this client giving up on authentication.
+ *
+ * Read by anything that would otherwise render the failure: there is nothing to
+ * report and nothing to retry, because the browser is leaving for the login
+ * page.
+ */
+export function isSessionEndedError(error: unknown): boolean {
+  return error instanceof ApiError && error.code === SESSION_ENDED_CODE;
 }
 
 function isMultipart(body: unknown): body is FormData {
@@ -146,14 +269,12 @@ function isMultipart(body: unknown): body is FormData {
  * omitted, and the backend answers 401 — which is the correct outcome rather
  * than something this layer should pre-empt with a message of its own.
  */
-async function requestHeaders(body: unknown): Promise<HeadersInit> {
+function requestHeaders(body: unknown, token: string | null): HeadersInit {
   const headers: Record<string, string> = { Accept: "application/json" };
 
   if (body !== undefined && !isMultipart(body)) {
     headers["Content-Type"] = "application/json";
   }
-
-  const token = await getAccessToken();
 
   if (token) {
     headers.Authorization = `Bearer ${token}`;

@@ -1,9 +1,14 @@
 import type { CustomProperty, PricingSnapshot, Trip } from "@/lib/api/types";
 import { toClockLabel } from "@/lib/calendar/clock";
+import { toCostConfirmationLabel } from "@/lib/trips/cost-confirmation";
 import { formatWaitingTime } from "@/lib/waiting-time";
 import { toRouteLabels } from "./export-route-labels";
 import { toRouteText } from "./route-label";
-import { toPricedTripLines, type PricedTripLines } from "./pricing-lines";
+import {
+  PRICING_CODES,
+  toPricedTripLines,
+  type PricedTripLines,
+} from "./pricing-lines";
 
 /**
  * What one Trip becomes in each export, before any spreadsheet is involved.
@@ -21,6 +26,14 @@ import { toPricedTripLines, type PricedTripLines } from "./pricing-lines";
 export const EMPTY_CELL = "";
 
 export interface PricingExportRow {
+  /**
+   * The group this Trip belongs to, or null.
+   *
+   * Not a column: it decides the ROW's background, exactly as it does in the
+   * BASIS sheet and in the Ritten list, so one Combination is one colour
+   * wherever it is shown. See `combinationFillArgb`.
+   */
+  readonly tripGroupId: string | null;
   /** `YYYY-MM-DD`, or null. The workbook turns it into a real date cell. */
   readonly planningDate: string | null;
   readonly startTime: string | null;
@@ -95,12 +108,100 @@ export function toRemarks(trip: Trip): string {
   return trip.customProperties.map((property) => property.name).join(", ");
 }
 
+/** Between the operator's own remarks and each confirmation reference. */
+const REMARKS_SEPARATOR = " | ";
+
+/**
+ * The Cost Confirmation references on the stored EK line.
+ *
+ * The Engine writes them there itself — `Cost confirmation 4139505`, or
+ * `Cost confirmations 4139505, 4156173` when a Trip was confirmed in
+ * instalments — so the line that carries the money also says which documents
+ * produced it. See `cost-confirmation.calculator.ts`.
+ */
+const CONFIRMATION_REFERENCES = /^Cost confirmations?\s+(.+)$/i;
+
+/**
+ * Every confirmation reference belonging to THIS Trip, newest first.
+ *
+ * ── WHY THE SNAPSHOT AND NOT A SEARCH ───────────────────────────────────────
+ * The references are read off the Trip's own stored pricing, which is the only
+ * source that cannot name somebody else's document: a snapshot belongs to one
+ * Trip, and the Engine put those references on it from the confirmations it
+ * actually priced. Nothing is matched on a booking number here, and no code is
+ * constructed — `CC` is added by `toCostConfirmationLabel`, which is where the
+ * prefix has always lived.
+ *
+ * A Trip confirmed several times therefore keeps every reference. Duplicates
+ * cannot arise: the backend refuses a second confirmation carrying a
+ * `cc_number` it already holds, so one document counts once however often it
+ * arrives.
+ *
+ * The Trip's own `costConfirmation` is the fallback, and it is the LATEST one
+ * only — the Ritten list's display rule. It answers for a Trip whose snapshot
+ * predates the confirmation, which is the one case the stored line cannot.
+ */
+export function toCostConfirmationLabels(
+  trip: Trip,
+  snapshot: PricingSnapshot | null,
+): string[] {
+  const stored = referencesOnSnapshot(snapshot);
+  const references =
+    stored.length > 0
+      ? stored
+      : trip.costConfirmation
+        ? [trip.costConfirmation.ccNumber]
+        : [];
+
+  return [...new Set(references)].map((ccNumber) =>
+    toCostConfirmationLabel({ ccNumber }),
+  );
+}
+
+function referencesOnSnapshot(snapshot: PricingSnapshot | null): string[] {
+  const line = snapshot?.items.find(
+    (item) => item.pricingComponentCode === PRICING_CODES.costConfirmation,
+  );
+
+  const references = line
+    ? CONFIRMATION_REFERENCES.exec(line.description)
+    : null;
+
+  if (references === null) {
+    return [];
+  }
+
+  return references[1]
+    .split(",")
+    .map((reference) => reference.trim())
+    .filter((reference) => reference !== "");
+}
+
+/**
+ * The Remarks column: what the operator wrote, then what Eucon confirmed.
+ *
+ * The existing remarks are never replaced. A confirmation reference is added
+ * after them, each on its own, so a Trip reads
+ * `Aan/Afkoppelen | CC4139505 | CC4156173` and the EK beside it is those
+ * confirmations' total.
+ */
+export function toPricingRemarks(
+  trip: Trip,
+  snapshot: PricingSnapshot | null,
+): string {
+  return [toRemarks(trip), ...toCostConfirmationLabels(trip, snapshot)]
+    .filter((part) => part !== "")
+    .join(REMARKS_SEPARATOR);
+}
+
 export function toPricingRow(
   trip: Trip,
   snapshot: PricingSnapshot | null,
   fuelPercentage: number | null,
 ): PricingExportRow {
   const lines: PricedTripLines = toPricedTripLines(snapshot);
+  /** What the Trip is worth NOW, corrections included. See `corrected`. */
+  const effective = trip.pricing ?? undefined;
   /*
    * The two ends of the Trip in the operator's own vocabulary, decided by the
    * persisted direction and the Combination relationship — never by a terminal
@@ -109,6 +210,7 @@ export function toPricingRow(
   const route = toRouteLabels(trip);
 
   return {
+    tripGroupId: trip.tripGroupId,
     planningDate: trip.planningDate,
     startTime: trip.startTime,
     endTime: trip.endTime,
@@ -118,22 +220,72 @@ export function toPricingRow(
     startPoint: route.startPoint,
     trip: toRouteLabel(trip),
     endPoint: route.endPoint,
-    basePrice: lines.basePrice,
+    basePrice: corrected(lines.basePrice, effective?.tarief),
     /*
-     * The percentage comes from configuration and the amount from the stored
-     * line. Showing the percentage without a stored surcharge would suggest a
-     * charge that was never made, so it appears only when the line does.
+     * ── THE RATE THIS TRIP WAS CHARGED AT, NOT TODAY'S ────────────────────
+     * The Engine records the rate on the fuel line itself, so a Trip closed at
+     * 19% still says 19% after the configured percentage moves to 23 — and the
+     * percentage printed here always explains the amount beside it. The
+     * configured value is the fallback, for snapshots written before the rate
+     * was kept.
+     *
+     * Either way it appears only where a fuel line does: a percentage beside no
+     * charge would suggest one that was never made.
      */
-    fuelPercentage: lines.fuel === null ? null : fuelPercentage,
-    fuelAmount: lines.fuel,
-    backload: lines.combination,
-    toll: lines.toll,
-    tunnel: lines.tunnel,
+    fuelPercentage:
+      lines.fuel === null ? null : (lines.fuelPercentage ?? fuelPercentage),
+    fuelAmount: corrected(lines.fuel, effective?.brandstof),
+    backload: corrected(lines.combination, effective?.backload),
+    toll: corrected(lines.toll, effective?.tol),
+    tunnel: corrected(lines.tunnel, effective?.tunnel),
+    /*
+     * Both from the stored lines alone, deliberately. The effective read groups
+     * the waiting time into its own `others`, and this sheet prints the two in
+     * separate columns — taking `others` from there would silently fold one
+     * into the other.
+     */
     others: lines.others,
     waitingTime: lines.waitingTime,
-    ek: lines.ek,
-    remarks: toRemarks(trip),
+    /*
+     * One line however many confirmations a Trip received: the backend sums
+     * them as Decimal and stores the total, so EK is already what the Trip has
+     * been confirmed for in full. Nothing is added up here.
+     */
+    ek: corrected(lines.ek, effective?.ek),
+    remarks: toPricingRemarks(trip, snapshot),
   };
+}
+
+/**
+ * A stored amount with the operator's correction applied, when there is one.
+ *
+ * ── WHY BOTH SOURCES, AND WHICH DECIDES WHAT ────────────────────────────────
+ * The stored snapshot decides WHETHER a component applies: no line, no figure,
+ * and an empty cell rather than a zero — a Trip that was never charged toll and
+ * one charged nothing for it are different facts.
+ *
+ * What a component is WORTH now can differ from what was stored: Tarief, Tol
+ * and Tunnel may be corrected by hand, the corrections live in their own table,
+ * and the backend applies them on top of the stored lines at read time. It also
+ * recalculates the fuel with them, because fuel is a percentage OF the Tarief —
+ * which is why an overridden Tarief must never be printed beside a fuel amount
+ * calculated from the old one.
+ *
+ * So `trip.pricing` — the same figures the Ritten list shows — supplies the
+ * amount, and this file calculates nothing. A Trip that has never been priced
+ * has no effective pricing at all, and the stored lines answer alone.
+ */
+function corrected(
+  stored: number | null,
+  effective: string | undefined,
+): number | null {
+  if (stored === null || effective === undefined) {
+    return stored;
+  }
+
+  const amount = Number(effective);
+
+  return Number.isFinite(amount) ? amount : stored;
 }
 
 /**

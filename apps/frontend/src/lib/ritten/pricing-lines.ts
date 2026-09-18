@@ -36,6 +36,16 @@ export interface PricedTripLines {
   /** Null everywhere means "no snapshot" — never "zero". */
   readonly basePrice: number | null;
   readonly fuel: number | null;
+  /**
+   * The rate that produced `fuel`, as a percentage — 23 for 23%.
+   *
+   * The Engine records it ON the line (`unitPrice`) precisely so a closed Trip
+   * stays historical: moving the configured FUEL_PERCENTAGE afterwards cannot
+   * change what a Trip was charged, and the sheet must show the rate that was
+   * actually applied rather than today's. Null on a snapshot written before the
+   * rate was kept, and on a Trip with no fuel line at all.
+   */
+  readonly fuelPercentage: number | null;
   readonly combination: number | null;
   readonly toll: number | null;
   readonly tunnel: number | null;
@@ -57,6 +67,7 @@ export interface PricedTripLines {
 export const NO_PRICING: PricedTripLines = {
   basePrice: null,
   fuel: null,
+  fuelPercentage: null,
   combination: null,
   toll: null,
   tunnel: null,
@@ -112,6 +123,7 @@ export function toPricedTripLines(
   return {
     basePrice: lineFor(items, PRICING_CODES.basePrice),
     fuel: lineFor(items, PRICING_CODES.fuel),
+    fuelPercentage: rateOf(items, PRICING_CODES.fuel),
     combination: lineFor(items, PRICING_CODES.combination),
     toll: lineFor(items, PRICING_CODES.toll),
     tunnel: lineFor(items, PRICING_CODES.tunnel),
@@ -125,6 +137,29 @@ export function toPricedTripLines(
       toAmount(item.amount),
     ),
   };
+}
+
+/**
+ * The rate a line recorded for itself, or null when it recorded none.
+ *
+ * `unitPrice` is the line's own rate — the percentage for fuel, the price of a
+ * block for waiting time. Read, never derived: dividing the stored fuel by the
+ * stored base would name no rate at all once the base is zero, which is the
+ * ordinary case for a route nobody has configured.
+ */
+function rateOf(
+  items: readonly TripPricingItem[],
+  code: string,
+): number | null {
+  const line = items.find((item) => item.pricingComponentCode === code);
+
+  if (!line || line.unitPrice === null) {
+    return null;
+  }
+
+  const rate = Number(line.unitPrice);
+
+  return Number.isFinite(rate) ? rate : null;
 }
 
 /**

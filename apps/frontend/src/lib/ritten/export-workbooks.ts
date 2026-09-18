@@ -111,7 +111,19 @@ const PRICING_COLUMNS: readonly ColumnSpec[] = [
   { header: "Trip", width: 30 },
   { header: "Endpoint", width: 20 },
   { header: "Tarief", width: 12, format: MONEY_FORMAT },
-  { header: "Brandstof (%)", width: 13, format: PERCENT_FORMAT },
+  /*
+   * ── TWO COLUMNS, BECAUSE THEY ANSWER TWO QUESTIONS ────────────────────────
+   * This was one column holding the configured percentage, under a header that
+   * said so. It made the sheet unusable as a price list: every other money
+   * column carried euros and this one carried `23%`, so a row could not be
+   * added up and the fuel a Trip actually cost appeared nowhere.
+   *
+   * The percentage is kept — it is real configuration and explains the amount —
+   * and the amount now sits beside it, in euros like its neighbours. The amount
+   * is the Engine's own, never this sheet multiplying anything.
+   */
+  { header: "Brandstof %", width: 11, format: PERCENT_FORMAT },
+  { header: "Brandstof", width: 12, format: MONEY_FORMAT },
   { header: "Backload", width: 12, format: MONEY_FORMAT },
   { header: "Tol", width: 12, format: MONEY_FORMAT },
   { header: "Tunnel", width: 12, format: MONEY_FORMAT },
@@ -168,6 +180,9 @@ const BASIC_COLUMNS: readonly StyledColumn[] = [
   { header: "COMBI EN KOST", width: 25.90625, fontColor: INK.green },
   { header: "INFO", width: 41, fontColor: INK.red },
 ];
+
+/** The pricing sheet's header; its Trips begin on the row below. */
+const PRICING_HEADER_ROW = 1;
 
 /** Column G, where the reference prints the day. */
 const DATE_HEADING_COLUMN = 7;
@@ -272,6 +287,7 @@ export async function buildPricingWorkbook(
       row.endPoint,
       row.basePrice,
       row.fuelPercentage,
+      row.fuelAmount,
       row.backload,
       row.toll,
       row.tunnel,
@@ -282,6 +298,8 @@ export async function buildPricingWorkbook(
     ]);
   }
 
+  // Row 1 is the header, so the Trips start under it — see `createPricingSheet`.
+  paintGroupRows(sheet, rows, PRICING_HEADER_ROW, PRICING_COLUMNS.length);
   applyBorders(sheet);
 
   return workbook.xlsx.writeBuffer();
@@ -340,7 +358,7 @@ export async function buildBasicWorkbook(
    * as on screen — and keeps its colour across the days it spans, because the
    * id does not change with the date or the row's position.
    */
-  paintGroupRows(sheet, rows, BASIC_HEADER_ROW);
+  paintGroupRows(sheet, rows, BASIC_HEADER_ROW, BASIC_COLUMNS.length);
 
   applyReferenceLook(sheet, BASIC_COLUMNS, BASIC_HEADER_ROW);
   writeDatePeriod(sheet, period);
@@ -420,14 +438,24 @@ function buildFileName(
 /**
  * Fills each row belonging to a group, every cell of it.
  *
+ * ── ONE COLOUR PER GROUP, IN EVERY PLACE IT IS SHOWN ────────────────────────
+ * Both sheets paint through this, and both take the colour from
+ * `combinationFillArgb` — the same mapping, keyed by the same
+ * `combinationColorIndex`, that the Ritten list's own group tag uses. So a
+ * Combination looks the same on screen, on the dispatch sheet and on the price
+ * list; it keeps that colour on every day it spans; and neither the row order
+ * nor the period exported can change it, because nothing but the group id
+ * decides it.
+ *
  * A Trip in no group is left alone: the sheet's own background and its grid
  * lines are what the office reads the table by, and painting a standalone row
  * white would flatten them.
  */
 function paintGroupRows(
   sheet: Worksheet,
-  rows: readonly BasicExportRow[],
+  rows: readonly { readonly tripGroupId: string | null }[],
   headerRowNumber: number,
+  columnCount: number,
 ): void {
   rows.forEach((row, index) => {
     const argb = combinationFillArgb(row.tripGroupId);
@@ -438,7 +466,7 @@ function paintGroupRows(
 
     const sheetRow = sheet.getRow(headerRowNumber + 1 + index);
 
-    for (let column = 1; column <= BASIC_COLUMNS.length; column += 1) {
+    for (let column = 1; column <= columnCount; column += 1) {
       sheetRow.getCell(column).fill = {
         type: "pattern",
         pattern: "solid",

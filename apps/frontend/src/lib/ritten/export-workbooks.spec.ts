@@ -64,6 +64,7 @@ function buildPricingRow(
   overrides: Partial<PricingExportRow> = {},
 ): PricingExportRow {
   return {
+    tripGroupId: null,
     planningDate: "2026-06-29",
     startTime: "07:00:00",
     endTime: "15:00:00",
@@ -141,7 +142,7 @@ describe("the pricing workbook", () => {
    * appeared nowhere — a Cost Confirmation changed the total on screen and
    * changed nothing here. Wachttijd got the column it needed and EK holds EK.
    */
-  it("has the eighteen columns, in the agreed order", async () => {
+  it("has the nineteen columns, in the agreed order", async () => {
     const sheet = await reopen(await buildPricingWorkbook([], "nl"));
 
     expect(sheet.getRow(1).values).toEqual([
@@ -156,7 +157,8 @@ describe("the pricing workbook", () => {
       "Trip",
       "Endpoint",
       "Tarief",
-      "Brandstof (%)",
+      "Brandstof %",
+      "Brandstof",
       "Backload",
       "Tol",
       "Tunnel",
@@ -255,6 +257,22 @@ describe("the pricing workbook", () => {
       expect(cell.numFmt).toContain("%");
     });
 
+    /**
+     * ── AND WHAT THAT PERCENTAGE COST ──────────────────────────────────────
+     * The percentage alone made this sheet unusable as a price list: `15%` is
+     * not a figure anybody can add to a Tarief. The amount beside it is the
+     * Engine's own, in euros like every other money column.
+     */
+    it("writes the fuel amount as money, beside its percentage", async () => {
+      const sheet = await reopen(
+        await buildPricingWorkbook([buildPricingRow()], "nl"),
+      );
+      const cell = sheet.getRow(2).getCell(12);
+
+      expect(cell.value).toBe(37.5);
+      expect(cell.numFmt).toContain("€");
+    });
+
     it("puts each surcharge in its own column", async () => {
       const sheet = await reopen(
         await buildPricingWorkbook(
@@ -272,11 +290,11 @@ describe("the pricing workbook", () => {
       );
       const row = sheet.getRow(2);
 
-      expect(row.getCell(12).value).toBe(75);
-      expect(row.getCell(13).value).toBe(9.75);
-      expect(row.getCell(14).value).toBe(6.2);
-      expect(row.getCell(15).value).toBe(85);
-      expect(row.getCell(16).value).toBe(25);
+      expect(row.getCell(13).value).toBe(75);
+      expect(row.getCell(14).value).toBe(9.75);
+      expect(row.getCell(15).value).toBe(6.2);
+      expect(row.getCell(16).value).toBe(85);
+      expect(row.getCell(17).value).toBe(25);
     });
 
     /** Empty, never 0.00, and never the word "null". */
@@ -295,7 +313,7 @@ describe("the pricing workbook", () => {
       );
       const row = sheet.getRow(2);
 
-      for (const column of [10, 11, 12, 13, 14, 15, 16]) {
+      for (const column of [10, 11, 12, 13, 14, 15, 16, 17]) {
         expect(row.getCell(column).value).toBeNull();
       }
     });
@@ -308,8 +326,8 @@ describe("the pricing workbook", () => {
         ),
       );
 
-      // Column 18 since Wachttijd gained one of its own.
-      expect(sheet.getRow(2).getCell(18).value).toBe("TAR, Flat");
+      // Column 19 since Wachttijd and the fuel amount each gained one.
+      expect(sheet.getRow(2).getCell(19).value).toBe("TAR, Flat");
     });
 
     /**
@@ -325,8 +343,8 @@ describe("the pricing workbook", () => {
         ),
       );
 
-      expect(sheet.getRow(2).getCell(16).value).toBe(25);
-      expect(sheet.getRow(2).getCell(17).value).toBe(165);
+      expect(sheet.getRow(2).getCell(17).value).toBe(25);
+      expect(sheet.getRow(2).getCell(18).value).toBe(165);
     });
 
     /** A Trip with no confirmation leaves EK empty, never zero. */
@@ -335,7 +353,7 @@ describe("the pricing workbook", () => {
         await buildPricingWorkbook([buildPricingRow({ ek: null })], "nl"),
       );
 
-      expect(sheet.getRow(2).getCell(17).value).toBeNull();
+      expect(sheet.getRow(2).getCell(18).value).toBeNull();
     });
   });
 

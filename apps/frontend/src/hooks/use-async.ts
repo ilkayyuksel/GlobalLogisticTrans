@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { isSessionEndedError } from "@/lib/api/client";
+
 /**
  * Runs an asynchronous read and reports its three possible states.
  *
@@ -61,6 +63,19 @@ export function useAsync<TData>(
         // An abort is this hook cancelling its own work, not a failure the user
         // should see. The component is gone or the inputs changed.
         if (!active || isAbortError(caught)) {
+          return;
+        }
+
+        /*
+         * The session has ended and the browser is already leaving for the
+         * login page. Marking this effect inactive leaves the widget exactly as
+         * it is — still loading, never failed — so the last seconds of the old
+         * page stay calm instead of filling with errors about authentication
+         * that the operator can neither read in time nor act on.
+         */
+        if (isSessionEndedError(caught)) {
+          active = false;
+
           return;
         }
 
