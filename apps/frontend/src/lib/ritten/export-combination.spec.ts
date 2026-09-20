@@ -77,7 +77,7 @@ async function reopen(buffer: ArrayBuffer) {
 
 /** The two columns under test, read from the produced file. */
 async function routeCellsOf(trips: readonly Trip[]) {
-  const rows = trips.map((trip) => toPricingRow(trip, null, 15));
+  const rows = trips.map((trip) => toPricingRow(trip, null));
   const sheet = await reopen(await buildPricingWorkbook(rows, "nl"));
   const cells: { booking: unknown; start: unknown; end: unknown }[] = [];
 
@@ -134,7 +134,7 @@ describe("a Combination in the pricing workbook", () => {
 
   it("still shows each leg's own stored route in the Trip column", async () => {
     const rows = [DELIVERY_LEG, COLLECTION_LEG].map((trip) =>
-      toPricingRow(trip, null, 15),
+      toPricingRow(trip, null),
     );
     const sheet = await reopen(await buildPricingWorkbook(rows, "nl"));
 
@@ -193,7 +193,7 @@ describe("a normal imported Trip in the workbook", () => {
         destinationCity: "Dourges",
         tripGroupId: null,
       }),
-    ].map((trip) => toPricingRow(trip, null, 15));
+    ].map((trip) => toPricingRow(trip, null));
     const sheet = await reopen(await buildPricingWorkbook(rows, "nl"));
 
     expect(sheet.getRow(2).getCell(8).value).toBe("Dourges → Quay 869");
@@ -215,7 +215,7 @@ describe("the operator's delivery rows in the workbook", () => {
       tripGroupId: null,
     });
     const sheet = await reopen(
-      await buildPricingWorkbook([toPricingRow(trip, null, 15)], "nl"),
+      await buildPricingWorkbook([toPricingRow(trip, null)], "nl"),
     );
 
     return [7, 8, 9].map((cell) => sheet.getRow(2).getCell(cell).value);

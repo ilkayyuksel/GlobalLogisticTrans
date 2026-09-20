@@ -45,8 +45,7 @@ export interface PricingExportRow {
   readonly trip: string;
   readonly endPoint: string;
   readonly basePrice: number | null;
-  /** The configured percentage, as a fraction for Excel's percent format. */
-  readonly fuelPercentage: number | null;
+  /** What the fuel cost. The rate behind it is not a column of this sheet. */
   readonly fuelAmount: number | null;
   readonly backload: number | null;
   readonly toll: number | null;
@@ -178,26 +177,70 @@ function referencesOnSnapshot(snapshot: PricingSnapshot | null): string[] {
 }
 
 /**
- * The Remarks column: what the operator wrote, then what Eucon confirmed.
+ * The Remarks column: everything about a Trip that is not an amount.
  *
- * The existing remarks are never replaced. A confirmation reference is added
- * after them, each on its own, so a Trip reads
- * `Aan/Afkoppelen | CC4139505 | CC4156173` and the EK beside it is those
- * confirmations' total.
+ * ── WHAT IT GATHERS, AND IN WHICH ORDER ─────────────────────────────────────
+ * The operator's own Custom Properties first, then three things the sheet used
+ * to leave unsaid:
+ *
+ *   TAR        the word, never the number. Whether it was charged comes from
+ *              the stored snapshot — the Engine's own answer, same-day rule
+ *              included — so an automatic charge is named even though nobody
+ *              ticked it. A Trip that carries TAR as an assigned property
+ *              already shows it, and it is not said twice.
+ *   Wachttijd  the window an operator read off a clock, or the duration when no
+ *              window was recorded. It appears whenever the Trip HAS a waiting
+ *              time, whether or not it was charged: the money column beside it
+ *              says what it cost, and a free half hour is still a half hour the
+ *              driver stood there.
+ *   CC         every confirmation reference, as `toCostConfirmationLabels`
+ *              reads them off the EK line.
+ *
+ * Nothing replaces what was already there, and nothing is invented: each part
+ * is either the operator's own text or the Engine's own stored answer.
  */
 export function toPricingRemarks(
   trip: Trip,
   snapshot: PricingSnapshot | null,
+  { automaticPropertyId = null, waitingWord = "Wachttijd" }: PricingRowContext = {},
 ): string {
-  return [toRemarks(trip), ...toCostConfirmationLabels(trip, snapshot)]
-    .filter((part) => part !== "")
-    .join(REMARKS_SEPARATOR);
+  const names = trip.customProperties.map((property) => property.name);
+  const parts = [...names];
+
+  // Charged by the Engine rather than chosen by anybody, so it is named here —
+  // unless the Trip also carries it as an assignment, which already says it.
+  if (wasTarChargedIn(snapshot, automaticPropertyId) && !names.includes(TAR_MARK)) {
+    parts.push(TAR_MARK);
+  }
+
+  const waiting = toWaitingLabel(trip, waitingWord);
+
+  if (waiting !== null) {
+    parts.push(waiting);
+  }
+
+  parts.push(...toCostConfirmationLabels(trip, snapshot));
+
+  return parts.filter((part) => part !== "").join(REMARKS_SEPARATOR);
+}
+
+/** What the Remarks column needs beyond the Trip itself. */
+export interface PricingRowContext {
+  /**
+   * The Custom Property the Engine applies on its own — TAR.
+   *
+   * Needed to RECOGNISE its line in a stored snapshot. Whether TAR applied is
+   * never decided here: the Engine already decided it, same-day rule included.
+   */
+  readonly automaticPropertyId?: string | null;
+  /** The word for waiting time, in the operator's own language. */
+  readonly waitingWord?: string;
 }
 
 export function toPricingRow(
   trip: Trip,
   snapshot: PricingSnapshot | null,
-  fuelPercentage: number | null,
+  { automaticPropertyId = null, waitingWord = "Wachttijd" }: PricingRowContext = {},
 ): PricingExportRow {
   const lines: PricedTripLines = toPricedTripLines(snapshot);
   /** What the Trip is worth NOW, corrections included. See `corrected`. */
@@ -222,18 +265,11 @@ export function toPricingRow(
     endPoint: route.endPoint,
     basePrice: corrected(lines.basePrice, effective?.tarief),
     /*
-     * ── THE RATE THIS TRIP WAS CHARGED AT, NOT TODAY'S ────────────────────
-     * The Engine records the rate on the fuel line itself, so a Trip closed at
-     * 19% still says 19% after the configured percentage moves to 23 — and the
-     * percentage printed here always explains the amount beside it. The
-     * configured value is the fallback, for snapshots written before the rate
-     * was kept.
-     *
-     * Either way it appears only where a fuel line does: a percentage beside no
-     * charge would suggest one that was never made.
+     * What the fuel cost, with a corrected Tarief already followed through:
+     * fuel is a percentage OF the Tarief, so the backend recalculates it from
+     * the corrected figure and both travel together. No rate is printed — the
+     * sheet is a price list, and the amount is the price.
      */
-    fuelPercentage:
-      lines.fuel === null ? null : (lines.fuelPercentage ?? fuelPercentage),
     fuelAmount: corrected(lines.fuel, effective?.brandstof),
     backload: corrected(lines.combination, effective?.backload),
     toll: corrected(lines.toll, effective?.tol),
@@ -252,7 +288,10 @@ export function toPricingRow(
      * been confirmed for in full. Nothing is added up here.
      */
     ek: corrected(lines.ek, effective?.ek),
-    remarks: toPricingRemarks(trip, snapshot),
+    remarks: toPricingRemarks(trip, snapshot, {
+      automaticPropertyId,
+      waitingWord,
+    }),
   };
 }
 

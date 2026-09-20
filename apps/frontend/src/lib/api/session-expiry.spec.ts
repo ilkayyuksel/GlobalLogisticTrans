@@ -158,6 +158,11 @@ describe("when authentication runs out", () => {
      * latch. Each test therefore needs a browser that has just opened.
      */
     jest.resetModules();
+    /*
+     * The loop guard remembers a trip through Auth0 in sessionStorage, which a
+     * reset module does not clear. Each test is a tab opened fresh.
+     */
+    window.sessionStorage.clear();
 
     const client = await import("./client");
     request = client.request;
@@ -296,6 +301,77 @@ describe("when authentication runs out", () => {
 
       expect(network.calls.token).toBe(1);
       expect(network.calls.api).toBe(0);
+    });
+  });
+
+  /**
+   * ── AND THE LOOP THAT MUST NOT HAPPEN ─────────────────────────────────────
+   * A browser whose token cannot be renewed usually still holds a valid session
+   * cookie: the SDK answers 401 for a refresh it cannot perform, and only an
+   * expired session clears the cookie. The middleware then treats the visitor
+   * as signed in — so the browser is sent to Auth0, comes back, is refused
+   * again, and goes round. That is the flashing "unauthorized" an operator saw
+   * on a tab left open overnight.
+   *
+   * Going to `/auth/login` breaks it, because the SDK serves that route itself
+   * rather than bouncing it. If the round trip still does not help — a wrong
+   * audience, a tenant issuing tokens for another API — the second failure
+   * stops instead of starting another lap, and says so out loud.
+   */
+  describe("a login that did not restore access", () => {
+    /** The tab has just come back from Auth0; the very next call is refused. */
+    function cameBackFromLogin(): void {
+      window.sessionStorage.setItem(
+        "traxo.signing-in-again",
+        String(Date.now()),
+      );
+    }
+
+    it("does not set off for Auth0 a second time", async () => {
+      cameBackFromLogin();
+      serve({ session: "gone" });
+
+      await failureOf(request("/api/v1/trips"));
+
+      expect(redirectToLogin).not.toHaveBeenCalled();
+    });
+
+    /** Shown, not swallowed: nobody is going anywhere, so a spinner would lie. */
+    it("reports the failure instead of hiding it", async () => {
+      cameBackFromLogin();
+      serve({ session: "gone" });
+
+      const error = await failureOf(request("/api/v1/trips"));
+
+      expect(isSessionEndedError(error)).toBe(false);
+      expect((error as InstanceType<typeof ApiError>).code).toBe(
+        "REAUTHENTICATION_FAILED",
+      );
+    });
+
+    it("still sends nothing further", async () => {
+      cameBackFromLogin();
+      const network = serve({ session: "gone" });
+
+      await failureOf(request("/api/v1/trips"));
+      await failureOf(request("/api/v1/trips"));
+
+      expect(network.calls.api).toBe(0);
+    });
+
+    /**
+     * A call that SUCCEEDS clears the memory of that trip, so an expiry an hour
+     * later signs in again normally rather than being mistaken for a loop.
+     */
+    it("forgets the attempt once anything works again", async () => {
+      cameBackFromLogin();
+      serve({ session: "alive" });
+
+      await request("/api/v1/trips");
+
+      expect(
+        window.sessionStorage.getItem("traxo.signing-in-again"),
+      ).toBeNull();
     });
   });
 

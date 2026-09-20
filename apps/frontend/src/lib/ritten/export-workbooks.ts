@@ -37,7 +37,6 @@ import {
 const DATE_FORMAT = "dd/mm/yyyy";
 const TIME_FORMAT = "hh:mm";
 const MONEY_FORMAT = '#,##0.00 "€"';
-const PERCENT_FORMAT = "0\\%";
 
 /**
  * The basic export's look is not chosen here.
@@ -112,17 +111,13 @@ const PRICING_COLUMNS: readonly ColumnSpec[] = [
   { header: "Endpoint", width: 20 },
   { header: "Tarief", width: 12, format: MONEY_FORMAT },
   /*
-   * ── TWO COLUMNS, BECAUSE THEY ANSWER TWO QUESTIONS ────────────────────────
-   * This was one column holding the configured percentage, under a header that
-   * said so. It made the sheet unusable as a price list: every other money
-   * column carried euros and this one carried `23%`, so a row could not be
-   * added up and the fuel a Trip actually cost appeared nowhere.
-   *
-   * The percentage is kept — it is real configuration and explains the amount —
-   * and the amount now sits beside it, in euros like its neighbours. The amount
-   * is the Engine's own, never this sheet multiplying anything.
+   * ── THE COST, NOT THE RATE ────────────────────────────────────────────────
+   * This column used to hold the configured percentage, which made the sheet
+   * unusable as a price list: every other money column carried euros and this
+   * one carried `23%`, so a row could not be added up and the fuel a Trip
+   * actually cost appeared nowhere. It now carries the amount the Engine
+   * charged — never this sheet multiplying anything.
    */
-  { header: "Brandstof %", width: 11, format: PERCENT_FORMAT },
   { header: "Brandstof", width: 12, format: MONEY_FORMAT },
   { header: "Backload", width: 12, format: MONEY_FORMAT },
   { header: "Tol", width: 12, format: MONEY_FORMAT },
@@ -286,7 +281,6 @@ export async function buildPricingWorkbook(
       row.trip,
       row.endPoint,
       row.basePrice,
-      row.fuelPercentage,
       row.fuelAmount,
       row.backload,
       row.toll,

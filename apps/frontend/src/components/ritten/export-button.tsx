@@ -7,7 +7,6 @@ import { listCustomProperties } from "@/lib/api/custom-properties";
 import { fetchPricingSnapshots } from "@/lib/api/pricing";
 import {
   findAutomaticPropertyId,
-  findFuelPercentage,
   listSettings,
 } from "@/lib/api/settings";
 import { ExportTooLargeError, fetchTripsForExport } from "@/lib/api/trip-export";
@@ -83,9 +82,19 @@ export function ExportButton({
       );
 
       if (kind === "pricing") {
-        const fuelPercentage = findFuelPercentage(await listSettings());
+        /*
+         * Which property is TAR, so its line can be RECOGNISED in a stored
+         * snapshot — the same lookup the BASIS export makes, and for the same
+         * reason: whether TAR applied was decided by the Engine, not here.
+         */
+        const automaticPropertyId = findAutomaticPropertyId(await listSettings());
+        const waitingWord = t("ritten.export.waitingWord");
+
         const rows = trips.map((trip) =>
-          toPricingRow(trip, snapshots.get(trip.id) ?? null, fuelPercentage),
+          toPricingRow(trip, snapshots.get(trip.id) ?? null, {
+            automaticPropertyId,
+            waitingWord,
+          }),
         );
 
         downloadWorkbook(

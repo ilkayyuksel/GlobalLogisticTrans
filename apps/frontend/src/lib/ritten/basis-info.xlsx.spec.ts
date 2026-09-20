@@ -316,7 +316,7 @@ describe("the EK column in a real pricing workbook", () => {
   }
 
   async function pricingCells(): Promise<{ waiting: unknown; ek: unknown }> {
-    const row = toPricingRow(buildTrip(), LIVE_SNAPSHOT, 15);
+    const row = toPricingRow(buildTrip(), LIVE_SNAPSHOT);
     const buffer = await buildPricingWorkbook([row], "nl");
 
     const directory = await mkdtemp(join(tmpdir(), "trano-pricing-"));
@@ -334,8 +334,8 @@ describe("the EK column in a real pricing workbook", () => {
     const dataRow = reopened.worksheets[0].getRow(2);
 
     return {
-      waiting: dataRow.getCell(17).value,
-      ek: dataRow.getCell(18).value,
+      waiting: dataRow.getCell(16).value,
+      ek: dataRow.getCell(17).value,
     };
   }
 
@@ -584,7 +584,6 @@ describe("Backload per Combination leg", () => {
             },
           ],
         } as unknown as PricingSnapshot,
-        15,
       );
 
     const buffer = await buildPricingWorkbook([leg("50.00"), leg("50.00")], "nl");
@@ -603,8 +602,8 @@ describe("Backload per Combination leg", () => {
 
     const sheet = reopened.worksheets[0];
 
-    // Column 13 is Backload; rows 2 and 3 are the two legs.
-    return [sheet.getRow(2).getCell(13).value, sheet.getRow(3).getCell(13).value];
+    // Column 12 is Backload; rows 2 and 3 are the two legs.
+    return [sheet.getRow(2).getCell(12).value, sheet.getRow(3).getCell(12).value];
   }
 
   it("writes €50 on each leg", async () => {

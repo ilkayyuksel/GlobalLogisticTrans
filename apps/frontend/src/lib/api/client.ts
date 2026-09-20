@@ -1,5 +1,10 @@
 import { getAccessToken, renewAccessToken } from "@/lib/auth/access-token";
-import { endSession, hasSessionEnded } from "@/lib/auth/session-expiry";
+import {
+  endSession,
+  hasReauthenticationFailed,
+  hasSessionEnded,
+  noteAuthenticationWorks,
+} from "@/lib/auth/session-expiry";
 import type { ApiErrorDetail, ApiResponse } from "./types";
 
 /**
@@ -46,6 +51,16 @@ export class ApiError extends Error {
  * would only flash past on the way out.
  */
 export const SESSION_ENDED_CODE = "SESSION_ENDED";
+
+/**
+ * Signing in again was tried, and the backend still refuses the token.
+ *
+ * A different code because it needs the opposite treatment: SESSION_ENDED is
+ * silent, since the browser is already leaving for Auth0, while this one has
+ * nowhere left to go and must be SHOWN. It means the configuration is wrong
+ * rather than the session old — see `hasReauthenticationFailed`.
+ */
+export const REAUTHENTICATION_FAILED_CODE = "REAUTHENTICATION_FAILED";
 
 /** The one status that means "authenticate again"; see `isAuthFailure`. */
 const UNAUTHORIZED = 401;
@@ -176,7 +191,13 @@ async function attempt<TData>(
   }
 
   try {
-    return await unwrap<TData>(response);
+    const data = await unwrap<TData>(response);
+
+    // The token worked, so whatever went wrong before is over: a later expiry
+    // may sign in again without being mistaken for a loop.
+    noteAuthenticationWorks();
+
+    return data;
   } catch (error: unknown) {
     if (!isAuthFailure(error)) {
       throw error;
@@ -231,6 +252,14 @@ function isAuthFailure(error: unknown): boolean {
 }
 
 function sessionEndedError(): ApiError {
+  if (hasReauthenticationFailed()) {
+    return new ApiError(
+      REAUTHENTICATION_FAILED_CODE,
+      "Signing in again did not restore access. Please reload the page, and tell an administrator if it keeps happening.",
+      UNAUTHORIZED,
+    );
+  }
+
   return new ApiError(
     SESSION_ENDED_CODE,
     "Your session has ended. Taking you to the sign-in page.",
@@ -239,11 +268,14 @@ function sessionEndedError(): ApiError {
 }
 
 /**
- * Whether a failure is this client giving up on authentication.
+ * Whether a failure is this client standing aside for a login it has started.
  *
  * Read by anything that would otherwise render the failure: there is nothing to
- * report and nothing to retry, because the browser is leaving for the login
- * page.
+ * report and nothing to retry, because the browser is leaving for Auth0.
+ *
+ * Deliberately FALSE for a re-authentication that failed. That one is shown,
+ * because nobody is going anywhere and a silent spinner would leave an operator
+ * waiting for a page that is never coming.
  */
 export function isSessionEndedError(error: unknown): boolean {
   return error instanceof ApiError && error.code === SESSION_ENDED_CODE;

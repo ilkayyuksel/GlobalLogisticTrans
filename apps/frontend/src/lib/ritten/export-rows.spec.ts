@@ -173,7 +173,6 @@ describe("the pricing row", () => {
         line("TUNNEL", "6.20"),
         line("WAITING_TIME", "25.00"),
       ),
-      15,
     );
 
     expect(row).toMatchObject({
@@ -185,22 +184,23 @@ describe("the pricing row", () => {
     });
   });
 
-  /** Configuration labels the stored amount; it never produces one. */
-  it("shows the configured fuel percentage beside the stored surcharge", () => {
+  /**
+   * The COST, which is the only thing this sheet says about fuel. The rate
+   * behind it was a column of its own and is not one any more: a price list
+   * carries prices, and `23%` is not a figure anybody can add to a Tarief.
+   */
+  it("takes the fuel amount from the stored surcharge", () => {
     const row = toPricingRow(
       buildTrip(),
       snapshotOf(line("FUEL_SURCHARGE", "37.50")),
-      22,
     );
 
-    expect(row.fuelPercentage).toBe(22);
     expect(row.fuelAmount).toBe(37.5);
   });
 
-  it("shows no percentage when no surcharge was charged", () => {
-    const row = toPricingRow(buildTrip(), snapshotOf(line("BASE_PRICE", "250.00")), 15);
+  it("leaves the fuel empty when none was charged", () => {
+    const row = toPricingRow(buildTrip(), snapshotOf(line("BASE_PRICE", "250.00")));
 
-    expect(row.fuelPercentage).toBeNull();
     expect(row.fuelAmount).toBeNull();
   });
 
@@ -208,14 +208,13 @@ describe("the pricing row", () => {
     const row = toPricingRow(
       buildTrip(),
       snapshotOf(line("COMBINATION", "75.00")),
-      15,
     );
 
     expect(row.backload).toBe(75);
   });
 
   it("leaves Backload empty for a Trip that is not a Combination", () => {
-    const row = toPricingRow(buildTrip(), snapshotOf(line("BASE_PRICE", "250.00")), 15);
+    const row = toPricingRow(buildTrip(), snapshotOf(line("BASE_PRICE", "250.00")));
 
     expect(row.backload).toBeNull();
   });
@@ -228,7 +227,6 @@ describe("the pricing row", () => {
         line("CUSTOM_PROPERTY", "35.00", "prop-1"),
         line("CUSTOM_PROPERTY", "50.00", "prop-2"),
       ),
-      15,
     );
 
     expect(row.others).toBe(85);
@@ -246,7 +244,6 @@ describe("the pricing row", () => {
         line("TUNNEL", "6.20"),
         line("CUSTOM_PROPERTY", "35.00", "prop-1"),
       ),
-      15,
     );
 
     expect(row.others).toBe(35);
@@ -256,7 +253,7 @@ describe("the pricing row", () => {
 
   describe("a Trip that was never priced", () => {
     it("still exports its operational fields", () => {
-      const row = toPricingRow(buildTrip(), null, 15);
+      const row = toPricingRow(buildTrip(), null);
 
       expect(row).toMatchObject({
         planningDate: "2026-06-29",
@@ -268,11 +265,10 @@ describe("the pricing row", () => {
 
     /** Empty, never 0.00: not priced and priced at zero are different facts. */
     it("leaves every pricing cell empty", () => {
-      const row = toPricingRow(buildTrip(), null, 15);
+      const row = toPricingRow(buildTrip(), null);
 
       expect(row.basePrice).toBeNull();
       expect(row.fuelAmount).toBeNull();
-      expect(row.fuelPercentage).toBeNull();
       expect(row.backload).toBeNull();
       expect(row.toll).toBeNull();
       expect(row.tunnel).toBeNull();
@@ -291,7 +287,6 @@ describe("the pricing row", () => {
         destinationCity: null,
       }),
       null,
-      15,
     );
 
     for (const value of [

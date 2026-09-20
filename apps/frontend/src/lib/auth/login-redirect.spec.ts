@@ -38,6 +38,13 @@ describe("redirectToLogin on the server", () => {
 });
 
 /**
+ * ── IT STARTS THE FLOW, RATHER THAN VISITING THE BRANDED PAGE ───────────────
+ * `/auth/login` is the SDK's own route and the one the button points at. The
+ * branded `/auth` cannot be used here: a browser whose token cannot be renewed
+ * usually still holds a valid session cookie, and the middleware sends anyone
+ * standing on `/auth` with a session onward to the Dashboard — which fails and
+ * redirects again. That bounce is the flashing "unauthorized" an operator saw.
+ *
  * ── WHERE THE OPERATOR COMES BACK TO ────────────────────────────────────────
  * A session that ends while somebody is reading a Trip should not cost them the
  * Trip. The page they were on travels to the login page as `returnTo`, which is
@@ -51,7 +58,7 @@ describe("where a redirect sends the browser", () => {
     const { loginDestination } = await import("./login-redirect");
 
     expect(loginDestination("/trips", "")).toBe(
-      "/auth?returnTo=%2Ftrips",
+      "/auth/login?returnTo=%2Ftrips",
     );
   });
 
@@ -59,7 +66,7 @@ describe("where a redirect sends the browser", () => {
     const { loginDestination } = await import("./login-redirect");
 
     expect(loginDestination("/trips", "?view=week&date=2026-09-14")).toBe(
-      "/auth?returnTo=%2Ftrips%3Fview%3Dweek%26date%3D2026-09-14",
+      "/auth/login?returnTo=%2Ftrips%3Fview%3Dweek%26date%3D2026-09-14",
     );
   });
 

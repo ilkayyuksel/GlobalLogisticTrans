@@ -93,7 +93,7 @@ async function basisSheet(): Promise<ExcelJS.Worksheet> {
 async function pricingSheet(): Promise<ExcelJS.Worksheet> {
   return reopen(
     await buildPricingWorkbook(
-      CAPTURE.trips.map((trip) => toPricingRow(trip, snapshotOf(trip), 15)),
+      CAPTURE.trips.map((trip) => toPricingRow(trip, snapshotOf(trip))),
       "nl",
     ),
   );

@@ -25,6 +25,9 @@ describe("getAccessToken", () => {
     // The module caches the token in a variable, so each test needs a fresh
     // copy of it — otherwise one test's token would satisfy the next.
     jest.resetModules();
+    // A session ending writes the loop guard's timestamp, per tab. Each test
+    // here is a tab that has not been through a login.
+    window.sessionStorage.clear();
 
     const module_ = await import("./access-token");
     getAccessToken = module_.getAccessToken;
@@ -127,7 +130,8 @@ describe("getAccessToken", () => {
     await getAccessToken();
 
     expect(window.localStorage.length).toBe(0);
-    expect(window.sessionStorage.length).toBe(0);
+    expect(window.sessionStorage.getItem("traxo.signing-in-again")).toBeNull();
+    expect(JSON.stringify(window.sessionStorage)).not.toContain("token-1");
     expect(document.cookie).not.toContain("token-1");
   });
 });

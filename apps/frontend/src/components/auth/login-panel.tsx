@@ -4,6 +4,7 @@ import { useSearchParams } from "next/navigation";
 import { Suspense } from "react";
 
 import { LoginBackground } from "@/components/auth/login-background";
+import { loginHref } from "@/lib/auth/login-redirect";
 import { Brand } from "@/components/layout/brand";
 import { LanguageSelect } from "@/components/layout/language-select";
 import { useTranslation } from "@/lib/i18n/language-provider";
@@ -101,22 +102,4 @@ function Panel({
       </div>
     </LoginBackground>
   );
-}
-
-/**
- * Where the login link points.
- *
- * `returnTo` is the page the visitor was trying to reach, carried through the
- * round trip so a bookmarked deep link survives it. Only a path within this
- * application is ever passed on: a full URL here would let a crafted link send
- * someone to another site the moment they signed in, wearing TRAXO's login as
- * the last thing they saw.
- */
-export function loginHref(returnTo: string | null): string {
-  const isSafeInternalPath =
-    returnTo !== null && returnTo.startsWith("/") && !returnTo.startsWith("//");
-
-  return isSafeInternalPath
-    ? `/auth/login?returnTo=${encodeURIComponent(returnTo)}`
-    : "/auth/login";
 }

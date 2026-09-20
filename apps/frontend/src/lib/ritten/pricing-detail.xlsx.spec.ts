@@ -38,8 +38,8 @@ import { buildPricingWorkbook } from "./export-workbooks";
 const GROUP_A = "5a1e7c1e-0000-4000-8000-00000000c0b1";
 const GROUP_B = "7fd2a904-0000-4000-8000-00000000d0c3";
 
-/** What the office sees today; a historical row must be able to disagree. */
-const CONFIGURED_PERCENTAGE = 23;
+/** The Custom Property the Engine applies on its own, as Settings names it. */
+const TAR_ID = "b36469b0-37ec-40ba-81da-9bc272e05d60";
 
 interface Line {
   readonly code: string;
@@ -47,6 +47,8 @@ interface Line {
   /** The line's own rate — the percentage, on a fuel line. */
   readonly unitPrice?: string;
   readonly description?: string;
+  /** Which Custom Property a CUSTOM_PROPERTY line charges. */
+  readonly customPropertyId?: string;
 }
 
 function buildTrip(overrides: Partial<Trip> = {}): Trip {
@@ -94,7 +96,7 @@ function snapshotOf(...lines: Line[]): PricingSnapshot {
       tripPricingId: "snapshot-1",
       pricingComponentId: `component-${line.code}`,
       pricingComponentCode: line.code,
-      customPropertyId: null,
+      customPropertyId: line.customPropertyId ?? null,
       description: line.description ?? line.code,
       amount: line.amount,
       currency: "EUR",
@@ -130,7 +132,7 @@ async function writeSheet(
   trips: { trip: Trip; snapshot: PricingSnapshot | null }[],
 ): Promise<Sheet> {
   const rows = trips.map(({ trip, snapshot }) =>
-    toPricingRow(trip, snapshot, CONFIGURED_PERCENTAGE),
+    toPricingRow(trip, snapshot, { automaticPropertyId: TAR_ID }),
   );
   const buffer = await buildPricingWorkbook(rows, "nl");
 
@@ -182,20 +184,12 @@ describe("Brandstof is a price, not a percentage", () => {
     expect(sheet.cell("Brandstof").numFmt).toContain("€");
   });
 
-  /** The rate stays too: it is what explains the amount beside it. */
-  it("keeps the percentage in its own column", async () => {
-    const sheet = await writeSheet([
-      {
-        trip: buildTrip(),
-        snapshot: snapshotOf(
-          { code: "BASE_PRICE", amount: "100.00" },
-          { code: "FUEL_SURCHARGE", amount: "23.00", unitPrice: "23" },
-        ),
-      },
-    ]);
+  /** The rate is not a column of this sheet: a price list carries prices. */
+  it("has no percentage column at all", async () => {
+    const sheet = await writeSheet([{ trip: buildTrip(), snapshot: null }]);
 
-    expect(sheet.cell("Brandstof %").value).toBe(23);
-    expect(sheet.cell("Brandstof %").numFmt).toContain("%");
+    expect(sheet.headers).toContain("Brandstof");
+    expect(sheet.headers.some((header) => header.includes("%"))).toBe(false);
   });
 
   /**
@@ -282,15 +276,13 @@ describe("Brandstof is a price, not a percentage", () => {
     ]);
 
     expect(sheet.cell("Brandstof").value).toBe(19);
-    expect(sheet.cell("Brandstof %").value).toBe(19);
   });
 
-  /** Never priced is not priced at zero, in either column. */
-  it("leaves both fuel cells empty for an unpriced Trip", async () => {
+  /** Never priced is not priced at zero. */
+  it("leaves the fuel cell empty for an unpriced Trip", async () => {
     const sheet = await writeSheet([{ trip: buildTrip(), snapshot: null }]);
 
     expect(sheet.cell("Brandstof").value).toBeNull();
-    expect(sheet.cell("Brandstof %").value).toBeNull();
   });
 });
 
@@ -395,6 +387,122 @@ describe("the Cost Confirmation references in Remarks", () => {
 
     expect(sheet.cell("Remarks", 0).value).toBe("CC4139505");
     expect(sheet.cell("Remarks", 1).value).toBe("CC4156173");
+  });
+});
+
+describe("TAR and the waiting time in Remarks", () => {
+  /**
+   * TAR is charged BY THE ENGINE, not ticked by anybody, so a Trip that owes it
+   * carries no property naming it. The word comes from the charge in the stored
+   * snapshot — the same rule the BASIS sheet's Info column follows — and the
+   * TAR-nummer itself never leaves the office.
+   */
+  it("names a TAR the Engine charged", async () => {
+    const sheet = await writeSheet([
+      {
+        trip: buildTrip({ tarNummer: "TAR123" } as Partial<Trip>),
+        snapshot: snapshotOf(
+          { code: "BASE_PRICE", amount: "100.00" },
+          { code: "CUSTOM_PROPERTY", amount: "20.00", customPropertyId: TAR_ID },
+        ),
+      },
+    ]);
+
+    expect(sheet.cell("Remarks").value).toBe("TAR");
+    expect(String(sheet.cell("Remarks").value)).not.toContain("TAR123");
+  });
+
+  /** The same-day rule withheld the charge, so there is nothing to name. */
+  it("says nothing when the charge was withheld", async () => {
+    const sheet = await writeSheet([
+      {
+        trip: buildTrip({ tarNummer: "TAR123" } as Partial<Trip>),
+        snapshot: snapshotOf({ code: "BASE_PRICE", amount: "100.00" }),
+      },
+    ]);
+
+    expect(sheet.cell("Remarks").value).toBe("");
+  });
+
+  /** Assigned by hand AND charged: said once, not twice. */
+  it("does not repeat a TAR the Trip already carries as a property", async () => {
+    const sheet = await writeSheet([
+      {
+        trip: buildTrip({
+          customProperties: [{ id: TAR_ID, name: "TAR", isActive: true }],
+        } as Partial<Trip>),
+        snapshot: snapshotOf({
+          code: "CUSTOM_PROPERTY",
+          amount: "20.00",
+          customPropertyId: TAR_ID,
+        }),
+      },
+    ]);
+
+    expect(sheet.cell("Remarks").value).toBe("TAR");
+  });
+
+  /** The window an operator read off a clock, beside what it cost. */
+  it("prints the waiting window", async () => {
+    const sheet = await writeSheet([
+      {
+        trip: buildTrip({
+          waitingTimeStart: "07:00:00",
+          waitingTimeEnd: "10:00:00",
+          waitingTimeMinutes: 180,
+        } as Partial<Trip>),
+        snapshot: snapshotOf(
+          { code: "BASE_PRICE", amount: "100.00" },
+          { code: "WAITING_TIME", amount: "55.00" },
+        ),
+      },
+    ]);
+
+    expect(sheet.cell("Remarks").value).toBe("Wachttijd 07:00-10:00");
+    expect(sheet.cell("Wachttijd").value).toBe(55);
+  });
+
+  /** No window recorded: the duration it does have, rather than an invented one. */
+  it("falls back to the duration", async () => {
+    const sheet = await writeSheet([
+      {
+        trip: buildTrip({ waitingTimeMinutes: 90 } as Partial<Trip>),
+        snapshot: snapshotOf({ code: "WAITING_TIME", amount: "25.00" }),
+      },
+    ]);
+
+    expect(sheet.cell("Remarks").value).toBe("Wachttijd 1 u 30 min");
+  });
+
+  /** Everything at once, in the order the column assembles it. */
+  it("puts the properties, TAR, the waiting time and the confirmations in order", async () => {
+    const sheet = await writeSheet([
+      {
+        trip: buildTrip({
+          tarNummer: "TAR123",
+          waitingTimeStart: "07:00:00",
+          waitingTimeEnd: "10:00:00",
+          waitingTimeMinutes: 180,
+          customProperties: [
+            { id: "prop-1", name: "Aan/Afkoppelen", isActive: true },
+          ],
+        } as Partial<Trip>),
+        snapshot: snapshotOf(
+          { code: "BASE_PRICE", amount: "100.00" },
+          { code: "CUSTOM_PROPERTY", amount: "20.00", customPropertyId: TAR_ID },
+          { code: "WAITING_TIME", amount: "55.00" },
+          {
+            code: "COST_CONFIRMATION",
+            amount: "121.25",
+            description: confirmedBy("4139505"),
+          },
+        ),
+      },
+    ]);
+
+    expect(sheet.cell("Remarks").value).toBe(
+      "Aan/Afkoppelen | TAR | Wachttijd 07:00-10:00 | CC4139505",
+    );
   });
 });
 

@@ -92,6 +92,11 @@ describe("staying signed in", () => {
       typeof import("./login-redirect").redirectToLogin
     >;
     redirectToLogin.mockClear();
+    /*
+     * The loop guard remembers a trip through Auth0 in sessionStorage, per tab.
+     * Each test here is a tab that has not been through one.
+     */
+    window.sessionStorage.clear();
   });
 
   afterEach(() => {
@@ -279,7 +284,13 @@ describe("staying signed in", () => {
 
   /** A refresh token is a credential. It never reaches this side at all. */
   describe("what is never held here", () => {
-    it("stores nothing outside the module", async () => {
+    /*
+     * No CREDENTIAL, anywhere a script could read one. The only thing this
+     * application does keep outside a module is the loop guard's timestamp,
+     * which is written by `session-expiry.ts` when a session ends and says
+     * nothing about anybody.
+     */
+    it("stores no credential outside the module", async () => {
       const endpoint = renewingEndpoint();
       global.fetch = endpoint.fetch;
 

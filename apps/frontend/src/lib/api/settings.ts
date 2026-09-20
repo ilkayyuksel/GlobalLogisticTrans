@@ -106,40 +106,10 @@ export const FUEL_PERCENTAGE_SETTING = {
   key: "FUEL_PERCENTAGE",
 } as const;
 
-/** The category and key the Pricing Engine reads its fuel percentage from. */
+/** The category every pricing setting lives under. */
 const PRICING_CATEGORY = "PRICING";
-const FUEL_PERCENTAGE_KEY = "FUEL_PERCENTAGE";
 /** Which Custom Property the Engine applies automatically — TAR. */
 const AUTOMATIC_PROPERTY_KEY = "AUTOMATIC_CUSTOM_PROPERTY_ID";
-
-/**
- * The configured fuel percentage, for the export to LABEL a stored surcharge.
- *
- * ── THIS NUMBER IS NEVER USED TO CALCULATE ──────────────────────────────────
- * The surcharge AMOUNT always comes from the stored pricing line. This is the
- * percentage the Pricing Engine was configured with, shown beside it so a
- * reader can see which rate produced the amount. Hardcoding 15% or 22% would
- * make the export lie the moment configuration changed.
- * ────────────────────────────────────────────────────────────────────────────
- *
- * Null when the setting is absent or unreadable: an export must not invent a
- * rate, and an empty percentage cell beside a real amount is honest.
- */
-export function findFuelPercentage(settings: readonly Setting[]): number | null {
-  const setting = settings.find(
-    (candidate) =>
-      candidate.key === FUEL_PERCENTAGE_KEY &&
-      candidate.category === PRICING_CATEGORY,
-  );
-
-  if (!setting) {
-    return null;
-  }
-
-  const percentage = Number(setting.value);
-
-  return Number.isFinite(percentage) ? percentage : null;
-}
 
 /**
  * The Custom Property the Pricing Engine applies automatically — TAR.

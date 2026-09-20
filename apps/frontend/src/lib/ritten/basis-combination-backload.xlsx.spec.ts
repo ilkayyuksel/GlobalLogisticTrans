@@ -111,7 +111,7 @@ async function basisCosts(): Promise<Map<string, string>> {
 async function pricingBackload(): Promise<Map<string, unknown>> {
   const sheet = await reopen(
     await buildPricingWorkbook(
-      CAPTURE.trips.map((trip) => toPricingRow(trip, snapshotOf(trip), 15)),
+      CAPTURE.trips.map((trip) => toPricingRow(trip, snapshotOf(trip))),
       "nl",
     ),
   );
