@@ -40,3 +40,18 @@ export function toUtcTime(clockTime: string): Date {
 export function toClockTime(time: Date): string {
   return time.toISOString().slice("1970-01-01T".length, "1970-01-01T00:00:00".length);
 }
+
+/**
+ * A stored clock time as a person reads it: `08:00:00` becomes `08:00`.
+ *
+ * Seconds are noise on anything a person reads — planning works in minutes, and
+ * every time in this system is stored to the minute anyway. The same rule the
+ * Trip history already applies before comparing two times, and the same one the
+ * interface applies before showing one; it lives here so all three say it once.
+ *
+ * Null passes through: a Trip without a planned time has none to render, and an
+ * invented one would put a promise on a driver's phone that nobody made.
+ */
+export function toClockLabel(clockTime: string | null): string | null {
+  return clockTime === null ? null : clockTime.slice(0, "HH:MM".length);
+}

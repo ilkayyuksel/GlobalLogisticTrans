@@ -1,6 +1,7 @@
 import { Inject, Injectable } from "@nestjs/common";
 import { TripStatus } from "@prisma/client";
 
+import { toClockLabel } from "../common/time-of-day";
 import { AppLoggerService } from "../logger/app-logger.service";
 import { meaningfulTarNummer } from "../trips/tar-nummer";
 import { PdfDocumentService } from "../pdf-documents/pdf-document.service";
@@ -137,7 +138,12 @@ export class TripWhatsAppService {
     const result = await this.sender.sendDocument({
       phoneNumber,
       filename: document.originalFilename,
-      caption: captionFor(trip.bookingNumber, trip.tarNummer),
+      caption: captionFor(
+        trip.bookingNumber,
+        trip.tarNummer,
+        trip.startTime,
+        trip.endTime,
+      ),
       content: document.content,
     });
 
@@ -307,17 +313,67 @@ const EXPLANATIONS: Record<WhatsAppStatus, string> = {
  * that: the value also reaches here from rows written before that rule existed,
  * and a caption reading "TAR nummer:" with nothing after it would be worse than
  * no line at all.
+ *
+ * ── AND THE PLANNED TIMES, ON A LINE OF THEIR OWN ───────────────────────────
+ * `08:00 - 12:00`, under the TAR-nummer when there is one and directly under
+ * the booking when there is not: the two are independent, and a driver who gets
+ * no TAR still needs to know when they are expected.
+ *
+ * The times are the Trip's own planned ones, rendered rather than calculated —
+ * `toClockLabel` only drops the seconds a TIME column always carries. Nothing
+ * here converts a timezone: these are wall-clock values, stored without one,
+ * and the hour a planner typed is the hour the driver reads.
  */
+/** The caption is one message; its lines are separated, not sent apart. */
+const NEWLINE = "\n";
+
 export function captionFor(
   bookingNumber: string | null,
   tarNummer: string | null = null,
+  startTime: string | null = null,
+  endTime: string | null = null,
 ): string {
-  const order = bookingNumber
-    ? `TRANO – Transportorder ${bookingNumber}`
-    : "TRANO – Transportorder";
+  const lines = [
+    bookingNumber
+      ? `TRANO – Transportorder ${bookingNumber}`
+      : "TRANO – Transportorder",
+  ];
 
   const stated = meaningfulTarNummer(tarNummer);
 
-  return stated === null ? order : `${order}
-TAR nummer: ${stated}`;
+  if (stated !== null) {
+    lines.push(`TAR nummer: ${stated}`);
+  }
+
+  const planned = plannedTimes(startTime, endTime);
+
+  if (planned !== null) {
+    lines.push(planned);
+  }
+
+  return lines.join(NEWLINE);
+}
+
+/**
+ * The window a Trip is planned for, or the one end of it that is known.
+ *
+ * ── NEITHER END IS EVER INVENTED ────────────────────────────────────────────
+ * A Trip with both times reads `08:00 - 12:00`. A Trip with only one of them
+ * shows that one alone, exactly as the route label shows the single end it has
+ * rather than making up the other, and as the planning board refuses to draw a
+ * length no data supports. A Trip with neither gets no line at all — the same
+ * rule the TAR-nummer follows two lines up.
+ */
+function plannedTimes(
+  startTime: string | null,
+  endTime: string | null,
+): string | null {
+  const start = toClockLabel(startTime);
+  const end = toClockLabel(endTime);
+
+  if (start !== null && end !== null) {
+    return `${start} - ${end}`;
+  }
+
+  return start ?? end;
 }

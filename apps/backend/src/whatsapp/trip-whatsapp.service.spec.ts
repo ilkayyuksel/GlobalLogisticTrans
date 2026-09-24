@@ -157,6 +157,54 @@ describe("sending a Trip's transport order over WhatsApp", () => {
       );
     });
 
+    /**
+     * ── THE TIMES COME OFF THE TRIP ────────────────────────────────────────
+     * Through the whole send, not just the formatter: the service reads the
+     * Trip's own `startTime` and `endTime` and nothing else works them out. A
+     * driver reading the caption is reading the planning.
+     */
+    it("captions the document with the Trip's own planned times", async () => {
+      tripService.findById.mockResolvedValue(
+        buildTrip({ startTime: "08:00:00", endTime: "12:00:00" }),
+      );
+
+      await service.sendTransportDocument(TRIP_ID);
+
+      expect(sender.commands[0].caption).toBe(
+        "TRANO – Transportorder ANRDUB2602247\n08:00 - 12:00",
+      );
+    });
+
+    /** Still ONE send: the times ride on the caption the PDF already carries. */
+    it("sends the times on the same single message", async () => {
+      tripService.findById.mockResolvedValue(
+        buildTrip({ startTime: "08:00:00", endTime: "12:00:00" }),
+      );
+
+      await service.sendTransportDocument(TRIP_ID);
+
+      expect(sender.commands).toHaveLength(1);
+      expect(sender.commands[0].content).toBe(PDF_BYTES);
+    });
+
+    /** A CLOSED Trip is sendable, and carries its times exactly as an open one. */
+    it("captions a CLOSED Trip the same way", async () => {
+      tripService.findById.mockResolvedValue(
+        buildTrip({
+          status: TripStatus.CLOSED,
+          tarNummer: "123456",
+          startTime: "08:00:00",
+          endTime: "12:00:00",
+        }),
+      );
+
+      await service.sendTransportDocument(TRIP_ID);
+
+      expect(sender.commands[0].caption).toBe(
+        "TRANO – Transportorder ANRDUB2602247\nTAR nummer: 123456\n08:00 - 12:00",
+      );
+    });
+
     /** One operator action, one message. Nothing here retries. */
     it("calls the sender exactly once", async () => {
       await service.sendTransportDocument(TRIP_ID);
@@ -610,6 +658,82 @@ describe("the caption a driver receives", () => {
     it("is unchanged when the argument is left off", () => {
       expect(captionFor("ANRDUB2602247")).toBe(
         captionFor("ANRDUB2602247", null),
+      );
+    });
+  });
+
+  /**
+   * ── WHEN THE DRIVER IS EXPECTED ───────────────────────────────────────────
+   * The planned window, under the TAR-nummer when there is one. The times are
+   * the Trip's own, rendered to the minute: a TIME column carries no timezone,
+   * so the hour a planner typed is the hour that arrives on the phone.
+   */
+  describe("with planned times", () => {
+    it("adds them under the TAR-nummer", () => {
+      expect(
+        captionFor("ANRDUB2602247", "123456", "08:00:00", "12:00:00"),
+      ).toBe(
+        "TRANO – Transportorder ANRDUB2602247\nTAR nummer: 123456\n08:00 - 12:00",
+      );
+    });
+
+    /** No TAR-nummer is no reason to leave a driver without their times. */
+    it("adds them under the booking when there is no TAR-nummer", () => {
+      expect(captionFor("ANRDUB2602247", null, "08:00:00", "12:00:00")).toBe(
+        "TRANO – Transportorder ANRDUB2602247\n08:00 - 12:00",
+      );
+    });
+
+    it.each([null, "", "   "])(
+      "keeps the times when the TAR-nummer is %p",
+      (tarNummer) => {
+        expect(
+          captionFor("ANRDUB2602247", tarNummer, "08:00:00", "12:00:00"),
+        ).toBe("TRANO – Transportorder ANRDUB2602247\n08:00 - 12:00");
+      },
+    );
+
+    /** Seconds are noise on a phone; the stored value carries them regardless. */
+    it("renders the times to the minute", () => {
+      expect(captionFor(null, null, "07:30:00", "16:45:00")).toBe(
+        "TRANO – Transportorder\n07:30 - 16:45",
+      );
+    });
+
+    /** Already to the minute — a value that reached here without seconds. */
+    it("takes a time that carries no seconds as it is", () => {
+      expect(captionFor(null, null, "07:30", "16:45")).toBe(
+        "TRANO – Transportorder\n07:30 - 16:45",
+      );
+    });
+
+    /**
+     * Neither end is invented: a Trip with one time shows that one, exactly as
+     * the route label shows the single end it has.
+     */
+    it("shows a lone start time on its own", () => {
+      expect(captionFor("ANRDUB2602247", null, "08:00:00", null)).toBe(
+        "TRANO – Transportorder ANRDUB2602247\n08:00",
+      );
+    });
+
+    it("shows a lone end time on its own", () => {
+      expect(captionFor("ANRDUB2602247", null, null, "12:00:00")).toBe(
+        "TRANO – Transportorder ANRDUB2602247\n12:00",
+      );
+    });
+
+    /** A Trip with no planned times gets no line, as the TAR-nummer does not. */
+    it("adds no line when the Trip has neither time", () => {
+      expect(captionFor("ANRDUB2602247", "123456", null, null)).toBe(
+        "TRANO – Transportorder ANRDUB2602247\nTAR nummer: 123456",
+      );
+    });
+
+    /** Leaving the arguments off is the same as having no times. */
+    it("is unchanged when the arguments are left off", () => {
+      expect(captionFor("ANRDUB2602247", "123456")).toBe(
+        captionFor("ANRDUB2602247", "123456", null, null),
       );
     });
   });

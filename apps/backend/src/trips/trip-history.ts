@@ -1,7 +1,7 @@
 import { Trip } from "@prisma/client";
 
 import { toIsoDate } from "../common/dates";
-import { toClockTime } from "../common/time-of-day";
+import { toClockLabel, toClockTime } from "../common/time-of-day";
 import { ImportedTripData } from "./import-trips.command";
 
 /**
@@ -170,8 +170,8 @@ function toComparableTrip(trip: Trip): Comparable {
     originalPlanningDate: trip.originalPlanningDate
       ? toIsoDate(trip.originalPlanningDate)
       : null,
-    startTime: toMinutes(trip.startTime ? toClockTime(trip.startTime) : null),
-    endTime: toMinutes(trip.endTime ? toClockTime(trip.endTime) : null),
+    startTime: toClockLabel(trip.startTime ? toClockTime(trip.startTime) : null),
+    endTime: toClockLabel(trip.endTime ? toClockTime(trip.endTime) : null),
     direction: trip.direction,
   };
 }
@@ -185,22 +185,13 @@ function toComparableDocument(document: ImportedTripData): Comparable {
     destinationCountry: document.destinationCountry,
     // The document's own date, which is what original_planning_date holds.
     originalPlanningDate: document.planningDate,
-    startTime: toMinutes(document.startTime),
-    endTime: toMinutes(document.endTime),
+    // To the minute: a stored TIME comes back as `10:00:00` and a document
+    // states `10:00`. They are the same moment, and comparing them as text
+    // would report a change on every update of two fields nobody touched.
+    startTime: toClockLabel(document.startTime),
+    endTime: toClockLabel(document.endTime),
     direction: document.direction,
   };
-}
-
-/**
- * A clock time to the minute.
- *
- * A stored TIME comes back as `10:00:00` and a document states `10:00`. They
- * are the same moment, and comparing them as text would report a change on
- * every single update — of two fields that nobody touched. Transport orders are
- * planned to the minute, so seconds carry no meaning to compare.
- */
-function toMinutes(clockTime: string | null): string | null {
-  return clockTime === null ? null : clockTime.slice(0, "HH:MM".length);
 }
 
 /** A readable one-line summary, for a person reading the audit trail. */
