@@ -227,6 +227,7 @@ describe("SettingsService", () => {
           "FUEL_PERCENTAGE",
           "COMBINATION_SURCHARGE",
           "DISTANCE_RATE_PER_KM",
+          "TOLL_RATE_PER_KM",
           "WAITING_TIME_BLOCK_PRICE",
         ];
 

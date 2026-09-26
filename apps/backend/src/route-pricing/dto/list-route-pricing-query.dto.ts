@@ -1,25 +1,19 @@
 import { ApiPropertyOptional } from "@nestjs/swagger";
 import { Transform } from "class-transformer";
-import { IsBoolean, IsOptional, IsString, MaxLength } from "class-validator";
+import { IsOptional, IsString, MaxLength } from "class-validator";
 
 import { PaginationQueryDto } from "../../common/dto/pagination-query.dto";
-import {
-  toOptionalBoolean,
-  trimToUndefined,
-} from "../../common/dto/transforms";
+import { trimToUndefined } from "../../common/dto/transforms";
 
 export const ROUTE_SEARCH_MAX_LENGTH = 200;
 
+/**
+ * There is no state to filter on.
+ *
+ * A route price exists or it does not: the active flag is gone, and with it the
+ * filter that separated the two kinds of row.
+ */
 export class ListRoutePricingQueryDto extends PaginationQueryDto {
-  @ApiPropertyOptional({
-    description:
-      "Filter by active state. Omit to return both active and inactive records.",
-  })
-  @Transform(toOptionalBoolean)
-  @IsOptional()
-  @IsBoolean()
-  isActive?: boolean;
-
   @ApiPropertyOptional({
     description:
       "Case-insensitive partial match across route name, departure and destination.",

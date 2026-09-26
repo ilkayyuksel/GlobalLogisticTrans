@@ -90,14 +90,35 @@ export class RouteCostService {
     return routeCosts.map(toRouteCostResponse);
   }
 
+  /**
+   * Every active cost OWNED by one configured route.
+   *
+   * The counterpart of `findActiveForRoute`, for a Combination leg: its costs
+   * belong to the leg rather than to the road, because the road it runs may also
+   * be an ordinary route with a tunnel of its own.
+   */
+  async findActiveForRoutePricing(
+    routePricingId: string,
+  ): Promise<RouteCostResponseDto[]> {
+    const routeCosts =
+      await this.repository.findActiveByRoutePricing(routePricingId);
+
+    return routeCosts.map(toRouteCostResponse);
+  }
+
   async create(dto: CreateRouteCostDto): Promise<RouteCostResponseDto> {
     const component = await this.requireRoutePricedComponent(
       dto.pricingComponentId,
     );
 
-    // New records are always active, so any existing active record for the same
-    // route and component is a conflict.
-    await this.assertRouteAvailable(dto.departure, dto.destination, component);
+    // New records are always active, so any existing active record with the same
+    // owner and component is a conflict.
+    await this.assertRouteAvailable(
+      dto.departure,
+      dto.destination,
+      component,
+      dto.routePricingId ?? null,
+    );
 
     const created = await this.runGuardingUniqueness(
       dto.departure,
@@ -108,6 +129,8 @@ export class RouteCostService {
           departure: dto.departure,
           destination: dto.destination,
           pricingComponentId: dto.pricingComponentId,
+          // Null keeps the original meaning: a cost of the road, matched by it.
+          routePricingId: dto.routePricingId ?? null,
           amount: dto.amount,
           notes: dto.notes ?? null,
         }),
@@ -150,7 +173,13 @@ export class RouteCostService {
     // Only while the record is active — an inactive row cannot collide with the
     // active-only index.
     if (identityChanged && existing.isActive) {
-      await this.assertRouteAvailable(departure, destination, component, id);
+      await this.assertRouteAvailable(
+        departure,
+        destination,
+        component,
+        existing.routePricingId,
+        id,
+      );
     }
 
     const updated = await this.runGuardingUniqueness(
@@ -183,6 +212,7 @@ export class RouteCostService {
       routeCost.departure,
       routeCost.destination,
       routeCost.pricingComponent,
+      routeCost.routePricingId,
       id,
     );
 
@@ -259,18 +289,34 @@ export class RouteCostService {
     return component;
   }
 
+  /**
+   * Refuses a second active cost for the same component on the same OWNER.
+   *
+   * The owner is the configured route when the cost belongs to a leg, and the
+   * road otherwise — which is why the lookup branches rather than filtering. A
+   * leg's tunnel and the ordinary route's tunnel on the same road are two
+   * legitimate rows, and neither is a duplicate of the other.
+   */
   private async assertRouteAvailable(
     departure: string,
     destination: string,
     component: PricingComponentSummary,
+    routePricingId: string | null,
     excludeRouteCostId?: string,
   ): Promise<void> {
-    const holder = await this.repository.findActiveByRouteAndComponent(
-      departure,
-      destination,
-      component.id,
-      excludeRouteCostId,
-    );
+    const holder =
+      routePricingId === null
+        ? await this.repository.findActiveByRouteAndComponent(
+            departure,
+            destination,
+            component.id,
+            excludeRouteCostId,
+          )
+        : await this.repository.findActiveByRoutePricingAndComponent(
+            routePricingId,
+            component.id,
+            excludeRouteCostId,
+          );
 
     if (holder) {
       this.logger.warn("Rejected duplicate active route cost", {

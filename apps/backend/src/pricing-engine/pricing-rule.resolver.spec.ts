@@ -27,6 +27,7 @@ const SEEDED_VALUES: Record<string, string> = {
   [PricingSettingKey.WAITING_TIME_BLOCK_MINUTES]: "30",
   [PricingSettingKey.WAITING_TIME_BLOCK_PRICE]: "25.00",
   [PricingSettingKey.DISTANCE_RATE_PER_KM]: "1.85",
+  [PricingSettingKey.TOLL_RATE_PER_KM]: "0.35",
   [PricingSettingKey.RULE_VERSION]: "2026.1",
 };
 
@@ -104,6 +105,7 @@ describe("PricingRuleResolver", () => {
         waitingTimeBlockMinutes: 30,
         waitingTimeBlockPrice: "25.00",
         ruleVersion: "2026.1",
+        tollRatePerKm: "0.35",
       });
     });
 
@@ -124,6 +126,12 @@ describe("PricingRuleResolver", () => {
         `${PRICING_SETTINGS_CATEGORY}.${PricingSettingKey.WAITING_TIME_BLOCK_MINUTES}`,
         `${PRICING_SETTINGS_CATEGORY}.${PricingSettingKey.WAITING_TIME_BLOCK_PRICE}`,
         `${PRICING_SETTINGS_CATEGORY}.${PricingSettingKey.RULE_VERSION}`,
+        /*
+         * Read like the rest, and read ONCE. It is tolerated when absent — it
+         * arrived after the Trips did, and a database whose row has not been
+         * created yet must still be able to price.
+         */
+        `${PRICING_SETTINGS_CATEGORY}.${PricingSettingKey.TOLL_RATE_PER_KM}`,
       ]);
     });
 
@@ -387,8 +395,8 @@ describe("PricingRuleResolver", () => {
       await resolver.resolve();
       await resolver.resolve();
 
-      // Seven keys, read again on the second call.
-      expect(settingsService.findOne).toHaveBeenCalledTimes(18);
+      // Ten keys, read again on the second call — and each read once per call.
+      expect(settingsService.findOne).toHaveBeenCalledTimes(20);
     });
   });
 

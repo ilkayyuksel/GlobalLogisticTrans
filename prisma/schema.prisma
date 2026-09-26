@@ -16,9 +16,16 @@
 //     custom_property     UNIQUE (name)                     WHERE is_active
 //     custom_property     UNIQUE (pricing_component_id)     WHERE is_active
 //     pricing_component   UNIQUE (code)                     WHERE is_active
-//     route_pricing       UNIQUE (departure, destination)   WHERE is_active
+//     route_pricing       UNIQUE (departure, destination)
+//                                             WHERE combination_group_id IS NULL
+//     route_pricing       UNIQUE (departure, destination)
+//                                         WHERE combination_group_id IS NOT NULL
+//     route_pricing       UNIQUE (combination_group_id, combination_leg_position)
+//                                         WHERE combination_group_id IS NOT NULL
 //     route_cost          UNIQUE (departure, destination, pricing_component_id)
-//                                                           WHERE is_active
+//                                 WHERE is_active AND route_pricing_id IS NULL
+//     route_cost          UNIQUE (route_pricing_id, pricing_component_id)
+//                             WHERE is_active AND route_pricing_id IS NOT NULL
 //     vehicle_assignment  UNIQUE (vehicle_id)               WHERE valid_to IS NULL
 //
 //   CHECK CONSTRAINTS (Prisma has no CHECK syntax)
@@ -31,6 +38,9 @@
 //     maintenance         exactly one of vehicle_id / trailer_id is set
 //     maintenance         cost >= 0
 //     route_pricing       base_price >= 0
+//     route_pricing       combination_leg_position IS NULL exactly when
+//                         combination_group_id is
+//     route_pricing       combination_leg_position IN (1, 2)
 //     route_cost          amount >= 0
 //     custom_property     default_price IS NULL when pricing_component_id is set
 //     trip_pricing        total_price >= 0
@@ -968,15 +978,100 @@ model RoutePricing {
 
   basePrice Decimal @map("base_price") @db.Decimal(12, 2)
 
+  /// The length of the route, in kilometres.
+  ///
+  /// The Toll is derived from it — kilometres times the configured toll rate —
+  /// so a route carries its DISTANCE rather than a toll amount of its own.
+  /// Decimal(8,2) to match `trip.distance_km`, which is the same quantity
+  /// measured on a different thing.
+  ///
+  /// Nullable because it cannot be derived for routes configured before this
+  /// existed: a stored toll amount does not say how long a road is. A route
+  /// without it is charged no toll until somebody states the distance, which is
+  /// the same silence an unconfigured route has always produced.
+  kilometres Decimal? @db.Decimal(8, 2)
+
   notes String? @db.Text
 
-  isActive Boolean @default(true) @map("is_active")
+  /// The Combination route configuration this leg belongs to, or NULL.
+  ///
+  /// ── THE DISCRIMINATOR ─────────────────────────────────────────────────────
+  /// NULL is an ordinary route, standing on its own. Set means this row is one
+  /// LEG of a Combination configuration, which always has exactly two — an
+  /// outbound and a return, each with its own price, distance and tunnel.
+  ///
+  /// It is what keeps the two contexts apart: a normal route and a Combination
+  /// leg may describe the same departure and destination without either
+  /// overwriting the other, because the partial unique indexes are scoped by
+  /// this column. See `database_schema.md`.
+  ///
+  /// `onDelete: Cascade` is the group's own rule: removing a Combination
+  /// configuration removes both its legs, and the database will not leave one
+  /// behind even if something else deletes the group row.
+  combinationGroupId String?                @map("combination_group_id") @db.Uuid
+  combinationGroup   CombinationRouteGroup? @relation(fields: [combinationGroupId], references: [id], onDelete: Cascade)
+
+  /// Which leg of the Combination this row is: 1 the outbound, 2 the return.
+  ///
+  /// NULL exactly when `combinationGroupId` is, which a CHECK enforces. The
+  /// position is not decoration: `created_at` is the transaction's timestamp, so
+  /// two legs written together carry the SAME one and could not be told apart by
+  /// it. Leg 1 and Leg 2 are what an operator configured and must come back in
+  /// that order every time.
+  ///
+  /// It also makes half of "exactly two legs" structural: a UNIQUE
+  /// (combination_group_id, combination_leg_position) together with a CHECK
+  /// restricting the position to 1 or 2 means the database itself refuses a
+  /// third leg. Only the lower bound still needs the service's transaction.
+  combinationLegPosition Int? @map("combination_leg_position") @db.SmallInt
+
+  /// The route costs that belong to THIS configured route rather than to the road.
+  ///
+  /// Empty for an ordinary route, whose costs are matched by departure and
+  /// destination as they always have been. See `RouteCost.routePricingId`.
+  routeCosts RouteCost[]
 
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  @@index([isActive])
+  /// Added by hand: UNIQUE (combination_group_id, combination_leg_position)
+  /// WHERE combination_group_id IS NOT NULL, plus the CHECKs described above.
+  @@index([combinationGroupId])
   @@map("route_pricing")
+}
+
+/// A Combination route CONFIGURATION: two legs priced together.
+///
+/// ── WHAT IT IS, AND WHAT IT IS NOT ──────────────────────────────────────────
+/// This is configuration in Settings → Prijzen, not a TripGroup. A TripGroup is
+/// two real Trips an operator put together, and it decides the €50 Backload;
+/// this decides what the outbound and the return of a Combination COST. The two
+/// are independent and neither reads the other.
+///
+/// ── WHY A PARENT ROW ────────────────────────────────────────────────────────
+/// The group identity has to exist somewhere that cannot drift: two legs
+/// pointing at each other, or a shared text key, would both allow a
+/// half-configured Combination to be stored. A parent row makes the relation
+/// structural — and makes "delete the Combination" one delete.
+///
+/// It carries no price of its own. Every amount belongs to a leg, because the
+/// outbound and the return legitimately cost different things.
+///
+/// EXACTLY TWO legs is enforced by the service, inside one transaction, and by
+/// the DTO that refuses any other number. PostgreSQL cannot express "this parent
+/// has two children" without a trigger, and a trigger would be a business rule
+/// living where nothing else in this schema lives.
+model CombinationRouteGroup {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+
+  notes String? @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  legs RoutePricing[]
+
+  @@map("combination_route_group")
 }
 
 /// Catalog of the pricing component kinds the engine may produce.
@@ -1031,6 +1126,24 @@ model RouteCost {
 
   pricingComponentId String @map("pricing_component_id") @db.Uuid
 
+  /// The configured route this cost belongs to, or NULL when it belongs to the ROAD.
+  ///
+  /// ── WHY A COST SOMETIMES NEEDS AN OWNER ───────────────────────────────────
+  /// A route cost has always been matched by departure and destination, which
+  /// is enough while one road has one configuration. A Combination broke that
+  /// assumption: its outbound leg may run the very road an ordinary Trip also
+  /// runs, and the two are priced differently — so "the tunnel of Antwerp to
+  /// Kallo" stopped being a single answer.
+  ///
+  /// A leg therefore OWNS its costs: the row names the leg it was configured
+  /// for, and editing the leg's tunnel can no longer reach the ordinary route's
+  /// tunnel. NULL keeps the original meaning — a cost of the road itself — so
+  /// every existing row and every ordinary route behaves exactly as before.
+  ///
+  /// `onDelete: Cascade` because such a cost has no meaning without its leg.
+  routePricingId String?       @map("route_pricing_id") @db.Uuid
+  routePricing   RoutePricing? @relation(fields: [routePricingId], references: [id], onDelete: Cascade)
+
   amount Decimal @db.Decimal(12, 2)
   notes  String? @db.Text
 
@@ -1041,10 +1154,13 @@ model RouteCost {
 
   pricingComponent PricingComponent @relation(fields: [pricingComponentId], references: [id], onDelete: Restrict)
 
-  /// A partial UNIQUE (departure, destination, pricing_component_id) WHERE
-  /// is_active and a CHECK (amount >= 0) are added by hand.
+  /// Two partial UNIQUE indexes and a CHECK (amount >= 0) are added by hand: one
+  /// on (departure, destination, pricing_component_id) for the costs of a ROAD,
+  /// one on (route_pricing_id, pricing_component_id) for those owned by a leg,
+  /// each WHERE is_active.
   @@index([departure, destination])
   @@index([pricingComponentId])
+  @@index([routePricingId])
   @@map("route_cost")
 }
 

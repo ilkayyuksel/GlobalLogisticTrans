@@ -5,6 +5,7 @@ import {
   HttpCode,
   HttpStatus,
   Param,
+  Delete,
   Patch,
   Post,
   Query,
@@ -13,6 +14,7 @@ import {
   ApiBadRequestResponse,
   ApiConflictResponse,
   ApiCreatedResponse,
+  ApiNoContentResponse,
   ApiNotFoundResponse,
   ApiOkResponse,
   ApiOperation,
@@ -112,39 +114,27 @@ export class RoutePricingController {
   }
 
   /**
-   * Sub-resource rather than a verb in the path, matching the pattern used by
-   * Driver and Vehicle.
+   * Removes a route's configuration.
+   *
+   * ── DELETE RATHER THAN DEACTIVATION ───────────────────────────────────────
+   * This used to be a pair of activation endpoints. A route price now exists or
+   * it does not: the flag produced a second state the configuration screen had
+   * no use for, and a route that looked configured while charging nothing.
+   *
+   * Pricing already calculated is unaffected. A TripPricing snapshot holds the
+   * amounts it was priced with and reads no configuration again, so removing
+   * the row explains yesterday's price exactly as well as keeping it did.
    */
-  @Patch(":id/activation")
-  @HttpCode(HttpStatus.OK)
+  @Delete(":id")
+  @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({
-    summary: "Activate a route pricing record",
+    summary: "Delete a route pricing record",
     description:
-      "Makes the record eligible for pricing. Idempotent. Fails if another active record now covers the same route.",
+      "Removes the configuration. Trips already priced keep the amounts they were priced with; Trips priced afterwards find no configuration for this route.",
   })
-  @ApiOkResponse({ type: RoutePricingResponseDto })
+  @ApiNoContentResponse({ description: "The configuration was removed." })
   @ApiNotFoundResponse({ description: "No route pricing with that id." })
-  @ApiConflictResponse({
-    description: "Another active record already covers this route.",
-  })
-  activate(
-    @Param() params: RoutePricingIdParamDto,
-  ): Promise<RoutePricingResponseDto> {
-    return this.routePricingService.activate(params.id);
-  }
-
-  @Patch(":id/deactivation")
-  @HttpCode(HttpStatus.OK)
-  @ApiOperation({
-    summary: "Deactivate a route pricing record",
-    description:
-      "Soft delete. The record is retained so pricing already derived from it stays explainable; it simply stops being eligible for new calculations. Idempotent.",
-  })
-  @ApiOkResponse({ type: RoutePricingResponseDto })
-  @ApiNotFoundResponse({ description: "No route pricing with that id." })
-  deactivate(
-    @Param() params: RoutePricingIdParamDto,
-  ): Promise<RoutePricingResponseDto> {
-    return this.routePricingService.deactivate(params.id);
+  remove(@Param() params: RoutePricingIdParamDto): Promise<void> {
+    return this.routePricingService.remove(params.id);
   }
 }

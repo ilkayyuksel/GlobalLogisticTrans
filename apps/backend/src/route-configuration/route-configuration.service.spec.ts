@@ -3,6 +3,7 @@ import { RouteCostRepository } from "../route-costs/route-cost.repository";
 import { RouteCostService } from "../route-costs/route-cost.service";
 import { RoutePricingService } from "../route-pricing/route-pricing.service";
 import { RouteConfigurationService } from "./route-configuration.service";
+import { RouteTunnelCostService } from "./route-tunnel-cost.service";
 import { UnknownPricingComponentException } from "./exceptions/route-configuration.exceptions";
 
 const ROUTE_ID = "3f2504e0-4f89-41d3-9a0c-0305e82c3301";
@@ -32,8 +33,8 @@ function routePricing(overrides: Record<string, unknown> = {}) {
     departure: "Quay 869",
     destination: "Dourges",
     basePrice: "520.00",
+    kilometres: "25.00",
     notes: null,
-    isActive: true,
     createdAt: new Date("2026-01-01T00:00:00Z"),
     updatedAt: new Date("2026-01-01T00:00:00Z"),
     ...overrides,
@@ -47,9 +48,14 @@ function routeCost(code: string, amount: string, overrides = {}) {
     destination: "Dourges",
     pricingComponentId:
       code === "TOLL" ? TOLL_COMPONENT_ID : TUNNEL_COMPONENT_ID,
-    pricingComponent: { id: TOLL_COMPONENT_ID, code, name: code },
+    pricingComponent: {
+      id: code === "TOLL" ? TOLL_COMPONENT_ID : TUNNEL_COMPONENT_ID,
+      code,
+      name: code,
+    },
     amount,
     notes: null,
+    // A route COST still has an active flag; only the route price lost one.
     isActive: true,
     createdAt: new Date("2026-01-01T00:00:00Z"),
     updatedAt: new Date("2026-01-01T00:00:00Z"),
@@ -63,8 +69,7 @@ describe("RouteConfigurationService", () => {
     findById: jest.Mock;
     create: jest.Mock;
     update: jest.Mock;
-    activate: jest.Mock;
-    deactivate: jest.Mock;
+    remove: jest.Mock;
   };
   let routeCostService: {
     findAll: jest.Mock;
@@ -85,18 +90,15 @@ describe("RouteConfigurationService", () => {
       findById: jest.fn().mockResolvedValue(routePricing()),
       create: jest.fn().mockResolvedValue(routePricing()),
       update: jest.fn().mockResolvedValue(routePricing()),
-      activate: jest.fn().mockResolvedValue(routePricing()),
-      deactivate: jest
-        .fn()
-        .mockResolvedValue(routePricing({ isActive: false })),
+      remove: jest.fn().mockResolvedValue(undefined),
     };
     routeCostService = {
       findAll: jest.fn().mockResolvedValue({ items: [], meta: {} }),
       findActiveForRoute: jest.fn().mockResolvedValue([]),
-      create: jest.fn().mockResolvedValue(routeCost("TOLL", "18.00")),
-      update: jest.fn().mockResolvedValue(routeCost("TOLL", "18.00")),
-      activate: jest.fn().mockResolvedValue(routeCost("TOLL", "18.00")),
-      deactivate: jest.fn().mockResolvedValue(routeCost("TOLL", "18.00")),
+      create: jest.fn().mockResolvedValue(routeCost("TUNNEL", "12.50")),
+      update: jest.fn().mockResolvedValue(routeCost("TUNNEL", "12.50")),
+      activate: jest.fn().mockResolvedValue(routeCost("TUNNEL", "12.50")),
+      deactivate: jest.fn().mockResolvedValue(routeCost("TUNNEL", "12.50")),
     };
     repository = {
       findPricingComponentByCode: jest.fn((code: string) =>
@@ -108,15 +110,25 @@ describe("RouteConfigurationService", () => {
       ),
     };
 
+    const logger = {
+      setContext: jest.fn(),
+      log: jest.fn(),
+      warn: jest.fn(),
+    } as unknown as AppLoggerService;
+
     service = new RouteConfigurationService(
       routePricingService as unknown as RoutePricingService,
-      routeCostService as unknown as RouteCostService,
-      repository as unknown as RouteCostRepository,
-      {
-        setContext: jest.fn(),
-        log: jest.fn(),
-        warn: jest.fn(),
-      } as unknown as AppLoggerService,
+      /*
+       * The real tunnel-cost service over the same mocks. It is the collaborator
+       * that reads and writes the route's tunnel, and stubbing it would leave
+       * these tests asserting nothing about the rows that actually get written.
+       */
+      new RouteTunnelCostService(
+        routeCostService as unknown as RouteCostService,
+        repository as unknown as RouteCostRepository,
+        logger,
+      ),
+      logger,
     );
   });
 
@@ -124,14 +136,14 @@ describe("RouteConfigurationService", () => {
     departure: "Quay 869",
     destination: "Dourges",
     tarief: 520,
-    toll: 18,
+    // A DISTANCE now, not a toll amount: the Engine multiplies it by the rate.
+    kilometres: 25,
     tunnel: 0,
   };
 
   describe("reading a route", () => {
-    it("presents the price and both costs as one record", async () => {
+    it("presents the price, the distance and the tunnel as one record", async () => {
       routeCostService.findActiveForRoute.mockResolvedValue([
-        routeCost("TOLL", "18.00"),
         routeCost("TUNNEL", "12.50"),
       ]);
 
@@ -141,13 +153,29 @@ describe("RouteConfigurationService", () => {
           departure: "Quay 869",
           destination: "Dourges",
           tarief: "520.00",
-          toll: "18.00",
+          kilometres: "25.00",
           tunnel: "12.50",
-          hasToll: true,
           hasTunnel: true,
-          isActive: true,
+          // Self-describing: an ordinary route says so rather than leaving a
+          // caller to infer it from the endpoint it came back on.
+          type: "NORMAL",
+          combinationGroupId: null,
         },
       ]);
+    });
+
+    /**
+     * A route configured before distances existed. No toll is charged for it
+     * until somebody states one — an invented distance would charge a Trip for
+     * a road nobody measured.
+     */
+    it("reads a route with no stated distance as null", async () => {
+      routePricingService.findAll.mockResolvedValue({
+        items: [routePricing({ kilometres: null })],
+        meta: {},
+      });
+
+      expect((await service.findAll())[0].kilometres).toBeNull();
     });
 
     /**
@@ -158,8 +186,6 @@ describe("RouteConfigurationService", () => {
     it("reads an absent cost as zero, and says it is absent", async () => {
       const [configuration] = await service.findAll();
 
-      expect(configuration.toll).toBe("0.00");
-      expect(configuration.hasToll).toBe(false);
       expect(configuration.tunnel).toBe("0.00");
       expect(configuration.hasTunnel).toBe(false);
     });
@@ -175,27 +201,21 @@ describe("RouteConfigurationService", () => {
       expect(configuration.hasTunnel).toBe(true);
     });
 
-    it("shows an inactive configuration too", async () => {
-      routePricingService.findAll.mockResolvedValue({
-        items: [routePricing({ isActive: false })],
-        meta: {},
-      });
-
-      expect((await service.findAll())[0].isActive).toBe(false);
-    });
-
     /** Configuration is read whole; a page-2 route would simply be missing. */
     it("asks for every route rather than a first page", async () => {
       await service.findAll();
 
       expect(routePricingService.findAll).toHaveBeenCalledWith(
         expect.objectContaining({ page: 1, pageSize: 200 }),
+        // Ordinary routes only. A Combination leg is half a pair and is never
+        // listed as a route an operator could edit on its own.
+        "NORMAL",
       );
     });
   });
 
   describe("configuring a route", () => {
-    it("writes the price and both costs", async () => {
+    it("writes the price with its distance, and the tunnel cost", async () => {
       await service.create(SAVE);
 
       expect(routePricingService.create).toHaveBeenCalledWith(
@@ -203,9 +223,11 @@ describe("RouteConfigurationService", () => {
           departure: "Quay 869",
           destination: "Dourges",
           basePrice: 520,
+          kilometres: 25,
         }),
       );
-      expect(routeCostService.create).toHaveBeenCalledTimes(2);
+      // One cost, not two: the toll is no longer stored per route.
+      expect(routeCostService.create).toHaveBeenCalledTimes(1);
     });
 
     /** The price first: its duplicate check is what refuses a second route. */
@@ -220,7 +242,7 @@ describe("RouteConfigurationService", () => {
       routeCostService.create.mockImplementation(async () => {
         order.push("cost");
 
-        return routeCost("TOLL", "18.00");
+        return routeCost("TUNNEL", "12.50");
       });
 
       await service.create(SAVE);
@@ -238,20 +260,32 @@ describe("RouteConfigurationService", () => {
 
     /** Zero is an amount an operator may configure, not an absence. */
     it("stores a zero amount as a real cost row", async () => {
-      await service.create({ ...SAVE, toll: 0, tunnel: 0 });
+      await service.create({ ...SAVE, kilometres: 0, tunnel: 0 });
 
-      expect(routeCostService.create).toHaveBeenCalledTimes(2);
+      expect(routeCostService.create).toHaveBeenCalledTimes(1);
+      expect(routeCostService.create.mock.calls[0][0].amount).toBe(0);
+    });
+
+    /** The distance goes on the route itself; no toll cost row is written. */
+    it("writes the distance with the price and no toll cost", async () => {
+      await service.create(SAVE);
+
+      expect(routePricingService.create).toHaveBeenCalledWith(
+        expect.objectContaining({ kilometres: 25 }),
+      );
       for (const [dto] of routeCostService.create.mock.calls) {
-        expect(dto.amount).toBe(0);
+        expect(dto.pricingComponentId).not.toBe("component-TOLL");
       }
     });
 
-    it("names the components by code, never by an id from the caller", async () => {
+    it("names the component by code, never by an id from the caller", async () => {
       await service.create(SAVE);
 
-      expect(repository.findPricingComponentByCode).toHaveBeenCalledWith("TOLL");
       expect(repository.findPricingComponentByCode).toHaveBeenCalledWith(
         "TUNNEL",
+      );
+      expect(repository.findPricingComponentByCode).not.toHaveBeenCalledWith(
+        "TOLL",
       );
     });
 
@@ -276,26 +310,41 @@ describe("RouteConfigurationService", () => {
   describe("changing a route", () => {
     it("corrects an existing cost rather than adding a second", async () => {
       routeCostService.findActiveForRoute.mockResolvedValue([
-        routeCost("TOLL", "18.00"),
+        routeCost("TUNNEL", "12.50"),
       ]);
 
-      await service.update(ROUTE_ID, { ...SAVE, toll: 25 });
+      await service.update(ROUTE_ID, { ...SAVE, tunnel: 25 });
 
-      expect(routeCostService.update).toHaveBeenCalledWith("cost-toll", {
+      expect(routeCostService.update).toHaveBeenCalledWith("cost-tunnel", {
         amount: 25,
+        // The road travels with the amount, so a cost owned by a Combination leg
+        // follows the leg when it moves. For a cost of the road it is the road
+        // the lookup just matched and cannot differ.
+        departure: "Quay 869",
+        destination: "Dourges",
       });
-      expect(routeCostService.create).toHaveBeenCalledTimes(1); // the tunnel
+      expect(routeCostService.create).not.toHaveBeenCalled();
+    });
+
+    /** The distance travels with the price, on the route record itself. */
+    it("writes the new distance onto the route", async () => {
+      await service.update(ROUTE_ID, { ...SAVE, kilometres: 42 });
+
+      expect(routePricingService.update).toHaveBeenCalledWith(
+        ROUTE_ID,
+        expect.objectContaining({ kilometres: 42 }),
+      );
     });
 
     it("reactivates a cost that had been switched off", async () => {
       routeCostService.findAll.mockResolvedValue({
-        items: [routeCost("TOLL", "18.00", { isActive: false })],
+        items: [routeCost("TUNNEL", "12.50", { isActive: false })],
         meta: {},
       });
 
       await service.update(ROUTE_ID, SAVE);
 
-      expect(routeCostService.activate).toHaveBeenCalledWith("cost-toll");
+      expect(routeCostService.activate).toHaveBeenCalledWith("cost-tunnel");
     });
 
     /**
@@ -304,13 +353,15 @@ describe("RouteConfigurationService", () => {
      * and quietly stop charging them.
      */
     it("moves the costs when the route moves", async () => {
-      routeCostService.findActiveForRoute.mockResolvedValue([
-        routeCost("TOLL", "18.00"),
-      ]);
+      // The cost exists at the OLD pair only, which is what moving means.
+      routeCostService.findActiveForRoute.mockImplementation(
+        async (_departure: string, destination: string) =>
+          destination === "Dourges" ? [routeCost("TUNNEL", "12.50")] : [],
+      );
 
       await service.update(ROUTE_ID, { ...SAVE, destination: "Bousbecque" });
 
-      expect(routeCostService.deactivate).toHaveBeenCalledWith("cost-toll");
+      expect(routeCostService.deactivate).toHaveBeenCalledWith("cost-tunnel");
       expect(routeCostService.create).toHaveBeenCalledWith(
         expect.objectContaining({ destination: "Bousbecque" }),
       );
@@ -318,7 +369,7 @@ describe("RouteConfigurationService", () => {
 
     it("leaves the costs where they are when only an amount changes", async () => {
       routeCostService.findActiveForRoute.mockResolvedValue([
-        routeCost("TOLL", "18.00"),
+        routeCost("TUNNEL", "12.50"),
       ]);
 
       await service.update(ROUTE_ID, { ...SAVE, tarief: 550 });
@@ -328,45 +379,81 @@ describe("RouteConfigurationService", () => {
   });
 
   /**
-   * The price and both costs move together. A route priced at zero but still
-   * charging a toll is a state the operator never asked for and could not see
-   * on a screen that shows one switch.
+   * ── REMOVING A ROUTE ──────────────────────────────────────────────────────
+   * This was a pair of activation tests. A route now exists or it does not, and
+   * its costs go with it: a tunnel cost left behind is matched by departure and
+   * destination and would keep charging Trips on a route nobody configured.
    */
-  describe("activating and deactivating", () => {
-    it("switches the costs off with the price", async () => {
+  describe("removing a route", () => {
+    it("deletes the price and stops its costs", async () => {
       routeCostService.findActiveForRoute.mockResolvedValue([
-        routeCost("TOLL", "18.00"),
         routeCost("TUNNEL", "12.50"),
       ]);
 
-      await service.changeState(ROUTE_ID, { isActive: false });
+      await service.remove(ROUTE_ID);
 
-      expect(routePricingService.deactivate).toHaveBeenCalledWith(ROUTE_ID);
-      expect(routeCostService.deactivate).toHaveBeenCalledTimes(2);
+      expect(routePricingService.remove).toHaveBeenCalledWith(ROUTE_ID);
+      expect(routeCostService.deactivate).toHaveBeenCalledWith("cost-tunnel");
     });
 
-    it("switches them back on with it", async () => {
-      routeCostService.findAll.mockResolvedValue({
-        items: [routeCost("TOLL", "18.00", { isActive: false })],
-        meta: {},
-      });
+    it("offers no way to switch a route off instead", () => {
+      const methods = Object.getOwnPropertyNames(
+        RouteConfigurationService.prototype,
+      );
 
-      await service.changeState(ROUTE_ID, { isActive: true });
+      expect(methods).not.toContain("changeState");
+    });
+  });
 
-      expect(routePricingService.activate).toHaveBeenCalledWith(ROUTE_ID);
-      expect(routeCostService.activate).toHaveBeenCalledWith("cost-toll");
+  /**
+   * ── A COMBINATION LEG IS NOT AN ORDINARY ROUTE ────────────────────────────
+   * These endpoints identify a route by its road and write its tunnel against
+   * that road. A leg is neither: it exists only as half of a pair, and its tunnel
+   * is its own. Reached through here it would be moved away from its partner, and
+   * its tunnel written as the road's — silently changing what every ordinary Trip
+   * on that road pays.
+   */
+  describe("a Combination leg reached through the ordinary endpoints", () => {
+    const COMBINATION_GROUP_ID = "7d2b8c14-9f3a-4c5e-8b1d-2e3f4a5b6c7d";
+
+    beforeEach(() => {
+      routePricingService.findById.mockResolvedValue(
+        routePricing({ combinationGroupId: COMBINATION_GROUP_ID }),
+      );
     });
 
-    /** Deactivating is not deleting: every Trip priced against it keeps its price. */
-    it("deletes nothing", async () => {
-      routeCostService.findActiveForRoute.mockResolvedValue([
-        routeCost("TOLL", "18.00"),
-      ]);
+    it("refuses to be edited", async () => {
+      await expect(service.update(ROUTE_ID, SAVE)).rejects.toThrow(
+        /cannot be changed on its own/,
+      );
+      expect(routePricingService.update).not.toHaveBeenCalled();
+    });
 
-      await service.changeState(ROUTE_ID, { isActive: false });
+    it("refuses to be removed", async () => {
+      await expect(service.remove(ROUTE_ID)).rejects.toThrow(
+        /cannot be removed on its own/,
+      );
+      expect(routePricingService.remove).not.toHaveBeenCalled();
+    });
 
-      expect(routeCostService).not.toHaveProperty("remove");
-      expect(routePricingService).not.toHaveProperty("remove");
+    /**
+     * The decisive one. The refusal must come BEFORE any write: a leg's tunnel is
+     * the leg's, so deactivating "its" road cost would switch off the ORDINARY
+     * route's tunnel on the way to failing.
+     */
+    it("changes no cost on its way to refusing", async () => {
+      await expect(service.remove(ROUTE_ID)).rejects.toThrow();
+      await expect(service.update(ROUTE_ID, SAVE)).rejects.toThrow();
+
+      expect(routeCostService.deactivate).not.toHaveBeenCalled();
+      expect(routeCostService.update).not.toHaveBeenCalled();
+      expect(routeCostService.create).not.toHaveBeenCalled();
+    });
+
+    it("names the Combination to act on instead", async () => {
+      await expect(service.remove(ROUTE_ID)).rejects.toThrow(
+        COMBINATION_GROUP_ID,
+      );
     });
   });
 
@@ -379,11 +466,6 @@ describe("RouteConfigurationService", () => {
   it("has no route to a Trip, a snapshot or the Engine", () => {
     const collaborators = Object.keys(service as unknown as object);
 
-    expect(collaborators).toEqual([
-      "routePricing",
-      "routeCosts",
-      "routeCostRepository",
-      "logger",
-    ]);
+    expect(collaborators).toEqual(["routePricing", "tunnelCosts", "logger"]);
   });
 });

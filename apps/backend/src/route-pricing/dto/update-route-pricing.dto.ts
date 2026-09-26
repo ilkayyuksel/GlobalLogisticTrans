@@ -15,6 +15,8 @@ import { trim, trimToNull } from "../../common/dto/transforms";
 import {
   BASE_PRICE_DECIMAL_PLACES,
   BASE_PRICE_MAX,
+  ROUTE_KILOMETRES_DECIMAL_PLACES,
+  ROUTE_KILOMETRES_MAX,
   ROUTE_LOCATION_MAX_LENGTH,
   ROUTE_NAME_MAX_LENGTH,
   ROUTE_NOTES_MAX_LENGTH,
@@ -71,6 +73,22 @@ export class UpdateRoutePricingDto {
   @Min(0)
   @Max(BASE_PRICE_MAX)
   basePrice?: number;
+
+  /** The route's length. Null clears it back to "nobody has stated it". */
+  @ApiPropertyOptional({
+    minimum: 0,
+    maximum: ROUTE_KILOMETRES_MAX,
+    nullable: true,
+  })
+  @ValidateIf(
+    (dto: UpdateRoutePricingDto) =>
+      dto.kilometres !== undefined && dto.kilometres !== null,
+  )
+  @Transform(toRawNumber)
+  @IsNumber({ maxDecimalPlaces: ROUTE_KILOMETRES_DECIMAL_PLACES })
+  @Min(0)
+  @Max(ROUTE_KILOMETRES_MAX)
+  kilometres?: number | null;
 
   @ApiPropertyOptional({
     maxLength: ROUTE_NOTES_MAX_LENGTH,

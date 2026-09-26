@@ -1,16 +1,23 @@
 import { request } from "./client";
 
 const PATH = "/api/v1/route-configuration";
+const COMBINATIONS_PATH = `${PATH}/combinations`;
+const BULK_PATH = `${PATH}/bulk`;
+const BULK_CHECK_PATH = `${BULK_PATH}/check`;
 
 /**
  * One route, as the operator configures it.
  *
- * ── ONE RECORD, THREE AMOUNTS ───────────────────────────────────────────────
- * The backend stores a route's price and each of its route-dependent costs in
- * separate tables. That split is invisible here, deliberately: an operator
- * configuring "Quay 869 to Dourges" means one route with three amounts, and the
- * composition is the backend's job. Nothing on this side assembles or splits a
- * route.
+ * ── ONE RECORD, WHATEVER THE TABLES DO ──────────────────────────────────────
+ * The backend stores a route's price and its route-dependent costs in separate
+ * tables. That split is invisible here, deliberately: an operator configuring
+ * "Quay 869 to Dourges" means one route, and the composition is the backend's
+ * job. Nothing on this side assembles or splits a route.
+ *
+ * ── AND THE TOLL IS NOT ONE OF ITS AMOUNTS ──────────────────────────────────
+ * A route carries its LENGTH. What a Trip pays in toll is that length times the
+ * rate configured once for the whole business, and the Pricing Engine works it
+ * out — never this screen, which stores kilometres and shows what it stored.
  *
  * Amounts are preformatted two-decimal STRINGS and are displayed exactly as
  * received. No arithmetic happens in the browser.
@@ -20,18 +27,56 @@ export interface RouteConfiguration {
   departure: string;
   destination: string;
   tarief: string;
-  toll: string;
+  /**
+   * The route's length in kilometres, or null when nobody has stated it.
+   *
+   * Null is not zero: a route of no stated length is charged no toll, while a
+   * route stated as nought kilometres is a decision somebody made. Routes
+   * configured before distances existed carry null until an operator fills
+   * them in.
+   */
+  kilometres: string | null;
   tunnel: string;
   /**
-   * Whether a cost is actually configured, as opposed to absent.
+   * Whether a tunnel cost is actually configured, as opposed to absent.
    *
    * Both read "0.00" as a price, and the distinction matters to an operator: a
    * configured zero is a decision, an absent one is a gap the Pricing Engine
    * reports when a Trip carries the property.
    */
-  hasToll: boolean;
   hasTunnel: boolean;
-  isActive: boolean;
+  /**
+   * Which kind of configuration this record is.
+   *
+   * NORMAL is an ordinary route. COMBINATION is one LEG of a two-leg Combination
+   * configuration, which is edited and removed as a whole — so a leg is never
+   * offered as a route an operator could change on its own.
+   *
+   * Both kinds may describe the same Van and Naar. That is not a duplicate: the
+   * backend reads them in different pricing contexts and neither overwrites the
+   * other.
+   */
+  type: "NORMAL" | "COMBINATION";
+  /** The Combination this record is a leg of, or null for an ordinary route. */
+  combinationGroupId: string | null;
+}
+
+/**
+ * One Combination route configuration: a group and its two legs.
+ *
+ * ── WHY THE GROUP IS THE THING ──────────────────────────────────────────────
+ * Antwerp to Kallo at 100 and Kallo back to Antwerp at 80 is ONE record an
+ * operator configures, with two legs that legitimately cost different amounts.
+ * The identity acted on is the group's, because half a Combination would price
+ * one direction and charge nothing for the other.
+ *
+ * Nothing to do with a Trip group in the Rittenlijst: that decides which Trips
+ * carry the Backload, this decides what a route costs.
+ */
+export interface CombinationRouteConfiguration {
+  id: string;
+  /** Exactly two, the outbound first. */
+  legs: RouteConfiguration[];
 }
 
 /** What a route is saved with. Amounts are numbers; the backend rounds. */
@@ -39,8 +84,14 @@ export interface RouteConfigurationPayload {
   departure: string;
   destination: string;
   tarief: number;
-  toll: number;
+  /** A distance, not an amount: the Engine turns it into the Toll. */
+  kilometres: number;
   tunnel: number;
+}
+
+/** Both legs of a Combination, saved together or not at all. */
+export interface CombinationRouteConfigurationPayload {
+  legs: RouteConfigurationPayload[];
 }
 
 export function listRouteConfigurations(
@@ -73,19 +124,137 @@ export function updateRouteConfiguration(
 }
 
 /**
- * Switches a whole configuration on or off.
+ * Removes a route's configuration.
  *
- * The price and both costs move together — the backend guarantees it — so the
- * screen offers one switch rather than three.
+ * The price and the route's tunnel cost go together — the backend guarantees
+ * it — so the screen offers one action rather than three. Trips already priced
+ * keep the amounts they were priced with; only the next calculation notices.
  */
-export function changeRouteConfigurationState(
+export function deleteRouteConfiguration(
   id: string,
-  isActive: boolean,
   signal?: AbortSignal,
-): Promise<RouteConfiguration> {
-  return request<RouteConfiguration>(`${PATH}/${id}/state`, {
-    method: "PATCH",
-    body: { isActive },
+): Promise<void> {
+  return request<void>(`${PATH}/${id}`, { method: "DELETE", signal });
+}
+
+/*
+ * ── THE COMBINATION ROUTES ──────────────────────────────────────────────────
+ * Their own endpoints rather than a flag on the ones above, because the thing
+ * acted on is the PAIR: created with two legs, edited with two legs and removed
+ * as a whole. The backend writes both legs in one transaction, so this side
+ * never has to keep them in step.
+ */
+
+export function listCombinationRouteConfigurations(
+  signal?: AbortSignal,
+): Promise<CombinationRouteConfiguration[]> {
+  return request<CombinationRouteConfiguration[]>(COMBINATIONS_PATH, { signal });
+}
+
+export function createCombinationRouteConfiguration(
+  payload: CombinationRouteConfigurationPayload,
+  signal?: AbortSignal,
+): Promise<CombinationRouteConfiguration> {
+  return request<CombinationRouteConfiguration>(COMBINATIONS_PATH, {
+    method: "POST",
+    body: payload,
+    signal,
+  });
+}
+
+export function updateCombinationRouteConfiguration(
+  combinationGroupId: string,
+  payload: CombinationRouteConfigurationPayload,
+  signal?: AbortSignal,
+): Promise<CombinationRouteConfiguration> {
+  return request<CombinationRouteConfiguration>(
+    `${COMBINATIONS_PATH}/${combinationGroupId}`,
+    { method: "PUT", body: payload, signal },
+  );
+}
+
+/**
+ * Removes a Combination, both of its legs and each leg's own tunnel.
+ *
+ * Never one leg: the backend refuses that outright, because a Combination with
+ * one leg prices one direction and silently charges nothing for the other.
+ * Trips already priced keep the amounts they were priced with.
+ */
+export function deleteCombinationRouteConfiguration(
+  combinationGroupId: string,
+  signal?: AbortSignal,
+): Promise<void> {
+  return request<void>(`${COMBINATIONS_PATH}/${combinationGroupId}`, {
+    method: "DELETE",
+    signal,
+  });
+}
+
+/*
+ * ── THE BULK IMPORT ─────────────────────────────────────────────────────────
+ * JSON is the input format and nothing else: the backend turns each entry into
+ * exactly the same records a route configured by hand becomes, with exactly the
+ * same rules. Nothing on this side validates a route, counts what would be
+ * created or decides what a duplicate is — all three are answered by `check`,
+ * because a browser's copy of a business rule is the one that drifts.
+ *
+ * The whole document goes out as the body, `routes` array and all: the backend
+ * reads the envelope too, so "this JSON has no routes array" is reported in the
+ * same list, in the same words, as "route 4 has no kilometres".
+ */
+
+/** What an import would create, or did. */
+export interface BulkRouteImportSummary {
+  normalRoutes: number;
+  combinationGroups: number;
+  combinationLegs: number;
+  totalRoutes: number;
+}
+
+/** What is wrong with one entry, and which entry it is. */
+export interface BulkRouteImportError {
+  routeNumber: number;
+  legNumber: number | null;
+  field: string | null;
+  message: string;
+}
+
+export interface BulkRouteImportCheck {
+  isValid: boolean;
+  summary: BulkRouteImportSummary;
+  errors: BulkRouteImportError[];
+}
+
+/**
+ * Asks what an import would do, without doing any of it.
+ *
+ * This is the preview. A refused document comes back as an ordinary answer with
+ * its reasons, not as a failure, because the question was "what would happen".
+ */
+export function checkBulkRouteImport(
+  document: unknown,
+  signal?: AbortSignal,
+): Promise<BulkRouteImportCheck> {
+  return request<BulkRouteImportCheck>(BULK_CHECK_PATH, {
+    method: "POST",
+    body: document,
+    signal,
+  });
+}
+
+/**
+ * Performs the import, or nothing at all.
+ *
+ * The backend validates the document again and writes it in one transaction, so
+ * twenty valid routes and one broken one leave the configuration untouched.
+ */
+export function runBulkRouteImport(
+  document: unknown,
+  signal?: AbortSignal,
+): Promise<BulkRouteImportSummary> {
+  return request<BulkRouteImportSummary>(BULK_PATH, {
+    method: "POST",
+    body: document,
     signal,
   });
 }

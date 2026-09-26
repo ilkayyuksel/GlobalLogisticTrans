@@ -49,6 +49,16 @@ export interface PricingRuleConfiguration {
    * Settings change, so it travels with the rules it describes.
    */
   readonly ruleVersion: string;
+
+  /**
+   * What one kilometre of toll costs, or null when nobody has configured it.
+   *
+   * Null rather than a number, and deliberately not a default written in code:
+   * a rate invented here would charge every tolled route in the business an
+   * amount nobody decided. A Trip priced while it is missing is charged no
+   * toll, which is the same answer an unconfigured route has always given.
+   */
+  readonly tollRatePerKm: string | null;
 }
 
 /**
@@ -70,6 +80,23 @@ export interface PricingRouteIdentity {
   readonly departure: string | null;
   readonly destination: string;
 }
+
+/**
+ * How long the Trip's route is, as its configuration states it.
+ *
+ * ── WHY A DISTANCE AND NOT A TOLL AMOUNT ────────────────────────────────────
+ * The Toll used to be an amount stored per route. It is now that route's length
+ * times one rate configured for the whole business, so the road contributes the
+ * kilometres and the Settings contribute the price of one.
+ *
+ * Null covers both silences: no configuration for this route at all, and a
+ * configuration whose distance nobody has stated yet. Neither charges a toll —
+ * an invented distance would charge a Trip for a road nobody measured.
+ *
+ * It sits beside the route costs rather than inside `PricingBaseSource`,
+ * because a Trip priced by DISTANCE still drives the same tolled road.
+ */
+export type PricingRouteKilometres = string | null;
 
 /**
  * Where the base price comes from, discriminated by the active strategy.
@@ -201,6 +228,14 @@ export interface PricingCalculationContext {
    * Empty when the route has none configured, and empty when the Trip has no
    * terminal to match on. Emptiness is not an error at this stage.
    */
+  /**
+   * The configured length of this Trip's route, or null when none is known.
+   *
+   * Read once here so the Toll calculator stays pure — see
+   * `PricingRouteKilometres`.
+   */
+  readonly routeKilometres: PricingRouteKilometres;
+
   readonly routeCosts: readonly PricingRouteCostInput[];
 
   /**

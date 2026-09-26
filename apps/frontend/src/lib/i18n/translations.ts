@@ -279,11 +279,17 @@ const nl = {
   "settings.pricing.cancel": "Annuleren",
   "settings.pricing.saved": "Opgeslagen.",
   "settings.pricing.failed": "Opslaan mislukt.",
-  "settings.pricing.fuel.title": "Brandstof",
   "settings.pricing.fuel.label": "Brandstofpercentage",
   "settings.pricing.fuel.historyNote":
     "Geldt voor toekomstige berekeningen. Reeds afgewerkte ritten behouden het percentage waarmee ze berekend zijn.",
-  "settings.pricing.configuration.title": "Prijsinstellingen",
+  "settings.pricing.settings.title": "Prijsinstellingen",
+  "settings.pricing.toll.label": "Toll prijs per km",
+  /*
+   * Retitled: the panel above is now "Prijsinstellingen", and two identical
+   * headings one inside the other would say nothing about the difference —
+   * the fields are the two amounts, this is every setting the Engine reads.
+   */
+  "settings.pricing.configuration.title": "Volledige configuratie",
   "settings.pricing.configuration.intro":
     "Alle instellingen die de prijsberekening nodig heeft. Ontbrekende instellingen kunnen hier aangemaakt worden; bestaande waarden worden nooit overschreven.",
   "settings.pricing.configuration.setting": "Instelling",
@@ -303,15 +309,45 @@ const nl = {
   "settings.pricing.routes.from": "Van",
   "settings.pricing.routes.to": "Naar",
   "settings.pricing.routes.tarief": "Tarief",
-  "settings.pricing.routes.toll": "Toll",
+  "settings.pricing.routes.kilometres": "KM",
   "settings.pricing.routes.tunnel": "Tunnel",
-  "settings.pricing.routes.active": "Actief",
   "settings.pricing.routes.actions": "Acties",
-  "settings.pricing.routes.isActive": "Actief",
-  "settings.pricing.routes.isInactive": "Inactief",
   "settings.pricing.routes.edit": "Bewerken",
-  "settings.pricing.routes.activate": "Activeren",
-  "settings.pricing.routes.deactivate": "Deactiveren",
+  "settings.pricing.routes.delete": "Verwijderen",
+  "settings.pricing.routes.deleteTitle": "Routeprijs verwijderen",
+  "settings.pricing.routes.deleteDescription":
+    "Deze routeprijs wordt verwijderd en wordt niet meer gebruikt voor nieuwe berekeningen.",
+  "settings.pricing.routes.deleteConsequence":
+    "Reeds afgewerkte ritten behouden de bedragen waarmee ze berekend zijn.",
+  "settings.pricing.routes.bulk.add": "Bulk toevoegen",
+  "settings.pricing.routes.bulk.title": "Routeprijzen bulk toevoegen",
+  "settings.pricing.routes.bulk.description":
+    "Plak een JSON-document met alle routes. JSON is enkel het importformaat: elke route wordt opgeslagen zoals een route die je handmatig toevoegt, met dezelfde validatie. Geef geen Toll op — die wordt berekend uit KM en de globale Toll prijs per km.",
+  "settings.pricing.routes.bulk.documentLabel": "JSON",
+  "settings.pricing.routes.bulk.check": "Controleren",
+  "settings.pricing.routes.bulk.import": "Importeren",
+  "settings.pricing.routes.bulk.previewTitle": "Wordt toegevoegd",
+  "settings.pricing.routes.bulk.refused": "Import geweigerd",
+  "settings.pricing.routes.bulk.route": "Route",
+  "settings.pricing.routes.bulk.normalRoutes": "normale routes",
+  "settings.pricing.routes.bulk.combinationGroups": "Combination-groepen",
+  "settings.pricing.routes.bulk.combinationLegs": "Combination-legs",
+  "settings.pricing.routes.bulk.total": "Totaal route-legs",
+  "settings.pricing.routes.bulk.invalidJson": "Dit is geen geldige JSON.",
+  "settings.pricing.routes.bulk.document": "Document",
+  "settings.pricing.routes.type.label": "Type",
+  "settings.pricing.routes.type.normal": "Normaal",
+  "settings.pricing.routes.type.combination": "Combination",
+  "settings.pricing.routes.combinations.title": "Combination-routes",
+  "settings.pricing.routes.combinations.label": "Combination",
+  "settings.pricing.routes.combinations.leg": "Leg",
+  "settings.pricing.routes.combinations.formTitle": "Combination-route",
+  "settings.pricing.routes.combinations.note":
+    "Een Combination bestaat altijd uit precies twee legs, elk met eigen Tarief, KM en Tunnel. Beide legs worden samen opgeslagen.",
+  "settings.pricing.routes.combinations.deleteTitle":
+    "Combination-route verwijderen",
+  "settings.pricing.routes.combinations.deleteDescription":
+    "De volledige Combination wordt verwijderd, inclusief beide legs. Een losse leg verwijderen is niet mogelijk.",
   "settings.pricing.routes.empty": "Nog geen routeprijzen",
   "settings.pricing.routes.emptyDescription":
     "Ritten op een route zonder configuratie krijgen Tarief, Toll en Tunnel op €0.",
@@ -1223,11 +1259,12 @@ const tr: Translations = {
   "settings.pricing.cancel": "İptal",
   "settings.pricing.saved": "Kaydedildi.",
   "settings.pricing.failed": "Kaydetme başarısız.",
-  "settings.pricing.fuel.title": "Yakıt",
   "settings.pricing.fuel.label": "Yakıt yüzdesi",
   "settings.pricing.fuel.historyNote":
     "Gelecekteki hesaplamalar için geçerlidir. Tamamlanmış seferler hesaplandıkları yüzdeyi korur.",
-  "settings.pricing.configuration.title": "Fiyat ayarları",
+  "settings.pricing.settings.title": "Fiyat ayarları",
+  "settings.pricing.toll.label": "Kilometre başına geçiş ücreti",
+  "settings.pricing.configuration.title": "Tüm yapılandırma",
   "settings.pricing.configuration.intro":
     "Fiyat hesaplamasının ihtiyaç duyduğu tüm ayarlar. Eksik ayarlar buradan oluşturulabilir; mevcut değerlerin üzerine asla yazılmaz.",
   "settings.pricing.configuration.setting": "Ayar",
@@ -1246,15 +1283,45 @@ const tr: Translations = {
   "settings.pricing.routes.from": "Nereden",
   "settings.pricing.routes.to": "Nereye",
   "settings.pricing.routes.tarief": "Tarife",
-  "settings.pricing.routes.toll": "Geçiş ücreti",
+  "settings.pricing.routes.kilometres": "KM",
   "settings.pricing.routes.tunnel": "Tünel",
-  "settings.pricing.routes.active": "Aktif",
   "settings.pricing.routes.actions": "İşlemler",
-  "settings.pricing.routes.isActive": "Aktif",
-  "settings.pricing.routes.isInactive": "Pasif",
   "settings.pricing.routes.edit": "Düzenle",
-  "settings.pricing.routes.activate": "Etkinleştir",
-  "settings.pricing.routes.deactivate": "Devre dışı bırak",
+  "settings.pricing.routes.delete": "Sil",
+  "settings.pricing.routes.deleteTitle": "Rota fiyatını sil",
+  "settings.pricing.routes.deleteDescription":
+    "Bu rota fiyatı silinir ve yeni hesaplamalarda kullanılmaz.",
+  "settings.pricing.routes.deleteConsequence":
+    "Tamamlanmış seferler hesaplandıkları tutarları korur.",
+  "settings.pricing.routes.bulk.add": "Toplu ekle",
+  "settings.pricing.routes.bulk.title": "Rota fiyatlarını toplu ekle",
+  "settings.pricing.routes.bulk.description":
+    "Tüm rotaları içeren bir JSON belgesi yapıştırın. JSON yalnızca içe aktarma biçimidir: her rota, elle eklenen bir rota gibi aynı doğrulamayla kaydedilir. Geçiş ücreti girmeyin — o, KM ve global km başına geçiş ücretinden hesaplanır.",
+  "settings.pricing.routes.bulk.documentLabel": "JSON",
+  "settings.pricing.routes.bulk.check": "Kontrol et",
+  "settings.pricing.routes.bulk.import": "İçe aktar",
+  "settings.pricing.routes.bulk.previewTitle": "Eklenecek",
+  "settings.pricing.routes.bulk.refused": "İçe aktarma reddedildi",
+  "settings.pricing.routes.bulk.route": "Rota",
+  "settings.pricing.routes.bulk.normalRoutes": "normal rota",
+  "settings.pricing.routes.bulk.combinationGroups": "Combination grubu",
+  "settings.pricing.routes.bulk.combinationLegs": "Combination bacağı",
+  "settings.pricing.routes.bulk.total": "Toplam rota bacağı",
+  "settings.pricing.routes.bulk.invalidJson": "Bu geçerli bir JSON değil.",
+  "settings.pricing.routes.bulk.document": "Belge",
+  "settings.pricing.routes.type.label": "Tür",
+  "settings.pricing.routes.type.normal": "Normal",
+  "settings.pricing.routes.type.combination": "Combination",
+  "settings.pricing.routes.combinations.title": "Combination rotaları",
+  "settings.pricing.routes.combinations.label": "Combination",
+  "settings.pricing.routes.combinations.leg": "Bacak",
+  "settings.pricing.routes.combinations.formTitle": "Combination rotası",
+  "settings.pricing.routes.combinations.note":
+    "Bir Combination her zaman tam iki bacaktan oluşur; her bacağın kendi Tarifesi, KM'si ve Tüneli vardır. İki bacak birlikte kaydedilir.",
+  "settings.pricing.routes.combinations.deleteTitle":
+    "Combination rotasını sil",
+  "settings.pricing.routes.combinations.deleteDescription":
+    "İki bacağıyla birlikte tüm Combination silinir. Tek bir bacağı silmek mümkün değildir.",
   "settings.pricing.routes.empty": "Henüz rota fiyatı yok",
   "settings.pricing.routes.emptyDescription":
     "Yapılandırılmamış bir rotadaki seferlerde Tarife, Geçiş ücreti ve Tünel €0 olur.",

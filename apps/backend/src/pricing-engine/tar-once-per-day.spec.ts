@@ -64,6 +64,7 @@ const RULES = {
   waitingTimeBlockMinutes: 15,
   waitingTimeBlockPrice: "13.75",
   ruleVersion: "2026.1",
+  tollRatePerKm: null,
 };
 
 describe("TAR is charged once per day per number", () => {
@@ -76,7 +77,7 @@ describe("TAR is charged once per day per number", () => {
     groupMembers = jest.fn().mockResolvedValue([]);
 
     resolver = new PricingComponentResolver(
-      { findActiveRoute: jest.fn().mockResolvedValue(null) } as unknown as RoutePricingService,
+      { findConfiguredRoute: jest.fn().mockResolvedValue(null) } as unknown as RoutePricingService,
       { findByTripId: jest.fn().mockResolvedValue([]) } as unknown as TripCustomPropertyReadService,
       {
         findById: jest.fn().mockResolvedValue({

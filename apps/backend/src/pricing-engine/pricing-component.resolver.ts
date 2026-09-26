@@ -2,6 +2,7 @@ import { Injectable } from "@nestjs/common";
 
 import { CustomPropertyService } from "../custom-properties/custom-property.service";
 import { AppLoggerService } from "../logger/app-logger.service";
+import { RouteConfigurationKind } from "../route-pricing/route-pricing.repository";
 import { RoutePricingService } from "../route-pricing/route-pricing.service";
 import { TripCustomPropertyReadService } from "../trip-custom-properties/trip-custom-property-read.service";
 import { meaningfulTarNummer } from "../trips/tar-nummer";
@@ -33,6 +34,28 @@ const UNCONFIGURED_ROUTE_BASE = {
   routePricingId: null,
   basePrice: "0.00",
 } as const;
+
+/**
+ * The route configuration a Trip was matched against.
+ *
+ * ── WHY ONE MATCH SERVES THREE COMPONENTS ───────────────────────────────────
+ * The Tarief, the road's length and the road's tunnel all come from the SAME
+ * configured row, and until now each was looked up separately — which was
+ * harmless while one road had one configuration. It stopped being harmless when a
+ * Combination leg and an ordinary route could describe the same road: two
+ * lookups could then match two different rows, and a Trip would be priced with
+ * one row's Tarief and another row's distance.
+ *
+ * So the row is matched ONCE and its identity travels with the values taken from
+ * it.
+ */
+export interface MatchedRouteConfiguration {
+  readonly routePricingId: string;
+  readonly basePrice: string;
+  readonly kilometres: string | null;
+  /** Which of the two configurations of this road was matched. */
+  readonly kind: RouteConfigurationKind;
+}
 import { PricingRuleResolver } from "./pricing-rule.resolver";
 
 /**
@@ -69,12 +92,22 @@ export class PricingComponentResolver {
    * validation failure naming the missing input rather than silently producing
    * a base price of zero.
    */
+  /**
+   * The base price this Trip prices against.
+   *
+   * `matchedRoute` is the configuration the caller already matched for this
+   * Trip — passed in rather than looked up again, so the Tarief, the distance and
+   * the tunnel cannot come from different rows. Route-Based pricing reads it;
+   * Distance-Based pricing ignores it, because a Trip priced by distance prices
+   * against its own kilometres and the configured rate.
+   */
   async resolveBaseSource(
     trip: TripReadView,
     rules: PricingRuleConfiguration,
+    matchedRoute: MatchedRouteConfiguration | null,
   ): Promise<PricingBaseSource> {
     if (rules.strategy === PricingStrategy.ROUTE_BASED) {
-      return this.resolveRouteBaseSource(trip);
+      return this.resolveRouteBaseSource(trip, matchedRoute);
     }
 
     return this.resolveDistanceBaseSource(trip);
@@ -291,6 +324,105 @@ export class PricingComponentResolver {
    * no extra query.
    */
   /**
+   * The route configuration this Trip prices against, or null when it has none.
+   *
+   * ── WHICH OF THE TWO CONFIGURATIONS OF A ROAD ─────────────────────────────
+   * A road may be configured twice: once as an ordinary route and once as a leg
+   * of a Combination, priced differently because a Combination's outbound and
+   * return are their own transports. The existing domain rule decides which one
+   * applies, and no new rule is invented here: `combinationLegOf` already
+   * answers whether a Trip is a leg of a GENUINE Combination — one document that
+   * printed an outbound delivery and a return collection — and it is the same
+   * answer the TAR allocation uses.
+   *
+   *   DELIVERY or COLLECTION  a genuine Combination leg: the Combination
+   *                           configuration of its road, if one exists.
+   *   NONE                    an ordinary Trip, or a group an operator made by
+   *                           hand: the ordinary configuration.
+   *   INVALID                 the Trips of one document are grouped but are not
+   *                           one delivery and one collection. Reported
+   *                           elsewhere and never priced on a guess, so it takes
+   *                           the ordinary configuration rather than a
+   *                           Combination one.
+   *
+   * ── AND WHY A LEG FALLS BACK ──────────────────────────────────────────────
+   * A genuine Combination leg whose road has no Combination configuration takes
+   * the ORDINARY one. Every Combination Trip priced before Combination routes
+   * existed was priced exactly that way, and refusing to match would silently
+   * reprice all of them to zero. The fallback is therefore what keeps existing
+   * pricing unchanged; configuring a Combination route is what changes it.
+   *
+   * Null whenever nobody has said: no terminal, no destination, or no
+   * configuration for the road in either context. None of those is an error —
+   * see `resolveRouteBaseSource`.
+   */
+  async resolveConfiguredRoute(
+    trip: TripReadView,
+  ): Promise<MatchedRouteConfiguration | null> {
+    /*
+     * A route needs two ends. A Trip missing either cannot MATCH a
+     * configuration, which is the same situation as a road nobody has
+     * configured — so it takes the same answer rather than a different one.
+     */
+    if (!trip.terminal || !trip.destinationCity) {
+      return null;
+    }
+
+    if (await this.isGenuineCombinationLeg(trip)) {
+      const leg = await this.routePricingService.findConfiguredRoute(
+        trip.terminal,
+        trip.destinationCity,
+        RouteConfigurationKind.COMBINATION,
+      );
+
+      if (leg) {
+        return this.toMatch(leg, RouteConfigurationKind.COMBINATION);
+      }
+
+      this.logger.log(
+        "No Combination route configured for this leg; using the ordinary route",
+        { tripId: trip.id },
+      );
+    }
+
+    const ordinary = await this.routePricingService.findConfiguredRoute(
+      trip.terminal,
+      trip.destinationCity,
+      RouteConfigurationKind.NORMAL,
+    );
+
+    return ordinary
+      ? this.toMatch(ordinary, RouteConfigurationKind.NORMAL)
+      : null;
+  }
+
+  /**
+   * Whether this Trip is a leg of a genuine Combination.
+   *
+   * The same question `resolveCombinationLeg` answers, asked for a different
+   * purpose — which route configuration applies, rather than which leg owes the
+   * TAR — and deliberately answered by the same rule. A Trip in no group returns
+   * without a query at all, so only a grouped Trip reads its group.
+   */
+  private async isGenuineCombinationLeg(trip: TripReadView): Promise<boolean> {
+    const leg = await this.resolveCombinationLeg(trip);
+
+    return leg === CombinationLeg.DELIVERY || leg === CombinationLeg.COLLECTION;
+  }
+
+  private toMatch(
+    route: { id: string; basePrice: string; kilometres: string | null },
+    kind: RouteConfigurationKind,
+  ): MatchedRouteConfiguration {
+    return {
+      routePricingId: route.id,
+      basePrice: route.basePrice,
+      kilometres: route.kilometres,
+      kind,
+    };
+  }
+
+  /**
    * Which leg of a genuine Combination this Trip is, or NONE.
    *
    * Public because the Combination Surcharge needs the same answer the TAR rule
@@ -318,14 +450,31 @@ export class PricingComponentResolver {
    */
   private async resolveRouteBaseSource(
     trip: TripReadView,
+    matchedRoute: MatchedRouteConfiguration | null,
   ): Promise<PricingBaseSource> {
     /*
-     * A route needs two ends. A Trip missing either cannot MATCH a
-     * configuration, which is the same situation as a route nobody has
-     * configured — so it takes the same answer rather than a different one.
+     * ── AN UNCONFIGURED ROUTE IS NOT A FAILURE ──────────────────────────────
+     * It used to raise MissingRoutePricingException, which meant no snapshot was
+     * written at all — and that had consequences far beyond the base price. A
+     * CLOSED Trip on an unconfigured route showed nothing in any of the eight
+     * pricing columns, offered no way to correct the Tarief by hand, and could
+     * not carry a waiting time, a custom property or a cost confirmation,
+     * because every one of those reads the snapshot that was never created.
+     *
+     * On this business's data that was the ORDINARY case rather than an edge
+     * one: most real routes have no configured price. So the absence of a
+     * configuration is now what it always was in fact — a price of zero that an
+     * operator can correct — and the Trip receives a complete snapshot that the
+     * dynamic components can move.
+     *
+     * Nothing is invented. Zero is not a guess at what the route costs; it is
+     * the honest statement that nobody has said what it costs, and it is visibly
+     * zero on screen rather than silently absent. A Trip with half a route
+     * reaches here the same way, having matched nothing.
+     * ────────────────────────────────────────────────────────────────────────
      */
-    if (!trip.terminal || !trip.destinationCity) {
-      this.logger.warn("Trip has no complete route, so it prices at zero", {
+    if (!matchedRoute) {
+      this.logger.warn("No route pricing matched; the Trip prices at zero", {
         tripId: trip.id,
         hasTerminal: Boolean(trip.terminal),
         hasDestination: Boolean(trip.destinationCity),
@@ -334,47 +483,12 @@ export class PricingComponentResolver {
       return UNCONFIGURED_ROUTE_BASE;
     }
 
-    const routePricing = await this.routePricingService.findActiveRoute(
-      trip.terminal,
-      trip.destinationCity,
-    );
-
-    /*
-     * ── AN UNCONFIGURED ROUTE IS NOT A FAILURE ──────────────────────────────
-     * It used to raise MissingRoutePricingException, which meant no snapshot
-     * was written at all — and that had consequences far beyond the base
-     * price. A CLOSED Trip on an unconfigured route showed nothing in any of
-     * the eight pricing columns, offered no way to correct the Tarief by hand,
-     * and could not carry a waiting time, a custom property or a cost
-     * confirmation, because every one of those reads the snapshot that was
-     * never created.
-     *
-     * On this business's data that was the ORDINARY case rather than an edge
-     * one: most real routes have no configured price. So the absence of a
-     * configuration is now what it always was in fact — a price of zero that
-     * an operator can correct — and the Trip receives a complete snapshot that
-     * the dynamic components can move.
-     *
-     * Nothing is invented. Zero is not a guess at what the route costs; it is
-     * the honest statement that nobody has said what it costs, and it is
-     * visibly zero on screen rather than silently absent.
-     * ────────────────────────────────────────────────────────────────────────
-     */
-    if (!routePricing) {
-      this.logger.warn("No active route pricing; the Trip prices at zero", {
-        tripId: trip.id,
-      });
-
-      return UNCONFIGURED_ROUTE_BASE;
-    }
-
-    // The route itself is not repeated here: the lookup above matched departure
-    // and destination exactly, so the configured row's route is the Trip's
-    // route, and the context already carries it.
+    // The route itself is not repeated here: the match was made on this Trip's
+    // departure and destination, and the context already carries them.
     return {
       strategy: PricingStrategy.ROUTE_BASED,
-      routePricingId: routePricing.id,
-      basePrice: routePricing.basePrice,
+      routePricingId: matchedRoute.routePricingId,
+      basePrice: matchedRoute.basePrice,
     };
   }
 

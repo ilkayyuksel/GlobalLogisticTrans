@@ -1,9 +1,54 @@
-import { ApiProperty, ApiPropertyOptional } from "@nestjs/swagger";
-import { Transform } from "class-transformer";
-import { IsBoolean, IsNumber, IsString, Max, Min, MaxLength } from "class-validator";
+import { ApiProperty } from "@nestjs/swagger";
+import { Transform, Type } from "class-transformer";
+import {
+  ArrayMaxSize,
+  ArrayMinSize,
+  IsArray,
+  IsNumber,
+  IsString,
+  Max,
+  Min,
+  MaxLength,
+  ValidateNested,
+} from "class-validator";
 
 import { MONEY_DECIMAL_PLACES, MONEY_MAX_VALUE } from "../../common/dto/money";
 import { rawValueOf, trim } from "../../common/dto/transforms";
+import { RouteCostResponseDto } from "../../route-costs/dto/route-cost-response.dto";
+import {
+  ROUTE_KILOMETRES_DECIMAL_PLACES,
+  ROUTE_KILOMETRES_MAX,
+} from "../../route-pricing/dto/create-route-pricing.dto";
+import { RoutePricingResponseDto } from "../../route-pricing/dto/route-pricing-response.dto";
+import { LEGS_PER_COMBINATION_ROUTE } from "../../route-pricing/exceptions/route-pricing.exceptions";
+
+/**
+ * Which kind of route configuration a record is.
+ *
+ * ── THE DISCRIMINATOR, SPELLED OUT IN THE API ───────────────────────────────
+ * NORMAL is an ordinary route standing on its own. COMBINATION is one LEG of a
+ * route group that always has exactly two — an outbound and a return, each with
+ * its own Tarief, KM and Tunnel, because the two legitimately cost different
+ * amounts.
+ *
+ * Both kinds may describe the same departure and destination. That is not a
+ * duplicate: they are read in different pricing contexts, and neither overwrites
+ * the other. Every record says which kind it is rather than leaving a caller to
+ * infer it from where it was listed.
+ *
+ * This has nothing to do with a Trip group in the Rittenlijst. That group decides
+ * which Trips carry the Backload; this decides what a route COSTS.
+ */
+export const RouteConfigurationType = {
+  NORMAL: "NORMAL",
+  COMBINATION: "COMBINATION",
+} as const;
+
+export type RouteConfigurationType =
+  (typeof RouteConfigurationType)[keyof typeof RouteConfigurationType];
+
+/** Money leaves as exact decimal text, never as a JSON number. */
+const ZERO_AMOUNT = (0).toFixed(MONEY_DECIMAL_PLACES);
 
 /** Long enough for any real place name; short enough to stay a place name. */
 export const ROUTE_ENDPOINT_MAX_LENGTH = 255;
@@ -57,38 +102,92 @@ export class RouteConfigurationDto {
 
   @ApiProperty({
     type: String,
-    example: "18.00",
+    nullable: true,
+    example: "25.00",
     description:
-      "The configured Toll for this route. \"0.00\" both when it is configured as zero and when it is not configured at all — the two are indistinguishable to a price, and `hasToll` says which it is.",
+      "The length of the route in kilometres, as a fixed-2 decimal string, or null when nobody has stated it. The Toll a Trip pays is this distance times the configured toll rate, so a route without it is charged no toll.",
   })
-  toll!: string;
+  kilometres!: string | null;
 
   @ApiProperty({ type: String, example: "0.00" })
   tunnel!: string;
-
-  @ApiProperty({
-    description:
-      "True when a Toll cost is actually configured for this route, as opposed to absent. A Trip carrying the Toll property on a route with no Toll cost is charged nothing and the gap is logged.",
-  })
-  hasToll!: boolean;
 
   @ApiProperty()
   hasTunnel!: boolean;
 
   @ApiProperty({
+    enum: Object.values(RouteConfigurationType),
     description:
-      "Only an ACTIVE configuration prices a Trip. Deactivating keeps the record and its history.",
+      "NORMAL is an ordinary route; COMBINATION is one leg of a two-leg Combination configuration, which is edited and removed as a whole.",
   })
-  isActive!: boolean;
+  type!: RouteConfigurationType;
+
+  @ApiProperty({
+    format: "uuid",
+    nullable: true,
+    description:
+      "The Combination this record is a leg of, or null for an ordinary route.",
+  })
+  combinationGroupId!: string | null;
+}
+
+/**
+ * One route, read back from the records that store it.
+ *
+ * Shared by both configuration services: an ordinary route and a Combination leg
+ * are the same shape and are composed the same way, and the only difference — the
+ * kind — comes straight off the stored discriminator rather than from whichever
+ * service happened to ask.
+ */
+export function composeRouteConfiguration(
+  route: RoutePricingResponseDto,
+  tunnel: RouteCostResponseDto | null,
+): RouteConfigurationDto {
+  return {
+    id: route.id,
+    departure: route.departure,
+    destination: route.destination,
+    tarief: route.basePrice,
+    // Null travels as null: "nobody has stated the distance" is not the same as
+    // a route of no length, and only the first one charges no toll.
+    kilometres: route.kilometres,
+    tunnel: tunnel?.amount ?? ZERO_AMOUNT,
+    hasTunnel: tunnel !== null,
+    /*
+     * Truthiness rather than a null check: an absent discriminator must read as
+     * an ordinary route. Marking one as a Combination is the more damaging
+     * mistake of the two, because it would offer an operator a leg to edit that
+     * belongs to no pair.
+     */
+    type: route.combinationGroupId
+      ? RouteConfigurationType.COMBINATION
+      : RouteConfigurationType.NORMAL,
+    combinationGroupId: route.combinationGroupId ?? null,
+  };
+}
+
+/**
+ * The name the underlying price record carries.
+ *
+ * RoutePricing requires one and this screen does not ask for it: an operator
+ * configuring a route has already said what it is by naming both ends, and a
+ * second free-text field would be a name that could disagree with them.
+ */
+export function routeNameOf(route: {
+  departure: string;
+  destination: string;
+}): string {
+  return `${route.departure} - ${route.destination}`;
 }
 
 /**
  * The amounts a route carries.
  *
- * All three are required on create: a route configured through this screen is
+ * All of them are required on create: a route configured through this screen is
  * complete by construction, which is the whole reason the abstraction exists.
- * Zero is a legitimate amount for any of them — a route genuinely without a
- * tunnel — and is stored as an explicit zero rather than as an absence.
+ * Zero is legitimate for each — a route genuinely without a tunnel, or one that
+ * is nought kilometres of tolled road — and is stored as an explicit zero
+ * rather than as an absence.
  */
 export class SaveRouteConfigurationDto {
   @ApiProperty({
@@ -115,12 +214,22 @@ export class SaveRouteConfigurationDto {
   @Max(MONEY_MAX_VALUE)
   tarief!: number;
 
-  @ApiProperty({ example: 18, minimum: 0, maximum: MONEY_MAX_VALUE })
+  /*
+   * A DISTANCE, not an amount: the Toll is derived from it and the configured
+   * rate per kilometre. Two decimals, as `trip.distance_km` has always had.
+   */
+  @ApiProperty({
+    example: 25,
+    minimum: 0,
+    maximum: ROUTE_KILOMETRES_MAX,
+    description:
+      "Length of the route in kilometres. The Toll is this times the configured toll rate per kilometre; no toll amount is stored per route.",
+  })
   @Transform(rawValueOf)
-  @IsNumber({ maxDecimalPlaces: MONEY_DECIMAL_PLACES })
+  @IsNumber({ maxDecimalPlaces: ROUTE_KILOMETRES_DECIMAL_PLACES })
   @Min(0)
-  @Max(MONEY_MAX_VALUE)
-  toll!: number;
+  @Max(ROUTE_KILOMETRES_MAX)
+  kilometres!: number;
 
   @ApiProperty({ example: 0, minimum: 0, maximum: MONEY_MAX_VALUE })
   @Transform(rawValueOf)
@@ -130,13 +239,46 @@ export class SaveRouteConfigurationDto {
   tunnel!: number;
 }
 
-/** Activating or deactivating one configuration. */
-export class ChangeRouteConfigurationStateDto {
-  @ApiPropertyOptional({
-    description:
-      "True activates the configuration, false deactivates it. Deactivating never deletes: the record and everything priced against it stay.",
+/**
+ * One Combination route configuration: a group and its two legs.
+ *
+ * ── WHY THE GROUP IS IN THE PAYLOAD ─────────────────────────────────────────
+ * The legs are edited and removed together, so the identity a caller acts on is
+ * the group's and not a leg's. Presenting the pair as two loose routes would
+ * offer an operator a way to delete half a Combination, which is exactly the
+ * state the model refuses to store.
+ */
+export class CombinationRouteConfigurationDto {
+  @ApiProperty({ format: "uuid" })
+  id!: string;
+
+  @ApiProperty({
+    type: [RouteConfigurationDto],
+    description: `Exactly ${LEGS_PER_COMBINATION_ROUTE} legs, the outbound first.`,
   })
-  @Transform(rawValueOf)
-  @IsBoolean()
-  isActive!: boolean;
+  legs!: RouteConfigurationDto[];
+}
+
+/**
+ * The two legs of a Combination, as an operator configures them.
+ *
+ * ── WHY THE COUNT IS VALIDATED HERE TOO ─────────────────────────────────────
+ * The service refuses any number but two and writes both in one transaction, and
+ * the database refuses a third leg outright. This refuses the request before any
+ * of that runs, so a caller sending one leg gets a validation error naming the
+ * field rather than a conflict from deeper down.
+ */
+export class SaveCombinationRouteConfigurationDto {
+  @ApiProperty({
+    type: [SaveRouteConfigurationDto],
+    minItems: LEGS_PER_COMBINATION_ROUTE,
+    maxItems: LEGS_PER_COMBINATION_ROUTE,
+    description: `Exactly ${LEGS_PER_COMBINATION_ROUTE} legs — the outbound first, then the return. Each carries its own Van, Naar, Tarief, KM and Tunnel: the two directions legitimately cost different amounts.`,
+  })
+  @IsArray()
+  @ArrayMinSize(LEGS_PER_COMBINATION_ROUTE)
+  @ArrayMaxSize(LEGS_PER_COMBINATION_ROUTE)
+  @ValidateNested({ each: true })
+  @Type(() => SaveRouteConfigurationDto)
+  legs!: SaveRouteConfigurationDto[];
 }

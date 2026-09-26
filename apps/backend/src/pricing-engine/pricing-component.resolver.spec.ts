@@ -1,12 +1,17 @@
 import { TripDirection, TripStatus } from "@prisma/client";
 
 import { AppLoggerService } from "../logger/app-logger.service";
+import { RouteConfigurationKind } from "../route-pricing/route-pricing.repository";
 import { RoutePricingService } from "../route-pricing/route-pricing.service";
 import { CustomPropertyService } from "../custom-properties/custom-property.service";
 import { TripCustomPropertyReadService } from "../trip-custom-properties/trip-custom-property-read.service";
 import { TripReadService, TripReadView } from "../trips/trip-read.service";
 import { MissingTripPricingInputException } from "./exceptions/pricing-engine.exceptions";
-import { PricingRuleConfiguration } from "./pricing-calculation-context";
+import { CombinationMember } from "./combination-leg";
+import {
+  PricingBaseSource,
+  PricingRuleConfiguration,
+} from "./pricing-calculation-context";
 import { PricingComponentResolver } from "./pricing-component.resolver";
 import { PricingRuleResolver } from "./pricing-rule.resolver";
 import { PricingStrategy } from "./pricing-settings";
@@ -16,6 +21,14 @@ const TRIP_ID = "3f2504e0-4f89-41d3-9a0c-0305e82c3301";
 /** The Custom Property the Engine applies on its own — TAR in this system. */
 const AUTOMATIC_PROPERTY_ID = "property-tar";
 const ROUTE_ID = "9c858901-8a57-4791-81fe-4c455b099bc9";
+
+/** The Combination configuration of the same road, priced differently. */
+const LEG_ID = "5a1f0c1e-2b3d-4e5f-8a9b-0c1d2e3f4a5b";
+
+/** One document that printed two legs, and the pair it produced. */
+const GROUP_ID = "7d2b8c14-9f3a-4c5e-8b1d-2e3f4a5b6c7d";
+const DOCUMENT_ID = "pdf-1";
+const OTHER_TRIP_ID = "1c2d3e4f-5a6b-7c8d-9e0f-1a2b3c4d5e6f";
 
 /**
  * The narrow engine shape, not the response DTO: the resolver reads eleven
@@ -55,6 +68,7 @@ function buildRules(
     waitingTimeBlockMinutes: 30,
     waitingTimeBlockPrice: "25.00",
     ruleVersion: "2026.1",
+    tollRatePerKm: null,
     ...overrides,
   };
 }
@@ -65,8 +79,12 @@ const ROUTE_PRICING = {
   departure: "Antwerp",
   destination: "Rotterdam",
   basePrice: "380.00",
+  // The road's length, which the Toll is derived from. It travels with the match
+  // rather than being looked up again, so it cannot come from another row.
+  kilometres: "25.00",
+  combinationGroupId: null,
+  combinationLegPosition: null,
   notes: null,
-  isActive: true,
   createdAt: new Date("2026-01-01T00:00:00Z"),
   updatedAt: new Date("2026-01-01T00:00:00Z"),
 };
@@ -90,7 +108,7 @@ function assignment(
 }
 
 describe("PricingComponentResolver", () => {
-  let routePricingService: { findActiveRoute: jest.Mock };
+  let routePricingService: { findConfiguredRoute: jest.Mock };
   let tripCustomProperties: { findByTripId: jest.Mock };
   let ruleResolver: { resolveDistanceRatePerKm: jest.Mock };
   let customPropertyService: { findById: jest.Mock };
@@ -101,7 +119,7 @@ describe("PricingComponentResolver", () => {
 
   beforeEach(() => {
     routePricingService = {
-      findActiveRoute: jest.fn().mockResolvedValue(ROUTE_PRICING),
+      findConfiguredRoute: jest.fn().mockResolvedValue(ROUTE_PRICING),
     };
     tripCustomProperties = {
       findByTripId: jest.fn().mockResolvedValue([]),
@@ -136,20 +154,48 @@ describe("PricingComponentResolver", () => {
   });
 
   describe("route-based base source", () => {
-    it("looks the route up by terminal and destination city", async () => {
-      await resolver.resolveBaseSource(buildTrip(), buildRules());
+    /**
+     * The route is matched first and the match is then priced — the two steps the
+     * Engine performs, in the order it performs them.
+     *
+     * Passing the match in rather than looking it up again is what keeps the
+     * Tarief, the road's length and the road's tunnel on ONE configured row: a
+     * road may be configured twice, as an ordinary route and as a leg of a
+     * Combination, and separate lookups could match different rows.
+     */
+    async function priceRouteBased(
+      trip = buildTrip(),
+      rules = buildRules(),
+    ): Promise<PricingBaseSource> {
+      return resolver.resolveBaseSource(
+        trip,
+        rules,
+        await resolver.resolveConfiguredRoute(trip),
+      );
+    }
 
-      expect(routePricingService.findActiveRoute).toHaveBeenCalledWith(
+    it("looks the route up by terminal and destination city", async () => {
+      await priceRouteBased();
+
+      expect(routePricingService.findConfiguredRoute).toHaveBeenCalledWith(
         "Antwerp",
         "Rotterdam",
+        RouteConfigurationKind.NORMAL,
       );
     });
 
+    /** An ordinary Trip is priced against the ORDINARY configuration of its road. */
+    it("asks for the ordinary configuration, not a Combination one", async () => {
+      await priceRouteBased();
+
+      expect(routePricingService.findConfiguredRoute).toHaveBeenCalledTimes(1);
+      expect(
+        routePricingService.findConfiguredRoute.mock.calls[0][2],
+      ).toBe(RouteConfigurationKind.NORMAL);
+    });
+
     it("returns the configured base price as an exact string", async () => {
-      const source = await resolver.resolveBaseSource(
-        buildTrip(),
-        buildRules(),
-      );
+      const source = await priceRouteBased();
 
       expect(source).toEqual({
         strategy: PricingStrategy.ROUTE_BASED,
@@ -159,10 +205,7 @@ describe("PricingComponentResolver", () => {
     });
 
     it("carries no route, which belongs to the Trip rather than the strategy", async () => {
-      const source = await resolver.resolveBaseSource(
-        buildTrip(),
-        buildRules(),
-      );
+      const source = await priceRouteBased();
 
       expect(source).not.toHaveProperty("departure");
       expect(source).not.toHaveProperty("destination");
@@ -185,12 +228,9 @@ describe("PricingComponentResolver", () => {
      * silently absent.
      */
     it("prices at zero when no active route pricing is configured", async () => {
-      routePricingService.findActiveRoute.mockResolvedValue(null);
+      routePricingService.findConfiguredRoute.mockResolvedValue(null);
 
-      const source = await resolver.resolveBaseSource(
-        buildTrip(),
-        buildRules(),
-      );
+      const source = await priceRouteBased();
 
       expect(source).toEqual({
         strategy: PricingStrategy.ROUTE_BASED,
@@ -201,41 +241,210 @@ describe("PricingComponentResolver", () => {
 
     /** Half a route matches no configuration, so it takes the same answer. */
     it("prices at zero when the Trip has no terminal", async () => {
-      const source = await resolver.resolveBaseSource(
-        buildTrip({ terminal: null }),
-        buildRules(),
-      );
+      const source = await priceRouteBased(buildTrip({ terminal: null }));
 
       expect(source).toMatchObject({ basePrice: "0.00", routePricingId: null });
-      expect(routePricingService.findActiveRoute).not.toHaveBeenCalled();
+      expect(routePricingService.findConfiguredRoute).not.toHaveBeenCalled();
     });
 
     it("prices at zero when the Trip has no destination", async () => {
-      const source = await resolver.resolveBaseSource(
+      const source = await priceRouteBased(
         buildTrip({ destinationCity: null }),
-        buildRules(),
       );
 
       expect(source).toMatchObject({ basePrice: "0.00", routePricingId: null });
-      expect(routePricingService.findActiveRoute).not.toHaveBeenCalled();
+      expect(routePricingService.findConfiguredRoute).not.toHaveBeenCalled();
     });
 
     /** The gap is still reported, so an administrator can close it. */
     it("says so in the log rather than passing over it", async () => {
-      routePricingService.findActiveRoute.mockResolvedValue(null);
+      routePricingService.findConfiguredRoute.mockResolvedValue(null);
 
-      await resolver.resolveBaseSource(buildTrip(), buildRules());
+      await priceRouteBased();
 
       expect(logger.warn).toHaveBeenCalledWith(
-        "No active route pricing; the Trip prices at zero",
-        { tripId: TRIP_ID },
+        "No route pricing matched; the Trip prices at zero",
+        { tripId: TRIP_ID, hasTerminal: true, hasDestination: true },
       );
     });
 
     it("never reads the distance rate", async () => {
-      await resolver.resolveBaseSource(buildTrip(), buildRules());
+      await priceRouteBased();
 
       expect(ruleResolver.resolveDistanceRatePerKm).not.toHaveBeenCalled();
+    });
+  });
+
+  /**
+   * ── WHICH CONFIGURATION OF A ROAD APPLIES ────────────────────────────────
+   * A road may be configured twice: once as an ordinary route and once as a leg
+   * of a Combination, priced differently because a Combination's outbound and
+   * return are their own transports. No new rule decides between them — the
+   * existing `combinationLegOf` does, the same answer the TAR allocation uses.
+   * ──────────────────────────────────────────────────────────────────────────
+   */
+  describe("which configured route a Trip matches", () => {
+    /** One document that printed an outbound delivery and a return collection. */
+    function combinationTrip(): TripReadView {
+      return buildTrip({
+        tripGroupId: GROUP_ID,
+        pdfDocumentId: DOCUMENT_ID,
+        direction: TripDirection.DELIVERY,
+      });
+    }
+
+    function genuinePair(): CombinationMember[] {
+      return [
+        {
+          id: TRIP_ID,
+          tripGroupId: GROUP_ID,
+          pdfDocumentId: DOCUMENT_ID,
+          direction: TripDirection.DELIVERY,
+        },
+        {
+          id: OTHER_TRIP_ID,
+          tripGroupId: GROUP_ID,
+          pdfDocumentId: DOCUMENT_ID,
+          direction: TripDirection.COLLECTION,
+        },
+      ];
+    }
+
+    /** What the second lookup — the Combination one — answers. */
+    function configure(combinationLeg: unknown, ordinary: unknown): void {
+      routePricingService.findConfiguredRoute.mockImplementation(
+        async (_departure: string, _destination: string, kind: string) =>
+          kind === RouteConfigurationKind.COMBINATION ? combinationLeg : ordinary,
+      );
+    }
+
+    it("matches the ordinary configuration for a Trip in no group", async () => {
+      const matched = await resolver.resolveConfiguredRoute(buildTrip());
+
+      expect(matched).toEqual({
+        routePricingId: ROUTE_ID,
+        basePrice: "380.00",
+        kilometres: "25.00",
+        kind: RouteConfigurationKind.NORMAL,
+      });
+    });
+
+    it("matches the Combination leg for a genuine Combination Trip", async () => {
+      trips.findByGroupId.mockResolvedValue(genuinePair());
+      configure({ ...ROUTE_PRICING, id: LEG_ID, basePrice: "100.00" }, null);
+
+      const matched = await resolver.resolveConfiguredRoute(combinationTrip());
+
+      expect(matched).toEqual({
+        routePricingId: LEG_ID,
+        basePrice: "100.00",
+        kilometres: "25.00",
+        kind: RouteConfigurationKind.COMBINATION,
+      });
+    });
+
+    /**
+     * ── AND THE LEG FALLS BACK ─────────────────────────────────────────────
+     * Every Combination Trip priced before Combination routes existed was priced
+     * against the ordinary configuration. Refusing to match would silently
+     * reprice all of them to zero, so the fallback is what keeps existing
+     * pricing unchanged; configuring a Combination route is what changes it.
+     */
+    it("falls back to the ordinary route when no Combination is configured", async () => {
+      trips.findByGroupId.mockResolvedValue(genuinePair());
+      configure(null, ROUTE_PRICING);
+
+      const matched = await resolver.resolveConfiguredRoute(combinationTrip());
+
+      expect(matched).toMatchObject({
+        routePricingId: ROUTE_ID,
+        kind: RouteConfigurationKind.NORMAL,
+      });
+    });
+
+    /** A group an operator made by hand claims nothing about pairing. */
+    it("matches the ordinary configuration for a manual group", async () => {
+      trips.findByGroupId.mockResolvedValue([
+        {
+          id: TRIP_ID,
+          tripGroupId: GROUP_ID,
+          pdfDocumentId: DOCUMENT_ID,
+          direction: TripDirection.DELIVERY,
+        },
+        {
+          id: OTHER_TRIP_ID,
+          tripGroupId: GROUP_ID,
+          pdfDocumentId: "a-different-document",
+          direction: TripDirection.COLLECTION,
+        },
+      ]);
+      configure({ ...ROUTE_PRICING, id: LEG_ID }, ROUTE_PRICING);
+
+      const matched = await resolver.resolveConfiguredRoute(combinationTrip());
+
+      expect(matched).toMatchObject({
+        routePricingId: ROUTE_ID,
+        kind: RouteConfigurationKind.NORMAL,
+      });
+    });
+
+    /** A malformed pair is reported elsewhere and never priced on a guess. */
+    it("matches the ordinary configuration for a malformed pair", async () => {
+      trips.findByGroupId.mockResolvedValue([
+        {
+          id: TRIP_ID,
+          tripGroupId: GROUP_ID,
+          pdfDocumentId: DOCUMENT_ID,
+          direction: TripDirection.DELIVERY,
+        },
+        {
+          id: OTHER_TRIP_ID,
+          tripGroupId: GROUP_ID,
+          pdfDocumentId: DOCUMENT_ID,
+          direction: TripDirection.DELIVERY,
+        },
+      ]);
+      configure({ ...ROUTE_PRICING, id: LEG_ID }, ROUTE_PRICING);
+
+      const matched = await resolver.resolveConfiguredRoute(combinationTrip());
+
+      expect(matched).toMatchObject({
+        routePricingId: ROUTE_ID,
+        kind: RouteConfigurationKind.NORMAL,
+      });
+    });
+
+    /** Half a route matches nothing, and costs no query to find out. */
+    it.each([
+      ["no terminal", { terminal: null }],
+      ["no destination", { destinationCity: null }],
+    ])("matches nothing for a Trip with %s", async (_name, overrides) => {
+      expect(
+        await resolver.resolveConfiguredRoute(buildTrip(overrides)),
+      ).toBeNull();
+      expect(routePricingService.findConfiguredRoute).not.toHaveBeenCalled();
+    });
+
+    it("matches nothing when the road is configured in neither context", async () => {
+      configure(null, null);
+
+      expect(await resolver.resolveConfiguredRoute(buildTrip())).toBeNull();
+    });
+
+    /** An ordinary Trip is not in a group, so its group is never read. */
+    it("reads no group for a Trip that is in none", async () => {
+      await resolver.resolveConfiguredRoute(buildTrip());
+
+      expect(trips.findByGroupId).not.toHaveBeenCalled();
+    });
+
+    /** The distance comes from the row that produced the Tarief, never elsewhere. */
+    it("carries the matched row's distance, blank included", async () => {
+      configure(null, { ...ROUTE_PRICING, kilometres: null });
+
+      expect(
+        (await resolver.resolveConfiguredRoute(buildTrip()))?.kilometres,
+      ).toBeNull();
     });
   });
 
@@ -248,6 +457,7 @@ describe("PricingComponentResolver", () => {
       const source = await resolver.resolveBaseSource(
         buildTrip({ distanceKm: "132.50" }),
         distanceRules,
+        null,
       );
 
       // 132.50 x 1.85 is the calculation phase's job, not this resolver's.
@@ -260,7 +470,7 @@ describe("PricingComponentResolver", () => {
 
     it("fails when the Trip has no distance", async () => {
       await expect(
-        resolver.resolveBaseSource(buildTrip(), distanceRules),
+        resolver.resolveBaseSource(buildTrip(), distanceRules, null),
       ).rejects.toBeInstanceOf(MissingTripPricingInputException);
     });
 
@@ -268,6 +478,7 @@ describe("PricingComponentResolver", () => {
       const source = await resolver.resolveBaseSource(
         buildTrip({ distanceKm: "0.00" }),
         distanceRules,
+        null,
       );
 
       expect(source).toMatchObject({ distanceKm: "0.00" });
@@ -277,9 +488,10 @@ describe("PricingComponentResolver", () => {
       await resolver.resolveBaseSource(
         buildTrip({ distanceKm: "10.00" }),
         distanceRules,
+        null,
       );
 
-      expect(routePricingService.findActiveRoute).not.toHaveBeenCalled();
+      expect(routePricingService.findConfiguredRoute).not.toHaveBeenCalled();
     });
 
     it("propagates a missing distance-rate setting", async () => {
@@ -290,6 +502,7 @@ describe("PricingComponentResolver", () => {
         resolver.resolveBaseSource(
           buildTrip({ distanceKm: "10.00" }),
           distanceRules,
+          null,
         ),
       ).rejects.toBe(failure);
     });

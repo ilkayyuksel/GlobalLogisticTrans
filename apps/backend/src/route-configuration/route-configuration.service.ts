@@ -1,52 +1,37 @@
 import { Injectable } from "@nestjs/common";
 
-import { isSameTerminal } from "../common/terminal";
 import { AppLoggerService } from "../logger/app-logger.service";
 import { MAX_PAGE_SIZE } from "../common/dto/pagination-query.dto";
-import { MONEY_DECIMAL_PLACES } from "../common/dto/money";
-import { RouteCostResponseDto } from "../route-costs/dto/route-cost-response.dto";
-import { RouteCostRepository } from "../route-costs/route-cost.repository";
-import { RouteCostService } from "../route-costs/route-cost.service";
 import { RoutePricingResponseDto } from "../route-pricing/dto/route-pricing-response.dto";
+import { RouteConfigurationKind } from "../route-pricing/route-pricing.repository";
 import { RoutePricingService } from "../route-pricing/route-pricing.service";
 import {
-  ChangeRouteConfigurationStateDto,
   RouteConfigurationDto,
   SaveRouteConfigurationDto,
+  composeRouteConfiguration,
+  routeNameOf,
 } from "./dto/route-configuration.dto";
 import {
-  RouteConfigurationNotFoundException,
-  UnknownPricingComponentException,
-} from "./exceptions/route-configuration.exceptions";
+  CombinationLegNotSeparatelyEditableException,
+  CombinationLegNotSeparatelyRemovableException,
+} from "../route-pricing/exceptions/route-pricing.exceptions";
+import { RouteConfigurationNotFoundException } from "./exceptions/route-configuration.exceptions";
+import {
+  RouteTunnelCostService,
+  TUNNEL_CODE,
+} from "./route-tunnel-cost.service";
 
 /**
  * The route-dependent components this screen configures, by catalog code.
  *
- * Deliberately a fixed pair rather than "every route-priced component there is".
- * Toll and Tunnel are the two the business configures per route and the two the
- * Ritten columns show; a component added to the catalog later would need a
- * column of its own on the screen before it could be configured here, so
- * discovering it automatically would produce an amount nobody can see.
+ * Named here and asserted by one binding test: a route cost may only exist for a
+ * component some Custom Property links to, and the pricing bootstrap is what
+ * provisions those properties. Adding a second column to this screen without a
+ * matching entry in that catalog would make saving a route fail with "is not
+ * route-priced", so `pricing-component.catalog.spec.ts` asserts the two lists
+ * agree.
  */
-const TOLL_CODE = "TOLL";
-const TUNNEL_CODE = "TUNNEL";
-
-/**
- * The same pair, exported for one binding test.
- *
- * A route cost may only exist for a component some Custom Property links to,
- * and the pricing bootstrap is what provisions those properties. If a third
- * column were added here without a matching entry in that catalog, saving a
- * route would fail again with "is not route-priced" — so
- * `pricing-component.catalog.spec.ts` asserts the two lists agree.
- */
-export const ROUTE_CONFIGURED_COMPONENT_CODES = [
-  TOLL_CODE,
-  TUNNEL_CODE,
-] as const;
-
-/** Money leaves as exact decimal text, never as a JSON number. */
-const ZERO_AMOUNT = (0).toFixed(MONEY_DECIMAL_PLACES);
+export const ROUTE_CONFIGURED_COMPONENT_CODES = [TUNNEL_CODE] as const;
 
 /**
  * One route, as an operator configures it — composed from the tables that
@@ -89,21 +74,19 @@ const ZERO_AMOUNT = (0).toFixed(MONEY_DECIMAL_PLACES);
 export class RouteConfigurationService {
   constructor(
     private readonly routePricing: RoutePricingService,
-    private readonly routeCosts: RouteCostService,
-    /*
-     * The repository for ONE read the service layer does not expose: turning a
-     * component CODE into its id. The screen speaks in Toll and Tunnel and
-     * never in identifiers, so the translation has to happen somewhere; doing
-     * it here keeps a raw UUID out of the API and out of the browser.
-     */
-    private readonly routeCostRepository: RouteCostRepository,
+    private readonly tunnelCosts: RouteTunnelCostService,
     private readonly logger: AppLoggerService,
   ) {
     this.logger.setContext(RouteConfigurationService.name);
   }
 
   /**
-   * Every configured route, active and inactive.
+   * Every ORDINARY configured route.
+   *
+   * Combination legs are deliberately absent. A leg listed on its own would look
+   * like a route an operator could edit or delete by itself, and it is neither:
+   * it exists only as half of a pair. Combinations are read whole, through
+   * CombinationRouteConfigurationService.
    *
    * Unpaginated: this is configuration an operator reads as a whole, and the
    * set is bounded by how many routes the business runs. The underlying list
@@ -111,10 +94,13 @@ export class RouteConfigurationService {
    * relied upon by default.
    */
   async findAll(): Promise<RouteConfigurationDto[]> {
-    const { items } = await this.routePricing.findAll({
-      page: 1,
-      pageSize: MAX_PAGE_SIZE,
-    });
+    const { items } = await this.routePricing.findAll(
+      {
+        page: 1,
+        pageSize: MAX_PAGE_SIZE,
+      },
+      RouteConfigurationKind.NORMAL,
+    );
 
     return Promise.all(items.map((route) => this.compose(route)));
   }
@@ -133,13 +119,14 @@ export class RouteConfigurationService {
    */
   async create(dto: SaveRouteConfigurationDto): Promise<RouteConfigurationDto> {
     const route = await this.routePricing.create({
-      routeName: this.toRouteName(dto),
+      routeName: routeNameOf(dto),
       departure: dto.departure,
       destination: dto.destination,
       basePrice: dto.tarief,
+      kilometres: dto.kilometres,
     });
 
-    await this.saveCosts(dto);
+    await this.tunnelCosts.save(this.ownerOf(dto), dto.tunnel);
 
     this.logger.log("Route configuration created", { routePricingId: route.id });
 
@@ -160,11 +147,14 @@ export class RouteConfigurationService {
   ): Promise<RouteConfigurationDto> {
     const existing = await this.requireConfiguration(id);
 
+    this.assertOrdinaryRoute(existing, "EDIT");
+
     const route = await this.routePricing.update(id, {
-      routeName: this.toRouteName(dto),
+      routeName: routeNameOf(dto),
       departure: dto.departure,
       destination: dto.destination,
       basePrice: dto.tarief,
+      kilometres: dto.kilometres,
     });
 
     const hasMoved =
@@ -172,10 +162,10 @@ export class RouteConfigurationService {
       existing.destination !== dto.destination;
 
     if (hasMoved) {
-      await this.deactivateCostsOf(existing.departure, existing.destination);
+      await this.tunnelCosts.deactivate(this.ownerOf(existing));
     }
 
-    await this.saveCosts(dto);
+    await this.tunnelCosts.save(this.ownerOf(dto), dto.tunnel);
 
     this.logger.log("Route configuration updated", {
       routePricingId: id,
@@ -186,164 +176,95 @@ export class RouteConfigurationService {
   }
 
   /**
-   * Activates or deactivates a whole configuration.
+   * Removes a route's configuration entirely.
    *
-   * The price and both costs move together. A route whose price is inactive but
-   * whose toll is still active would charge a toll on a route the Engine prices
-   * at zero — a state the operator never asked for and could not see on this
-   * screen, which shows one switch.
+   * ── WHAT GOES, AND WHAT STAYS ─────────────────────────────────────────────
+   * The price record and the route's tunnel cost go together, for the reason
+   * the two were always written together: a cost left behind is matched by
+   * departure and destination and would keep charging Trips on a route nobody
+   * has configured any more.
+   *
+   * Nothing priced changes. A TripPricing snapshot holds the amounts it was
+   * priced with and never reads configuration again, so last month's invoices
+   * are exactly as explainable as they were before.
+   *
+   * This replaced deactivation. A switched-off route was a second state the
+   * screen had to explain and a configuration that looked present while
+   * charging nothing.
    */
-  async changeState(
-    id: string,
-    dto: ChangeRouteConfigurationStateDto,
-  ): Promise<RouteConfigurationDto> {
+  async remove(id: string): Promise<void> {
     const existing = await this.requireConfiguration(id);
 
-    const route = dto.isActive
-      ? await this.routePricing.activate(id)
-      : await this.routePricing.deactivate(id);
+    /*
+     * Checked BEFORE anything is written. A leg's tunnel belongs to the leg, so
+     * treating it as a road here would switch off the ORDINARY route's tunnel on
+     * its way to a refusal — the deletion would fail and still have changed
+     * something it was never allowed to touch.
+     */
+    this.assertOrdinaryRoute(existing, "REMOVE");
 
-    if (dto.isActive) {
-      await this.saveCosts({
-        departure: existing.departure,
-        destination: existing.destination,
-        tarief: Number(existing.tarief),
-        toll: Number(existing.toll),
-        tunnel: Number(existing.tunnel),
-      });
-    } else {
-      await this.deactivateCostsOf(existing.departure, existing.destination);
-    }
+    await this.tunnelCosts.deactivate(this.ownerOf(existing));
+    await this.routePricing.remove(id);
 
-    this.logger.log("Route configuration state changed", {
-      routePricingId: id,
-      isActive: dto.isActive,
-    });
-
-    return this.compose(route);
+    this.logger.log("Route configuration deleted", { routePricingId: id });
   }
 
   /**
-   * Writes both route costs, creating or correcting whichever already exists.
+   * Refuses to treat a Combination leg as an ordinary route.
    *
-   * An amount of ZERO is stored as a real row rather than as no row. The two
-   * price a Trip identically, but they say different things: an explicit zero
-   * is "this route has no toll", and an absent row is "nobody has said". The
-   * second is reported as a configuration gap when a Trip carries the property,
-   * and an operator who typed 0 should not be nagged about it.
+   * These endpoints identify a route by its road and write its tunnel against
+   * that road. A leg is neither: it exists only as half of a pair, and its tunnel
+   * is its own. Both legs are edited and removed together, through
+   * CombinationRouteConfigurationService.
    */
-  private async saveCosts(dto: SaveRouteConfigurationDto): Promise<void> {
-    await this.saveCost(dto, TOLL_CODE, dto.toll);
-    await this.saveCost(dto, TUNNEL_CODE, dto.tunnel);
-  }
-
-  private async saveCost(
-    dto: SaveRouteConfigurationDto,
-    code: string,
-    amount: number,
-  ): Promise<void> {
-    const component = await this.requireComponent(code);
-    const existing = await this.findCost(dto.departure, dto.destination, code);
-
-    if (existing) {
-      await this.routeCosts.update(existing.id, { amount });
-
-      if (!existing.isActive) {
-        await this.routeCosts.activate(existing.id);
-      }
-
+  private assertOrdinaryRoute(
+    route: RouteConfigurationDto,
+    action: "EDIT" | "REMOVE",
+  ): void {
+    if (route.combinationGroupId === null) {
       return;
     }
 
-    await this.routeCosts.create({
-      departure: dto.departure,
-      destination: dto.destination,
-      pricingComponentId: component.id,
-      amount,
+    this.logger.warn("Rejected an ordinary route action on a Combination leg", {
+      routePricingId: route.id,
+      combinationGroupId: route.combinationGroupId,
+      action,
     });
-  }
 
-  /** Leaves the rows in place; only the Engine stops reading them. */
-  private async deactivateCostsOf(
-    departure: string,
-    destination: string,
-  ): Promise<void> {
-    for (const code of [TOLL_CODE, TUNNEL_CODE]) {
-      const cost = await this.findCost(departure, destination, code);
-
-      if (cost?.isActive) {
-        await this.routeCosts.deactivate(cost.id);
-      }
-    }
+    throw action === "EDIT"
+      ? new CombinationLegNotSeparatelyEditableException(
+          route.id,
+          route.combinationGroupId,
+        )
+      : new CombinationLegNotSeparatelyRemovableException(
+          route.id,
+          route.combinationGroupId,
+        );
   }
 
   /**
-   * The route's cost for one component, active or not.
+   * Whose tunnel an ordinary route's is.
    *
-   * Matched through the route-cost service's own active lookup first, which
-   * applies the canonical terminal rule. An INACTIVE cost is invisible to that
-   * lookup, so the paginated list is searched as well — otherwise reactivating
-   * a route would create a second cost row beside the one already there.
+   * The ROAD, as it always has been: an ordinary route's tunnel is a fact about
+   * the road, and every existing row says so. Only a Combination leg owns its
+   * tunnel, because the road it runs may be an ordinary route's as well.
    */
-  private async findCost(
-    departure: string,
-    destination: string,
-    code: string,
-  ): Promise<RouteCostResponseDto | null> {
-    const active = await this.routeCosts.findActiveForRoute(
-      departure,
-      destination,
-    );
-    const activeMatch = active.find(
-      (cost) => cost.pricingComponent.code === code,
-    );
-
-    if (activeMatch) {
-      return activeMatch;
-    }
-
-    const { items } = await this.routeCosts.findAll({
-      page: 1,
-      pageSize: MAX_PAGE_SIZE,
-      isActive: false,
-    });
-
-    return (
-      items.find(
-        (cost) =>
-          cost.pricingComponent.code === code &&
-          cost.destination === destination &&
-          isSameRouteEnd(cost.departure, departure),
-      ) ?? null
-    );
+  private ownerOf(route: { departure: string; destination: string }) {
+    return {
+      kind: "ROAD" as const,
+      departure: route.departure,
+      destination: route.destination,
+    };
   }
 
-  /** The two amounts a route carries, read back onto its price record. */
+  /** What a route carries, read back onto its price record. */
   private async compose(
     route: RoutePricingResponseDto,
   ): Promise<RouteConfigurationDto> {
-    const toll = await this.findCost(
-      route.departure,
-      route.destination,
-      TOLL_CODE,
+    return composeRouteConfiguration(
+      route,
+      await this.tunnelCosts.find(this.ownerOf(route)),
     );
-    const tunnel = await this.findCost(
-      route.departure,
-      route.destination,
-      TUNNEL_CODE,
-    );
-
-    return {
-      id: route.id,
-      departure: route.departure,
-      destination: route.destination,
-      tarief: route.basePrice,
-      toll: toll?.amount ?? ZERO_AMOUNT,
-      tunnel: tunnel?.amount ?? ZERO_AMOUNT,
-      hasToll: toll !== null,
-      hasTunnel: tunnel !== null,
-      isActive: route.isActive,
-    };
   }
 
   private async requireConfiguration(
@@ -356,40 +277,5 @@ export class RouteConfigurationService {
     }
   }
 
-  private async requireComponent(code: string) {
-    const component =
-      await this.routeCostRepository.findPricingComponentByCode(code);
-
-    if (!component) {
-      throw new UnknownPricingComponentException(code);
-    }
-
-    return component;
-  }
-
-  /**
-   * The name the underlying price record carries.
-   *
-   * RoutePricing requires one, and this screen does not ask for it: an operator
-   * configuring a route has already said what it is by naming both ends, and a
-   * second free-text field would be a name that could disagree with them.
-   */
-  private toRouteName(dto: {
-    departure: string;
-    destination: string;
-  }): string {
-    return `${dto.departure} - ${dto.destination}`;
-  }
 }
 
-/**
- * Whether two route ends are the same place.
- *
- * The canonical terminal rule, applied through the same helper the repositories
- * use, so a cost recorded against "PSA Quay 869" is found for a route typed as
- * "Quay 869". Kept as a function rather than inlined because it is the one rule
- * this service applies itself, and it should be visible.
- */
-function isSameRouteEnd(left: string, right: string): boolean {
-  return isSameTerminal(left, right);
-}

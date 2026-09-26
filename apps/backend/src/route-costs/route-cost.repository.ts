@@ -107,6 +107,9 @@ export class RouteCostRepository {
         destination,
         pricingComponentId,
         isActive: true,
+        // The costs of the ROAD. One owned by a Combination leg is not a
+        // conflict here, because it is never matched by road either.
+        routePricingId: null,
         ...(excludeRouteCostId ? { id: { not: excludeRouteCostId } } : {}),
       },
       orderBy: { id: "asc" },
@@ -140,7 +143,7 @@ export class RouteCostRepository {
     destination: string,
   ): Promise<RouteCostWithComponent[]> {
     const candidates = await this.prisma.routeCost.findMany({
-      where: { destination, isActive: true },
+      where: { destination, isActive: true, routePricingId: null },
       include: WITH_COMPONENT,
       orderBy: [{ pricingComponent: { displayOrder: "asc" } }, { id: "asc" }],
     });
@@ -148,6 +151,45 @@ export class RouteCostRepository {
     return candidates.filter((candidate) =>
       isSameTerminal(candidate.departure, departure),
     );
+  }
+
+  /**
+   * Every active cost OWNED by one configured route.
+   *
+   * ── WHY THIS IS A SEPARATE LOOKUP ─────────────────────────────────────────
+   * A Combination leg may run the same road as an ordinary route, so matching
+   * by departure and destination would return the wrong row — or both. A leg's
+   * costs are therefore found by the leg, exactly, with no terminal rule to
+   * apply: the row names its owner rather than describing a road.
+   *
+   * Ordered like the lookup above, so a breakdown built from either comes out in
+   * the documented pricing sequence.
+   */
+  findActiveByRoutePricing(
+    routePricingId: string,
+  ): Promise<RouteCostWithComponent[]> {
+    return this.prisma.routeCost.findMany({
+      where: { routePricingId, isActive: true },
+      include: WITH_COMPONENT,
+      orderBy: [{ pricingComponent: { displayOrder: "asc" } }, { id: "asc" }],
+    });
+  }
+
+  /** The owned counterpart of `findActiveByRouteAndComponent`. */
+  findActiveByRoutePricingAndComponent(
+    routePricingId: string,
+    pricingComponentId: string,
+    excludeRouteCostId?: string,
+  ): Promise<RouteCost | null> {
+    return this.prisma.routeCost.findFirst({
+      where: {
+        routePricingId,
+        pricingComponentId,
+        isActive: true,
+        ...(excludeRouteCostId ? { id: { not: excludeRouteCostId } } : {}),
+      },
+      orderBy: { id: "asc" },
+    });
   }
 
   /**

@@ -31,12 +31,18 @@ function routeCost(
 }
 
 describe("RouteCostResolver", () => {
-  let routeCostService: { findActiveForRoute: jest.Mock };
+  let routeCostService: {
+    findActiveForRoute: jest.Mock;
+    findActiveForRoutePricing: jest.Mock;
+  };
   let logger: { setContext: jest.Mock; log: jest.Mock; warn: jest.Mock };
   let resolver: RouteCostResolver;
 
   beforeEach(() => {
-    routeCostService = { findActiveForRoute: jest.fn().mockResolvedValue([]) };
+    routeCostService = {
+      findActiveForRoute: jest.fn().mockResolvedValue([]),
+      findActiveForRoutePricing: jest.fn().mockResolvedValue([]),
+    };
     logger = { setContext: jest.fn(), log: jest.fn(), warn: jest.fn() };
 
     resolver = new RouteCostResolver(
@@ -167,6 +173,96 @@ describe("RouteCostResolver", () => {
 
       expect(logged).not.toContain("1234.56");
       expect(logged).not.toContain("Rotterdam");
+    });
+  });
+
+  /**
+   * ── A COMBINATION LEG OWNS ITS COSTS ──────────────────────────────────────
+   * A leg may run the very road an ordinary route also covers, priced
+   * differently. Charging the road's tunnel to the leg would mean one amount for
+   * two prices that are deliberately different, so a leg's costs are found by the
+   * leg and every other Trip's by the road.
+   */
+  describe("when the Trip matched a Combination leg", () => {
+    const COMBINATION_MATCH = {
+      routePricingId: "5a1f0c1e-2b3d-4e5f-8a9b-0c1d2e3f4a5b",
+      basePrice: "100.00",
+      kilometres: "25.00",
+      kind: "COMBINATION" as const,
+    };
+
+    const NORMAL_MATCH = {
+      routePricingId: "9c858901-8a57-4791-81fe-4c455b099bc9",
+      basePrice: "380.00",
+      kilometres: "25.00",
+      kind: "NORMAL" as const,
+    };
+
+    it("reads the costs owned by that leg", async () => {
+      await resolver.resolve(TRIP_ID, ROUTE, COMBINATION_MATCH);
+
+      expect(routeCostService.findActiveForRoutePricing).toHaveBeenCalledWith(
+        COMBINATION_MATCH.routePricingId,
+      );
+    });
+
+    /** The decisive one: the ordinary route's tunnel is never even looked at. */
+    it("never reads the road's costs", async () => {
+      await resolver.resolve(TRIP_ID, ROUTE, COMBINATION_MATCH);
+
+      expect(routeCostService.findActiveForRoute).not.toHaveBeenCalled();
+    });
+
+    it("carries the leg's own amounts to the calculators", async () => {
+      routeCostService.findActiveForRoutePricing.mockResolvedValue([
+        routeCost("cost-leg", "component-tunnel", "TUNNEL", "3.75"),
+      ]);
+
+      expect(
+        await resolver.resolve(TRIP_ID, ROUTE, COMBINATION_MATCH),
+      ).toEqual([
+        {
+          routeCostId: "cost-leg",
+          pricingComponentId: "component-tunnel",
+          componentCode: "TUNNEL",
+          amount: "3.75",
+        },
+      ]);
+    });
+
+    it("reads the road's costs for an ordinary match", async () => {
+      await resolver.resolve(TRIP_ID, ROUTE, NORMAL_MATCH);
+
+      expect(routeCostService.findActiveForRoute).toHaveBeenCalledWith(
+        ROUTE.departure,
+        ROUTE.destination,
+      );
+      expect(routeCostService.findActiveForRoutePricing).not.toHaveBeenCalled();
+    });
+
+    /** No match at all is the road, which is how every caller behaved before. */
+    it("reads the road's costs when nothing was matched", async () => {
+      await resolver.resolve(TRIP_ID, ROUTE, null);
+
+      expect(routeCostService.findActiveForRoute).toHaveBeenCalled();
+    });
+
+    it("logs the leg it read, and no amount", async () => {
+      routeCostService.findActiveForRoutePricing.mockResolvedValue([
+        routeCost("cost-leg", "component-tunnel", "TUNNEL", "1234.56"),
+      ]);
+
+      await resolver.resolve(TRIP_ID, ROUTE, COMBINATION_MATCH);
+
+      expect(logger.log).toHaveBeenCalledWith(
+        "Combination leg route costs resolved",
+        expect.objectContaining({
+          tripId: TRIP_ID,
+          routePricingId: COMBINATION_MATCH.routePricingId,
+          routeCostCount: 1,
+        }),
+      );
+      expect(JSON.stringify(logger.log.mock.calls)).not.toContain("1234.56");
     });
   });
 

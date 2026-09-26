@@ -39,6 +39,9 @@ function buildRouteCost(
     destination: "Rotterdam",
     pricingComponentId: TOLL_COMPONENT_ID,
     amount: new Prisma.Decimal("24.50"),
+    // A cost of the ROAD, matched by departure and destination, as every route
+    // cost is unless a Combination leg owns it.
+    routePricingId: null,
     notes: null,
     isActive: true,
     createdAt: new Date("2026-01-01T00:00:00Z"),
@@ -154,6 +157,9 @@ describe("RouteCostService", () => {
         destination: "Rotterdam",
         pricingComponentId: TOLL_COMPONENT_ID,
         amount: 24.5,
+        // A cost of the ROAD unless the caller names an owner: null keeps the
+        // meaning route costs have always had.
+        routePricingId: null,
         notes: null,
       });
     });

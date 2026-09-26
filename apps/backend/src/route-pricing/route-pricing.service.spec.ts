@@ -3,14 +3,17 @@ import { Prisma, RoutePricing } from "@prisma/client";
 import { AppLoggerService } from "../logger/app-logger.service";
 import { ListRoutePricingQueryDto } from "./dto/list-route-pricing-query.dto";
 import {
+  CombinationLegNotSeparatelyRemovableException,
   DuplicateActiveRouteException,
   RoutePricingNotFoundException,
 } from "./exceptions/route-pricing.exceptions";
 import { RoutePricingRepository } from "./route-pricing.repository";
+import { RouteConfigurationKind } from "./route-pricing.repository";
 import { RoutePricingService } from "./route-pricing.service";
 
 const ROUTE_ID = "3f2504e0-4f89-41d3-9a0c-0305e82c3301";
 const OTHER_ROUTE_ID = "9c858901-8a57-4791-81fe-4c455b099bc9";
+const COMBINATION_GROUP_ID = "7d2b8c14-9f3a-4c5e-8b1d-2e3f4a5b6c7d";
 
 function buildRoutePricing(
   overrides: Partial<RoutePricing> = {},
@@ -20,9 +23,12 @@ function buildRoutePricing(
     routeName: "Antwerp - Rotterdam",
     departure: "Antwerp",
     destination: "Rotterdam",
+    kilometres: new Prisma.Decimal("25.00"),
     basePrice: new Prisma.Decimal("380.00"),
+    // An ordinary route: neither half of the Combination discriminator is set.
+    combinationGroupId: null,
+    combinationLegPosition: null,
     notes: null,
-    isActive: true,
     createdAt: new Date("2026-01-01T00:00:00Z"),
     updatedAt: new Date("2026-01-01T00:00:00Z"),
     ...overrides,
@@ -45,9 +51,10 @@ describe("RoutePricingService", () => {
     repository = {
       findPage: jest.fn().mockResolvedValue({ items: [], totalItems: 0 }),
       findById: jest.fn().mockResolvedValue(null),
-      findActiveByRoute: jest.fn().mockResolvedValue(null),
+      findByRoute: jest.fn().mockResolvedValue(null),
       create: jest.fn().mockResolvedValue(buildRoutePricing()),
       update: jest.fn().mockResolvedValue(buildRoutePricing()),
+      delete: jest.fn(),
       setActive: jest.fn().mockResolvedValue(buildRoutePricing()),
     } as unknown as jest.Mocked<RoutePricingRepository>;
 
@@ -105,11 +112,15 @@ describe("RoutePricingService", () => {
 
       expect(Object.keys(item).sort()).toEqual([
         "basePrice",
+        // Both halves of the Combination discriminator: a record says which kind
+        // of configuration it is rather than leaving a caller to infer it.
+        "combinationGroupId",
+        "combinationLegPosition",
         "createdAt",
         "departure",
         "destination",
         "id",
-        "isActive",
+        "kilometres",
         "notes",
         "routeName",
         "updatedAt",
@@ -128,11 +139,11 @@ describe("RoutePricingService", () => {
       expect(typeof item.basePrice).toBe("string");
     });
 
-    it("forwards the filters", async () => {
-      await service.findAll(query({ isActive: false, search: "antwerp" }));
+    it("forwards the search", async () => {
+      await service.findAll(query({ search: "antwerp" }));
 
       expect(repository.findPage).toHaveBeenCalledWith(
-        expect.objectContaining({ isActive: false, search: "antwerp" }),
+        expect.objectContaining({ search: "antwerp" }),
       );
     });
   });
@@ -152,12 +163,19 @@ describe("RoutePricingService", () => {
       );
     });
 
-    it("returns inactive records too, so history stays explainable", async () => {
+    it("returns the route's configured length", async () => {
+      repository.findById.mockResolvedValue(buildRoutePricing());
+
+      expect((await service.findById(ROUTE_ID)).kilometres).toBe("25.00");
+    });
+
+    /** Routes configured before distances existed have none, and say so. */
+    it("returns null for a route whose length nobody has stated", async () => {
       repository.findById.mockResolvedValue(
-        buildRoutePricing({ isActive: false }),
+        buildRoutePricing({ kilometres: null }),
       );
 
-      expect((await service.findById(ROUTE_ID)).isActive).toBe(false);
+      expect((await service.findById(ROUTE_ID)).kilometres).toBeNull();
     });
   });
 
@@ -169,7 +187,7 @@ describe("RoutePricingService", () => {
       basePrice: 380,
     };
 
-    it("stores the record with null for omitted notes", async () => {
+    it("stores the record with null for an omitted distance and notes", async () => {
       await service.create(dto);
 
       expect(repository.create).toHaveBeenCalledWith({
@@ -177,12 +195,23 @@ describe("RoutePricingService", () => {
         departure: "Antwerp",
         destination: "Rotterdam",
         basePrice: 380,
+        // Null, not zero: nobody has stated the distance, so no toll is
+        // charged — as against a road somebody measured as nought kilometres.
+        kilometres: null,
         notes: null,
       });
     });
 
+    it("stores the distance it was given", async () => {
+      await service.create({ ...dto, kilometres: 25 });
+
+      expect(repository.create).toHaveBeenCalledWith(
+        expect.objectContaining({ kilometres: 25 }),
+      );
+    });
+
     it("rejects a route already covered by an active record", async () => {
-      repository.findActiveByRoute.mockResolvedValue(
+      repository.findByRoute.mockResolvedValue(
         buildRoutePricing({ id: OTHER_ROUTE_ID }),
       );
 
@@ -194,7 +223,7 @@ describe("RoutePricingService", () => {
     });
 
     it("allows a route covered only by an inactive record", async () => {
-      repository.findActiveByRoute.mockResolvedValue(null);
+      repository.findByRoute.mockResolvedValue(null);
 
       await expect(service.create(dto)).resolves.toMatchObject({
         departure: "Antwerp",
@@ -221,7 +250,7 @@ describe("RoutePricingService", () => {
     });
 
     it("logs a rejected duplicate as a warning without the price", async () => {
-      repository.findActiveByRoute.mockResolvedValue(
+      repository.findByRoute.mockResolvedValue(
         buildRoutePricing({ id: OTHER_ROUTE_ID }),
       );
 
@@ -272,7 +301,7 @@ describe("RoutePricingService", () => {
 
       await service.update(ROUTE_ID, { basePrice: 400 });
 
-      expect(repository.findActiveByRoute).not.toHaveBeenCalled();
+      expect(repository.findByRoute).not.toHaveBeenCalled();
     });
 
     it("re-checks uniqueness when the route moves", async () => {
@@ -280,16 +309,17 @@ describe("RoutePricingService", () => {
 
       await service.update(ROUTE_ID, { destination: "Gent" });
 
-      expect(repository.findActiveByRoute).toHaveBeenCalledWith(
-        "Antwerp",
-        "Gent",
-        ROUTE_ID,
-      );
+      expect(repository.findByRoute).toHaveBeenCalledWith("Antwerp", "Gent", {
+        // An ordinary route collides only with another ordinary route: a
+        // Combination leg on the same road is a different pricing context.
+        kind: RouteConfigurationKind.NORMAL,
+        excludeRoutePricingId: ROUTE_ID,
+      });
     });
 
     it("rejects a move onto a route another active record covers", async () => {
       repository.findById.mockResolvedValue(buildRoutePricing());
-      repository.findActiveByRoute.mockResolvedValue(
+      repository.findByRoute.mockResolvedValue(
         buildRoutePricing({ id: OTHER_ROUTE_ID }),
       );
 
@@ -300,15 +330,12 @@ describe("RoutePricingService", () => {
       expect(repository.update).not.toHaveBeenCalled();
     });
 
-    it("does not check uniqueness while the record is inactive", async () => {
-      // An inactive record cannot collide with the active-only index.
-      repository.findById.mockResolvedValue(
-        buildRoutePricing({ isActive: false }),
-      );
+    it("checks uniqueness whenever the route moves", async () => {
+      repository.findById.mockResolvedValue(buildRoutePricing());
 
       await service.update(ROUTE_ID, { destination: "Gent" });
 
-      expect(repository.findActiveByRoute).not.toHaveBeenCalled();
+      expect(repository.findByRoute).toHaveBeenCalled();
       expect(repository.update).toHaveBeenCalled();
     });
 
@@ -332,115 +359,88 @@ describe("RoutePricingService", () => {
     });
   });
 
-  describe("activate", () => {
-    it("activates an inactive record", async () => {
-      repository.findById.mockResolvedValue(
-        buildRoutePricing({ isActive: false }),
-      );
-      repository.setActive.mockResolvedValue(
-        buildRoutePricing({ isActive: true }),
-      );
-
-      const result = await service.activate(ROUTE_ID);
-
-      expect(repository.setActive).toHaveBeenCalledWith(ROUTE_ID, true);
-      expect(result.isActive).toBe(true);
-      expect(logger.log).toHaveBeenCalledWith("Route pricing activated", {
-        routePricingId: ROUTE_ID,
-      });
-    });
-
-    it("is idempotent for an already active record", async () => {
+  /**
+   * ── REMOVING REPLACED SWITCHING OFF ───────────────────────────────────────
+   * A route used to be deactivated and kept, so that pricing derived from it
+   * stayed explainable. It stays explainable regardless: a snapshot holds the
+   * amounts it was priced with and reads no configuration ever again. The kept
+   * row only gave the screen a second state to explain.
+   */
+  describe("remove", () => {
+    it("deletes the record", async () => {
       repository.findById.mockResolvedValue(buildRoutePricing());
 
-      await service.activate(ROUTE_ID);
+      await service.remove(ROUTE_ID);
 
-      expect(repository.setActive).not.toHaveBeenCalled();
+      expect(repository.delete).toHaveBeenCalledWith(ROUTE_ID);
     });
 
-    it("refuses when the route was taken while inactive", async () => {
-      repository.findById.mockResolvedValue(
-        buildRoutePricing({ isActive: false }),
-      );
-      repository.findActiveByRoute.mockResolvedValue(
-        buildRoutePricing({ id: OTHER_ROUTE_ID }),
-      );
-
-      await expect(service.activate(ROUTE_ID)).rejects.toThrow(
-        DuplicateActiveRouteException,
-      );
-
-      expect(repository.setActive).not.toHaveBeenCalled();
-    });
-
-    it("throws when the record does not exist", async () => {
+    it("refuses an unknown record, and deletes nothing", async () => {
       repository.findById.mockResolvedValue(null);
 
-      await expect(service.activate(ROUTE_ID)).rejects.toThrow(
+      await expect(service.remove(ROUTE_ID)).rejects.toBeInstanceOf(
         RoutePricingNotFoundException,
       );
-    });
-  });
 
-  describe("deactivate", () => {
-    it("soft deletes rather than removing the record", async () => {
-      repository.findById.mockResolvedValue(buildRoutePricing());
-      repository.setActive.mockResolvedValue(
-        buildRoutePricing({ isActive: false }),
-      );
-
-      const result = await service.deactivate(ROUTE_ID);
-
-      expect(repository.setActive).toHaveBeenCalledWith(ROUTE_ID, false);
-      expect(result.isActive).toBe(false);
-      expect(logger.log).toHaveBeenCalledWith("Route pricing deactivated", {
-        routePricingId: ROUTE_ID,
-      });
+      expect(repository.delete).not.toHaveBeenCalled();
     });
 
-    it("is idempotent for an already inactive record", async () => {
+    /*
+     * ── HALF A COMBINATION IS NOT A THING ──────────────────────────────────
+     * Removing one leg would leave a configuration that prices the outbound and
+     * silently charges nothing for the return. The whole Combination goes
+     * through CombinationRoutePricingService, or none of it does.
+     */
+    it("refuses to remove a leg of a Combination", async () => {
       repository.findById.mockResolvedValue(
-        buildRoutePricing({ isActive: false }),
+        buildRoutePricing({
+          combinationGroupId: COMBINATION_GROUP_ID,
+          combinationLegPosition: 1,
+        }),
       );
 
-      await service.deactivate(ROUTE_ID);
-
-      expect(repository.setActive).not.toHaveBeenCalled();
+      await expect(service.remove(ROUTE_ID)).rejects.toBeInstanceOf(
+        CombinationLegNotSeparatelyRemovableException,
+      );
+      expect(repository.delete).not.toHaveBeenCalled();
     });
 
-    it("is never blocked by historical pricing", async () => {
-      // Deactivation must always succeed: historical Trip pricing stays
-      // explainable precisely because the row is retained.
+    it("names the Combination to remove instead", async () => {
+      repository.findById.mockResolvedValue(
+        buildRoutePricing({
+          combinationGroupId: COMBINATION_GROUP_ID,
+          combinationLegPosition: 2,
+        }),
+      );
+
+      await expect(service.remove(ROUTE_ID)).rejects.toThrow(
+        COMBINATION_GROUP_ID,
+      );
+    });
+
+    /** The route it covered is free again the moment it is gone. */
+    it("frees the route for a new configuration", async () => {
       repository.findById.mockResolvedValue(buildRoutePricing());
-      repository.setActive.mockResolvedValue(
-        buildRoutePricing({ isActive: false }),
-      );
+      await service.remove(ROUTE_ID);
 
-      await expect(service.deactivate(ROUTE_ID)).resolves.toMatchObject({
-        isActive: false,
-      });
+      repository.findByRoute.mockResolvedValue(null);
+      repository.create.mockResolvedValue(buildRoutePricing());
+
+      await expect(
+        service.create({
+          routeName: "Antwerp - Rotterdam",
+          departure: "Antwerp",
+          destination: "Rotterdam",
+          basePrice: 380,
+        }),
+      ).resolves.toBeDefined();
     });
 
-    it("throws when the record does not exist", async () => {
-      repository.findById.mockResolvedValue(null);
+    it("offers no way to switch a route off instead", () => {
+      const methods = Object.getOwnPropertyNames(RoutePricingService.prototype);
 
-      await expect(service.deactivate(ROUTE_ID)).rejects.toThrow(
-        RoutePricingNotFoundException,
-      );
+      expect(methods).not.toContain("activate");
+      expect(methods).not.toContain("deactivate");
     });
-  });
-
-  it("exposes no delete operation", () => {
-    const methods = Object.getOwnPropertyNames(RoutePricingService.prototype);
-
-    expect(methods).not.toContain("delete");
-    expect(methods).not.toContain("remove");
-  });
-
-  it("performs no price arithmetic", () => {
-    // Calculation belongs exclusively to the future Pricing Engine.
-    const source = RoutePricingService.prototype.constructor.toString();
-
-    expect(source).not.toMatch(/basePrice\s*[*+/-]/);
   });
 });

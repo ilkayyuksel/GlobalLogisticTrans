@@ -27,11 +27,11 @@ function settingIdentity(category: string, key: string): string {
  * converts billable waiting minutes into blocks, so zero leaves the pricing
  * formula undefined. A minimum of one whole minute is the smallest usable block.
  *
- * The four pricing amounts below are bounded at zero rather than at one.
+ * The five pricing amounts below are bounded at zero rather than at one.
  * pricing_rules.md § Business Constraints states that negative pricing is not
  * supported, and each of these values feeds an amount directly: a negative
  * percentage, surcharge, rate or block price would produce a negative pricing
- * line. Zero remains valid for all four and means the component is configured
+ * line. Zero remains valid for all five and means the component is configured
  * but charges nothing — pricing_examples.md example 9 relies on exactly that.
  *
  * `PRICING.WAITING_TIME_THRESHOLD_MINUTES` — the wait at which charging begins.
@@ -49,6 +49,7 @@ const MINIMUM_BY_SETTING: ReadonlyMap<string, number> = new Map([
   [settingIdentity("PRICING", "FUEL_PERCENTAGE"), 0],
   [settingIdentity("PRICING", "COMBINATION_SURCHARGE"), 0],
   [settingIdentity("PRICING", "DISTANCE_RATE_PER_KM"), 0],
+  [settingIdentity("PRICING", "TOLL_RATE_PER_KM"), 0],
   [settingIdentity("PRICING", "WAITING_TIME_BLOCK_PRICE"), 0],
   [settingIdentity("PRICING", "WAITING_TIME_FREE_MINUTES"), 0],
   [settingIdentity("PRICING", "WAITING_TIME_THRESHOLD_MINUTES"), 0],

@@ -85,11 +85,12 @@ const RULES = {
   waitingTimeBlockMinutes: 15,
   waitingTimeBlockPrice: "13.75",
   ruleVersion: "2026.1",
+  tollRatePerKm: null,
 };
 
 describe("a CLOSED Trip on an unconfigured route", () => {
   let trips: { findById: jest.Mock; findByGroupId: jest.Mock };
-  let routePricing: { findActiveRoute: jest.Mock };
+  let routePricing: { findConfiguredRoute: jest.Mock };
   let routeCosts: { findActiveForRoute: jest.Mock };
   let assignments: { findByTripId: jest.Mock };
   let customProperties: { findById: jest.Mock };
@@ -120,7 +121,7 @@ describe("a CLOSED Trip on an unconfigured route", () => {
       findByGroupId: jest.fn().mockResolvedValue([]),
     };
     // The whole point: nothing is configured for this route.
-    routePricing = { findActiveRoute: jest.fn().mockResolvedValue(null) };
+    routePricing = { findConfiguredRoute: jest.fn().mockResolvedValue(null) };
     routeCosts = { findActiveForRoute: jest.fn().mockResolvedValue([]) };
     assignments = { findByTripId: jest.fn().mockResolvedValue([]) };
     customProperties = {
@@ -207,8 +208,8 @@ describe("a CLOSED Trip on an unconfigured route", () => {
       await engine.calculate(TRIP_ID);
 
       expect(logger.warn).toHaveBeenCalledWith(
-        "No active route pricing; the Trip prices at zero",
-        { tripId: TRIP_ID },
+        "No route pricing matched; the Trip prices at zero",
+        { tripId: TRIP_ID, hasTerminal: true, hasDestination: true },
       );
     });
   });
@@ -584,7 +585,7 @@ describe("the two legs of a Combination", () => {
       trips,
       ruleResolver,
       new PricingComponentResolver(
-        { findActiveRoute: jest.fn().mockResolvedValue(null) } as never,
+        { findConfiguredRoute: jest.fn().mockResolvedValue(null) } as never,
         { findByTripId: jest.fn().mockResolvedValue(options.assignments ?? []) } as never,
         {
           findById: jest.fn().mockResolvedValue({

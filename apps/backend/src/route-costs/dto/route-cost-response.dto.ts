@@ -51,6 +51,14 @@ export class RouteCostResponseDto {
   })
   amount!: string;
 
+  @ApiPropertyOptional({
+    description:
+      "The configured route that OWNS this cost, or null when it belongs to the road and is matched by departure and destination. A Combination leg owns its costs, because the road it runs may also be an ordinary route with a tunnel of its own.",
+    format: "uuid",
+    nullable: true,
+  })
+  routePricingId!: string | null;
+
   @ApiPropertyOptional({ nullable: true })
   notes!: string | null;
 
@@ -90,6 +98,7 @@ export function toRouteCostResponse(
       name: routeCost.pricingComponent.name,
     },
     amount: routeCost.amount.toFixed(MONEY_DECIMAL_PLACES),
+    routePricingId: routeCost.routePricingId,
     notes: routeCost.notes,
     isActive: routeCost.isActive,
     createdAt: routeCost.createdAt,

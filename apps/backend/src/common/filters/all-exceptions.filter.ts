@@ -81,9 +81,16 @@ export class AllExceptionsFilter implements ExceptionFilter {
       return { code, message: "Validation failed", details: message };
     }
 
+    /*
+     * An exception may carry its own detail beside a readable sentence. A bulk
+     * import does: it has one thing to say about the request as a whole — that
+     * nothing was created — and a list of reasons per entry, and collapsing the
+     * two into "Validation failed" would lose the half that answers "what now?".
+     */
     return {
       code,
       message: typeof message === "string" ? message : exception.message,
+      ...(record.details === undefined ? {} : { details: record.details }),
     };
   }
 

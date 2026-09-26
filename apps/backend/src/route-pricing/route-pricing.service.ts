@@ -13,10 +13,14 @@ import {
 } from "./dto/route-pricing-response.dto";
 import { UpdateRoutePricingDto } from "./dto/update-route-pricing.dto";
 import {
+  CombinationLegNotSeparatelyRemovableException,
   DuplicateActiveRouteException,
   RoutePricingNotFoundException,
 } from "./exceptions/route-pricing.exceptions";
-import { RoutePricingRepository } from "./route-pricing.repository";
+import {
+  RouteConfigurationKind,
+  RoutePricingRepository,
+} from "./route-pricing.repository";
 
 /** Prisma's unique-constraint violation code. */
 const PRISMA_UNIQUE_VIOLATION = "P2002";
@@ -37,12 +41,20 @@ export class RoutePricingService {
     this.logger.setContext(RoutePricingService.name);
   }
 
+  /**
+   * A page of configured routes.
+   *
+   * `kind` narrows the page to ordinary routes or to Combination legs. Omitted,
+   * it returns both — which is what the REST endpoint does, because a
+   * configuration list that hid half its rows would be misleading.
+   */
   async findAll(
     query: ListRoutePricingQueryDto,
+    kind?: RouteConfigurationKind,
   ): Promise<PaginatedRoutePricingDto> {
     const { items, totalItems } = await this.repository.findPage({
-      isActive: query.isActive,
       search: query.search,
+      kind,
       skip: (query.page - 1) * query.pageSize,
       take: query.pageSize,
     });
@@ -58,7 +70,7 @@ export class RoutePricingService {
   }
 
   /**
-   * The active record configured for a route, or null when none is.
+   * The record configured for a route, or null when none is.
    *
    * Exposes the exact lookup the duplicate check already performs, because the
    * Pricing Engine has to select a route deterministically and the paginated
@@ -66,22 +78,30 @@ export class RoutePricingService {
    * route is an error depends on the caller's pricing strategy, so that decision
    * stays with the caller.
    */
-  async findActiveRoute(
+  async findConfiguredRoute(
     departure: string,
     destination: string,
+    kind: RouteConfigurationKind = RouteConfigurationKind.NORMAL,
   ): Promise<RoutePricingResponseDto | null> {
-    const routePricing = await this.repository.findActiveByRoute(
+    const routePricing = await this.repository.findByRoute(
       departure,
       destination,
+      { kind },
     );
 
     return routePricing ? toRoutePricingResponse(routePricing) : null;
   }
 
   async create(dto: CreateRoutePricingDto): Promise<RoutePricingResponseDto> {
-    // New records are always active, so any existing active record for the same
-    // route is a conflict.
-    await this.assertRouteAvailable(dto.departure, dto.destination);
+    // One ORDINARY configuration per route: an existing record for the same
+    // route is a conflict, and there is no longer a dormant state one could hide
+    // in. A Combination leg on the same road is not a conflict — the two are
+    // read in different pricing contexts and never overwrite each other.
+    await this.assertRouteAvailable(
+      dto.departure,
+      dto.destination,
+      RouteConfigurationKind.NORMAL,
+    );
 
     const created = await this.runGuardingRoute(
       dto.departure,
@@ -92,6 +112,7 @@ export class RoutePricingService {
           departure: dto.departure,
           destination: dto.destination,
           basePrice: dto.basePrice,
+          kilometres: dto.kilometres ?? null,
           notes: dto.notes ?? null,
         }),
     );
@@ -113,10 +134,17 @@ export class RoutePricingService {
     const routeChanged =
       departure !== existing.departure || destination !== existing.destination;
 
-    // Only re-check when the route actually moves, and only while the record is
-    // active — an inactive record cannot collide with the active-only index.
-    if (routeChanged && existing.isActive) {
-      await this.assertRouteAvailable(departure, destination, id);
+    // Only re-check when the route actually moves: a record never collides
+    // with itself.
+    if (routeChanged) {
+      await this.assertRouteAvailable(
+        departure,
+        destination,
+        existing.combinationGroupId === null
+          ? RouteConfigurationKind.NORMAL
+          : RouteConfigurationKind.COMBINATION,
+        id,
+      );
     }
 
     const updated = await this.runGuardingRoute(departure, destination, () =>
@@ -132,49 +160,39 @@ export class RoutePricingService {
   }
 
   /**
-   * Reactivating can resurrect a clash: the record kept its route while
-   * inactive, but another record may have taken it in the meantime.
+   * Removes a route's configuration.
+   *
+   * ── WHY THIS REPLACED DEACTIVATION ────────────────────────────────────────
+   * A route used to be switched off and kept, so that pricing calculated from
+   * it stayed explainable. It stays explainable either way: a TripPricing
+   * snapshot holds the amounts it was priced with and reads no configuration
+   * ever again. What the kept row really produced was a second state on a
+   * screen that had no use for one, and a route that looked configured while
+   * charging nothing.
+   *
+   * So the row goes. A Trip priced yesterday keeps its price; a Trip priced
+   * tomorrow finds no configuration for this route, which is exactly what
+   * deleting it means.
    */
-  async activate(id: string): Promise<RoutePricingResponseDto> {
-    const routePricing = await this.requireRoutePricing(id);
+  async remove(id: string): Promise<void> {
+    const existing = await this.requireRoutePricing(id);
 
-    if (routePricing.isActive) {
-      return toRoutePricingResponse(routePricing);
+    /*
+     * A Combination is two legs or it is nothing. Removing one would leave a
+     * configuration that prices the outbound and silently charges nothing for
+     * the return, so the whole group goes through
+     * CombinationRoutePricingService or none of it does.
+     */
+    if (existing.combinationGroupId !== null) {
+      throw new CombinationLegNotSeparatelyRemovableException(
+        id,
+        existing.combinationGroupId,
+      );
     }
 
-    await this.assertRouteAvailable(
-      routePricing.departure,
-      routePricing.destination,
-      id,
-    );
+    await this.repository.delete(id);
 
-    const activated = await this.runGuardingRoute(
-      routePricing.departure,
-      routePricing.destination,
-      () => this.repository.setActive(id, true),
-    );
-
-    this.logger.log("Route pricing activated", { routePricingId: id });
-
-    return toRoutePricingResponse(activated);
-  }
-
-  /**
-   * Soft delete. The record is never removed, so pricing already calculated
-   * from it remains explainable.
-   */
-  async deactivate(id: string): Promise<RoutePricingResponseDto> {
-    const routePricing = await this.requireRoutePricing(id);
-
-    if (!routePricing.isActive) {
-      return toRoutePricingResponse(routePricing);
-    }
-
-    const deactivated = await this.repository.setActive(id, false);
-
-    this.logger.log("Route pricing deactivated", { routePricingId: id });
-
-    return toRoutePricingResponse(deactivated);
+    this.logger.log("Route pricing deleted", { routePricingId: id });
   }
 
   private async requireRoutePricing(id: string): Promise<RoutePricing> {
@@ -190,13 +208,13 @@ export class RoutePricingService {
   private async assertRouteAvailable(
     departure: string,
     destination: string,
+    kind: RouteConfigurationKind,
     excludeRoutePricingId?: string,
   ): Promise<void> {
-    const holder = await this.repository.findActiveByRoute(
-      departure,
-      destination,
+    const holder = await this.repository.findByRoute(departure, destination, {
+      kind,
       excludeRoutePricingId,
-    );
+    });
 
     if (holder) {
       this.logger.warn("Rejected duplicate active route", {
@@ -244,6 +262,12 @@ export class RoutePricingService {
       departure: dto.departure,
       destination: dto.destination,
       basePrice: dto.basePrice,
+      /*
+       * The route's length, which the Toll is derived from. It reached the
+       * service and was dropped here, so an edited distance was accepted and
+       * never stored.
+       */
+      kilometres: dto.kilometres,
       notes: dto.notes,
     };
   }

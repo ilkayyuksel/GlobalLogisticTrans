@@ -4476,16 +4476,43 @@ A RoutePricing should contain:
 - Departure
 - Destination
 - Base Price
-- Active Status
+- Kilometres — the length of the road, from which the Toll is derived. Optional:
+  a route nobody has measured is charged no toll.
+- Combination Group and Leg Position — the discriminator described below.
+  Both are absent for an ordinary route.
 - Notes (optional)
+
+There is no Active Status. A route price exists or it is deleted: the flag gave
+the configuration screen a second state it had no use for, and produced a route
+that looked configured while charging nothing. Deleting one changes no stored
+pricing, because a snapshot keeps the amounts it was priced with.
+
+---
+
+## Two Kinds of Configured Route
+
+A RoutePricing is one of two kinds:
+
+- **an ordinary route** — a road configured on its own;
+- **a Combination leg** — one of the two legs of a CombinationRouteGroup.
+
+A road may be configured **both** ways at once. That is not a duplicate: the two
+are read in different pricing contexts and neither overwrites the other. Which
+context a Trip prices against is decided by the rule that already existed —
+whether the Trip is a leg of a genuine Combination — and is documented in
+`pricing_rules.md`.
+
+> A CombinationRouteGroup is route **configuration**. It is not a TripGroup: a
+> TripGroup is two real Trips an operator put together and it decides the €50
+> Backload, while this decides what a route COSTS. Neither reads the other.
 
 ---
 
 ## Business Constraints
 
-Routes should be unique among active RoutePricing records.
-
-Only active RoutePricing records may be used.
+A road may hold at most one ordinary RoutePricing and at most one Combination leg.
+Pricing selects a row by its road within one context, so a second row in the same
+context would make the choice arbitrary.
 
 Historical Trip pricing must never change automatically after RoutePricing modifications.
 
@@ -4498,6 +4525,44 @@ RoutePricing should support future extensions such as:
 - Customer-specific prices
 - Seasonal pricing
 - Effective dates
+
+---
+
+# 4.18.1 CombinationRouteGroup
+
+## Purpose
+
+The identity of one Combination route configuration: the parent of exactly two
+RoutePricing legs — an outbound and a return, each with its own Tarief, distance
+and tunnel, because the two legitimately cost different amounts.
+
+## Why the group is an entity
+
+"Both legs or neither" cannot otherwise be expressed. Legs pointing at each
+other, or a shared text key, would both permit a half-configured Combination to
+exist — and a Combination with one leg prices one direction while silently
+charging nothing for the other.
+
+## Relationships
+
+One CombinationRouteGroup has exactly two RoutePricing legs.
+
+It references no Trip, no TripGroup and no pricing snapshot, and nothing
+references it but its legs.
+
+## Business Constraints
+
+Exactly two legs. The database refuses a **third** on its own — only two leg
+positions exist and each is unique within its group — while the lower bound is
+enforced by the service, which writes the group and both legs in one transaction:
+no constraint can require a row to have a sibling.
+
+The two legs must describe different roads.
+
+Removing a CombinationRouteGroup removes both legs and each leg's own route costs.
+A single leg cannot be removed on its own.
+
+Historical Trip pricing is untouched by any of it.
 - Distance overrides
 - Container-type pricing
 - Weekend pricing
@@ -5554,19 +5619,27 @@ The Pricing Engine only reads RouteCost.
 
 ## Relationship with RoutePricing
 
-RouteCost is **independent** of RoutePricing.
+A RouteCost belongs either to a **road** or to one **configured route**.
 
-RoutePricing supplies the base transport price and is used only when the active
-Pricing Strategy is Route-Based Pricing.
+By default it belongs to the road, independently of RoutePricing. RoutePricing
+supplies the base transport price and is used only when the active Pricing
+Strategy is Route-Based Pricing, while a toll is incurred whichever strategy
+produced the base price. If every RouteCost belonged to a RoutePricing, switching
+the Pricing Strategy would silently remove every toll and tunnel charge.
 
-A toll is incurred whichever strategy produced the base price. If RouteCost
-belonged to RoutePricing, switching the Pricing Strategy would silently remove
-every toll and tunnel charge.
+Such a RouteCost therefore identifies its route by departure and destination in
+its own right, exactly as RoutePricing does, without referencing it. A road may
+have a RouteCost without having a RoutePricing, and the reverse.
 
-RouteCost therefore identifies its route by departure and destination in its own
-right, exactly as RoutePricing does, without referencing it.
+The exception is a **Combination leg**, which OWNS its route costs. A leg may run
+the very road an ordinary route also covers, priced differently, so "the tunnel of
+that road" stopped being a single answer: the leg's cost names the leg it was
+configured for, and editing it cannot reach the ordinary route's. Such a cost is
+read only through its leg, and goes when the leg does — it describes that leg and
+nothing else.
 
-A route may have a RouteCost without having a RoutePricing, and the reverse.
+No cost recorded before Combination routes existed was converted. Every one of
+them belongs to the road and behaves exactly as it did.
 
 ---
 

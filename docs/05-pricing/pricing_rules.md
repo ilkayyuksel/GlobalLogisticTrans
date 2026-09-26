@@ -368,14 +368,81 @@ The formula is defined in `pricing_formula.md` and worked through in
 
 ---
 
+# Which Configured Route a Trip Prices Against
+
+A road may be configured **twice**:
+
+- as an **ordinary route**, and
+- as a **leg of a Combination route**, priced for itself because a Combination's
+  outbound and return are their own transports and legitimately cost different
+  amounts.
+
+Both are legitimate and neither is a duplicate of the other. A Combination route
+configuration is always exactly two legs, each with its own Tarief, distance and
+tunnel, held together by a `combination_route_group` row — see
+`database_schema.md` §8.1 and §8.1.1.
+
+> This is route **configuration**. It is not a `trip_group`: that decides which
+> Trips carry the €50 Backload, and nothing in it is read here.
+
+## The rule that decides
+
+No new matching rule was invented. The one that already existed decides, and it
+is the same answer the TAR allocation uses — `combinationLegOf`, described under
+*What counts as a genuine Combination* below:
+
+| The Trip's leg | Configuration it prices against |
+|---|---|
+| DELIVERY or COLLECTION of a genuine Combination | the **Combination** configuration of its road, if one exists |
+| NONE — an ordinary Trip, or a group an operator made by hand | the **ordinary** configuration |
+| INVALID — the Trips of one document are grouped but are not one delivery and one collection | the **ordinary** configuration |
+
+An INVALID group is reported rather than priced on a guess, so it takes the
+ordinary configuration rather than a Combination one.
+
+### A genuine leg falls back
+
+A genuine Combination leg whose road has **no** Combination configuration prices
+against the ordinary one. Every Combination Trip priced before Combination routes
+existed was priced exactly that way; refusing to match would silently reprice all
+of them to zero. The fallback is therefore what keeps existing pricing unchanged,
+and configuring a Combination route is what changes it.
+
+## One match, read three times
+
+The configured route is matched **once** per calculation, and the Tarief, the
+road's length and the road's tunnel all come from that one row. Three independent
+lookups could each match a different row now that a road can be configured twice,
+and the Trip would be priced with a mixture of the two.
+
+Concretely, from the matched row:
+
+| Amount | Source |
+|---|---|
+| Tarief | `route_pricing.base_price` of the matched row |
+| Toll | `route_pricing.kilometres` of the matched row × `PRICING.TOLL_RATE_PER_KM` |
+| Tunnel | the TUNNEL `route_cost` of the matched row's owner — the LEG for a Combination leg, the ROAD otherwise |
+
+A Combination leg **owns** its route costs (`route_cost.route_pricing_id`), which
+is what stops the two configurations of one road sharing a tunnel amount: editing
+the Combination's tunnel can no longer change what every ordinary Trip on that
+road pays.
+
+---
+
 # Toll and Tunnel Costs
 
-Toll and Tunnel are **route-dependent** costs.
+Toll and Tunnel are both **route-dependent**, and the route decides both whether
+they apply and how much they cost. They no longer share one rule, because they
+are configured differently.
 
-They share one rule, stated once here rather than twice, because they differ
-only in which Pricing Component they use.
+## Toll: the road's length times one rate
 
-**The route decides both** whether they apply and how much they cost:
+A route carries its **distance in kilometres**. What a Trip pays is that
+distance times the toll rate configured once for the whole business
+(`PRICING.TOLL_RATE_PER_KM`):
+
+    Toll = route kilometres × toll rate per kilometre
 
 Trip
 
@@ -385,16 +452,64 @@ Route (Terminal → Destination City)
 
 ↓
 
-RouteCost — the configured amount for that component
+RoutePricing.kilometres — the length of that road
+
+× PRICING.TOLL_RATE_PER_KM — what one kilometre costs
 
 ↓
 
 TripPricingItem
 
+A toll amount is therefore **not** stored per route any more. The road
+contributes a fact that changes only when the road does, and one number is
+changed when tolls rise instead of an amount on every route.
+
+The distance is per **leg** for a Combination: each leg states its own, and each
+Trip is charged the toll of the leg it prices against. The two legs of one
+Combination may therefore carry different distances and different tolls.
+
+The line records what it charged for: `quantity` holds the distance and
+`unit_price` the rate. So a breakdown says why the toll is what it is, and a Trip
+closed today keeps the rate that applied today — moving the setting tomorrow
+cannot restate it.
+
+**Either half missing produces no line**, as against a line of zero. No line
+says nobody has stated what this road costs; that covers a route with no
+configuration, a route configured before distances existed, and a rate nobody
+has set. A route stated **as** nought kilometres is a decision somebody made and
+does produce a line, of zero.
+
+## Tunnel: an amount for the road
+
+Tunnel is unchanged. It is a fixed amount configured per route and stored as a
+RouteCost:
+
+Trip
+
+↓
+
+Route (Terminal → Destination City)
+
+↓
+
+RouteCost — the configured amount for the TUNNEL component
+
+↓
+
+TripPricingItem
+
+It is **not** part of the kilometres. A route's distance prices its toll; its
+tunnel is charged beside it.
+
+Each leg of a Combination carries its **own** tunnel, stored as a RouteCost owned
+by that leg rather than by the road. A leg's tunnel is read only through the leg,
+and the road's only through the road, so the ordinary route's tunnel and the
+Combination leg's tunnel on the same road are two independent amounts.
+
 ## Applicability
 
 A route-dependent cost applies to every Trip whose route has that cost
-configured and active. A toll is a property of the road, not of the load: if the
+configured. A toll is a property of the road, not of the load: if the
 route is tolled, the Trip driving it pays.
 
 Nothing is assigned, ticked or selected per Trip. This changed: applicability

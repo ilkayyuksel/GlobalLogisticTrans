@@ -77,6 +77,7 @@ const RULES: PricingRuleConfiguration = {
   waitingTimeBlockMinutes: 30,
     waitingTimeBlockPrice: "25.00",
     ruleVersion: "2026.1",
+    tollRatePerKm: null,
 };
 
 const BASE_SOURCE = {
@@ -121,6 +122,7 @@ describe("PricingEngineService", () => {
   let componentResolver: {
     resolveBaseSource: jest.Mock;
     resolveAssignedCustomProperties: jest.Mock;
+    resolveConfiguredRoute: jest.Mock;
     resolveCombinationLeg: jest.Mock;
   };
   let routeCostResolver: { resolve: jest.Mock };
@@ -162,6 +164,13 @@ describe("PricingEngineService", () => {
       resolveBaseSource: jest.fn().mockResolvedValue(BASE_SOURCE),
       resolveAssignedCustomProperties: jest.fn().mockResolvedValue([]),
       /*
+       * The configured route this Trip matched, resolved ONCE and then read by
+       * the Tarief, the Toll's distance and the route's costs. Nothing matched
+       * unless a test says otherwise, which is the ordinary case on this
+       * business's data: most roads have no configured price.
+       */
+      resolveConfiguredRoute: jest.fn().mockResolvedValue(null),
+      /*
        * A stand-in, not the rule. Which Trips form a genuine Combination is
        * decided by combinationLegOf() and proved in the resolver spec; here the
        * double simply reports the leg each test set its Trip up to be, so a
@@ -199,6 +208,9 @@ describe("PricingEngineService", () => {
       expect(componentResolver.resolveBaseSource).toHaveBeenCalledWith(
         buildTrip(),
         RULES,
+        // The match, passed in rather than looked up again: the Tarief, the
+        // distance and the tunnel must come from ONE configured row.
+        null,
       );
       // The Trip itself, not just its id: the resolver needs the group and the
       // direction to decide whether this leg carries the automatic property.
@@ -208,7 +220,13 @@ describe("PricingEngineService", () => {
         expect.objectContaining({ id: TRIP_ID }),
         expect.objectContaining({ automaticCustomPropertyId: "property-tar" }),
       );
-      expect(routeCostResolver.resolve).toHaveBeenCalledWith(TRIP_ID, ROUTE);
+      // The match travels with the route: a Combination leg's costs are found by
+      // the leg, and every other Trip's by the road.
+      expect(routeCostResolver.resolve).toHaveBeenCalledWith(
+        TRIP_ID,
+        ROUTE,
+        null,
+      );
       expect(snapshotWriter.findExistingSnapshot).toHaveBeenCalledWith(TRIP_ID);
     });
 
@@ -349,6 +367,7 @@ describe("PricingEngineService", () => {
         baseSource: BASE_SOURCE,
         rules: RULES,
         assignedCustomProperties: properties,
+        routeKilometres: null,
         routeCosts: ROUTE_COSTS,
         existingSnapshot: null,
       });
@@ -1007,6 +1026,31 @@ describe("PricingEngineService", () => {
         routeCostResolver.resolve.mockResolvedValue(costs);
       }
 
+      /**
+       * A tolled road: a distance on the route and a rate in the Settings.
+       *
+       * The toll is no longer a cost stored per route, so arranging one means
+       * stating how long the road is and what a kilometre costs — which is
+       * exactly what an operator now configures.
+       */
+      function tolledRoad(kilometres = "25.00", ratePerKm = "0.39") {
+        /*
+         * The distance travels on the MATCH, so a Trip is charged for the road
+         * the row that priced it describes. The kind matters too: an ordinary
+         * route reads the road's costs, a Combination leg its own.
+         */
+        componentResolver.resolveConfiguredRoute.mockResolvedValue({
+          routePricingId: ROUTE_ID,
+          basePrice: "380.00",
+          kilometres,
+          kind: "NORMAL",
+        });
+        ruleResolver.resolve.mockResolvedValue({
+          ...RULES,
+          tollRatePerKm: ratePerKm,
+        });
+      }
+
       /*
        * The whole point of the change: a Trip on a route with a tunnel pays it
        * without anybody assigning a property. Previously this produced only the
@@ -1082,8 +1126,9 @@ describe("PricingEngineService", () => {
        * produces one line of each — and a route priced for only one produces
        * only that one.
        */
-      it("never mistakes the Toll cost for the Tunnel", async () => {
-        assign([], [TOLL_ROUTE_COST]);
+      it("never mistakes the Toll for the Tunnel", async () => {
+        assign([], []);
+        tolledRoad();
 
         const { lines } = await engine.calculate(TRIP_ID);
 
@@ -1099,10 +1144,8 @@ describe("PricingEngineService", () => {
         trips.findById.mockResolvedValue(
           buildTrip({ tripGroupId: "group-1", waitingTimeMinutes: 105 }),
         );
-        assign(
-          [TOLL_PROPERTY, TUNNEL_PROPERTY],
-          [TOLL_ROUTE_COST, TUNNEL_ROUTE_COST],
-        );
+        assign([TOLL_PROPERTY, TUNNEL_PROPERTY], [TUNNEL_ROUTE_COST]);
+        tolledRoad();
 
         const { lines } = await engine.calculate(TRIP_ID);
 
@@ -1128,10 +1171,8 @@ describe("PricingEngineService", () => {
       });
 
       it("charges fuel on the base price only, never on toll or tunnel", async () => {
-        assign(
-          [TOLL_PROPERTY, TUNNEL_PROPERTY],
-          [TOLL_ROUTE_COST, TUNNEL_ROUTE_COST],
-        );
+        assign([TOLL_PROPERTY, TUNNEL_PROPERTY], [TUNNEL_ROUTE_COST]);
+        tolledRoad();
 
         const { lines } = await engine.calculate(TRIP_ID);
         const fuel = lines.find(
@@ -1237,10 +1278,8 @@ describe("PricingEngineService", () => {
           trips.findById.mockResolvedValue(
             buildTrip({ tripGroupId: "group-1", waitingTimeMinutes: 105 }),
           );
-          assign(
-            [TOLL_PROPERTY, TUNNEL_PROPERTY, TAR],
-            [TOLL_ROUTE_COST, TUNNEL_ROUTE_COST],
-          );
+          assign([TOLL_PROPERTY, TUNNEL_PROPERTY, TAR], [TUNNEL_ROUTE_COST]);
+          tolledRoad();
 
           const { lines } = await engine.calculate(TRIP_ID);
 
@@ -1351,18 +1390,24 @@ describe("PricingEngineService", () => {
         ]);
         routeCostResolver.resolve.mockResolvedValue([
           {
-            routeCostId: "cost-toll",
-            pricingComponentId: "component-toll",
-            componentCode: "TOLL",
-            amount: "9.75",
-          },
-          {
             routeCostId: "cost-tunnel",
             pricingComponentId: "component-tunnel",
             componentCode: "TUNNEL",
             amount: "12.50",
           },
         ]);
+        // The same 9.75 of toll, reached the way the business reaches it:
+        // 25 kilometres of road at 0.39 each.
+        componentResolver.resolveConfiguredRoute.mockResolvedValue({
+          routePricingId: ROUTE_ID,
+          basePrice: "380.00",
+          kilometres: "25.00",
+          kind: "NORMAL",
+        });
+        ruleResolver.resolve.mockResolvedValue({
+          ...RULES,
+          tollRatePerKm: "0.39",
+        });
 
         const { totalPrice } = await engine.calculate(TRIP_ID);
 
@@ -1486,6 +1531,7 @@ describe("PricingEngineService", () => {
       ruleResolver.resolve.mockResolvedValue({
         ...RULES,
         ruleVersion: "2027.4",
+        tollRatePerKm: null,
       });
 
       expect((await engine.calculate(TRIP_ID)).pricingRuleVersion).toBe(
@@ -1749,6 +1795,7 @@ describe("PricingEngineService", () => {
       ruleResolver.resolve.mockResolvedValue({
         ...RULES,
         ruleVersion: "2027.9",
+        tollRatePerKm: null,
       });
 
       const result = await engine.reprocess(TRIP_ID);

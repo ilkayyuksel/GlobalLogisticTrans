@@ -101,7 +101,7 @@ If future requirements introduce multiple parser implementations, OCR providers,
 ## Soft Delete
 
 - `trip` uses `status = 'DELETED'`.
-- Configurable entities (`driver`, `vehicle`, `trailer`, `custom_property`, `route_pricing`, `pricing_component`, `route_cost`, `setting`) use `is_active BOOLEAN NOT NULL DEFAULT TRUE`.
+- Configurable entities (`driver`, `vehicle`, `trailer`, `custom_property`, `pricing_component`, `route_cost`, `setting`) use `is_active BOOLEAN NOT NULL DEFAULT TRUE`. `route_pricing` is the exception: it carries no state and is deleted instead.
 - `vacation` has **no** soft delete flag.
 
 ## Active-Scoped Uniqueness
@@ -165,6 +165,7 @@ Two exceptions:
 | 14 | `custom_property` | Settings |
 | 15 | `setting` | Settings |
 | 16 | `route_pricing` | Pricing configuration |
+| 16a | `combination_route_group` | Pricing configuration |
 | 17 | `pricing_component` | Pricing configuration |
 | 18 | `route_cost` | Pricing configuration |
 | 19 | `trip_pricing` | Pricing |
@@ -1017,6 +1018,23 @@ None.
 
 Configured base transport price for one route, used when the active Pricing Strategy is Route-Based Pricing.
 
+A row is one of two kinds, told apart by `combination_group_id`:
+
+- **an ordinary route** (`NULL`) — a road configured on its own;
+- **a Combination leg** (set) — one of the two legs of a Combination route
+  configuration, which always has exactly two: an outbound and a return, each
+  with its own price, distance and tunnel, because the two legitimately cost
+  different amounts.
+
+A road may be configured **both** ways at once, and that is not a duplicate: the
+two are read in different pricing contexts and neither overwrites the other. See
+`combination_route_group` (§8.1.1) and `pricing_rules.md` for which context
+applies to a given Trip.
+
+This has nothing to do with `trip_group`. A `trip_group` is two real Trips an
+operator put together and it decides the €50 Backload; this decides what a route
+COSTS. Neither reads the other.
+
 ### Columns
 
 | Column | Type | Nullable | Default | Notes |
@@ -1026,32 +1044,102 @@ Configured base transport price for one route, used when the active Pricing Stra
 | `departure` | `TEXT` | NO | — | |
 | `destination` | `TEXT` | NO | — | |
 | `base_price` | `NUMERIC(12,2)` | NO | — | |
+| `kilometres` | `NUMERIC(8,2)` | YES | `NULL` | The length of the route. The Toll is this times `PRICING.TOLL_RATE_PER_KM`; `NULL` means nobody has stated it, and no toll is charged. Per LEG for a Combination, so each leg is charged for its own road. |
+| `combination_group_id` | `UUID` | YES | `NULL` | The discriminator. `NULL` is an ordinary route; set makes the row one leg of that Combination configuration. |
+| `combination_leg_position` | `SMALLINT` | YES | `NULL` | `1` the outbound, `2` the return. `NULL` exactly when `combination_group_id` is. Not decoration: both legs are written in one transaction and share `created_at`, which therefore cannot order them. |
 | `notes` | `TEXT` | YES | `NULL` | |
-| `is_active` | `BOOLEAN` | NO | `TRUE` | |
 | `created_at` | `TIMESTAMPTZ` | NO | `now()` | |
 | `updated_at` | `TIMESTAMPTZ` | NO | `now()` | |
 
+There is **no** `is_active`. A route price exists or it is deleted: the flag gave
+the configuration screen a second state it had no use for, and a route that
+looked configured while charging nothing. Deleting one changes no stored pricing
+— a snapshot keeps the amounts it was priced with and reads no configuration
+again.
+
 ### Constraints
 
-- Partial `UNIQUE (departure, destination)` where `is_active = TRUE` — the route, as currently defined, is the departure/destination pair.
+- Partial `UNIQUE (departure, destination)` where `combination_group_id IS NULL` — one ordinary configuration per route.
+- Partial `UNIQUE (departure, destination)` where `combination_group_id IS NOT NULL` — one Combination leg per route. Pricing selects a leg by its road, so two legs on one road would make the choice between them arbitrary.
+- Partial `UNIQUE (combination_group_id, combination_leg_position)` where `combination_group_id IS NOT NULL` — with only two positions permitted, this is what makes **at most two legs** structural: the database refuses a third.
 - `CHECK` — `base_price` must be greater than or equal to zero.
+- `CHECK` — `combination_leg_position IS NULL` exactly when `combination_group_id` is, so neither half of the discriminator can be set without the other.
+- `CHECK` — `combination_leg_position IN (1, 2)` when set.
+
+The two partial unique indexes replaced one unconditional `UNIQUE (departure,
+destination)`. That is precisely what lets an ordinary route and a Combination leg
+describe the same road while neither kind holds two rows for one road.
+
+**At least** two legs is the one half no constraint can express — nothing can
+require a row to have a sibling — so it is enforced by
+`CombinationRoutePricingService`, which writes the group row and both legs in one
+transaction.
 
 ### Foreign Keys
 
-None. Trips do not reference `route_pricing`; the Pricing Engine selects the row during calculation.
+| Column | References | On Delete |
+|---|---|---|
+| `combination_group_id` | `combination_route_group(id)` | `CASCADE` |
+
+Trips do not reference `route_pricing`; the Pricing Engine selects the row during
+calculation. The cascade is the group's own rule: removing a Combination removes
+both its legs, and the database will not leave one behind.
 
 ### Indexes
 
 | Index | Columns | Type | Purpose |
 |---|---|---|---|
 | PK | `id` | Primary key | |
-| Unique (partial) | `departure`, `destination` where `is_active = TRUE` | Unique | Route uniqueness among active records |
-| Lookup | `is_active` | B-tree | Active-only selection |
+| Unique (partial) | `departure`, `destination` where `combination_group_id IS NULL` | Unique | One ordinary configuration per route |
+| Unique (partial) | `departure`, `destination` where `combination_group_id IS NOT NULL` | Unique | One Combination leg per route |
+| Unique (partial) | `combination_group_id`, `combination_leg_position` where `combination_group_id IS NOT NULL` | Unique | At most two legs, each in a known position |
+| Lookup | `combination_group_id` | B-tree | Reading a Combination's legs |
 
 ### Application-enforced rules
 
-- Only active records may be used for new calculations.
 - Modifying a route price never changes historical Trip pricing automatically.
+- A Combination configuration is created, changed and removed as a whole. A single leg cannot be deleted through the ordinary route endpoint: `RoutePricingService.remove` refuses it and names the group to remove instead.
+
+---
+
+## 8.1.1 `combination_route_group`
+
+### Purpose
+
+The identity of one Combination route configuration: the parent of exactly two
+`route_pricing` legs.
+
+A row of its own rather than a convention, because "both legs or neither" cannot
+otherwise be expressed. Legs pointing at each other, or a shared text key, would
+both permit a half-configured Combination to exist — and a Combination with one
+leg prices one direction while silently charging nothing for the other.
+
+Configuration only. No `trip_pricing` snapshot and no pricing item is read,
+written or deleted here.
+
+### Columns
+
+| Column | Type | Nullable | Default | Notes |
+|---|---|---|---|---|
+| `id` | `UUID` | NO | `gen_random_uuid()` | Primary key |
+| `notes` | `TEXT` | YES | `NULL` | |
+| `created_at` | `TIMESTAMPTZ` | NO | `now()` | |
+| `updated_at` | `TIMESTAMPTZ` | NO | `now()` | |
+
+### Foreign Keys
+
+None. It is referenced BY `route_pricing` and by `route_cost` (through a leg).
+
+### Indexes
+
+| Index | Columns | Type | Purpose |
+|---|---|---|---|
+| PK | `id` | Primary key | |
+
+### Application-enforced rules
+
+- Exactly two legs, written in one transaction.
+- Deleting the group deletes both legs, and with them each leg's own route costs, through the cascades.
 
 ---
 
@@ -1105,10 +1193,22 @@ The amount of a route-dependent pricing component for one route. Whether the
 component applies to a Trip is decided by `trip_custom_property`; this table
 answers only how much it costs on that route.
 
-Deliberately **independent of `route_pricing`**: a toll is incurred whichever
-Pricing Strategy produced the base price, and `route_pricing` is consulted only
-under Route-Based Pricing. Keying this table by the route itself, rather than by
-`route_pricing_id`, keeps route costs alive when the strategy changes.
+A cost belongs either to a **road** or to one **configured route**, which
+`route_pricing_id` says:
+
+- `NULL` — a cost of the road, matched by `departure` and `destination`. This is
+  how every route cost has always been matched, and how every ordinary route's
+  cost still is. Keying by the route itself rather than by `route_pricing_id`
+  keeps such a cost alive when the Pricing Strategy changes, because a toll is
+  incurred whichever strategy produced the base price.
+- set — a cost owned by that configured route. Used by a **Combination leg**,
+  whose road may also be an ordinary route with a tunnel of its own: "the tunnel
+  of Antwerp to Kallo" stopped being a single answer once a road could be
+  configured twice, so a leg owns its costs and editing one cannot reach the
+  other.
+
+No existing row was converted: every cost recorded before Combination routes
+existed is a cost of the road and behaves exactly as it did.
 
 ### Columns
 
@@ -1118,6 +1218,7 @@ under Route-Based Pricing. Keying this table by the route itself, rather than by
 | `departure` | `TEXT` | NO | — | Matched against `trip.terminal` |
 | `destination` | `TEXT` | NO | — | Matched against `trip.destination_city` |
 | `pricing_component_id` | `UUID` | NO | — | The component this amount belongs to |
+| `route_pricing_id` | `UUID` | YES | `NULL` | The configured route that OWNS this cost, or `NULL` when it belongs to the road. Set for a Combination leg's own costs. |
 | `amount` | `NUMERIC(12,2)` | NO | — | |
 | `notes` | `TEXT` | YES | `NULL` | |
 | `is_active` | `BOOLEAN` | NO | `TRUE` | |
@@ -1129,29 +1230,38 @@ stay comparable, but neither references the other.
 
 ### Constraints
 
-- Partial `UNIQUE (departure, destination, pricing_component_id)` where `is_active = TRUE` — one active amount per component per route.
+- Partial `UNIQUE (departure, destination, pricing_component_id)` where `is_active AND route_pricing_id IS NULL` — one active amount per component per road.
+- Partial `UNIQUE (route_pricing_id, pricing_component_id)` where `is_active AND route_pricing_id IS NOT NULL` — one active amount per component per owning route.
 - `CHECK` — `amount` must be greater than or equal to zero (negative pricing is not supported).
+
+One uniqueness rule per owner: a road may hold one active cost per component and
+so may a leg, and the two no longer collide — which is what lets a Combination leg
+carry its own tunnel on a road an ordinary route also uses.
 
 ### Foreign Keys
 
 | Column | References | On Delete |
 |---|---|---|
 | `pricing_component_id` | `pricing_component(id)` | `RESTRICT` |
+| `route_pricing_id` | `route_pricing(id)` | `CASCADE` |
 
 ### Indexes
 
 | Index | Columns | Type | Purpose |
 |---|---|---|---|
 | PK | `id` | Primary key | |
-| Unique (partial) | `departure`, `destination`, `pricing_component_id` where `is_active = TRUE` | Unique | Route uniqueness per component |
+| Unique (partial) | `departure`, `destination`, `pricing_component_id` where `is_active AND route_pricing_id IS NULL` | Unique | One amount per component per road |
+| Unique (partial) | `route_pricing_id`, `pricing_component_id` where `is_active AND route_pricing_id IS NOT NULL` | Unique | One amount per component per owning route |
 | Lookup | `departure`, `destination` | B-tree | **Resolving every route cost for a Trip's route in one query** |
 | Lookup | `pricing_component_id` | B-tree | Per-component reporting and maintenance |
+| Lookup | `route_pricing_id` | B-tree | Resolving a Combination leg's own costs |
 
 ### Application-enforced rules
 
 - Only active records may be used for new calculations.
 - Modifying an amount never changes historical Trip pricing automatically.
-- Records are never physically deleted.
+- A cost of the ROAD is never physically deleted: it describes a road that still exists, so it is deactivated. A cost OWNED by a Combination leg goes with its leg through the cascade, because it describes that leg and nothing else and no lookup could reach it afterwards.
+- A lookup by road never returns a cost owned by a leg, and a lookup by leg never returns a cost of the road. That is what keeps the two configurations of one road independent.
 - A Trip carrying a route-priced Custom Property whose route has no active `route_cost` for that component **fails the calculation**. It is never skipped and never priced as zero — see `pricing_rules.md`.
 
 ---

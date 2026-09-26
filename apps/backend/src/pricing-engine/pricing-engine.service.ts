@@ -263,14 +263,36 @@ export class PricingEngineService {
       destination: trip.destinationCity ?? "",
     };
 
+    /*
+     * The configured route, matched ONCE for this Trip and then read by three
+     * components: the Tarief, the road's length for the Toll, and the road's
+     * tunnel. A road may be configured twice — as an ordinary route and as a leg
+     * of a Combination — so three separate lookups could match three different
+     * rows and price a Trip with a mixture of them.
+     */
+    const matchedRoute =
+      await this.componentResolver.resolveConfiguredRoute(trip);
+
     const baseSource = await this.componentResolver.resolveBaseSource(
       trip,
       rules,
+      matchedRoute,
     );
     const assignedCustomProperties =
       await this.componentResolver.resolveAssignedCustomProperties(trip, rules);
 
-    const routeCosts = await this.routeCostResolver.resolve(trip.id, route);
+    const routeCosts = await this.routeCostResolver.resolve(
+      trip.id,
+      route,
+      matchedRoute,
+    );
+    /*
+     * The road's length, for the Toll — taken from the row that produced the
+     * Tarief, so a Combination leg is charged for its own distance and never for
+     * the ordinary route's. Null when nobody has stated it, which charges no
+     * toll; the Toll calculator stays a pure function of the context.
+     */
+    const routeKilometres = matchedRoute?.kilometres ?? null;
 
     // Both halves of every route-priced component are now known, so a gap
     // between them can be reported before any step runs.
@@ -309,6 +331,7 @@ export class PricingEngineService {
       baseSource,
       rules,
       assignedCustomProperties,
+      routeKilometres,
       routeCosts,
       costConfirmation,
       existingSnapshot,

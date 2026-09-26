@@ -195,6 +195,9 @@ describe("RouteCostRepository", () => {
           destination: "Rotterdam",
           pricingComponentId: COMPONENT_ID,
           isActive: true,
+          // The costs of the ROAD. One owned by a Combination leg is a
+          // legitimate second row and never a duplicate of this one.
+          routePricingId: null,
         },
         orderBy: { id: "asc" },
       });
@@ -225,6 +228,7 @@ describe("RouteCostRepository", () => {
           destination: "Rotterdam",
           pricingComponentId: COMPONENT_ID,
           isActive: true,
+          routePricingId: null,
           id: { not: "self" },
         },
         orderBy: { id: "asc" },
@@ -291,7 +295,11 @@ describe("RouteCostRepository", () => {
 
       const [call] = prisma.routeCost.findMany.mock.calls;
 
-      expect(call[0].where).toEqual({ destination: "Dourges", isActive: true });
+      expect(call[0].where).toEqual({
+        destination: "Dourges",
+        isActive: true,
+        routePricingId: null,
+      });
       expect(call[0].where).not.toHaveProperty("departure");
     });
 

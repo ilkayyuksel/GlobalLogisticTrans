@@ -1,5 +1,12 @@
 import { PrismaService } from "../prisma/prisma.service";
-import { RoutePricingRepository } from "./route-pricing.repository";
+import {
+  RouteConfigurationKind,
+  RoutePricingRepository,
+} from "./route-pricing.repository";
+
+/** The two scopes a route lookup can mean. See `FindRouteOptions`. */
+const NORMAL_ROUTE = { kind: RouteConfigurationKind.NORMAL } as const;
+const COMBINATION_ROUTE = { kind: RouteConfigurationKind.COMBINATION } as const;
 
 /**
  * Verifies the exact Prisma calls. A wrong `where` here returns the wrong
@@ -15,6 +22,13 @@ describe("RoutePricingRepository", () => {
       count: jest.Mock;
       create: jest.Mock;
       update: jest.Mock;
+      delete: jest.Mock;
+    };
+    combinationRouteGroup: {
+      findUnique: jest.Mock;
+      findMany: jest.Mock;
+      create: jest.Mock;
+      delete: jest.Mock;
     };
     $transaction: jest.Mock;
   };
@@ -29,6 +43,13 @@ describe("RoutePricingRepository", () => {
         count: jest.fn().mockResolvedValue(0),
         create: jest.fn().mockResolvedValue({}),
         update: jest.fn().mockResolvedValue({}),
+        delete: jest.fn(),
+      },
+      combinationRouteGroup: {
+        findUnique: jest.fn().mockResolvedValue(null),
+        findMany: jest.fn().mockResolvedValue([]),
+        create: jest.fn().mockResolvedValue({}),
+        delete: jest.fn().mockResolvedValue({}),
       },
       $transaction: jest.fn().mockResolvedValue([[], 0]),
     };
@@ -56,17 +77,6 @@ describe("RoutePricingRepository", () => {
       });
     });
 
-    it.each([true, false])(
-      "filters on isActive=%p when supplied",
-      async (isActive) => {
-        await repository.findPage({ isActive, skip: 0, take: 25 });
-
-        expect(prisma.routePricing.findMany).toHaveBeenCalledWith(
-          expect.objectContaining({ where: { isActive } }),
-        );
-      },
-    );
-
     it("searches route name, departure and destination case-insensitively", async () => {
       await repository.findPage({ search: "rotterdam", skip: 0, take: 25 });
 
@@ -83,9 +93,8 @@ describe("RoutePricingRepository", () => {
       );
     });
 
-    it("combines the active filter with the search", async () => {
+    it("searches without filtering on any state", async () => {
       await repository.findPage({
-        isActive: true,
         search: "antwerp",
         skip: 0,
         take: 25,
@@ -93,13 +102,12 @@ describe("RoutePricingRepository", () => {
 
       const where = prisma.routePricing.findMany.mock.calls[0][0].where;
 
-      expect(where.isActive).toBe(true);
+      expect(where).not.toHaveProperty("isActive");
       expect(where.OR).toHaveLength(3);
     });
 
     it("uses the same where clause for the rows and the count", async () => {
       await repository.findPage({
-        isActive: true,
         search: "antwerp",
         skip: 50,
         take: 25,
@@ -137,30 +145,52 @@ describe("RoutePricingRepository", () => {
    * both spellings exist in the configuration. Neither side is rewritten.
    * ──────────────────────────────────────────────────────────────────────────
    */
-  describe("findActiveByRoute", () => {
+  describe("findByRoute", () => {
     function candidates(...departures: string[]): void {
       prisma.routePricing.findMany.mockResolvedValue(
         departures.map((departure, index) => ({
           id: `route-${index}`,
           departure,
           destination: "Dourges",
-          isActive: true,
         })),
       );
     }
 
-    it("narrows by destination and active state in SQL", async () => {
-      await repository.findActiveByRoute("Antwerp", "Rotterdam");
+    it("narrows by destination in SQL", async () => {
+      await repository.findByRoute("Antwerp", "Rotterdam", NORMAL_ROUTE);
 
       expect(prisma.routePricing.findMany).toHaveBeenCalledWith({
-        where: { destination: "Rotterdam", isActive: true },
+        where: { destination: "Rotterdam", combinationGroupId: null },
         orderBy: { id: "asc" },
       });
     });
 
+    /*
+     * ── THE KIND IS PART OF THE IDENTITY ──────────────────────────────────
+     * One road may be configured twice: as an ordinary route and as a leg of a
+     * Combination. A lookup therefore says which of the two it means, and the
+     * scope is applied in SQL — without it a match would be ambiguous rather
+     * than merely unfiltered.
+     */
+    it("looks only at ordinary routes when asked for one", async () => {
+      await repository.findByRoute("Antwerp", "Rotterdam", NORMAL_ROUTE);
+
+      const [call] = prisma.routePricing.findMany.mock.calls;
+
+      expect(call[0].where.combinationGroupId).toBeNull();
+    });
+
+    it("looks only at Combination legs when asked for one", async () => {
+      await repository.findByRoute("Antwerp", "Rotterdam", COMBINATION_ROUTE);
+
+      const [call] = prisma.routePricing.findMany.mock.calls;
+
+      expect(call[0].where.combinationGroupId).toEqual({ not: null });
+    });
+
     /** The departure must NOT be an SQL equality, or a spelling would miss. */
     it("does not constrain the departure in SQL", async () => {
-      await repository.findActiveByRoute("PSA Quay 869", "Dourges");
+      await repository.findByRoute("PSA Quay 869", "Dourges", NORMAL_ROUTE);
 
       const [call] = prisma.routePricing.findMany.mock.calls;
 
@@ -168,12 +198,15 @@ describe("RoutePricingRepository", () => {
     });
 
     it("excludes the record being edited", async () => {
-      await repository.findActiveByRoute("Antwerp", "Rotterdam", "self");
+      await repository.findByRoute("Antwerp", "Rotterdam", {
+        kind: RouteConfigurationKind.NORMAL,
+        excludeRoutePricingId: "self",
+      });
 
       expect(prisma.routePricing.findMany).toHaveBeenCalledWith({
         where: {
           destination: "Rotterdam",
-          isActive: true,
+          combinationGroupId: null,
           id: { not: "self" },
         },
         orderBy: { id: "asc" },
@@ -194,7 +227,11 @@ describe("RoutePricingRepository", () => {
     ) => {
       candidates(configured);
 
-      const found = await repository.findActiveByRoute(tripTerminal, "Dourges");
+      const found = await repository.findByRoute(
+        tripTerminal,
+        "Dourges",
+        NORMAL_ROUTE,
+      );
 
       expect(found?.departure).toBe(configured);
     });
@@ -208,7 +245,7 @@ describe("RoutePricingRepository", () => {
       candidates(configured);
 
       expect(
-        await repository.findActiveByRoute(tripTerminal, "Dourges"),
+        await repository.findByRoute(tripTerminal, "Dourges", NORMAL_ROUTE),
       ).toBeNull();
     });
 
@@ -216,7 +253,7 @@ describe("RoutePricingRepository", () => {
       candidates();
 
       expect(
-        await repository.findActiveByRoute("Quay 869", "Dourges"),
+        await repository.findByRoute("Quay 869", "Dourges", NORMAL_ROUTE),
       ).toBeNull();
     });
 
@@ -225,7 +262,8 @@ describe("RoutePricingRepository", () => {
       candidates("Quay 869", "PSA Quay 869");
 
       expect(
-        (await repository.findActiveByRoute("Quay 869", "Dourges"))?.id,
+        (await repository.findByRoute("Quay 869", "Dourges", NORMAL_ROUTE))
+          ?.id,
       ).toBe("route-0");
     });
   });
@@ -258,27 +296,124 @@ describe("RoutePricingRepository", () => {
       });
     });
 
-    it.each([true, false])(
-      "setActive writes only isActive=%p",
-      async (isActive) => {
-        await repository.setActive("route-1", isActive);
+    it("deletes the row it is given", async () => {
+      await repository.delete("route-1");
 
-        expect(prisma.routePricing.update).toHaveBeenCalledWith({
-          where: { id: "route-1" },
-          data: { isActive },
-        });
-      },
-    );
+      expect(prisma.routePricing.delete).toHaveBeenCalledWith({
+        where: { id: "route-1" },
+      });
+    });
   });
 
-  it("exposes no delete operation, because records are never removed", () => {
+  /**
+   * ── THE COMBINATION GROUPS ────────────────────────────────────────────────
+   * A Combination configuration is a parent row with exactly two legs. The
+   * queries that read and write it are asserted for the same reason every other
+   * query here is: a wrong `where` or a wrong `orderBy` returns the wrong
+   * configuration silently rather than failing.
+   */
+  describe("Combination route groups", () => {
+    it("reads a group by its primary key", async () => {
+      await repository.findGroupById("group-1");
+
+      expect(prisma.combinationRouteGroup.findUnique).toHaveBeenCalledWith({
+        where: { id: "group-1" },
+      });
+    });
+
+    /**
+     * Ordered by POSITION, never by `created_at`: both legs are written in one
+     * transaction and carry the same timestamp, so the timestamp could not tell
+     * the outbound from the return.
+     */
+    it("reads a group's legs in configured order", async () => {
+      await repository.findLegsOfGroup("group-1");
+
+      expect(prisma.routePricing.findMany).toHaveBeenCalledWith({
+        where: { combinationGroupId: "group-1" },
+        orderBy: { combinationLegPosition: "asc" },
+      });
+    });
+
+    it("lists every group with its legs, each in configured order", async () => {
+      await repository.findGroups();
+
+      expect(prisma.combinationRouteGroup.findMany).toHaveBeenCalledWith({
+        include: { legs: { orderBy: { combinationLegPosition: "asc" } } },
+        orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+      });
+    });
+
+    it("creates a group with no notes by default", async () => {
+      await repository.createGroup();
+
+      expect(prisma.combinationRouteGroup.create).toHaveBeenCalledWith({
+        data: { notes: null },
+      });
+    });
+
+    /**
+     * ── ONE STATEMENT, NOT THREE ───────────────────────────────────────────
+     * The legs reference the group with ON DELETE CASCADE, so removing the group
+     * removes them. Deleting the legs first would open a window in which one leg
+     * survived alone.
+     */
+    it("removes a group and lets the cascade take its legs", async () => {
+      await repository.deleteGroup("group-1");
+
+      expect(prisma.combinationRouteGroup.delete).toHaveBeenCalledWith({
+        where: { id: "group-1" },
+      });
+      expect(prisma.routePricing.delete).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("the transaction", () => {
+    /**
+     * The service never sees a Prisma client: it is handed a repository bound to
+     * the transaction, so the layering rule holds while a group row and both its
+     * legs commit together.
+     */
+    it("hands the work a repository, not a client", async () => {
+      prisma.$transaction.mockImplementation(
+        async (work: (client: unknown) => Promise<unknown>) =>
+          work(prisma as never),
+      );
+
+      const received = await repository.runInTransaction(
+        async (transactional) => transactional,
+      );
+
+      expect(received).toBeInstanceOf(RoutePricingRepository);
+      expect(received).not.toBe(repository);
+    });
+
+    it("returns whatever the work returns", async () => {
+      prisma.$transaction.mockImplementation(
+        async (work: (client: unknown) => Promise<unknown>) =>
+          work(prisma as never),
+      );
+
+      expect(
+        await repository.runInTransaction(async () => "committed"),
+      ).toBe("committed");
+    });
+  });
+
+  /**
+   * ── A ROUTE CAN NOW BE REMOVED ────────────────────────────────────────────
+   * This used to assert the opposite: records were kept forever so that pricing
+   * derived from them stayed explainable. It stays explainable either way — a
+   * snapshot holds the amounts it was priced with and reads no configuration
+   * again — while the kept row gave the screen a second state and a route that
+   * looked configured while charging nothing.
+   */
+  it("exposes a delete, and no soft-delete beside it", () => {
     const methods = Object.getOwnPropertyNames(RoutePricingRepository.prototype);
 
-    expect(methods).not.toContain("delete");
-    expect(methods).not.toContain("deleteMany");
-    expect(methods).not.toContain("remove");
+    expect(methods).toContain("delete");
+    expect(methods).not.toContain("setActive");
   });
-
   it("never touches Trip or TripPricing tables", () => {
     // Pricing results belong to the Pricing Domain, not to this configuration.
     const source = RoutePricingRepository.prototype.constructor.toString();

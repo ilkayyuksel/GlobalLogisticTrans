@@ -72,7 +72,45 @@ export class PricingRuleResolver {
       ruleVersion: await this.requireNonEmptyText(
         PricingSettingKey.RULE_VERSION,
       ),
+      tollRatePerKm: await this.optionalNonNegativeDecimal(
+        PricingSettingKey.TOLL_RATE_PER_KM,
+      ),
     };
+  }
+
+  /**
+   * A configured amount, or null when the setting is absent or switched off.
+   *
+   * ── WHY THIS ONE DOES NOT REFUSE ──────────────────────────────────────────
+   * Every other pricing setting is required: without it the Engine cannot say
+   * what a Trip is worth, so it refuses rather than guesses. The toll rate is
+   * different in one way that matters — it arrived after the Trips did. A
+   * database that has not had the row created yet would otherwise stop pricing
+   * ALTOGETHER the moment this code shipped, which is a far worse failure than
+   * the one it would be reporting.
+   *
+   * So a missing rate charges no toll and says so in the log, exactly as an
+   * unconfigured route charges no base price. A rate that IS configured is
+   * validated like any other amount; a malformed one is still refused, because
+   * that is a value somebody typed wrongly rather than one nobody typed.
+   */
+  private async optionalNonNegativeDecimal(
+    settingKey: string,
+  ): Promise<string | null> {
+    const setting = await this.findSetting(settingKey);
+
+    if (!setting || !setting.isActive) {
+      this.logger.warn("Pricing setting absent; the component charges nothing", {
+        category: PRICING_SETTINGS_CATEGORY,
+        settingKey,
+      });
+
+      return null;
+    }
+
+    // Validated from the value already in hand: asking the service again would
+    // read the same row twice on every single calculation.
+    return this.nonNegativeDecimalOf(settingKey, setting);
   }
 
   /**
@@ -123,7 +161,22 @@ export class PricingRuleResolver {
   private async requireNonNegativeDecimal(
     settingKey: string,
   ): Promise<string> {
-    const setting = await this.requireSetting(settingKey);
+    return this.nonNegativeDecimalOf(
+      settingKey,
+      await this.requireSetting(settingKey),
+    );
+  }
+
+  /**
+   * One reading of a configured amount, whether the caller required it or not.
+   *
+   * A malformed value is refused either way: that is a number somebody typed
+   * wrongly, which is a different thing from one nobody typed at all.
+   */
+  private nonNegativeDecimalOf(
+    settingKey: string,
+    setting: SettingResponseDto,
+  ): string {
     const value = setting.value.trim();
 
     if (!isDecimalSettingValue(value)) {

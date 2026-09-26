@@ -41,6 +41,16 @@ const FUEL_SETTING = {
   description: null,
 };
 
+/** Stored exactly as the fuel percentage is: a decimal in the same category. */
+const TOLL_SETTING = {
+  id: "setting-toll",
+  category: "PRICING",
+  key: "TOLL_RATE_PER_KM",
+  value: "0.35",
+  valueType: "DECIMAL",
+  description: null,
+};
+
 /** The keys the Pricing Engine reads, as the backend catalog lists them. */
 const CANONICAL_KEYS = [
   "PRICING_STRATEGY",
@@ -52,6 +62,7 @@ const CANONICAL_KEYS = [
   "WAITING_TIME_BLOCK_MINUTES",
   "WAITING_TIME_BLOCK_PRICE",
   "DISTANCE_RATE_PER_KM",
+  "TOLL_RATE_PER_KM",
   "PRICING_RULE_VERSION",
 ];
 
@@ -105,19 +116,23 @@ function route(overrides: Record<string, unknown> = {}) {
     departure: "Quay 869",
     destination: "Dourges",
     tarief: "520.00",
-    toll: "18.00",
+    kilometres: "25.00",
     tunnel: "0.00",
-    hasToll: true,
     hasTunnel: true,
-    isActive: true,
+    // Self-describing: every record says which kind of configuration it is.
+    type: "NORMAL",
+    combinationGroupId: null,
     ...overrides,
   };
 }
 
 const BOOTSTRAP_PATH = "/api/v1/settings/pricing/bootstrap";
+const ROUTES_PATH = "/api/v1/route-configuration";
+const COMBINATIONS_PATH = `${ROUTES_PATH}/combinations`;
 
 interface Responses {
   routes?: unknown[];
+  combinations?: unknown[];
   settings?: unknown[];
   plan?: unknown;
   onSave?: (path: string, options?: Record<string, unknown>) => unknown;
@@ -143,6 +158,15 @@ function respondWith(responses: Responses = {}): void {
 
     if (path === "/api/v1/settings") {
       return Promise.resolve(responses.settings ?? [FUEL_SETTING]);
+    }
+
+    /*
+     * Before the bare route path below, which is a prefix of it. The
+     * Combinations are read separately because a Combination is ONE record with
+     * two legs, not two routes that happen to be related.
+     */
+    if (path === COMBINATIONS_PATH) {
+      return Promise.resolve(responses.combinations ?? []);
     }
 
     return Promise.resolve(responses.routes ?? [route()]);
@@ -181,6 +205,22 @@ function renderPage(language?: "nl" | "tr", theme?: "light" | "dark") {
   );
 }
 
+/**
+ * Opens the price settings, which start folded.
+ *
+ * The routes are what this page is opened for; the amounts below them are
+ * configured once and left alone, so they are behind a disclosure. Every test
+ * about what is inside has to open it first — which is itself the assertion
+ * that it starts closed.
+ */
+async function openPriceSettings(): Promise<void> {
+  await userEvent.click(
+    await screen.findByRole("button", {
+      name: /Prijsinstellingen|Fiyat ayarları/,
+    }),
+  );
+}
+
 /** Every non-GET call the page made. */
 function writes() {
   return requestMock.mock.calls.filter(
@@ -198,6 +238,7 @@ describe("the fuel percentage", () => {
   it("shows the configured value", async () => {
     respondWith();
     renderPage();
+    await openPriceSettings();
 
     expect(await screen.findByLabelText("Brandstofpercentage")).toHaveValue(15);
   });
@@ -205,6 +246,7 @@ describe("the fuel percentage", () => {
   it("labels it as a percentage", async () => {
     respondWith();
     renderPage();
+    await openPriceSettings();
 
     await screen.findByLabelText("Brandstofpercentage");
 
@@ -215,6 +257,7 @@ describe("the fuel percentage", () => {
   it("says that finished Trips keep their own rate", async () => {
     respondWith();
     renderPage();
+    await openPriceSettings();
 
     expect(
       await screen.findByText(/Reeds afgewerkte ritten behouden/),
@@ -224,13 +267,14 @@ describe("the fuel percentage", () => {
   it("saves the raw value to the settings endpoint", async () => {
     respondWith();
     renderPage();
+    await openPriceSettings();
 
     const input = await screen.findByLabelText("Brandstofpercentage");
 
     await userEvent.clear(input);
     await userEvent.type(input, "20");
     await userEvent.click(
-      within(sectionOf("Brandstof")).getByRole("button", { name: "Opslaan" }),
+      screen.getByRole("button", { name: "Brandstofpercentage: Opslaan" }),
     );
 
     await waitFor(() => expect(writes()).toHaveLength(1));
@@ -252,6 +296,7 @@ describe("the fuel percentage", () => {
   it("saves a value that was never configured before", async () => {
     respondWith({ settings: [], plan: freshPlan() });
     renderPage();
+    await openPriceSettings();
 
     const input = await screen.findByLabelText("Brandstofpercentage");
 
@@ -259,7 +304,7 @@ describe("the fuel percentage", () => {
 
     await userEvent.type(input, "15");
     await userEvent.click(
-      within(sectionOf("Brandstof")).getByRole("button", { name: "Opslaan" }),
+      screen.getByRole("button", { name: "Brandstofpercentage: Opslaan" }),
     );
 
     await waitFor(() => expect(writes()).toHaveLength(1));
@@ -275,21 +320,235 @@ describe("the fuel percentage", () => {
   it("shows the backend's own refusal", async () => {
     respondWith({ failWith: new Error("nope") });
     renderPage();
+    await openPriceSettings();
 
     const input = await screen.findByLabelText("Brandstofpercentage");
 
     await userEvent.clear(input);
     await userEvent.type(input, "150");
     await userEvent.click(
-      within(sectionOf("Brandstof")).getByRole("button", { name: "Opslaan" }),
+      screen.getByRole("button", { name: "Brandstofpercentage: Opslaan" }),
     );
 
     expect(await screen.findByText(/Opslaan mislukt/)).toBeInTheDocument();
   });
 });
 
+/**
+ * ── THE PANEL ITSELF ────────────────────────────────────────────────────────
+ * The routes are what an operator opens this page for. These amounts are set
+ * once and then left alone, so they sit underneath and start folded: closed,
+ * the panel is a header and nothing else.
+ */
+describe("the price settings panel", () => {
+  it("starts closed, with neither amount on the page", async () => {
+    respondWith({ settings: [FUEL_SETTING, TOLL_SETTING] });
+    renderPage();
+
+    await screen.findByRole("heading", { name: "Routeprijzen" });
+
+    expect(screen.queryByLabelText("Brandstofpercentage")).toBeNull();
+    expect(screen.queryByLabelText("Toll prijs per km")).toBeNull();
+    expect(
+      screen.getByRole("button", { name: "Prijsinstellingen" }),
+    ).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("opens on a click and shows both amounts", async () => {
+    respondWith({ settings: [FUEL_SETTING, TOLL_SETTING] });
+    renderPage();
+    await openPriceSettings();
+
+    expect(await screen.findByLabelText("Brandstofpercentage")).toHaveValue(15);
+    expect(screen.getByLabelText("Toll prijs per km")).toHaveValue(0.35);
+    expect(
+      screen.getByRole("button", { name: "Prijsinstellingen" }),
+    ).toHaveAttribute("aria-expanded", "true");
+  });
+
+  /** Below the routes, never above them. */
+  it("sits under the route prices", async () => {
+    respondWith();
+    renderPage();
+
+    const headings = await screen.findAllByRole("heading");
+    // The folded header carries its open/close indicator too, so the heading
+    // is matched by what it says rather than by an exact string.
+    const order = headings.map((heading) => heading.textContent ?? "");
+    const routes = order.findIndex((text) => text.includes("Routeprijzen"));
+    const priceSettings = order.findIndex((text) =>
+      text.includes("Prijsinstellingen"),
+    );
+
+    expect(routes).toBeGreaterThanOrEqual(0);
+    expect(priceSettings).toBeGreaterThan(routes);
+  });
+});
+
+/**
+ * ── TOLL PRIJS PER KM ───────────────────────────────────────────────────────
+ * A money amount stored exactly as the other pricing amounts are: a decimal
+ * Setting in the PRICING category, saved through the same idempotent call. The
+ * Pricing Engine does not read it yet — the route pricing that applies it is a
+ * separate change — but the value it will read is configured here.
+ */
+describe("the toll rate per kilometre", () => {
+  it("shows the configured value", async () => {
+    respondWith({ settings: [FUEL_SETTING, TOLL_SETTING] });
+    renderPage();
+    await openPriceSettings();
+
+    expect(await screen.findByLabelText("Toll prijs per km")).toHaveValue(0.35);
+  });
+
+  it("is labelled as an amount per kilometre", async () => {
+    respondWith({ settings: [FUEL_SETTING, TOLL_SETTING] });
+    renderPage();
+    await openPriceSettings();
+
+    await screen.findByLabelText("Toll prijs per km");
+
+    expect(screen.getByText("€ / km")).toBeInTheDocument();
+  });
+
+  it("saves the raw value to the settings endpoint", async () => {
+    respondWith({ settings: [FUEL_SETTING, TOLL_SETTING] });
+    renderPage();
+    await openPriceSettings();
+
+    const input = await screen.findByLabelText("Toll prijs per km");
+
+    await userEvent.clear(input);
+    await userEvent.type(input, "0.42");
+    await userEvent.click(
+      screen.getByRole("button", { name: "Toll prijs per km: Opslaan" }),
+    );
+
+    await waitFor(() => expect(writes()).toHaveLength(1));
+
+    const [path, options] = writes()[0];
+
+    expect(path).toBe("/api/v1/settings/PRICING/TOLL_RATE_PER_KM");
+    // PUT, as the fuel percentage is: the same call has to work whether or not
+    // the row has ever existed.
+    expect(options?.method).toBe("PUT");
+    expect(options?.body).toEqual({ value: "0.42" });
+  });
+
+  /** The state a deployment is in before anybody has set a rate. */
+  it("saves a value that was never configured before", async () => {
+    respondWith({ settings: [FUEL_SETTING], plan: freshPlan() });
+    renderPage();
+    await openPriceSettings();
+
+    const input = await screen.findByLabelText("Toll prijs per km");
+
+    expect(input).toHaveValue(null);
+
+    await userEvent.type(input, "0.35");
+    await userEvent.click(
+      screen.getByRole("button", { name: "Toll prijs per km: Opslaan" }),
+    );
+
+    await waitFor(() => expect(writes()).toHaveLength(1));
+
+    expect(writes()[0][1]?.body).toEqual({ value: "0.35" });
+  });
+
+  /**
+   * Reopening the page reads the stored value back. The draft lives only as
+   * long as the control does, so what an operator sees on a fresh visit is what
+   * the database holds — not what they last typed.
+   */
+  it("still shows the stored value when the page is opened again", async () => {
+    respondWith({
+      settings: [FUEL_SETTING, { ...TOLL_SETTING, value: "0.42" }],
+    });
+
+    const first = renderPage();
+    await openPriceSettings();
+
+    expect(await screen.findByLabelText("Toll prijs per km")).toHaveValue(0.42);
+
+    first.unmount();
+    renderPage();
+    await openPriceSettings();
+
+    expect(await screen.findByLabelText("Toll prijs per km")).toHaveValue(0.42);
+  });
+
+  /** A price is never negative; the control refuses to offer one. */
+  it("offers no negative amount", async () => {
+    respondWith({ settings: [FUEL_SETTING, TOLL_SETTING] });
+    renderPage();
+    await openPriceSettings();
+
+    const input = await screen.findByLabelText("Toll prijs per km");
+
+    expect(input).toHaveAttribute("min", "0");
+    expect(input).toHaveAttribute("step", "0.01");
+  });
+
+  /** Nothing is saved with an empty box: there is no value to store. */
+  it("cannot be saved empty", async () => {
+    respondWith({ settings: [FUEL_SETTING], plan: freshPlan() });
+    renderPage();
+    await openPriceSettings();
+
+    await screen.findByLabelText("Toll prijs per km");
+
+    expect(
+      screen.getByRole("button", { name: "Toll prijs per km: Opslaan" }),
+    ).toBeDisabled();
+    expect(writes()).toHaveLength(0);
+  });
+
+  /**
+   * Validation is the backend's — it holds the rule that a pricing amount is
+   * never negative — and so is the wording of its refusal.
+   */
+  it("shows the backend's own refusal", async () => {
+    respondWith({
+      settings: [FUEL_SETTING, TOLL_SETTING],
+      failWith: new Error("nope"),
+    });
+    renderPage();
+    await openPriceSettings();
+
+    const input = await screen.findByLabelText("Toll prijs per km");
+
+    await userEvent.clear(input);
+    await userEvent.type(input, "-1");
+    await userEvent.click(
+      screen.getByRole("button", { name: "Toll prijs per km: Opslaan" }),
+    );
+
+    expect(await screen.findByText(/Opslaan mislukt/)).toBeInTheDocument();
+  });
+
+  /** The fuel percentage is untouched by any of this. */
+  it("leaves the fuel percentage working beside it", async () => {
+    respondWith({ settings: [FUEL_SETTING, TOLL_SETTING] });
+    renderPage();
+    await openPriceSettings();
+
+    const fuel = await screen.findByLabelText("Brandstofpercentage");
+
+    await userEvent.clear(fuel);
+    await userEvent.type(fuel, "23");
+    await userEvent.click(
+      screen.getByRole("button", { name: "Brandstofpercentage: Opslaan" }),
+    );
+
+    await waitFor(() => expect(writes()).toHaveLength(1));
+
+    expect(writes()[0][0]).toBe("/api/v1/settings/PRICING/FUEL_PERCENTAGE");
+    expect(writes()[0][1]?.body).toEqual({ value: "23" });
+  });
+});
+
 describe("the route prices", () => {
-  it("shows one row per route, with all three amounts", async () => {
+  it("shows one row per route: the price, the distance and the tunnel", async () => {
     respondWith();
     renderPage();
 
@@ -299,8 +558,24 @@ describe("the route prices", () => {
 
     expect(within(row).getByText("Quay 869")).toBeInTheDocument();
     expect(within(row).getByText("520.00")).toBeInTheDocument();
-    expect(within(row).getByText("18.00")).toBeInTheDocument();
+    expect(within(row).getByText("25.00")).toBeInTheDocument();
     expect(within(row).getByText("0.00")).toBeInTheDocument();
+  });
+
+  /**
+   * A route configured before distances existed. An em dash rather than a 0:
+   * nobody has stated this road's length, and until somebody does it is charged
+   * no toll — which is a different fact from a road measured as free.
+   */
+  it("shows a dash for a route with no stated distance", async () => {
+    respondWith({ routes: [route({ kilometres: null })] });
+    renderPage();
+
+    const row = (await screen.findByText("Dourges")).closest(
+      "tr",
+    ) as HTMLElement;
+
+    expect(within(row).getByText("—")).toBeInTheDocument();
   });
 
   /** One route, one row — never a price row and two cost rows. */
@@ -317,9 +592,8 @@ describe("the route prices", () => {
       "Van",
       "Naar",
       "Tarief",
-      "Toll",
+      "KM",
       "Tunnel",
-      "Actief",
       "Acties",
     ]);
     expect(screen.queryByText(/RouteCost|RoutePricing/)).toBeNull();
@@ -360,7 +634,7 @@ describe("the route prices", () => {
     await userEvent.type(screen.getByLabelText("Van"), "Quay 869");
     await userEvent.type(screen.getByLabelText("Naar"), "Ghlin");
     await userEvent.type(screen.getByLabelText("Tarief"), "480");
-    await userEvent.type(screen.getByLabelText("Toll"), "12");
+    await userEvent.type(screen.getByLabelText("KM"), "25");
     await userEvent.type(screen.getByLabelText("Tunnel"), "0");
 
     await userEvent.click(
@@ -379,7 +653,7 @@ describe("the route prices", () => {
       departure: "Quay 869",
       destination: "Ghlin",
       tarief: 480,
-      toll: 12,
+      kilometres: 25,
       tunnel: 0,
     });
   });
@@ -396,7 +670,7 @@ describe("the route prices", () => {
     await userEvent.type(screen.getByLabelText("Van"), "Quay 869");
     await userEvent.type(screen.getByLabelText("Naar"), "Ghlin");
     await userEvent.type(screen.getByLabelText("Tarief"), "0");
-    await userEvent.type(screen.getByLabelText("Toll"), "0");
+    await userEvent.type(screen.getByLabelText("KM"), "0");
     await userEvent.type(screen.getByLabelText("Tunnel"), "0");
 
     await userEvent.click(
@@ -409,7 +683,7 @@ describe("the route prices", () => {
 
     expect(writes()[0][1]?.body).toMatchObject({
       tarief: 0,
-      toll: 0,
+      kilometres: 0,
       tunnel: 0,
     });
   });
@@ -443,50 +717,82 @@ describe("the route prices", () => {
     expect(options?.body).toMatchObject({ tarief: 550 });
   });
 
-  /** One switch, because the backend moves the price and both costs together. */
-  it("deactivates a route with a single control", async () => {
+  /**
+   * ── DELETING, WHERE THE SWITCH USED TO BE ───────────────────────────────
+   * A route price has no active state any more, so there is nothing to switch:
+   * it exists or it is removed. The confirmation is the application's own — the
+   * same one the Custom values page uses — so it can name the route and say
+   * what deleting does not touch.
+   */
+  it("asks for confirmation before deleting, and names the route", async () => {
     respondWith();
     renderPage();
 
     await userEvent.click(
       await screen.findByRole("button", {
-        name: "Deactiveren Quay 869 Dourges",
+        name: "Verwijderen Quay 869 Dourges",
       }),
+    );
+
+    expect(
+      await screen.findByText("Routeprijs verwijderen"),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Quay 869 → Dourges")).toBeInTheDocument();
+    // Said before anything is destroyed, not after.
+    expect(
+      screen.getByText(/Reeds afgewerkte ritten behouden/),
+    ).toBeInTheDocument();
+    expect(writes()).toHaveLength(0);
+  });
+
+  it("deletes the route once it is confirmed", async () => {
+    respondWith();
+    renderPage();
+
+    await userEvent.click(
+      await screen.findByRole("button", {
+        name: "Verwijderen Quay 869 Dourges",
+      }),
+    );
+    await userEvent.click(
+      screen.getByRole("button", { name: "Verwijderen" }),
     );
 
     await waitFor(() => expect(writes()).toHaveLength(1));
 
     const [path, options] = writes()[0];
 
-    expect(path).toBe("/api/v1/route-configuration/route-1/state");
-    expect(options?.method).toBe("PATCH");
-    expect(options?.body).toEqual({ isActive: false });
+    expect(path).toBe("/api/v1/route-configuration/route-1");
+    expect(options?.method).toBe("DELETE");
   });
 
-  it("offers to reactivate an inactive route", async () => {
-    respondWith({ routes: [route({ isActive: false })] });
+  it("writes nothing when the confirmation is dismissed", async () => {
+    respondWith();
     renderPage();
 
     await userEvent.click(
       await screen.findByRole("button", {
-        name: "Activeren Quay 869 Dourges",
+        name: "Verwijderen Quay 869 Dourges",
       }),
     );
+    await userEvent.click(screen.getByRole("button", { name: "Annuleren" }));
 
-    await waitFor(() => expect(writes()).toHaveLength(1));
-
-    expect(writes()[0][1]?.body).toEqual({ isActive: true });
+    expect(writes()).toHaveLength(0);
   });
 
-  it("marks an inactive route as such", async () => {
-    respondWith({ routes: [route({ isActive: false })] });
+  /** The concept is gone from the screen, not merely relabelled. */
+  it("offers no way to activate or deactivate a route", async () => {
+    respondWith();
     renderPage();
+    await screen.findByText("Dourges");
 
-    const row = (await screen.findByText("Dourges")).closest(
-      "tr",
-    ) as HTMLElement;
+    const section = sectionOf("Routeprijzen");
 
-    expect(within(row).getByText("Inactief")).toBeInTheDocument();
+    expect(within(section).queryByText("Actief")).toBeNull();
+    expect(within(section).queryByText("Inactief")).toBeNull();
+    expect(
+      within(section).queryByRole("button", { name: /Deactiveren|Activeren/ }),
+    ).toBeNull();
   });
 
   /**
@@ -505,7 +811,7 @@ describe("the route prices", () => {
     await userEvent.type(screen.getByLabelText("Van"), "PSA Quay 869");
     await userEvent.type(screen.getByLabelText("Naar"), "Dourges");
     await userEvent.type(screen.getByLabelText("Tarief"), "1");
-    await userEvent.type(screen.getByLabelText("Toll"), "0");
+    await userEvent.type(screen.getByLabelText("KM"), "0");
     await userEvent.type(screen.getByLabelText("Tunnel"), "0");
 
     await userEvent.click(
@@ -545,6 +851,7 @@ describe("the pricing configuration", () => {
   it("lists every setting the Pricing Engine reads", async () => {
     respondWith();
     renderPage();
+    await openPriceSettings();
 
     const section = sectionOf("Prijsinstellingen");
 
@@ -562,6 +869,7 @@ describe("the pricing configuration", () => {
   it("marks every setting as missing on a fresh database", async () => {
     respondWith({ settings: [], plan: freshPlan() });
     renderPage();
+    await openPriceSettings();
 
     const section = sectionOf("Prijsinstellingen");
 
@@ -575,6 +883,7 @@ describe("the pricing configuration", () => {
   it("says that nothing will be priced while they are missing", async () => {
     respondWith({ settings: [], plan: freshPlan() });
     renderPage();
+    await openPriceSettings();
 
     expect(
       await screen.findByText(/berekent het systeem geen prijzen/),
@@ -585,6 +894,7 @@ describe("the pricing configuration", () => {
   it("writes nothing merely by showing what is missing", async () => {
     respondWith({ settings: [], plan: freshPlan() });
     renderPage();
+    await openPriceSettings();
 
     await screen.findByText(/berekent het systeem geen prijzen/);
 
@@ -595,6 +905,7 @@ describe("the pricing configuration", () => {
   it("shows the value a missing setting would be created with", async () => {
     respondWith({ settings: [], plan: freshPlan() });
     renderPage();
+    await openPriceSettings();
 
     expect(await screen.findByLabelText("PRICING_STRATEGY")).toHaveValue("15");
   });
@@ -602,6 +913,7 @@ describe("the pricing configuration", () => {
   it("creates the missing settings in one action, without SQL", async () => {
     respondWith({ settings: [], plan: freshPlan() });
     renderPage();
+    await openPriceSettings();
 
     await userEvent.click(
       await screen.findByRole("button", {
@@ -620,6 +932,7 @@ describe("the pricing configuration", () => {
   it("offers nothing to create once everything is configured", async () => {
     respondWith();
     renderPage();
+    await openPriceSettings();
 
     await waitFor(() =>
       expect(screen.getByText("PRICING_STRATEGY")).toBeInTheDocument(),
@@ -640,6 +953,7 @@ describe("the pricing configuration", () => {
   it("shows the backend's reason for a setting it cannot create", async () => {
     respondWith({ settings: [], plan: freshPlan() });
     renderPage();
+    await openPriceSettings();
 
     expect(
       await screen.findByText(/No active Custom Property named "TAR"/),
@@ -661,6 +975,7 @@ describe("the pricing configuration", () => {
       },
     });
     renderPage();
+    await openPriceSettings();
 
     const row = (await screen.findByText("FUEL_PERCENTAGE")).closest(
       "tr",
@@ -674,6 +989,7 @@ describe("the pricing configuration", () => {
   it("saves one setting through the same idempotent call either way", async () => {
     respondWith({ settings: [], plan: freshPlan() });
     renderPage();
+    await openPriceSettings();
 
     const input = await screen.findByLabelText("WAITING_TIME_BLOCK_PRICE");
 
@@ -701,6 +1017,7 @@ describe("the pricing configuration", () => {
       failWith: new Error("out of range"),
     });
     renderPage();
+    await openPriceSettings();
 
     const input = await screen.findByLabelText("FUEL_PERCENTAGE");
 
@@ -720,8 +1037,11 @@ describe("the page in the other language and theme", () => {
   it("is translated", async () => {
     respondWith();
     renderPage("tr");
+    await openPriceSettings();
 
-    expect(await screen.findByText("Rota fiyatları")).toBeInTheDocument();
+    expect(
+      await screen.findByRole("heading", { name: "Rota fiyatları" }),
+    ).toBeInTheDocument();
     expect(screen.getByLabelText("Yakıt yüzdesi")).toBeInTheDocument();
     expect(
       screen.getByRole("columnheader", { name: "Nereden" }),
@@ -735,8 +1055,9 @@ describe("the page in the other language and theme", () => {
   it.each(["light", "dark"] as const)("renders in %s mode", async (theme) => {
     respondWith();
     renderPage(undefined, theme);
+    await openPriceSettings();
 
-    const section = (await screen.findByText("Brandstof")).closest(
+    const section = (await screen.findByText("Prijsinstellingen")).closest(
       "section",
     ) as HTMLElement;
 

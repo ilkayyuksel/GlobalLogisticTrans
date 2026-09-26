@@ -33,6 +33,7 @@ function buildContext(
     },
     rules: {} as PricingCalculationContext["rules"],
     assignedCustomProperties: [],
+    routeKilometres: null,
     routeCosts: [],
     costConfirmation,
     existingSnapshot: null,

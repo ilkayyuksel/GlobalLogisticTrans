@@ -2,10 +2,12 @@ import { Injectable } from "@nestjs/common";
 
 import { AppLoggerService } from "../logger/app-logger.service";
 import { RouteCostService } from "../route-costs/route-cost.service";
+import { RouteConfigurationKind } from "../route-pricing/route-pricing.repository";
 import {
   PricingRouteCostInput,
   PricingRouteIdentity,
 } from "./pricing-calculation-context";
+import { MatchedRouteConfiguration } from "./pricing-component.resolver";
 
 /**
  * Resolves the route-dependent costs configured for a Trip's route.
@@ -31,10 +33,25 @@ export class RouteCostResolver {
     this.logger.setContext(RouteCostResolver.name);
   }
 
+  /**
+   * `matchedRoute` is the configuration this Trip was priced against.
+   *
+   * ── WHY THE COSTS FOLLOW THE MATCH ────────────────────────────────────────
+   * A Combination leg OWNS its costs: the road it runs may also be an ordinary
+   * configured route with a tunnel of its own, and charging the road's tunnel to
+   * the leg would mean one amount for two prices that are deliberately
+   * different. So a leg's costs are read by its identity, and every other Trip
+   * reads the road's, exactly as before.
+   */
   async resolve(
     tripId: string,
     route: PricingRouteIdentity,
+    matchedRoute: MatchedRouteConfiguration | null = null,
   ): Promise<PricingRouteCostInput[]> {
+    if (matchedRoute?.kind === RouteConfigurationKind.COMBINATION) {
+      return this.resolveOwnedBy(tripId, matchedRoute.routePricingId);
+    }
+
     // `trip.terminal` is nullable, and route costs are matched on it. Without a
     // departure there is no route identity to match, so nothing can be
     // resolved — which is different from a route that resolved to nothing.
@@ -57,11 +74,39 @@ export class RouteCostResolver {
       components: routeCosts.map((cost) => cost.pricingComponent.code),
     });
 
-    return routeCosts.map((cost) => ({
-      routeCostId: cost.id,
-      pricingComponentId: cost.pricingComponentId,
-      componentCode: cost.pricingComponent.code,
-      amount: cost.amount,
-    }));
+    return routeCosts.map((cost) => toInput(cost));
   }
+
+  /** The costs configured for one Combination leg, found by the leg itself. */
+  private async resolveOwnedBy(
+    tripId: string,
+    routePricingId: string,
+  ): Promise<PricingRouteCostInput[]> {
+    const routeCosts =
+      await this.routeCostService.findActiveForRoutePricing(routePricingId);
+
+    this.logger.log("Combination leg route costs resolved", {
+      tripId,
+      routePricingId,
+      routeCostCount: routeCosts.length,
+      components: routeCosts.map((cost) => cost.pricingComponent.code),
+    });
+
+    return routeCosts.map((cost) => toInput(cost));
+  }
+}
+
+/** One stored cost, as the calculation phase reads it. */
+function toInput(cost: {
+  id: string;
+  pricingComponentId: string;
+  pricingComponent: { code: string };
+  amount: string;
+}): PricingRouteCostInput {
+  return {
+    routeCostId: cost.id,
+    pricingComponentId: cost.pricingComponentId,
+    componentCode: cost.pricingComponent.code,
+    amount: cost.amount,
+  };
 }

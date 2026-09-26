@@ -14,6 +14,8 @@ import { AppLoggerService } from "../logger/app-logger.service";
 import { PricingBootstrapService } from "../settings/pricing-bootstrap.service";
 import { SettingsController } from "../settings/settings.controller";
 import { SettingsService } from "../settings/settings.service";
+import { BulkRouteImportService } from "./bulk-route-import.service";
+import { CombinationRouteConfigurationService } from "./combination-route-configuration.service";
 import { RouteConfigurationController } from "./route-configuration.controller";
 import { RouteConfigurationService } from "./route-configuration.service";
 
@@ -73,24 +75,77 @@ const ADMIN_SUBJECT = "auth0|traxo-admin";
 
 const ROUTE_ID = "3f2504e0-4f89-41d3-9a0c-0305e82c3301";
 
+const COMBINATION_GROUP_ID = "7d2b8c14-9f3a-4c5e-8b1d-2e3f4a5b6c7d";
+const LEG_ID = "5a1f0c1e-2b3d-4e5f-8a9b-0c1d2e3f4a5b";
+
 const CONFIGURATION = {
   id: ROUTE_ID,
   departure: "Quay 869",
   destination: "Dourges",
   tarief: "520.00",
-  toll: "18.00",
+  kilometres: "25.00",
   tunnel: "0.00",
-  hasToll: true,
   hasTunnel: true,
-  isActive: true,
+  type: "NORMAL",
+  combinationGroupId: null,
+};
+
+/** One Combination, as the endpoint returns it: a group and its two legs. */
+const COMBINATION = {
+  id: COMBINATION_GROUP_ID,
+  legs: [
+    {
+      ...CONFIGURATION,
+      id: LEG_ID,
+      type: "COMBINATION",
+      combinationGroupId: COMBINATION_GROUP_ID,
+    },
+    {
+      ...CONFIGURATION,
+      id: "9c858901-8a57-4791-81fe-4c455b099bc9",
+      departure: "Dourges",
+      destination: "Quay 869",
+      tarief: "480.00",
+      type: "COMBINATION",
+      combinationGroupId: COMBINATION_GROUP_ID,
+    },
+  ],
 };
 
 const SAVE_BODY = {
   departure: "Quay 869",
   destination: "Dourges",
   tarief: 550,
-  toll: 25,
+  kilometres: 25,
   tunnel: 5,
+};
+
+/** What a bulk import reports having created. */
+const IMPORT_SUMMARY = {
+  normalRoutes: 1,
+  combinationGroups: 0,
+  combinationLegs: 0,
+  totalRoutes: 1,
+};
+
+const BULK_BODY = {
+  routes: [
+    {
+      type: "NORMAL",
+      departure: "Quay 869",
+      destination: "Dourges",
+      tarief: 550,
+      kilometres: 25,
+      tunnel: 5,
+    },
+  ],
+};
+
+const SAVE_COMBINATION_BODY = {
+  legs: [
+    SAVE_BODY,
+    { departure: "Dourges", destination: "Quay 869", tarief: 480, kilometres: 25, tunnel: 0 },
+  ],
 };
 
 describe("pricing configuration is protected", () => {
@@ -103,8 +158,15 @@ describe("pricing configuration is protected", () => {
     findAll: jest.Mock;
     create: jest.Mock;
     update: jest.Mock;
-    changeState: jest.Mock;
+    remove: jest.Mock;
   };
+  let combinationConfiguration: {
+    findAll: jest.Mock;
+    create: jest.Mock;
+    update: jest.Mock;
+    remove: jest.Mock;
+  };
+  let bulkImport: { check: jest.Mock; import: jest.Mock };
   let settings: { findAll: jest.Mock; update: jest.Mock; upsert: jest.Mock };
   let bootstrap: { plan: jest.Mock; apply: jest.Mock };
 
@@ -160,7 +222,32 @@ describe("pricing configuration is protected", () => {
       findAll: jest.fn().mockResolvedValue([CONFIGURATION]),
       create: jest.fn().mockResolvedValue(CONFIGURATION),
       update: jest.fn().mockResolvedValue(CONFIGURATION),
-      changeState: jest.fn().mockResolvedValue(CONFIGURATION),
+      remove: jest.fn().mockResolvedValue(CONFIGURATION),
+    };
+    /*
+     * The Combination routes are configuration writes of exactly the same value:
+     * they decide what both legs of a Combination cost. Left open they would be
+     * as damaging as an open route price, so they are held to the same rule here.
+     */
+    combinationConfiguration = {
+      findAll: jest.fn().mockResolvedValue([COMBINATION]),
+      create: jest.fn().mockResolvedValue(COMBINATION),
+      update: jest.fn().mockResolvedValue(COMBINATION),
+      remove: jest.fn().mockResolvedValue(undefined),
+    };
+    /*
+     * The bulk import is the single most valuable write on this controller: one
+     * request configures every route the business prices against. Left open it
+     * would be worse than an open single-route endpoint, not better, so it is held
+     * to exactly the same rule here.
+     */
+    bulkImport = {
+      check: jest.fn().mockResolvedValue({
+        isValid: true,
+        summary: IMPORT_SUMMARY,
+        errors: [],
+      }),
+      import: jest.fn().mockResolvedValue(IMPORT_SUMMARY),
     };
     const savedSetting = {
       id: "setting-fuel",
@@ -205,6 +292,11 @@ describe("pricing configuration is protected", () => {
           provide: RouteConfigurationService,
           useValue: routeConfiguration,
         },
+        {
+          provide: CombinationRouteConfigurationService,
+          useValue: combinationConfiguration,
+        },
+        { provide: BulkRouteImportService, useValue: bulkImport },
         { provide: SettingsService, useValue: settings },
         { provide: PricingBootstrapService, useValue: bootstrap },
         {
@@ -256,10 +348,11 @@ describe("pricing configuration is protected", () => {
       SAVE_BODY,
     ],
     [
-      "a route's activation",
-      "patch",
-      `/api/v1/route-configuration/${ROUTE_ID}/state`,
-      { isActive: false },
+      "a route's deletion",
+      "delete",
+      `/api/v1/route-configuration/${ROUTE_ID}`,
+      // A DELETE carries no body.
+      {},
     ],
     /*
      * Bootstrapping CREATES pricing settings on a database that has none, so it
@@ -278,6 +371,40 @@ describe("pricing configuration is protected", () => {
       "post",
       "/api/v1/settings/pricing/bootstrap",
       {},
+    ],
+    [
+      "a new Combination route configuration",
+      "post",
+      "/api/v1/route-configuration/combinations",
+      SAVE_COMBINATION_BODY,
+    ],
+    [
+      "both legs of a Combination route",
+      "put",
+      `/api/v1/route-configuration/combinations/${COMBINATION_GROUP_ID}`,
+      SAVE_COMBINATION_BODY,
+    ],
+    [
+      "a Combination route's deletion",
+      "delete",
+      `/api/v1/route-configuration/combinations/${COMBINATION_GROUP_ID}`,
+      {},
+    ],
+    [
+      "every route price at once through a bulk import",
+      "post",
+      "/api/v1/route-configuration/bulk",
+      BULK_BODY,
+    ],
+    /*
+     * The dry run writes nothing, and is still protected: it reads back which
+     * routes are already configured, which is commercial information.
+     */
+    [
+      "a bulk import dry run",
+      "post",
+      "/api/v1/route-configuration/bulk/check",
+      BULK_BODY,
     ],
   ];
 
@@ -322,13 +449,22 @@ describe("pricing configuration is protected", () => {
         expect(bootstrap.apply).not.toHaveBeenCalled();
         expect(routeConfiguration.create).not.toHaveBeenCalled();
         expect(routeConfiguration.update).not.toHaveBeenCalled();
-        expect(routeConfiguration.changeState).not.toHaveBeenCalled();
+        expect(routeConfiguration.remove).not.toHaveBeenCalled();
+        expect(combinationConfiguration.create).not.toHaveBeenCalled();
+        expect(combinationConfiguration.update).not.toHaveBeenCalled();
+        expect(combinationConfiguration.remove).not.toHaveBeenCalled();
+        expect(bulkImport.import).not.toHaveBeenCalled();
+        expect(bulkImport.check).not.toHaveBeenCalled();
       },
     );
 
     /** Reading configuration is protected too: prices are commercial data. */
     it.each([
       ["the route configuration", "/api/v1/route-configuration"],
+      [
+        "the Combination route configuration",
+        "/api/v1/route-configuration/combinations",
+      ],
       ["the settings", "/api/v1/settings"],
       ["what is missing from the pricing configuration", "/api/v1/settings/pricing/bootstrap"],
     ])("refuses to read %s", async (_what, path) => {
@@ -395,7 +531,7 @@ describe("pricing configuration is protected", () => {
       expect(response.body.data.value).toBe("20");
     });
 
-    it("changes a route's Tarief, Toll and Tunnel", async () => {
+    it("changes a route's Tarief, KM and Tunnel", async () => {
       const response = await request(application.getHttpServer())
         .put(`/api/v1/route-configuration/${ROUTE_ID}`)
         .set("Authorization", `Bearer ${await signToken()}`)
@@ -404,7 +540,7 @@ describe("pricing configuration is protected", () => {
 
       expect(routeConfiguration.update).toHaveBeenCalledWith(
         ROUTE_ID,
-        expect.objectContaining({ tarief: 550, toll: 25, tunnel: 5 }),
+        expect.objectContaining({ tarief: 550, kilometres: 25, tunnel: 5 }),
       );
       expect(response.body.data.id).toBe(ROUTE_ID);
     });
@@ -419,16 +555,13 @@ describe("pricing configuration is protected", () => {
       expect(routeConfiguration.create).toHaveBeenCalledTimes(1);
     });
 
-    it("deactivates a route", async () => {
+    it("deletes a route", async () => {
       await request(application.getHttpServer())
-        .patch(`/api/v1/route-configuration/${ROUTE_ID}/state`)
+        .delete(`/api/v1/route-configuration/${ROUTE_ID}`)
         .set("Authorization", `Bearer ${await signToken()}`)
-        .send({ isActive: false })
-        .expect(200);
+        .expect(204);
 
-      expect(routeConfiguration.changeState).toHaveBeenCalledWith(ROUTE_ID, {
-        isActive: false,
-      });
+      expect(routeConfiguration.remove).toHaveBeenCalledWith(ROUTE_ID);
     });
 
     it("reads the route configuration", async () => {
@@ -438,6 +571,79 @@ describe("pricing configuration is protected", () => {
         .expect(200);
 
       expect(response.body.data).toHaveLength(1);
+    });
+
+    it("creates a Combination route configuration", async () => {
+      await request(application.getHttpServer())
+        .post("/api/v1/route-configuration/combinations")
+        .set("Authorization", `Bearer ${await signToken()}`)
+        .send(SAVE_COMBINATION_BODY)
+        .expect(201);
+
+      expect(combinationConfiguration.create).toHaveBeenCalledWith(
+        expect.objectContaining({ legs: expect.any(Array) }),
+      );
+    });
+
+    it("changes both legs of a Combination route", async () => {
+      await request(application.getHttpServer())
+        .put(`/api/v1/route-configuration/combinations/${COMBINATION_GROUP_ID}`)
+        .set("Authorization", `Bearer ${await signToken()}`)
+        .send(SAVE_COMBINATION_BODY)
+        .expect(200);
+
+      expect(combinationConfiguration.update).toHaveBeenCalledWith(
+        COMBINATION_GROUP_ID,
+        expect.objectContaining({ legs: expect.any(Array) }),
+      );
+    });
+
+    /** The GROUP is removed, never one leg: the id is the group's. */
+    it("deletes a Combination route configuration", async () => {
+      await request(application.getHttpServer())
+        .delete(
+          `/api/v1/route-configuration/combinations/${COMBINATION_GROUP_ID}`,
+        )
+        .set("Authorization", `Bearer ${await signToken()}`)
+        .expect(204);
+
+      expect(combinationConfiguration.remove).toHaveBeenCalledWith(
+        COMBINATION_GROUP_ID,
+      );
+    });
+
+    it("imports route prices in bulk", async () => {
+      const response = await request(application.getHttpServer())
+        .post("/api/v1/route-configuration/bulk")
+        .set("Authorization", `Bearer ${await signToken()}`)
+        .send(BULK_BODY)
+        .expect(201);
+
+      expect(bulkImport.import).toHaveBeenCalledWith(BULK_BODY);
+      expect(response.body.data.totalRoutes).toBe(1);
+    });
+
+    /** A dry run answers with 200 and writes nothing: it is a question. */
+    it("checks a bulk import without performing it", async () => {
+      const response = await request(application.getHttpServer())
+        .post("/api/v1/route-configuration/bulk/check")
+        .set("Authorization", `Bearer ${await signToken()}`)
+        .send(BULK_BODY)
+        .expect(200);
+
+      expect(bulkImport.check).toHaveBeenCalledWith(BULK_BODY);
+      expect(bulkImport.import).not.toHaveBeenCalled();
+      expect(response.body.data.isValid).toBe(true);
+    });
+
+    it("reads the Combination route configuration with both legs", async () => {
+      const response = await request(application.getHttpServer())
+        .get("/api/v1/route-configuration/combinations")
+        .set("Authorization", `Bearer ${await signToken()}`)
+        .expect(200);
+
+      expect(response.body.data).toHaveLength(1);
+      expect(response.body.data[0].legs).toHaveLength(2);
     });
 
     it("sets a setting that has never been configured", async () => {

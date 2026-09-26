@@ -28,8 +28,11 @@ function buildRoutePricing(
     departure: "Antwerp",
     destination: "Rotterdam",
     basePrice: new Prisma.Decimal("380.00"),
+    kilometres: new Prisma.Decimal("25.00"),
+    // An ordinary route: neither half of the Combination discriminator is set.
+    combinationGroupId: null,
+    combinationLegPosition: null,
     notes: null,
-    isActive: true,
     createdAt: new Date("2026-01-01T00:00:00Z"),
     updatedAt: new Date("2026-01-01T00:00:00Z"),
     ...overrides,
@@ -49,9 +52,10 @@ describe("RoutePricingController (integration)", () => {
     repository = {
       findPage: jest.fn().mockResolvedValue({ items: [], totalItems: 0 }),
       findById: jest.fn().mockResolvedValue(null),
-      findActiveByRoute: jest.fn().mockResolvedValue(null),
+      findByRoute: jest.fn().mockResolvedValue(null),
       create: jest.fn().mockResolvedValue(buildRoutePricing()),
       update: jest.fn().mockResolvedValue(buildRoutePricing()),
+      delete: jest.fn(),
       setActive: jest.fn().mockResolvedValue(buildRoutePricing()),
     } as unknown as jest.Mocked<RoutePricingRepository>;
 
@@ -133,22 +137,26 @@ describe("RoutePricingController (integration)", () => {
       );
     });
 
-    it("passes isActive=false as a filter rather than dropping it", async () => {
+    /**
+     * The filter is GONE, not ignored. A route price has no state to filter on,
+     * and the query DTO refuses a parameter it does not define — which tells a
+     * caller still sending it that the concept has been removed, rather than
+     * quietly answering with something they did not ask for.
+     */
+    it("refuses an isActive query parameter", async () => {
       await request(app.getHttpServer())
         .get(`${BASE}?isActive=false`)
-        .expect(200);
+        .expect(400);
 
-      expect(repository.findPage).toHaveBeenCalledWith(
-        expect.objectContaining({ isActive: false }),
-      );
+      expect(repository.findPage).not.toHaveBeenCalled();
     });
 
-    it("omits the filter entirely when isActive is absent", async () => {
+    it("lists every configured route", async () => {
       await request(app.getHttpServer()).get(BASE).expect(200);
 
-      expect(repository.findPage).toHaveBeenCalledWith(
-        expect.objectContaining({ isActive: undefined }),
-      );
+      const [filter] = repository.findPage.mock.calls[0];
+
+      expect(filter).not.toHaveProperty("isActive");
     });
 
     it("forwards a trimmed search term", async () => {
@@ -258,7 +266,7 @@ describe("RoutePricingController (integration)", () => {
     });
 
     it("returns 409 when an active record already covers the route", async () => {
-      repository.findActiveByRoute.mockResolvedValue(
+      repository.findByRoute.mockResolvedValue(
         buildRoutePricing({ id: OTHER_ROUTE_ID }),
       );
 
@@ -335,7 +343,7 @@ describe("RoutePricingController (integration)", () => {
 
     it("returns 409 when the new route is already covered", async () => {
       repository.findById.mockResolvedValue(buildRoutePricing());
-      repository.findActiveByRoute.mockResolvedValue(
+      repository.findByRoute.mockResolvedValue(
         buildRoutePricing({ id: OTHER_ROUTE_ID }),
       );
 
@@ -346,61 +354,47 @@ describe("RoutePricingController (integration)", () => {
     });
   });
 
-  describe("activation and deactivation", () => {
-    it("deactivates without removing the record", async () => {
+  /**
+   * ── DELETE, WHERE ACTIVATION USED TO BE ───────────────────────────────────
+   * There were two endpoints here, one to switch a route off and one to switch
+   * it back on, and a test asserting that DELETE did not exist. A route price
+   * now exists or it does not.
+   *
+   * Nothing priced changes: a snapshot keeps the amounts it was priced with and
+   * reads no configuration again, which is what made the kept row unnecessary.
+   */
+  describe("deleting a route", () => {
+    it("removes the record and answers 204", async () => {
       repository.findById.mockResolvedValue(buildRoutePricing());
-      repository.setActive.mockResolvedValue(
-        buildRoutePricing({ isActive: false }),
-      );
-
-      const response = await request(app.getHttpServer())
-        .patch(`${BASE}/${ROUTE_ID}/deactivation`)
-        .expect(200);
-
-      expect(response.body.data.isActive).toBe(false);
-      expect(repository.setActive).toHaveBeenCalledWith(ROUTE_ID, false);
-    });
-
-    it("activates a previously deactivated record", async () => {
-      repository.findById.mockResolvedValue(
-        buildRoutePricing({ isActive: false }),
-      );
-      repository.setActive.mockResolvedValue(
-        buildRoutePricing({ isActive: true }),
-      );
-
-      const response = await request(app.getHttpServer())
-        .patch(`${BASE}/${ROUTE_ID}/activation`)
-        .expect(200);
-
-      expect(response.body.data.isActive).toBe(true);
-    });
-
-    it("returns 409 when activation would duplicate an active route", async () => {
-      repository.findById.mockResolvedValue(
-        buildRoutePricing({ isActive: false }),
-      );
-      repository.findActiveByRoute.mockResolvedValue(
-        buildRoutePricing({ id: OTHER_ROUTE_ID }),
-      );
+      repository.delete.mockResolvedValue(buildRoutePricing());
 
       await request(app.getHttpServer())
-        .patch(`${BASE}/${ROUTE_ID}/activation`)
-        .expect(409);
+        .delete(`${BASE}/${ROUTE_ID}`)
+        .expect(204);
+
+      expect(repository.delete).toHaveBeenCalledWith(ROUTE_ID);
     });
 
     it("returns 404 for an unknown record", async () => {
       repository.findById.mockResolvedValue(null);
 
       await request(app.getHttpServer())
-        .patch(`${BASE}/${ROUTE_ID}/deactivation`)
+        .delete(`${BASE}/${ROUTE_ID}`)
         .expect(404);
+
+      expect(repository.delete).not.toHaveBeenCalled();
     });
-  });
 
-  it("exposes no DELETE route", async () => {
-    repository.findById.mockResolvedValue(buildRoutePricing());
+    /** The switch is gone, not renamed: neither path answers any more. */
+    it.each(["activation", "deactivation"])(
+      "no longer serves %s",
+      async (path) => {
+        repository.findById.mockResolvedValue(buildRoutePricing());
 
-    await request(app.getHttpServer()).delete(`${BASE}/${ROUTE_ID}`).expect(404);
+        await request(app.getHttpServer())
+          .patch(`${BASE}/${ROUTE_ID}/${path}`)
+          .expect(404);
+      },
+    );
   });
 });

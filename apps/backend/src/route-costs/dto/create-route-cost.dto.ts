@@ -70,6 +70,16 @@ export class CreateRouteCostDto {
   amount!: number;
 
   @ApiPropertyOptional({
+    description:
+      "The configured route that OWNS this cost, when it belongs to one route rather than to the road. Used by a Combination leg, whose road may also be an ordinary route with a tunnel of its own. Omit it for a cost of the road, which is how every route cost has always been matched.",
+    format: "uuid",
+    nullable: true,
+  })
+  @IsOptional()
+  @IsUUID()
+  routePricingId?: string | null;
+
+  @ApiPropertyOptional({
     description: "Free-text note, for example the tariff this amount came from.",
     maxLength: ROUTE_COST_NOTES_MAX_LENGTH,
     nullable: true,

@@ -103,6 +103,13 @@ describe("the pricing settings catalog", () => {
     ["WAITING_TIME_THRESHOLD_MINUTES", "150"],
     ["WAITING_TIME_BLOCK_MINUTES", "15"],
     ["WAITING_TIME_BLOCK_PRICE", "13.75"],
+    /*
+     * The one default that was not transcribed from a working database: toll
+     * has always been configured per route and no per-kilometre rate has ever
+     * been in use. Zero is "configured, charges nothing" — the state the bounds
+     * already define — rather than a rate nobody decided on.
+     */
+    ["TOLL_RATE_PER_KM", "0.00"],
     ["DISTANCE_RATE_PER_KM", "2.75"],
     ["PRICING_RULE_VERSION", "2026.1"],
   ])("proposes %s = %s", (key, value) => {
@@ -344,7 +351,8 @@ describe("PricingBootstrapService", () => {
     await service.apply();
 
     expect(componentsFirstPass).toBe(1);
-    expect(propertiesFirstPass).toBe(3);
+    // TAR and the tunnel. Toll is no longer route-priced.
+    expect(propertiesFirstPass).toBe(2);
     expect(settingsFirstPass).toBe(PRICING_SETTING_CATALOG.length);
 
     expect(components.createMany).not.toHaveBeenCalled();
@@ -524,13 +532,15 @@ describe("PricingBootstrapService", () => {
    *   Pricing component "TOLL" is not route-priced, so it cannot have a route cost
    */
   describe("the route-priced Custom Properties", () => {
-    it("reports both as absent on a fresh database", async () => {
+    /**
+     * Only the tunnel. Toll stopped being route-priced when it became the
+     * route's length times a configured rate: there is no route cost to attach
+     * it to, so there is no property for the bootstrap to provision.
+     */
+    it("reports the tunnel as absent on a fresh database", async () => {
       const plan = await service.plan();
 
-      expect(plan.routePricedProperties.map((p) => p.name)).toEqual([
-        "Toll",
-        "Tunnel",
-      ]);
+      expect(plan.routePricedProperties.map((p) => p.name)).toEqual(["Tunnel"]);
       expect(plan.routePricedProperties.every((p) => !p.isPresent)).toBe(true);
     });
 
@@ -540,21 +550,26 @@ describe("PricingBootstrapService", () => {
       expect(customProperties.create).not.toHaveBeenCalled();
     });
 
-    it("creates both, each linked to its own component", async () => {
+    it("creates it linked to its own component", async () => {
       await service.apply();
 
-      expect(customProperties.create).toHaveBeenCalledWith(
-        expect.objectContaining({
-          name: "Toll",
-          pricingComponentId: "component-TOLL",
-        }),
-      );
       expect(customProperties.create).toHaveBeenCalledWith(
         expect.objectContaining({
           name: "Tunnel",
           pricingComponentId: "component-TUNNEL",
         }),
       );
+    });
+
+    /** And never a Toll property, which nothing would read. */
+    it("creates no Toll property", async () => {
+      await service.apply();
+
+      const created = customProperties.create.mock.calls.map(
+        (call) => (call[0] as { name: string }).name,
+      );
+
+      expect(created).not.toContain("Toll");
     });
 
     /**
@@ -575,7 +590,7 @@ describe("PricingBootstrapService", () => {
     });
 
     it("leaves an existing one alone", async () => {
-      existingPropertyNames.add("Toll");
+      existingPropertyNames.add("Tunnel");
 
       await service.apply();
 
@@ -583,19 +598,18 @@ describe("PricingBootstrapService", () => {
         (call) => (call[0] as { name: string }).name,
       );
 
-      expect(created).not.toContain("Toll");
-      expect(created).toContain("Tunnel");
+      expect(created).not.toContain("Tunnel");
     });
 
-    it("creates neither a second time", async () => {
+    it("creates it once, however often the bootstrap runs", async () => {
       await service.apply();
       await service.apply();
 
-      const created = customProperties.create.mock.calls.filter((call) =>
-        ["Toll", "Tunnel"].includes((call[0] as { name: string }).name),
+      const created = customProperties.create.mock.calls.filter(
+        (call) => (call[0] as { name: string }).name === "Tunnel",
       );
 
-      expect(created).toHaveLength(2);
+      expect(created).toHaveLength(1);
     });
 
     /**
@@ -605,14 +619,14 @@ describe("PricingBootstrapService", () => {
      */
     it("reports a missing component as the reason it cannot link", async () => {
       storedCodes = PRICING_COMPONENT_CATALOG.map((c) => c.code).filter(
-        (code) => code !== "TOLL",
+        (code) => code !== "TUNNEL",
       );
 
       const plan = await service.plan();
-      const toll = plan.routePricedProperties.find((p) => p.name === "Toll");
+      const toll = plan.routePricedProperties.find((p) => p.name === "Tunnel");
 
       expect(toll?.willCreate).toBe(false);
-      expect(toll?.blockedReason).toMatch(/TOLL/);
+      expect(toll?.blockedReason).toMatch(/TUNNEL/);
     });
 
     /** Creating a switch is not creating a charge. */
