@@ -8,7 +8,6 @@ import {
   CombinationDeleteDialog,
   CombinationRouteForm,
   CombinationRows,
-  combinationDraftOf,
   type CombinationDraft,
 } from "@/components/pricing/combination-routes";
 import { RouteRow } from "@/components/pricing/route-row";
@@ -50,7 +49,9 @@ type RoutesState = ReturnType<
   typeof useAsync<Awaited<ReturnType<typeof listRouteConfigurations>>>
 >;
 type CombinationsState = ReturnType<
-  typeof useAsync<Awaited<ReturnType<typeof listCombinationRouteConfigurations>>>
+  typeof useAsync<
+    Awaited<ReturnType<typeof listCombinationRouteConfigurations>>
+  >
 >;
 
 /** The two kinds of route an operator can configure. */
@@ -231,14 +232,12 @@ export function RoutePricesSection({
       return;
     }
 
-    const payload = {
-      legs: combinationDraft.legs.map((leg) => toRoutePayload(leg)),
-    };
-
-    void run(combinationDraft.id, () =>
-      combinationDraft.id === null
-        ? createCombinationRouteConfiguration(payload)
-        : updateCombinationRouteConfiguration(combinationDraft.id, payload),
+    // Only ever a new one: a stored Combination is changed in its own rows, and
+    // the update those changes go through is `saveLegField`.
+    void run(null, () =>
+      createCombinationRouteConfiguration({
+        legs: combinationDraft.legs.map((leg) => toRoutePayload(leg)),
+      }),
     );
   }
 
@@ -476,7 +475,9 @@ export function RoutePricesSection({
         </div>
       ) : null}
 
-      {isLoading ? <LoadingState label={t("settings.pricing.loading")} /> : null}
+      {isLoading ? (
+        <LoadingState label={t("settings.pricing.loading")} />
+      ) : null}
 
       {!isLoading && error ? (
         <ErrorState
@@ -560,7 +561,8 @@ export function RoutePricesSection({
                       onReview={(reviewed) =>
                         void run(
                           route.id,
-                          () => markRouteConfigurationReviewed(route.id, reviewed),
+                          () =>
+                            markRouteConfigurationReviewed(route.id, reviewed),
                           { done: "settings.pricing.routes.reviewSaved" },
                         )
                       }
@@ -572,46 +574,41 @@ export function RoutePricesSection({
               {/*
                 Each Combination is one `<tbody>` of its own: the same rows, the
                 same borders and the same type as an ordinary route, with a quiet
-                header row saying the two belong together. The one being edited is
-                left out, because its form stands in for it below.
+                header row saying the two belong together. None is ever left out:
+                a Combination is edited in place, so no form ever stands in for a
+                row.
               */}
-              {shownCombinations.map((combination, index) =>
-                combination.id === combinationDraft?.id ? null : (
-                  <CombinationRows
-                    key={combination.id}
-                    combination={combination}
-                    index={index}
-                    isBusy={busyId === combination.id}
-                    columnCount={ROUTE_COLUMN_COUNT}
-                    onEdit={() => {
-                      setDraft(null);
-                      setCombinationDraft(combinationDraftOf(combination));
-                    }}
-                    onDelete={() => setDeletingCombination(combination)}
-                    onSaveLegField={(legIndex, field, value) =>
-                      saveLegField(combination, legIndex, field, value)
-                    }
-                    onReview={(reviewed) =>
-                      void run(
-                        combination.id,
-                        () =>
-                          markCombinationRouteConfigurationReviewed(
-                            combination.id,
-                            reviewed,
-                          ),
-                        { done: "settings.pricing.routes.reviewSaved" },
-                      )
-                    }
-                  />
-                ),
-              )}
+              {shownCombinations.map((combination, index) => (
+                <CombinationRows
+                  key={combination.id}
+                  combination={combination}
+                  index={index}
+                  isBusy={busyId === combination.id}
+                  columnCount={ROUTE_COLUMN_COUNT}
+                  onDelete={() => setDeletingCombination(combination)}
+                  onSaveLegField={(legIndex, field, value) =>
+                    saveLegField(combination, legIndex, field, value)
+                  }
+                  onReview={(reviewed) =>
+                    void run(
+                      combination.id,
+                      () =>
+                        markCombinationRouteConfigurationReviewed(
+                          combination.id,
+                          reviewed,
+                        ),
+                      { done: "settings.pricing.routes.reviewSaved" },
+                    )
+                  }
+                />
+              ))}
             </table>
           </div>
 
           {combinationDraft ? (
             <CombinationRouteForm
               draft={combinationDraft}
-              isBusy={busyId === (combinationDraft.id ?? "new")}
+              isBusy={busyId === "new"}
               onChange={setCombinationDraft}
               onSave={saveCombination}
               onCancel={() => setCombinationDraft(null)}
@@ -640,10 +637,14 @@ export function RoutePricesSection({
           confirmKey="settings.pricing.routes.delete"
           tone="danger"
           onConfirm={async () => {
-            await run(deleting.id, () => deleteRouteConfiguration(deleting.id), {
-              done: "settings.pricing.routes.deleted",
-              failed: "settings.pricing.routes.deleteFailed",
-            });
+            await run(
+              deleting.id,
+              () => deleteRouteConfiguration(deleting.id),
+              {
+                done: "settings.pricing.routes.deleted",
+                failed: "settings.pricing.routes.deleteFailed",
+              },
+            );
             setDeleting(null);
           }}
           onClose={() => setDeleting(null)}
@@ -720,7 +721,9 @@ function RouteForm({
         step="0.01"
         aria-label={t(labelKey)}
         value={draft[field]}
-        onChange={(event) => onChange({ ...draft, [field]: event.target.value })}
+        onChange={(event) =>
+          onChange({ ...draft, [field]: event.target.value })
+        }
         className="w-24 rounded-md border border-border bg-card px-2 py-1 text-right text-sm text-foreground"
       />
     </td>

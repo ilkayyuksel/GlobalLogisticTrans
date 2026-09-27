@@ -7,9 +7,9 @@ import {
   CombinationLegNotSeparatelyRemovableException,
   CombinationRouteGroupNotFoundException,
   DuplicateActiveRouteException,
+  DuplicateCombinationRouteException,
   InvalidCombinationLegCountException,
 } from "./exceptions/route-pricing.exceptions";
-import { RouteConfigurationKind } from "./route-pricing.repository";
 
 const GROUP_ID = "7d2b8c14-9f3a-4c5e-8b1d-2e3f4a5b6c7d";
 const OUTBOUND_ID = "5a1f0c1e-2b3d-4e5f-8a9b-0c1d2e3f4a5b";
@@ -114,6 +114,7 @@ describe("CombinationRoutePricingService", () => {
     create: jest.Mock;
     update: jest.Mock;
     findByRoute: jest.Mock;
+    findGroupWithLegRoads: jest.Mock;
     findGroupById: jest.Mock;
     findGroups: jest.Mock;
     findLegsOfGroup: jest.Mock;
@@ -161,6 +162,8 @@ describe("CombinationRoutePricingService", () => {
       }),
       // Nothing else configures either road unless a test says so.
       findByRoute: jest.fn().mockResolvedValue(null),
+      // And no Combination holds this pair of roads unless a test says so.
+      findGroupWithLegRoads: jest.fn().mockResolvedValue(null),
       findGroupById: jest.fn().mockResolvedValue(GROUP),
       findGroups: jest.fn().mockResolvedValue([]),
       findLegsOfGroup: jest.fn().mockResolvedValue(storedPair()),
@@ -363,38 +366,61 @@ describe("CombinationRoutePricingService", () => {
     });
   });
 
+  /**
+   * ── WHAT MAY NOT EXIST TWICE IS THE PAIR ──────────────────────────────────
+   * A Combination is identified by its two legs together. A single leg is not a
+   * configuration — it has no meaning without its partner — so one road may be a
+   * leg of as many Combinations as an operator has returns for it. This service
+   * used to refuse the second use of a road, which made the real configuration
+   * of this business impossible to enter.
+   */
   describe("which roads a Combination may describe", () => {
-    it("looks for a conflicting leg in the Combination scope only", async () => {
+    it("asks whether this PAIR of roads is already configured", async () => {
       await service.create(bothLegs());
 
-      for (const [, , options] of repository.findByRoute.mock.calls) {
-        expect(options.kind).toBe(RouteConfigurationKind.COMBINATION);
-      }
+      expect(repository.findGroupWithLegRoads).toHaveBeenCalledTimes(1);
+      expect(repository.findGroupWithLegRoads.mock.calls[0][0]).toMatchObject([
+        { departure: "Antwerp", destination: "Kallo" },
+        { departure: "Kallo", destination: "Antwerp" },
+      ]);
     });
 
     /**
-     * ── AN ORDINARY ROUTE ON THE SAME ROAD IS NOT A CONFLICT ───────────────
-     * That is the whole point of the two scopes: Antwerp to Kallo may be
-     * configured as an ordinary route AND as a Combination leg, priced
-     * differently, and neither overwrites the other.
+     * ── A SHARED ROAD IS NOT A CONFLICT ────────────────────────────────────
+     * Everything leaving one terminal shares its outbound. Nothing asks whether
+     * a single road is taken, in either scope: an ordinary route on the same
+     * road is not a conflict either, which is what the two scopes are for.
      */
-    it("never asks about ordinary routes", async () => {
-      await service.create(bothLegs());
-
-      const scopes = repository.findByRoute.mock.calls.map(
-        ([, , options]) => options.kind,
-      );
-
-      expect(scopes).not.toContain(RouteConfigurationKind.NORMAL);
-    });
-
-    it("refuses a road another Combination leg already configures", async () => {
+    it("never refuses a Combination over a single road", async () => {
       repository.findByRoute.mockResolvedValue(storedLeg(OUTBOUND_ID, 1));
 
+      await expect(service.create(bothLegs())).resolves.toMatchObject({
+        id: GROUP_ID,
+      });
+      expect(repository.findByRoute).not.toHaveBeenCalled();
+    });
+
+    it("refuses a Combination whose pair is already configured", async () => {
+      repository.findGroupWithLegRoads.mockResolvedValue({
+        ...GROUP,
+        legs: storedPair(),
+      });
+
       await expect(service.create(bothLegs())).rejects.toBeInstanceOf(
-        DuplicateActiveRouteException,
+        DuplicateCombinationRouteException,
       );
       expect(repository.runInTransaction).not.toHaveBeenCalled();
+    });
+
+    it("names both roads when refusing the pair", async () => {
+      repository.findGroupWithLegRoads.mockResolvedValue({
+        ...GROUP,
+        legs: storedPair(),
+      });
+
+      await expect(service.create(bothLegs())).rejects.toThrow(
+        "Antwerp to Kallo and Kallo to Antwerp",
+      );
     });
 
     /** Two legs on one road would make the choice between them arbitrary. */
@@ -404,14 +430,13 @@ describe("CombinationRoutePricingService", () => {
       );
     });
 
-    it("lets an edit keep its own roads", async () => {
+    it("lets an edit keep its own pair", async () => {
       await service.replaceLegs(GROUP_ID, bothLegs());
 
-      const excluded = repository.findByRoute.mock.calls.map(
-        ([, , options]) => options.excludeRoutePricingId,
+      expect(repository.findGroupWithLegRoads).toHaveBeenCalledWith(
+        expect.anything(),
+        { excludeCombinationGroupId: GROUP_ID },
       );
-
-      expect(excluded).toEqual([OUTBOUND_ID, RETURN_ID]);
     });
 
     /** The index is the real guard; its violation reads as the same conflict. */

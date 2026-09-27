@@ -529,19 +529,35 @@ describe("the configured Combinations", () => {
   });
 });
 
+/**
+ * ── A COMBINATION IS CHANGED IN ITS OWN ROWS ────────────────────────────────
+ * There is no form for a stored Combination and no Bewerken button on the group:
+ * every value of both legs is edited by clicking it, exactly as an ordinary
+ * route's is. The whole of that behaviour has its own suite —
+ * `route-inline-editing.spec.tsx`. What belongs HERE is the guarantee this suite
+ * is about: however a leg is changed, both legs go to the group in one request,
+ * so the pair can never disagree.
+ */
 describe("changing a Combination", () => {
-  it("opens both legs with their stored values", async () => {
+  it("offers no form for the group, only its values", async () => {
     respondWith({ combinations: [combination()] });
     renderPage();
 
+    await screen.findByText("Combination #1");
+
+    expect(
+      screen.queryByRole("button", { name: /^Bewerken/ }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Leg 1: Tarief")).not.toBeInTheDocument();
+
+    // The value itself opens, and it opens with what is stored in it.
     await userEvent.click(
-      await screen.findByRole("button", { name: "Bewerken Combination 1" }),
+      screen.getByRole("button", { name: "Tarief: Antwerp Kallo" }),
     );
 
-    expect(screen.getByLabelText("Leg 1: Van")).toHaveValue("Antwerp");
-    expect(screen.getByLabelText("Leg 1: Tarief")).toHaveValue(100);
-    expect(screen.getByLabelText("Leg 2: Van")).toHaveValue("Kallo");
-    expect(screen.getByLabelText("Leg 2: Tunnel")).toHaveValue(3.75);
+    expect(
+      screen.getByRole("spinbutton", { name: "Tarief: Antwerp Kallo" }),
+    ).toHaveValue(100);
   });
 
   /** Both legs go out together, so the pair can never disagree. */
@@ -550,16 +566,14 @@ describe("changing a Combination", () => {
     renderPage();
 
     await userEvent.click(
-      await screen.findByRole("button", { name: "Bewerken Combination 1" }),
+      await screen.findByRole("button", { name: "Tarief: Antwerp Kallo" }),
     );
 
-    const tarief = screen.getByLabelText("Leg 1: Tarief");
+    const tarief = screen.getByRole("spinbutton", {
+      name: "Tarief: Antwerp Kallo",
+    });
     await userEvent.clear(tarief);
-    await userEvent.type(tarief, "120");
-
-    await userEvent.click(
-      within(routeSection()).getByRole("button", { name: "Opslaan" }),
-    );
+    await userEvent.type(tarief, "120{Enter}");
 
     await waitFor(() => expect(writes).toHaveLength(1));
     expect(writes[0]).toMatchObject({

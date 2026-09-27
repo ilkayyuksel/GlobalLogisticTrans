@@ -2,8 +2,14 @@ import { Injectable } from "@nestjs/common";
 import { plainToInstance } from "class-transformer";
 import { ValidationError, validate } from "class-validator";
 
-import { isSameTerminal } from "../common/terminal";
 import { AppLoggerService } from "../logger/app-logger.service";
+import { CombinationRoutePricingService } from "../route-pricing/combination-route-pricing.service";
+import {
+  RoadEndpoints,
+  describeCombination,
+  isSameCombination,
+  isSameRoad,
+} from "../route-pricing/route-identity";
 import { RouteConfigurationKind } from "../route-pricing/route-pricing.repository";
 import { RoutePricingService } from "../route-pricing/route-pricing.service";
 import {
@@ -43,12 +49,22 @@ export interface BulkRouteImportPlan extends BulkRouteImportCheckDto {
   readonly routes: readonly ImportedRoute[];
 }
 
-/** One road, as the uniqueness rules compare them. */
-interface Road {
-  readonly departure: string;
-  readonly destination: string;
+/** One road of the document, and where in it that road was named. */
+interface Road extends RoadEndpoints {
   readonly routeNumber: number;
   readonly legNumber: number | null;
+}
+
+/**
+ * One Combination entry, as the uniqueness rule compares them.
+ *
+ * The rule is about the PAIR, so the entry travels as its two roads together.
+ * See `isSameCombination`: one road may be a leg of many Combinations, and only
+ * the same pair twice is a duplicate.
+ */
+interface Configuration {
+  readonly routeNumber: number;
+  readonly roads: readonly RoadEndpoints[];
 }
 
 /**
@@ -76,6 +92,7 @@ interface Road {
 export class BulkRouteImportValidator {
   constructor(
     private readonly routePricing: RoutePricingService,
+    private readonly combinationPricing: CombinationRoutePricingService,
     private readonly logger: AppLoggerService,
   ) {
     this.logger.setContext(BulkRouteImportValidator.name);
@@ -250,32 +267,43 @@ export class BulkRouteImportValidator {
   }
 
   /**
-   * Entries of this same document that describe the same road twice.
+   * Entries of this same document that configure the same thing twice.
    *
-   * Checked separately from the stored routes, because neither exists yet: two
+   * Checked separately from the stored records, because neither exists yet: two
    * identical entries would pass every per-entry rule and then collide with each
    * other halfway through the transaction, reported as a database conflict on an
    * entry the operator never thought was the problem.
    *
-   * The two scopes are counted apart, exactly as the two partial unique indexes
-   * are: an ordinary route and a Combination leg on one road are not a collision.
+   * ── EACH KIND BY ITS OWN IDENTITY ─────────────────────────────────────────
+   * An ordinary route is its road, and one road may hold one ordinary
+   * configuration. A Combination is its PAIR of roads: the same leg may be used
+   * by as many Combinations as an operator has returns for it, so a document
+   * naming `Quay 869 → Lessines` as Leg 1 of ten Combinations is ten
+   * configurations and not one collision. What is refused is the same pair twice.
+   *
+   * A Combination leg and an ordinary route on one road are not a collision
+   * either, exactly as the partial unique indexes have it.
    */
   private collidingWithinDocument(
     routes: readonly ImportedRoute[],
   ): BulkRouteImportErrorDto[] {
     return [
       ...duplicatesAmong(ordinaryRoads(routes), "route"),
-      ...duplicatesAmong(combinationRoads(routes), "leg"),
+      ...duplicateCombinationsAmong(combinationConfigurations(routes)),
     ];
   }
 
   /**
-   * Entries whose road is already configured.
+   * Entries that are already configured in the database.
    *
-   * Through the same lookup the manual create uses, so the canonical terminal
+   * Through the same lookups the manual create uses, so the canonical terminal
    * rule applies: an import naming `PSA Quay 869` collides with a route
    * configured as `Quay 869`. Nothing is overwritten and nothing is skipped — the
    * import is refused and says which entry is already there.
+   *
+   * An ordinary route is compared by its road; a Combination by its pair, which
+   * is the only thing that identifies one. A leg whose road is already used by
+   * some OTHER Combination is not a collision.
    */
   private async collidingWithStoredRoutes(
     routes: readonly ImportedRoute[],
@@ -288,9 +316,16 @@ export class BulkRouteImportValidator {
       }
     }
 
-    for (const road of combinationRoads(routes)) {
-      if (await this.isConfigured(road, RouteConfigurationKind.COMBINATION)) {
-        errors.push(alreadyConfigured(road, "leg"));
+    for (const configuration of combinationConfigurations(routes)) {
+      if (await this.isConfiguredCombination(configuration.roads)) {
+        errors.push(
+          failure(
+            configuration.routeNumber,
+            null,
+            null,
+            `this Combination is already configured: ${describeCombination(configuration.roads)}`,
+          ),
+        );
       }
     }
 
@@ -306,6 +341,15 @@ export class BulkRouteImportValidator {
       road.destination,
       kind,
     );
+
+    return configured !== null;
+  }
+
+  private async isConfiguredCombination(
+    roads: readonly RoadEndpoints[],
+  ): Promise<boolean> {
+    const configured =
+      await this.combinationPricing.findConfiguredCombination(roads);
 
     return configured !== null;
   }
@@ -388,23 +432,52 @@ function ordinaryRoads(routes: readonly ImportedRoute[]): Road[] {
   );
 }
 
-/**
- * The roads the Combination legs describe, across every group.
- *
- * Across groups on purpose: a Combination leg is selected by its road alone, so
- * one road may be a leg of at most one Combination in the whole configuration.
- */
-function combinationRoads(routes: readonly ImportedRoute[]): Road[] {
+/** The Combination entries, each as its own pair of roads. */
+function combinationConfigurations(
+  routes: readonly ImportedRoute[],
+): Configuration[] {
   return routes.flatMap((entry, index) =>
     entry.kind === "COMBINATION"
-      ? entry.combination.legs.map((leg, legIndex) => ({
-          departure: leg.departure,
-          destination: leg.destination,
-          routeNumber: index + 1,
-          legNumber: legIndex + 1,
-        }))
+      ? [
+          {
+            routeNumber: index + 1,
+            roads: entry.combination.legs.map((leg) => ({
+              departure: leg.departure,
+              destination: leg.destination,
+            })),
+          },
+        ]
       : [],
   );
+}
+
+/**
+ * Every Combination configured twice in one document, reported on the LATER
+ * entry.
+ *
+ * Only an identical PAIR counts, in either leg order — see `isSameCombination`.
+ * Two Combinations sharing one leg are two configurations, and this is the check
+ * that used to refuse them.
+ */
+function duplicateCombinationsAmong(
+  configurations: readonly Configuration[],
+): BulkRouteImportErrorDto[] {
+  return configurations.flatMap((configuration, index) => {
+    const earlier = configurations
+      .slice(0, index)
+      .find((candidate) => isSameCombination(candidate.roads, configuration.roads));
+
+    return earlier
+      ? [
+          failure(
+            configuration.routeNumber,
+            null,
+            null,
+            `this Combination is already configured by route ${earlier.routeNumber} of this import: ${describeCombination(configuration.roads)}`,
+          ),
+        ]
+      : [];
+  });
 }
 
 /**
@@ -444,23 +517,6 @@ function alreadyConfigured(
     road.legNumber,
     null,
     `this ${subject} is already configured: ${road.departure} to ${road.destination}`,
-  );
-}
-
-/**
- * Whether two entries describe the same road.
- *
- * The departure is compared as a TERMINAL through the shared helper, so
- * `PSA Quay 869` and `Quay 869` are one place — the same rule the repositories
- * apply, which is what makes this check agree with the database.
- */
-function isSameRoad(
-  left: { departure: string; destination: string },
-  right: { departure: string; destination: string },
-): boolean {
-  return (
-    left.destination === right.destination &&
-    isSameTerminal(left.departure, right.departure)
   );
 }
 

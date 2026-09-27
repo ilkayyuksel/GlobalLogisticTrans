@@ -268,6 +268,50 @@ describe("RoutePricingRepository", () => {
     });
   });
 
+  /**
+   * ── A COMBINATION LEG'S ROAD IS NO LONGER UNIQUE ──────────────────────────
+   * Several Combinations may hold one road, so a caller that must know cannot
+   * learn it from an answer of one row. Same query and same terminal rule as
+   * `findByRoute`, which reads through this.
+   */
+  describe("findAllByRoute", () => {
+    it("returns every match on the road, not the first", async () => {
+      prisma.routePricing.findMany.mockResolvedValue([
+        { id: "leg-1", departure: "Quay 869", destination: "LESSINES" },
+        { id: "leg-2", departure: "PSA Quay 869", destination: "LESSINES" },
+        { id: "other", departure: "MPET 1742", destination: "LESSINES" },
+      ]);
+
+      const found = await repository.findAllByRoute(
+        "Quay 869",
+        "LESSINES",
+        COMBINATION_ROUTE,
+      );
+
+      expect(found.map((route) => route.id)).toEqual(["leg-1", "leg-2"]);
+    });
+
+    it("reads only Combination legs in the Combination scope", async () => {
+      await repository.findAllByRoute("Quay 869", "LESSINES", COMBINATION_ROUTE);
+
+      expect(prisma.routePricing.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ combinationGroupId: { not: null } }),
+        }),
+      );
+    });
+
+    it("reads only ordinary routes in the ordinary scope", async () => {
+      await repository.findAllByRoute("Quay 869", "LESSINES", NORMAL_ROUTE);
+
+      expect(prisma.routePricing.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ combinationGroupId: null }),
+        }),
+      );
+    });
+  });
+
   describe("writes", () => {
     it("creates with the supplied data", async () => {
       await repository.create({
@@ -342,6 +386,82 @@ describe("RoutePricingRepository", () => {
         include: { legs: { orderBy: { combinationLegPosition: "asc" } } },
         orderBy: [{ createdAt: "asc" }, { id: "asc" }],
       });
+    });
+
+    /**
+     * ── FINDING A COMBINATION BY ITS PAIR ──────────────────────────────────
+     * The identity of a Combination is its two legs together, so "is this
+     * already configured" is a question about the GROUP. Narrowed in SQL by the
+     * two destinations and decided in memory by the terminal rule, exactly as
+     * `findByRoute` is — SQL equality cannot say that PSA Quay 869 and Quay 869
+     * are one place.
+     */
+    it("narrows the candidate groups by the destinations of both legs", async () => {
+      await repository.findGroupWithLegRoads([
+        { departure: "Quay 869", destination: "LESSINES" },
+        { departure: "LESSINES", destination: "Kallo" },
+      ]);
+
+      expect(prisma.combinationRouteGroup.findMany).toHaveBeenCalledWith({
+        where: { legs: { some: { destination: { in: ["LESSINES", "Kallo"] } } } },
+        include: { legs: { orderBy: { combinationLegPosition: "asc" } } },
+        orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+      });
+    });
+
+    it("can leave the group being edited out of the comparison", async () => {
+      await repository.findGroupWithLegRoads(
+        [
+          { departure: "Quay 869", destination: "LESSINES" },
+          { departure: "LESSINES", destination: "Kallo" },
+        ],
+        { excludeCombinationGroupId: "group-1" },
+      );
+
+      expect(prisma.combinationRouteGroup.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ id: { not: "group-1" } }),
+        }),
+      );
+    });
+
+    /** A group sharing ONE road is not the same Combination. */
+    it("answers null for a group that shares only one leg", async () => {
+      prisma.combinationRouteGroup.findMany.mockResolvedValue([
+        {
+          id: "group-1",
+          legs: [
+            { departure: "Quay 869", destination: "LESSINES" },
+            { departure: "LESSINES", destination: "Kallo" },
+          ],
+        },
+      ]);
+
+      const found = await repository.findGroupWithLegRoads([
+        { departure: "Quay 869", destination: "LESSINES" },
+        { departure: "Kallo", destination: "Antwerp" },
+      ]);
+
+      expect(found).toBeNull();
+    });
+
+    it("answers the group that holds both roads, in either order", async () => {
+      prisma.combinationRouteGroup.findMany.mockResolvedValue([
+        {
+          id: "group-1",
+          legs: [
+            { departure: "LESSINES", destination: "Kallo" },
+            { departure: "PSA Quay 869", destination: "LESSINES" },
+          ],
+        },
+      ]);
+
+      const found = await repository.findGroupWithLegRoads([
+        { departure: "Quay 869", destination: "LESSINES" },
+        { departure: "LESSINES", destination: "Kallo" },
+      ]);
+
+      expect(found).toMatchObject({ id: "group-1" });
     });
 
     it("creates a group with no notes by default", async () => {

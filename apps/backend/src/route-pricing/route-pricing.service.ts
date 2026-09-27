@@ -83,13 +83,36 @@ export class RoutePricingService {
     destination: string,
     kind: RouteConfigurationKind = RouteConfigurationKind.NORMAL,
   ): Promise<RoutePricingResponseDto | null> {
-    const routePricing = await this.repository.findByRoute(
+    const matches = await this.repository.findAllByRoute(
       departure,
       destination,
       { kind },
     );
 
-    return routePricing ? toRoutePricingResponse(routePricing) : null;
+    /*
+     * ── WHEN ONE ROAD IS A LEG OF SEVERAL COMBINATIONS ──────────────────────
+     * A Combination leg's road is no longer unique: the same outbound may serve
+     * many Combinations, each with its own return and its own prices. Selecting
+     * BY ROAD then has more than one candidate, and this returns the first of
+     * them — deterministic, but it cannot know which Combination the Trip
+     * belongs to, because a Trip's pairing is a document fact and this lookup is
+     * given only a road.
+     *
+     * Logged rather than guessed at silently: if the candidates disagree on
+     * price, the amount a Trip is charged depends on which row came first, and
+     * that is something an operator has to be able to find out. Deciding it
+     * properly means matching the Trip's PAIR of roads, which is a change to the
+     * Engine's rule and not to this lookup.
+     */
+    if (matches.length > 1) {
+      this.logger.warn("More than one configured route matches this road", {
+        kind,
+        matchCount: matches.length,
+        usedRoutePricingId: matches[0].id,
+      });
+    }
+
+    return matches[0] ? toRoutePricingResponse(matches[0]) : null;
   }
 
   async create(dto: CreateRoutePricingDto): Promise<RoutePricingResponseDto> {

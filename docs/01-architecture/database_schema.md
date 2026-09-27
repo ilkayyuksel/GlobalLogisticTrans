@@ -1060,7 +1060,7 @@ again.
 ### Constraints
 
 - Partial `UNIQUE (departure, destination)` where `combination_group_id IS NULL` — one ordinary configuration per route.
-- Partial `UNIQUE (departure, destination)` where `combination_group_id IS NOT NULL` — one Combination leg per route. Pricing selects a leg by its road, so two legs on one road would make the choice between them arbitrary.
+- Partial `UNIQUE (combination_group_id, departure, destination)` where `combination_group_id IS NOT NULL` — one road per Combination, so a group cannot hold the same road as both of its legs. Scoped to the GROUP on purpose: a road may be a leg of many Combinations, because everything leaving one terminal shares its outbound. The unscoped index this replaced (`route_pricing_combination_route_key`) made that impossible and was removed in `20260927140000_combination_legs_may_be_shared`.
 - Partial `UNIQUE (combination_group_id, combination_leg_position)` where `combination_group_id IS NOT NULL` — with only two positions permitted, this is what makes **at most two legs** structural: the database refuses a third.
 - `CHECK` — `base_price` must be greater than or equal to zero.
 - `CHECK` — `combination_leg_position IS NULL` exactly when `combination_group_id` is, so neither half of the discriminator can be set without the other.
@@ -1091,7 +1091,7 @@ both its legs, and the database will not leave one behind.
 |---|---|---|---|
 | PK | `id` | Primary key | |
 | Unique (partial) | `departure`, `destination` where `combination_group_id IS NULL` | Unique | One ordinary configuration per route |
-| Unique (partial) | `departure`, `destination` where `combination_group_id IS NOT NULL` | Unique | One Combination leg per route |
+| Unique (partial) | `combination_group_id`, `departure`, `destination` where `combination_group_id IS NOT NULL` | Unique | One road per Combination; the same road may be a leg of other Combinations |
 | Unique (partial) | `combination_group_id`, `combination_leg_position` where `combination_group_id IS NOT NULL` | Unique | At most two legs, each in a known position |
 | Lookup | `combination_group_id` | B-tree | Reading a Combination's legs |
 

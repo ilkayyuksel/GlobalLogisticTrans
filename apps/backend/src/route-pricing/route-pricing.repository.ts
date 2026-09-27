@@ -3,6 +3,7 @@ import { CombinationRouteGroup, Prisma, RoutePricing } from "@prisma/client";
 
 import { isSameTerminal } from "../common/terminal";
 import { PrismaService } from "../prisma/prisma.service";
+import { RoadEndpoints, isSameCombination } from "./route-identity";
 
 export interface FindRoutePricingFilter {
   search?: string;
@@ -133,33 +134,19 @@ export class RoutePricingRepository {
     destination: string,
     options: FindRouteOptions,
   ): Promise<RoutePricing | null> {
-    const candidates = await this.prisma.routePricing.findMany({
-      where: {
-        destination,
-        /*
-         * The kind is part of the identity of a configured route, not a filter
-         * over one set: the two partial unique indexes make each kind unique on
-         * its own, so scoping here is what lets a lookup return exactly one row.
-         */
-        combinationGroupId:
-          options.kind === RouteConfigurationKind.COMBINATION
-            ? { not: null }
-            : null,
-        ...(options.excludeRoutePricingId
-          ? { id: { not: options.excludeRoutePricingId } }
-          : {}),
-      },
-      // Ordered so a caller gets the same answer every time. The unique index
-      // makes more than one row per exact route impossible, but two SPELLINGS
-      // of one terminal are not excluded by it.
-      orderBy: { id: "asc" },
-    });
+    /*
+     * The kind is part of the identity of a configured route, not a filter over
+     * one set: an ordinary route and a Combination leg may describe the same
+     * road and are read in different contexts.
+     *
+     * Ordered by id inside `findAllByRoute`, so a caller gets the same answer
+     * every time. ONE row per road is guaranteed for an ordinary route by its
+     * partial unique index; a Combination leg's road may now be held by several
+     * groups, and a caller that must know takes `findAllByRoute` instead.
+     */
+    const matches = await this.findAllByRoute(departure, destination, options);
 
-    return (
-      candidates.find((candidate) =>
-        isSameTerminal(candidate.departure, departure),
-      ) ?? null
-    );
+    return matches[0] ?? null;
   }
 
   create(data: CreateRoutePricingData): Promise<RoutePricing> {
@@ -191,6 +178,74 @@ export class RoutePricingRepository {
 
   findGroupById(id: string): Promise<CombinationRouteGroup | null> {
     return this.prisma.combinationRouteGroup.findUnique({ where: { id } });
+  }
+
+  /**
+   * The Combination configured for exactly these roads, or null.
+   *
+   * ── WHY THE GROUP AND NOT THE LEG ─────────────────────────────────────────
+   * A road may be a leg of many Combinations: everything leaving MPET 1742
+   * shares its outbound, and each of those is its own configuration with its own
+   * return. So "is this already configured" is a question about the PAIR, which
+   * only the group can answer — see `isSameCombination`.
+   *
+   * Narrowed in SQL by destination, decided in memory by the terminal rule, for
+   * the same reason `findByRoute` is: `PSA Quay 869` and `Quay 869` are one
+   * place, and SQL equality cannot say so. The candidate set is small by
+   * construction — the Combinations that touch one of these two destinations.
+   */
+  async findGroupWithLegRoads(
+    roads: readonly RoadEndpoints[],
+    options: { excludeCombinationGroupId?: string } = {},
+  ): Promise<CombinationRouteGroupWithLegs | null> {
+    const candidates = await this.prisma.combinationRouteGroup.findMany({
+      where: {
+        ...(options.excludeCombinationGroupId
+          ? { id: { not: options.excludeCombinationGroupId } }
+          : {}),
+        legs: { some: { destination: { in: roads.map((road) => road.destination) } } },
+      },
+      include: { legs: { orderBy: { combinationLegPosition: "asc" } } },
+      // The oldest first, so the configuration an operator made first is the one
+      // reported as the holder of the pair.
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+    });
+
+    return (
+      candidates.find((group) => isSameCombination(group.legs, roads)) ?? null
+    );
+  }
+
+  /**
+   * Every configured route on this road, rather than the first of them.
+   *
+   * Exists because a Combination leg's road is no longer unique across groups:
+   * `findByRoute` answers with one row, and a caller that needs to know whether
+   * the road is ambiguous cannot learn it from that answer. Same query, same
+   * terminal rule, so the two can never disagree about what matches.
+   */
+  async findAllByRoute(
+    departure: string,
+    destination: string,
+    options: FindRouteOptions,
+  ): Promise<RoutePricing[]> {
+    const candidates = await this.prisma.routePricing.findMany({
+      where: {
+        destination,
+        combinationGroupId:
+          options.kind === RouteConfigurationKind.COMBINATION
+            ? { not: null }
+            : null,
+        ...(options.excludeRoutePricingId
+          ? { id: { not: options.excludeRoutePricingId } }
+          : {}),
+      },
+      orderBy: { id: "asc" },
+    });
+
+    return candidates.filter((candidate) =>
+      isSameTerminal(candidate.departure, departure),
+    );
   }
 
   /** Every Combination configuration with its legs, oldest first. */

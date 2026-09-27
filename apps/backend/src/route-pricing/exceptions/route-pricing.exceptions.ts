@@ -4,6 +4,8 @@ import {
   NotFoundException,
 } from "@nestjs/common";
 
+import { RoadEndpoints, describeCombination } from "../route-identity";
+
 /**
  * Domain exceptions for the RoutePricing module.
  *
@@ -28,6 +30,22 @@ export class DuplicateActiveRouteException extends ConflictException {
   constructor(departure: string, destination: string) {
     super(
       `An active route pricing already exists for "${departure}" to "${destination}".`,
+    );
+  }
+}
+
+/**
+ * The same Combination — the same two roads — is already configured.
+ *
+ * Distinct from `DuplicateActiveRouteException`, which is about ONE road: a
+ * shared road is perfectly legitimate across Combinations, and only the pair
+ * being configured twice is a conflict. The message names both roads, because
+ * neither of them alone is the problem.
+ */
+export class DuplicateCombinationRouteException extends ConflictException {
+  constructor(roads: readonly RoadEndpoints[]) {
+    super(
+      `A Combination route configuration already exists for ${describeCombination(roads)}.`,
     );
   }
 }

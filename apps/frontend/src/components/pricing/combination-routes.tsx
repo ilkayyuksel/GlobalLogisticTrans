@@ -9,32 +9,22 @@ import type { CombinationRouteConfiguration } from "@/lib/api/route-configuratio
 import type { RouteField } from "@/lib/pricing/route-draft";
 import { useTranslation } from "@/lib/i18n/language-provider";
 import type { TranslationKey } from "@/lib/i18n/translations";
-import {
-  BLANK_ROUTE_DRAFT,
-  draftOf,
-  type RouteDraft,
-} from "@/lib/pricing/route-draft";
+import { BLANK_ROUTE_DRAFT, type RouteDraft } from "@/lib/pricing/route-draft";
 
-/** A Combination being typed: its group, if it has one, and both legs. */
+/**
+ * A Combination being ADDED: both legs, typed together.
+ *
+ * There is no draft of a stored Combination, because a stored one is never
+ * opened in a form: every value of both legs is edited where it stands. The form
+ * exists for the one thing a row cannot do — come into being.
+ */
 export interface CombinationDraft {
-  readonly id: string | null;
   readonly legs: readonly [RouteDraft, RouteDraft];
 }
 
 export const BLANK_COMBINATION_DRAFT: CombinationDraft = {
-  id: null,
   legs: [{ ...BLANK_ROUTE_DRAFT }, { ...BLANK_ROUTE_DRAFT }],
 };
-
-/** A stored Combination, opened for editing — both legs at once, always. */
-export function combinationDraftOf(
-  combination: CombinationRouteConfiguration,
-): CombinationDraft {
-  return {
-    id: combination.id,
-    legs: [draftOf(combination.legs[0]), draftOf(combination.legs[1])],
-  };
-}
 
 /**
  * One Combination, as rows of the Routeprijzen table.
@@ -55,13 +45,18 @@ export function combinationDraftOf(
  * pattern the Ritten list uses to group a day's Trips under their truck.
  *
  * No leg carries actions of its own, because none exists on its own.
+ *
+ * ── AND NO BEWERKEN, ON THE GROUP EITHER ────────────────────────────────────
+ * A leg's Van, Naar, Tarief, KM and Tunnel are edited by clicking them, exactly
+ * as an ordinary route's are, so the pair has nothing left for a form to do. The
+ * transaction that keeps both legs in step is the backend's, not the form's: one
+ * leg at a time reaches it, and the other is passed through unchanged.
  */
 export function CombinationRows({
   combination,
   index,
   isBusy,
   columnCount,
-  onEdit,
   onDelete,
   onReview,
   onSaveLegField,
@@ -71,7 +66,6 @@ export function CombinationRows({
   index: number;
   isBusy: boolean;
   columnCount: number;
-  onEdit: () => void;
   onDelete: () => void;
   onReview: (reviewed: boolean) => void;
   /**
@@ -118,27 +112,20 @@ export function CombinationRows({
             onChange={onReview}
           />
         </td>
+        {/*
+          One action, as on an ordinary route's row: the one thing the pair
+          cannot do to itself. Editing happens in the legs below.
+        */}
         <td className="px-3 py-1.5">
-          <span className="flex flex-wrap gap-2">
-            <button
-              type="button"
-              disabled={isBusy}
-              onClick={onEdit}
-              aria-label={`${t("settings.pricing.routes.edit")} ${t("settings.pricing.routes.combinations.label")} ${index + 1}`}
-              className="rounded-md border border-border px-2 py-0.5 text-xs font-medium text-foreground hover:bg-hover disabled:opacity-50"
-            >
-              {t("settings.pricing.routes.edit")}
-            </button>
-            <button
-              type="button"
-              disabled={isBusy}
-              onClick={onDelete}
-              aria-label={`${t("settings.pricing.routes.delete")} ${t("settings.pricing.routes.combinations.label")} ${index + 1}`}
-              className="rounded-md border border-danger/40 px-2 py-0.5 text-xs font-medium text-danger hover:bg-danger/10 disabled:opacity-50"
-            >
-              {t("settings.pricing.routes.delete")}
-            </button>
-          </span>
+          <button
+            type="button"
+            disabled={isBusy}
+            onClick={onDelete}
+            aria-label={`${t("settings.pricing.routes.delete")} ${t("settings.pricing.routes.combinations.label")} ${index + 1}`}
+            className="rounded-md border border-danger/40 px-2 py-0.5 text-xs font-medium text-danger hover:bg-danger/10 disabled:opacity-50"
+          >
+            {t("settings.pricing.routes.delete")}
+          </button>
         </td>
       </tr>
 
@@ -172,12 +159,14 @@ export function CombinationRows({
 }
 
 /**
- * The add / edit form for a Combination: both legs, always together.
+ * The ADD form for a Combination: both legs, always together.
  *
  * ── WHY ONE FORM AND NOT TWO ────────────────────────────────────────────────
- * A Combination is saved in one request and the backend writes both legs in one
+ * A Combination is created in one request and the backend writes both legs in one
  * transaction, so there is no moment at which it has a single leg. A form that
  * saved one leg at a time would have to invent that moment.
+ *
+ * It only ever adds. A Combination that exists is changed in its own rows.
  *
  * Van and Naar are free TEXT, as they are for an ordinary route: there is no
  * terminal master data in this system and no city list, so a dropdown could only

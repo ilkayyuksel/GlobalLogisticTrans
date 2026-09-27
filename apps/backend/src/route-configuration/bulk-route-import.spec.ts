@@ -1,4 +1,5 @@
 import { AppLoggerService } from "../logger/app-logger.service";
+import { CombinationRoutePricingService } from "../route-pricing/combination-route-pricing.service";
 import { RoutePricingService } from "../route-pricing/route-pricing.service";
 import {
   BulkRouteImportRefusedException,
@@ -81,6 +82,7 @@ function combinationRoute(overrides: Record<string, unknown> = {}) {
 
 describe("bulk route import", () => {
   let routePricing: { findConfiguredRoute: jest.Mock };
+  let combinationPricing: { findConfiguredCombination: jest.Mock };
   let configurationServices: {
     routes: { create: jest.Mock };
     combinations: { create: jest.Mock };
@@ -98,6 +100,9 @@ describe("bulk route import", () => {
 
     // Nothing is configured yet unless a test says otherwise.
     routePricing = { findConfiguredRoute: jest.fn().mockResolvedValue(null) };
+    combinationPricing = {
+      findConfiguredCombination: jest.fn().mockResolvedValue(null),
+    };
 
     configurationServices = {
       routes: { create: jest.fn().mockResolvedValue({}) },
@@ -121,6 +126,7 @@ describe("bulk route import", () => {
 
     validator = new BulkRouteImportValidator(
       routePricing as unknown as RoutePricingService,
+      combinationPricing as unknown as CombinationRoutePricingService,
       logger as unknown as AppLoggerService,
     );
     service = new BulkRouteImportService(
@@ -730,6 +736,192 @@ describe("bulk route import", () => {
     });
   });
 
+  /**
+   * ── ONE LEG, MANY COMBINATIONS ────────────────────────────────────────────
+   * The importer used to keep a set of every leg road it had seen and refuse the
+   * second use of one. That is not the business rule: everything leaving
+   * MPET 1742 shares its outbound, and each of those is its own Combination with
+   * its own return. The rule is about the PAIR.
+   *
+   * Every test here would have been refused by the old rule.
+   */
+  describe("legs shared between Combinations", () => {
+    /** The same Leg 1, with a different return each time. */
+    function sharingLegOne(count: number) {
+      return Array.from({ length: count }, (_, index) =>
+        combinationRoute({
+          legs: [
+            leg({ departure: "MPET 1742", destination: "Kallo (Beveren)" }),
+            leg({
+              departure: `Return ${index + 1}`,
+              destination: "MPET 1742",
+              tarief: 80 + index,
+            }),
+          ],
+        }),
+      );
+    }
+
+    it("accepts the same leg in two Combinations", async () => {
+      await expect(importRoutes(sharingLegOne(2))).resolves.toMatchObject({
+        combinationGroups: 2,
+        combinationLegs: 4,
+      });
+      expect(configurationServices.combinations.create).toHaveBeenCalledTimes(2);
+    });
+
+    it("accepts the same leg in ten Combinations", async () => {
+      await expect(importRoutes(sharingLegOne(10))).resolves.toMatchObject({
+        combinationGroups: 10,
+        combinationLegs: 20,
+      });
+      expect(configurationServices.combinations.create).toHaveBeenCalledTimes(10);
+    });
+
+    it("accepts a road shared as Leg 1", async () => {
+      await expect(
+        importRoutes([
+          combinationRoute({
+            legs: [
+              leg({ departure: "Quay 869", destination: "LESSINES" }),
+              leg({ departure: "LESSINES", destination: "Kallo", tarief: 80 }),
+            ],
+          }),
+          combinationRoute({
+            legs: [
+              leg({ departure: "Quay 869", destination: "LESSINES" }),
+              leg({ departure: "Kallo", destination: "Antwerp", tarief: 70 }),
+            ],
+          }),
+        ]),
+      ).resolves.toMatchObject({ combinationGroups: 2 });
+    });
+
+    it("accepts a road shared as Leg 2", async () => {
+      await expect(
+        importRoutes([
+          combinationRoute({
+            legs: [
+              leg({ departure: "Quay 869", destination: "Dourges" }),
+              leg({ departure: "Kallo", destination: "Quay 869", tarief: 80 }),
+            ],
+          }),
+          combinationRoute({
+            legs: [
+              leg({ departure: "MPET 1742", destination: "Gent" }),
+              leg({ departure: "Kallo", destination: "Quay 869", tarief: 90 }),
+            ],
+          }),
+        ]),
+      ).resolves.toMatchObject({ combinationGroups: 2 });
+    });
+
+    /**
+     * The pair is compared as a SET: the position says which leg is the outbound
+     * and is kept, but pricing selects a leg by its road, so a swapped pair is
+     * the same configuration and cannot be smuggled in as a second one.
+     */
+    it("refuses the same pair with its legs swapped", async () => {
+      const [outbound, back] = combinationRoute().legs;
+
+      const messages = await refusalOf([
+        combinationRoute(),
+        combinationRoute({ legs: [back, outbound] }),
+      ]);
+
+      expect(messages[0]).toContain("already configured by route 1");
+    });
+
+    /**
+     * Each Combination keeps its OWN leg rows, so two groups sharing a road may
+     * price it differently. Nothing here merges them into one record: the
+     * importer sends both entries to the service that writes a group of its own.
+     */
+    it("keeps each Combination's own price for a shared road", async () => {
+      await importRoutes([
+        combinationRoute({
+          legs: [
+            leg({ departure: "Quay 869", destination: "LESSINES", tarief: 100 }),
+            leg({ departure: "LESSINES", destination: "Kallo", tarief: 80 }),
+          ],
+        }),
+        combinationRoute({
+          legs: [
+            leg({ departure: "Quay 869", destination: "LESSINES", tarief: 120 }),
+            leg({ departure: "Kallo", destination: "Antwerp", tarief: 70 }),
+          ],
+        }),
+      ]);
+
+      const written = configurationServices.combinations.create.mock.calls.map(
+        ([dto]: [{ legs: { tarief: number }[] }]) =>
+          dto.legs.map((written) => written.tarief),
+      );
+
+      expect(written).toEqual([
+        [100, 80],
+        [120, 70],
+      ]);
+    });
+
+    /** What the operator actually has: many Combinations out of few terminals. */
+    it("imports 209 Combinations sharing legs in one transaction", async () => {
+      const document = Array.from({ length: 209 }, (_, index) =>
+        combinationRoute({
+          legs: [
+            // Three terminals between them, so every road is shared many times.
+            leg({
+              departure: ["Quay 869", "MPET 1742", "Quay 1742"][index % 3],
+              destination: "LESSINES",
+            }),
+            leg({
+              departure: "LESSINES",
+              destination: `Customer ${index + 1}`,
+              tarief: 80,
+            }),
+          ],
+        }),
+      );
+
+      await expect(importRoutes(document)).resolves.toMatchObject({
+        combinationGroups: 209,
+        combinationLegs: 418,
+      });
+      expect(transactions).toBe(1);
+      expect(configurationServices.combinations.create).toHaveBeenCalledTimes(
+        209,
+      );
+    });
+
+    /** One broken entry among shared legs still changes nothing at all. */
+    it("writes nothing when one of the shared-leg Combinations is invalid", async () => {
+      const [valid, second] = sharingLegOne(2);
+
+      await expect(
+        importRoutes([valid, { ...second, legs: [second.legs[0]] }]),
+      ).rejects.toThrow(/nothing was created/);
+
+      expect(transactions).toBe(0);
+      expect(configurationServices.combinations.create).not.toHaveBeenCalled();
+    });
+
+    /** A mixed document: ordinary routes beside Combinations that share legs. */
+    it("imports ordinary routes and shared-leg Combinations together", async () => {
+      await expect(
+        importRoutes([
+          normalRoute(),
+          normalRoute({ departure: "Quay 869", destination: "Dourges" }),
+          ...sharingLegOne(3),
+        ]),
+      ).resolves.toMatchObject({
+        normalRoutes: 2,
+        combinationGroups: 3,
+        combinationLegs: 6,
+        totalRoutes: 8,
+      });
+    });
+  });
+
   describe("duplicates", () => {
     /**
      * ── NEVER A SILENT OVERWRITE ───────────────────────────────────────────
@@ -756,15 +948,46 @@ describe("bulk route import", () => {
       );
     });
 
-    it("refuses a Combination leg whose road is already a Combination leg", async () => {
+    /**
+     * ── A LEG IS NOT A CONFIGURATION ────────────────────────────────────────
+     * A road already used as a leg SOMEWHERE says nothing about this entry: the
+     * same outbound may serve as many Combinations as an operator has returns
+     * for it. What decides is whether this PAIR is configured, which is a
+     * question only the group can answer.
+     */
+    it("accepts a Combination whose leg is already a leg elsewhere", async () => {
       routePricing.findConfiguredRoute.mockImplementation(
         async (_departure: string, _destination: string, kind: string) =>
           kind === "COMBINATION" ? { id: "leg-1" } : null,
       );
 
+      await expect(importRoutes([combinationRoute()])).resolves.toMatchObject({
+        combinationGroups: 1,
+      });
+    });
+
+    it("refuses a Combination whose PAIR is already configured", async () => {
+      combinationPricing.findConfiguredCombination.mockResolvedValue({
+        id: "group-1",
+      });
+
       const messages = await refusalOf([combinationRoute()]);
 
-      expect(messages[0]).toContain("already configured");
+      expect(messages[0]).toBe(
+        "route 1: this Combination is already configured: Antwerp to Kallo and Kallo to Antwerp",
+      );
+      expect(configurationServices.combinations.create).not.toHaveBeenCalled();
+    });
+
+    it("asks about the pair, not about either leg", async () => {
+      await importRoutes([combinationRoute()]);
+
+      expect(
+        combinationPricing.findConfiguredCombination,
+      ).toHaveBeenCalledWith([
+        { departure: "Antwerp", destination: "Kallo" },
+        { departure: "Kallo", destination: "Antwerp" },
+      ]);
     });
 
     /**
@@ -791,18 +1014,26 @@ describe("bulk route import", () => {
       );
     });
 
-    it("refuses one road used by two Combinations of one document", async () => {
-      const messages = await refusalOf([
-        combinationRoute(),
-        combinationRoute({
-          legs: [
-            leg(),
-            leg({ departure: "Gent", destination: "Lille", tarief: 90 }),
-          ],
-        }),
-      ]);
+    it("accepts one road used by two Combinations of one document", async () => {
+      await expect(
+        importRoutes([
+          combinationRoute(),
+          combinationRoute({
+            legs: [
+              leg(),
+              leg({ departure: "Gent", destination: "Lille", tarief: 90 }),
+            ],
+          }),
+        ]),
+      ).resolves.toMatchObject({ combinationGroups: 2 });
+    });
 
-      expect(messages[0]).toContain("already configured by route 1");
+    it("refuses the same Combination written twice in one document", async () => {
+      const messages = await refusalOf([combinationRoute(), combinationRoute()]);
+
+      expect(messages[0]).toBe(
+        "route 2: this Combination is already configured by route 1 of this import: Antwerp to Kallo and Kallo to Antwerp",
+      );
     });
 
     /**

@@ -461,6 +461,30 @@ describe("editing a Combination leg", () => {
       expect(screen.getByRole("button", { name: label })).toBeInTheDocument();
     }
   });
+
+  /**
+   * ── THE GROUP HAS NO FORM EITHER ──────────────────────────────────────────
+   * Ten values are editable where they stand, so a Bewerken button on the header
+   * row would be a second way to do the same thing — and the only way that could
+   * write a leg nobody touched.
+   */
+  it("has no Bewerken button on the group", async () => {
+    renderPage();
+
+    await screen.findByText("Combination #1");
+
+    expect(
+      screen.queryByRole("button", { name: /^Bewerken/ }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Leg 1: Tarief")).not.toBeInTheDocument();
+    // What the group DOES keep: its tick and its one action.
+    expect(
+      screen.getByRole("checkbox", { name: "Gecontroleerd: Combination #1" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Verwijderen Combination 1" }),
+    ).toBeInTheDocument();
+  });
 });
 
 describe("what inline editing leaves alone", () => {

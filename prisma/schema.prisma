@@ -1022,6 +1022,12 @@ model RoutePricing {
   /// overwriting the other, because the partial unique indexes are scoped by
   /// this column. See `database_schema.md`.
   ///
+  /// A road may be a leg of MANY Combinations — everything leaving one terminal
+  /// shares its outbound — so the uniqueness of a leg's road is scoped to its
+  /// GROUP and not to the whole table. What may not exist twice is the PAIR of
+  /// roads, which spans two rows and is therefore enforced by
+  /// CombinationRoutePricingService rather than by an index.
+  ///
   /// `onDelete: Cascade` is the group's own rule: removing a Combination
   /// configuration removes both its legs, and the database will not leave one
   /// behind even if something else deletes the group row.
@@ -1052,7 +1058,9 @@ model RoutePricing {
   updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   /// Added by hand: UNIQUE (combination_group_id, combination_leg_position)
-  /// WHERE combination_group_id IS NOT NULL, plus the CHECKs described above.
+  /// WHERE combination_group_id IS NOT NULL, UNIQUE (combination_group_id,
+  /// departure, destination) WHERE combination_group_id IS NOT NULL, plus the
+  /// CHECKs described above.
   @@index([combinationGroupId])
   @@map("route_pricing")
 }
@@ -1078,6 +1086,14 @@ model RoutePricing {
 /// the DTO that refuses any other number. PostgreSQL cannot express "this parent
 /// has two children" without a trigger, and a trigger would be a business rule
 /// living where nothing else in this schema lives.
+///
+/// ── THE IDENTITY OF A COMBINATION IS ITS PAIR OF LEGS ───────────────────────
+/// Not either leg on its own: one road may be a leg of many Combinations, and
+/// refusing that is what once made a whole import impossible. Two groups may
+/// therefore hold the same road, each with its own price for it, and what may not
+/// exist twice is the same PAIR. Enforced by CombinationRoutePricingService,
+/// because the rule spans two rows of route_pricing and no unique index reaches
+/// across rows.
 model CombinationRouteGroup {
   id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
 

@@ -10,12 +10,13 @@ import {
 import {
   CombinationRouteGroupNotFoundException,
   DuplicateActiveRouteException,
+  DuplicateCombinationRouteException,
   InvalidCombinationLegCountException,
   LEGS_PER_COMBINATION_ROUTE,
 } from "./exceptions/route-pricing.exceptions";
+import { RoadEndpoints } from "./route-identity";
 import {
   CombinationRouteGroupWithLegs,
-  RouteConfigurationKind,
   RoutePricingRepository,
 } from "./route-pricing.repository";
 
@@ -86,10 +87,7 @@ export class CombinationRoutePricingService {
   ): Promise<CombinationRoutePricingDto> {
     this.assertExactlyTwoLegs(legs);
     this.assertDistinctRoutes(legs);
-
-    for (const leg of legs) {
-      await this.assertRouteAvailable(leg.departure, leg.destination);
-    }
+    await this.assertCombinationAvailable(legs);
 
     const created = await this.guardingUniqueness(legs, () =>
       this.repository.runInTransaction(async (repository) => {
@@ -138,13 +136,9 @@ export class CombinationRoutePricingService {
     // repaired: repairing it would mean inventing a leg.
     this.assertExactlyTwoLegs(existing.legs);
 
-    for (const [index, leg] of legs.entries()) {
-      await this.assertRouteAvailable(
-        leg.departure,
-        leg.destination,
-        existing.legs[index].id,
-      );
-    }
+    // Itself excluded: an edit that leaves the pair as it was — a changed Tarief,
+    // a corrected distance — is not a duplicate of the record being edited.
+    await this.assertCombinationAvailable(legs, combinationGroupId);
 
     const updated = await this.guardingUniqueness(legs, () =>
       this.repository.runInTransaction(async (repository) => {
@@ -209,6 +203,22 @@ export class CombinationRoutePricingService {
     return this.toResponse({ ...group, reviewed });
   }
 
+  /**
+   * The Combination configured for exactly these two roads, or null.
+   *
+   * The same lookup the duplicate rule performs, exposed because the bulk import
+   * has to judge a whole document before writing any of it and must ask this
+   * question rather than restate it. Null is not an error: whether an unknown
+   * pair matters is the caller's business.
+   */
+  async findConfiguredCombination(
+    roads: readonly RoadEndpoints[],
+  ): Promise<CombinationRoutePricingDto | null> {
+    const group = await this.repository.findGroupWithLegRoads(roads);
+
+    return group ? this.toResponse(group) : null;
+  }
+
   private async requireGroup(
     combinationGroupId: string,
   ): Promise<CombinationRouteGroupWithLegs> {
@@ -266,23 +276,34 @@ export class CombinationRoutePricingService {
     }
   }
 
-  /** No second Combination leg may describe the same road. */
-  private async assertRouteAvailable(
-    departure: string,
-    destination: string,
-    excludeRoutePricingId?: string,
+  /**
+   * Refuses a Combination that is already configured.
+   *
+   * ── WHAT MAY NOT EXIST TWICE IS THE PAIR ──────────────────────────────────
+   * This used to refuse a LEG whose road was already a leg somewhere, which made
+   * a shared road impossible: every Combination leaving MPET 1742 would have
+   * collided with the first one configured. But a leg is not a configuration — it
+   * has no meaning without its partner — so the question is whether this PAIR of
+   * roads is already configured, and one road may appear in as many
+   * Combinations as an operator has returns for it.
+   *
+   * Each of those keeps its OWN leg rows, with its own Tarief, distance and
+   * tunnel: nothing is shared between groups and no price is merged.
+   */
+  private async assertCombinationAvailable(
+    legs: readonly CreateRoutePricingDto[],
+    excludeCombinationGroupId?: string,
   ): Promise<void> {
-    const holder = await this.repository.findByRoute(departure, destination, {
-      kind: RouteConfigurationKind.COMBINATION,
-      excludeRoutePricingId,
+    const holder = await this.repository.findGroupWithLegRoads(legs, {
+      excludeCombinationGroupId,
     });
 
     if (holder) {
-      this.logger.warn("Rejected duplicate Combination leg", {
-        conflictingRoutePricingId: holder.id,
+      this.logger.warn("Rejected duplicate Combination configuration", {
+        conflictingCombinationGroupId: holder.id,
       });
 
-      throw new DuplicateActiveRouteException(departure, destination);
+      throw new DuplicateCombinationRouteException(legs);
     }
   }
 
