@@ -205,6 +205,17 @@ export class RoutePricingRepository {
     return this.prisma.combinationRouteGroup.create({ data: { notes } });
   }
 
+  /** Records that somebody has been through this Combination's prices. */
+  setGroupReviewed(
+    id: string,
+    reviewed: boolean,
+  ): Promise<CombinationRouteGroup> {
+    return this.prisma.combinationRouteGroup.update({
+      where: { id },
+      data: { reviewed },
+    });
+  }
+
   /**
    * Removes a Combination configuration and, through the cascade, both legs.
    *

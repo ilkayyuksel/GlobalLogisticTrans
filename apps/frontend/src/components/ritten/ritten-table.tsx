@@ -17,7 +17,10 @@ import { formatCalendarDate } from "@/lib/calendar/calendar-dates";
 import { toFleetOptions, type FleetOption } from "@/lib/fleet-options";
 import { toVehicleLabel } from "@/lib/fleet/vehicle-label";
 import { useTranslation } from "@/lib/i18n/language-provider";
-import { combinationClasses, combinationLabel } from "@/lib/ritten/combination";
+import {
+  combinationLabel,
+  type CombinationPalette,
+} from "@/lib/ritten/combination";
 import { toVehicleGroups } from "@/lib/ritten/vehicle-groups";
 import { toCostConfirmationLabel } from "@/lib/trips/cost-confirmation";
 import {
@@ -166,6 +169,15 @@ export interface RittenTableProps {
   onDeleteTrip: (trip: Trip) => void;
   /** Opens the reopen confirmation, for a CANCELLED Trip. */
   onReopenTrip: (trip: Trip) => void;
+  /**
+   * The colours of the groups visible in this period.
+   *
+   * Passed in rather than derived per row, because which colour a group should
+   * get depends on the OTHER groups on screen: two of them must be plainly
+   * different, and a row cannot see its neighbours. Built once for the period —
+   * see `combinationPalette`.
+   */
+  palette: CombinationPalette;
 }
 
 export function RittenTable(props: RittenTableProps) {
@@ -268,6 +280,7 @@ function RittenRow({
   whatsAppStatus,
   onDeleteTrip,
   onReopenTrip,
+  palette,
 }: RittenTableProps & { trip: Trip }) {
   const t = useTranslation();
   const empty = t("ritten.value.empty");
@@ -326,7 +339,7 @@ function RittenRow({
             type="button"
             onClick={() => actions.openCombination(trip.tripGroupId as string)}
             title={t("ritten.group.open")}
-            className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold ring-1 ${combinationClasses(trip.tripGroupId)}`}
+            className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold ring-1 ${palette.classesFor(trip.tripGroupId)}`}
           >
             {combinationLabel(trip.tripGroupId)}
           </button>

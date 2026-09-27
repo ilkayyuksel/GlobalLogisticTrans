@@ -52,6 +52,70 @@ export function toRoutePayload(draft: RouteDraft): RouteConfigurationPayload {
   };
 }
 
+/** The five fields of a route that can be edited in place. */
+export type RouteField =
+  | "departure"
+  | "destination"
+  | "tarief"
+  | "kilometres"
+  | "tunnel";
+
+/**
+ * A stored route as a payload, with ONE field replaced.
+ *
+ * ── WHY THE WHOLE ROUTE GOES BACK ───────────────────────────────────────────
+ * The update endpoint takes a complete configuration — it is the same call the
+ * add form makes — so an inline edit of one value sends the other four exactly
+ * as they are. Read from the route on screen, so nothing else can move: the one
+ * field an operator changed is the one field that differs.
+ *
+ * ── AND WHY NULL SURVIVES ───────────────────────────────────────────────────
+ * A route whose distance nobody has stated carries null, not zero, and the two
+ * mean different things: no toll because nobody measured the road, against no
+ * toll because somebody decided it is free. Editing the TARIEF of such a route
+ * must not quietly measure it at zero on the way past.
+ */
+export function toUpdatedRoutePayload(
+  route: RouteConfiguration,
+  field: RouteField,
+  value: string,
+): RouteConfigurationPayload {
+  return { ...toRouteValues(route), [field]: toFieldValue(field, value) };
+}
+
+/** A route as the payload states it, before anything is changed. */
+export function toRouteValues(
+  route: RouteConfiguration,
+): RouteConfigurationPayload {
+  return {
+    departure: route.departure,
+    destination: route.destination,
+    tarief: Number(route.tarief),
+    kilometres: route.kilometres === null ? null : Number(route.kilometres),
+    tunnel: Number(route.tunnel),
+  };
+}
+
+/**
+ * What one typed value means for its field.
+ *
+ * An empty DISTANCE is null: nobody has stated how long the road is, which is
+ * what the column has always meant. An empty amount is not turned into zero —
+ * `Number("")` would make it one silently — so it goes out as it is and the
+ * backend refuses it in its own words. No rule is invented here.
+ */
+function toFieldValue(field: RouteField, value: string): string | number | null {
+  if (field === "departure" || field === "destination") {
+    return value.trim();
+  }
+
+  if (field === "kilometres" && value.trim() === "") {
+    return null;
+  }
+
+  return Number(value);
+}
+
 /** A stored route, opened for editing. */
 export function draftOf(route: RouteConfiguration): RouteDraft {
   return {

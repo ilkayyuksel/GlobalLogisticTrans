@@ -28,6 +28,8 @@ function buildRoutePricing(
     // An ordinary route: neither half of the Combination discriminator is set.
     combinationGroupId: null,
     combinationLegPosition: null,
+    // Administrative progress, false until somebody says otherwise.
+    reviewed: false,
     notes: null,
     createdAt: new Date("2026-01-01T00:00:00Z"),
     updatedAt: new Date("2026-01-01T00:00:00Z"),
@@ -122,6 +124,8 @@ describe("RoutePricingService", () => {
         "id",
         "kilometres",
         "notes",
+        // Administrative progress, carried so a screen can show it.
+        "reviewed",
         "routeName",
         "updatedAt",
       ]);
@@ -369,10 +373,30 @@ describe("RoutePricingService", () => {
   describe("remove", () => {
     it("deletes the record", async () => {
       repository.findById.mockResolvedValue(buildRoutePricing());
+      repository.delete.mockResolvedValue(buildRoutePricing());
 
       await service.remove(ROUTE_ID);
 
       expect(repository.delete).toHaveBeenCalledWith(ROUTE_ID);
+    });
+
+    /**
+     * ── IT ANSWERS WITH WHAT IT REMOVED ────────────────────────────────────
+     * The convention every DELETE in this API follows, and the reason for it:
+     * each response carries the standard envelope. A caller that receives an
+     * empty body has nothing to read and cannot tell success from a broken
+     * response — which is exactly what happened on this screen.
+     */
+    it("answers with the record it removed", async () => {
+      repository.findById.mockResolvedValue(buildRoutePricing());
+      repository.delete.mockResolvedValue(buildRoutePricing());
+
+      expect(await service.remove(ROUTE_ID)).toMatchObject({
+        id: ROUTE_ID,
+        departure: "Antwerp",
+        destination: "Rotterdam",
+        basePrice: "380.00",
+      });
     });
 
     it("refuses an unknown record, and deletes nothing", async () => {
@@ -421,6 +445,7 @@ describe("RoutePricingService", () => {
     /** The route it covered is free again the moment it is gone. */
     it("frees the route for a new configuration", async () => {
       repository.findById.mockResolvedValue(buildRoutePricing());
+      repository.delete.mockResolvedValue(buildRoutePricing());
       await service.remove(ROUTE_ID);
 
       repository.findByRoute.mockResolvedValue(null);

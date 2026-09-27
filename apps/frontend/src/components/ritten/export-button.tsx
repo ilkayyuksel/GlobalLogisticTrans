@@ -12,6 +12,7 @@ import {
 import { ExportTooLargeError, fetchTripsForExport } from "@/lib/api/trip-export";
 import { MAX_PAGE_SIZE, type ListTripsParams } from "@/lib/api/trips";
 import { useLanguage, useTranslation } from "@/lib/i18n/language-provider";
+import { combinationPalette } from "@/lib/ritten/combination";
 import {
   toBasicRow,
   toManualPropertyIds,
@@ -81,6 +82,16 @@ export function ExportButton({
         trips.map((trip) => trip.id),
       );
 
+      /*
+       * ── THE SHEET'S GROUP COLOURS ARE THE LIST'S ────────────────────────────
+       * Built from the exported TRIPS, which carry the day each group appears on,
+       * so a Combination is the colour an operator saw on screen. Derived from the
+       * trips rather than from the rows for two reasons: the dispatch sheet's rows
+       * hold no date at all — the day is printed once, above the table — and the
+       * order rows happen to be written in must not decide a colour.
+       */
+      const palette = combinationPalette(trips);
+
       if (kind === "pricing") {
         /*
          * Which property is TAR, so its line can be RECOGNISED in a stored
@@ -98,7 +109,7 @@ export function ExportButton({
         );
 
         downloadWorkbook(
-          await buildPricingWorkbook(rows, language),
+          await buildPricingWorkbook(rows, language, palette),
           pricingFileName(periodStart, periodEnd),
         );
       } else {
@@ -135,10 +146,12 @@ export function ExportButton({
         downloadWorkbook(
           // The period prints above the table, exactly as the office sheet has
           // it, so a page picked off a printer says which day it covers.
-          await buildBasicWorkbook(rows, language, {
-            start: periodStart,
-            end: periodEnd,
-          }),
+          await buildBasicWorkbook(
+            rows,
+            language,
+            { start: periodStart, end: periodEnd },
+            palette,
+          ),
           basicFileName(periodStart, periodEnd),
         );
       }

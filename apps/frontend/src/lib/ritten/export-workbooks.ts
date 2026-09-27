@@ -2,7 +2,7 @@ import type { Worksheet } from "exceljs";
 
 import type { Language } from "@/lib/i18n/translations";
 import { TRANSLATIONS } from "@/lib/i18n/translations";
-import { combinationFillArgb } from "./combination";
+import { combinationPalette, type CombinationPalette } from "./combination";
 import type { BasicExportRow, PricingExportRow } from "./export-rows";
 import {
   GRID_BORDER,
@@ -154,6 +154,20 @@ const PRICING_COLUMNS: readonly ColumnSpec[] = [
  * sheet is the reference's again. The Trip's status is untouched — it is simply
  * not a column here.
  */
+/** The reference's name for the booking column, and its own width. */
+const BOOKING_HEADER = "BOEKING";
+const BOOKING_REFERENCE_WIDTH = 9.6328125;
+
+/**
+ * The slack a column needs beyond the characters it must hold.
+ *
+ * The reference workbook's own margin, read off the one column whose width it
+ * chose deliberately: `CONT NR` is 11.54296875 wide so that an eleven-character
+ * container number such as `EUCU1451295` sits on one line. One character of text
+ * therefore costs one unit of width plus this.
+ */
+const COLUMN_WIDTH_MARGIN = 0.54296875;
+
 const BASIC_COLUMNS: readonly StyledColumn[] = [
   { header: "NR PLAAT", width: 8.7265625, fontColor: INK.red },
   {
@@ -168,13 +182,23 @@ const BASIC_COLUMNS: readonly StyledColumn[] = [
     fontColor: INK.green,
     format: REFERENCE_TIME_FORMAT,
   },
-  { header: "BOEKING", width: 9.6328125, fontColor: INK.blue },
+  { header: BOOKING_HEADER, width: BOOKING_REFERENCE_WIDTH, fontColor: INK.blue },
   { header: "TYPE", width: 8.7265625, fontColor: INK.red },
   { header: "CONT NR", width: 11.54296875, fontColor: INK.green },
   { header: "PLAATS", width: 19.6328125, fontColor: INK.blue },
   { header: "COMBI EN KOST", width: 25.90625, fontColor: INK.green },
   { header: "INFO", width: 41, fontColor: INK.red },
 ];
+
+/**
+ * The colours for a caller that knows of no other groups.
+ *
+ * An export run from the Ritten screen passes the period's own palette, so the
+ * spreadsheet and the list agree. Nothing else has to: a caller with no context
+ * gets the same group-id-derived colour the interface falls back to, which is
+ * still one colour per group and still the same on every run.
+ */
+const NO_CONTEXT_PALETTE = combinationPalette([]);
 
 /** The pricing sheet's header; its Trips begin on the row below. */
 const PRICING_HEADER_ROW = 1;
@@ -261,6 +285,7 @@ function applyBorders(sheet: Worksheet): void {
 export async function buildPricingWorkbook(
   rows: readonly PricingExportRow[],
   language: Language,
+  palette: CombinationPalette = NO_CONTEXT_PALETTE,
 ): Promise<ArrayBuffer> {
   const translations = TRANSLATIONS[language];
   const { workbook, sheet } = await createPricingSheet(
@@ -293,7 +318,7 @@ export async function buildPricingWorkbook(
   }
 
   // Row 1 is the header, so the Trips start under it — see `createPricingSheet`.
-  paintGroupRows(sheet, rows, PRICING_HEADER_ROW, PRICING_COLUMNS.length);
+  paintGroupRows(sheet, rows, PRICING_HEADER_ROW, PRICING_COLUMNS.length, palette);
   applyBorders(sheet);
 
   return workbook.xlsx.writeBuffer();
@@ -321,6 +346,7 @@ export async function buildBasicWorkbook(
   rows: readonly BasicExportRow[],
   language: Language,
   period: ExportPeriod,
+  palette: CombinationPalette = NO_CONTEXT_PALETTE,
 ): Promise<ArrayBuffer> {
   const translations = TRANSLATIONS[language];
   const { workbook, sheet } = await createWorkbook(
@@ -352,12 +378,66 @@ export async function buildBasicWorkbook(
    * as on screen — and keeps its colour across the days it spans, because the
    * id does not change with the date or the row's position.
    */
-  paintGroupRows(sheet, rows, BASIC_HEADER_ROW, BASIC_COLUMNS.length);
+  paintGroupRows(sheet, rows, BASIC_HEADER_ROW, BASIC_COLUMNS.length, palette);
 
-  applyReferenceLook(sheet, BASIC_COLUMNS, BASIC_HEADER_ROW);
+  applyReferenceLook(sheet, basicColumnsFor(rows), BASIC_HEADER_ROW);
   writeDatePeriod(sheet, period);
 
   return workbook.xlsx.writeBuffer();
+}
+
+/**
+ * The reference layout, with the booking column widened to what it must hold.
+ *
+ * ── WHY ONE COLUMN IS NOT FIXED ─────────────────────────────────────────────
+ * Every width here is the reference workbook's, measured off the sheet the office
+ * has printed for years, and moving one costs real time at a real desk — a
+ * dispatcher finds a value by its POSITION long before they read a header. So
+ * they stay.
+ *
+ * The booking column was the exception that did not work. At its reference width
+ * of 9.6 a number such as `ANRBEL2801529` — thirteen characters — is squeezed
+ * against the cell edge, and a booking number that cannot be read is the one
+ * thing this sheet exists to carry. Widening it to a larger FIXED number would
+ * only move the problem to the first longer number, so it follows the content:
+ * the header, the longest number actually exported, and the reference width as a
+ * floor.
+ *
+ * Nothing else is touched. Every other column is returned as it stands — the
+ * same object, the same width — which is what makes that claim checkable rather
+ * than a promise.
+ */
+function basicColumnsFor(
+  rows: readonly BasicExportRow[],
+): readonly StyledColumn[] {
+  return BASIC_COLUMNS.map((column) =>
+    column.header === BOOKING_HEADER
+      ? { ...column, width: bookingColumnWidth(column, rows) }
+      : column,
+  );
+}
+
+/**
+ * Wide enough for the header, for the longest booking number exported, and never
+ * narrower than the reference.
+ *
+ * The floor matters for a day nobody booked: an export of empty booking cells
+ * keeps the width the sheet has always had rather than collapsing to the header.
+ */
+function bookingColumnWidth(
+  column: StyledColumn,
+  rows: readonly BasicExportRow[],
+): number {
+  const longest = rows.reduce(
+    (widest, row) => Math.max(widest, row.bookingNumber.length),
+    0,
+  );
+
+  return Math.max(
+    BOOKING_REFERENCE_WIDTH,
+    column.header.length + COLUMN_WIDTH_MARGIN,
+    longest + COLUMN_WIDTH_MARGIN,
+  );
 }
 
 /** The headers go in row 2, because row 1 belongs to the date. */
@@ -433,13 +513,17 @@ function buildFileName(
  * Fills each row belonging to a group, every cell of it.
  *
  * ── ONE COLOUR PER GROUP, IN EVERY PLACE IT IS SHOWN ────────────────────────
- * Both sheets paint through this, and both take the colour from
- * `combinationFillArgb` — the same mapping, keyed by the same
- * `combinationColorIndex`, that the Ritten list's own group tag uses. So a
- * Combination looks the same on screen, on the dispatch sheet and on the price
- * list; it keeps that colour on every day it spans; and neither the row order
- * nor the period exported can change it, because nothing but the group id
- * decides it.
+ * Both sheets paint through this, and both take the colour from the palette the
+ * CALLER built — the very object the Ritten list colours its group tags from. So
+ * a Combination looks the same on screen, on the dispatch sheet and on the price
+ * list, and it keeps that colour on every day it spans.
+ *
+ * The palette is passed in rather than derived from the rows because it is the
+ * caller that knows which groups are seen together: the rows of the dispatch
+ * sheet carry no date at all — the day is printed once, above the table — so they
+ * could not answer that question even in principle. What the rows cannot change
+ * is the answer: the palette is keyed by group id and ordered by day, so the
+ * order the rows happen to be exported in moves nothing.
  *
  * A Trip in no group is left alone: the sheet's own background and its grid
  * lines are what the office reads the table by, and painting a standalone row
@@ -450,9 +534,10 @@ function paintGroupRows(
   rows: readonly { readonly tripGroupId: string | null }[],
   headerRowNumber: number,
   columnCount: number,
+  palette: CombinationPalette,
 ): void {
   rows.forEach((row, index) => {
-    const argb = combinationFillArgb(row.tripGroupId);
+    const argb = palette.fillArgb(row.tripGroupId);
 
     if (argb === null) {
       return;

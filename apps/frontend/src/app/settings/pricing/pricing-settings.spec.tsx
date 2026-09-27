@@ -594,6 +594,9 @@ describe("the route prices", () => {
       "Tarief",
       "KM",
       "Tunnel",
+      // The review tick: administrative progress, and the narrowest column
+      // there is. Its heading is a mark, with the word only for a screen reader.
+      "✓Gecontroleerd",
       "Acties",
     ]);
     expect(screen.queryByText(/RouteCost|RoutePricing/)).toBeNull();
@@ -688,25 +691,32 @@ describe("the route prices", () => {
     });
   });
 
-  it("edits an existing route through the same form", async () => {
+  /**
+   * ── EDITING IS THE ROW ITSELF NOW ─────────────────────────────────────────
+   * There is no Bewerken button and no edit form: a value is opened by clicking
+   * it and saved with Enter, through the same update the add form uses. The
+   * whole of that behaviour has its own suite —
+   * `route-inline-editing.spec.tsx` — and this one only holds that the button is
+   * gone and that the update still goes where it always did.
+   */
+  it("edits a route by its own value, with no Bewerken button", async () => {
     respondWith();
     renderPage();
 
+    await screen.findByText("Quay 869");
+
+    expect(
+      screen.queryByRole("button", { name: /^Bewerken Quay 869/ }),
+    ).not.toBeInTheDocument();
+
     await userEvent.click(
-      await screen.findByRole("button", {
-        name: "Bewerken Quay 869 Dourges",
-      }),
+      screen.getByRole("button", { name: "Tarief: Quay 869 Dourges" }),
     );
 
-    const tarief = screen.getByLabelText("Tarief");
+    const tarief = screen.getByLabelText("Tarief: Quay 869 Dourges");
 
     await userEvent.clear(tarief);
-    await userEvent.type(tarief, "550");
-    await userEvent.click(
-      within(sectionOf("Routeprijzen")).getAllByRole("button", {
-        name: "Opslaan",
-      })[0],
-    );
+    await userEvent.type(tarief, "550{Enter}");
 
     await waitFor(() => expect(writes()).toHaveLength(1));
 

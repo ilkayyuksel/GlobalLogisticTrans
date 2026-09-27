@@ -191,8 +191,11 @@ export class RouteConfigurationService {
    * This replaced deactivation. A switched-off route was a second state the
    * screen had to explain and a configuration that looked present while
    * charging nothing.
+   *
+   * Answers with the configuration that was removed, which is the convention
+   * every DELETE in this API follows — see the controller.
    */
-  async remove(id: string): Promise<void> {
+  async remove(id: string): Promise<RouteConfigurationDto> {
     const existing = await this.requireConfiguration(id);
 
     /*
@@ -207,6 +210,8 @@ export class RouteConfigurationService {
     await this.routePricing.remove(id);
 
     this.logger.log("Route configuration deleted", { routePricingId: id });
+
+    return existing;
   }
 
   /**
@@ -264,7 +269,35 @@ export class RouteConfigurationService {
     return composeRouteConfiguration(
       route,
       await this.tunnelCosts.find(this.ownerOf(route)),
+      route.reviewed,
     );
+  }
+
+  /**
+   * Records that somebody has been through this route's prices.
+   *
+   * ── BOOKKEEPING, AND ONLY THAT ────────────────────────────────────────────
+   * It changes no amount, no route and nothing the Pricing Engine reads. It is
+   * here rather than in the ordinary update because an administrator ticking a
+   * box has not edited the route: sending the amounts back to mark one would
+   * rewrite the tunnel cost and risk changing a price nobody meant to touch.
+   */
+  async setReviewed(
+    id: string,
+    reviewed: boolean,
+  ): Promise<RouteConfigurationDto> {
+    const existing = await this.requireConfiguration(id);
+
+    this.assertOrdinaryRoute(existing, "EDIT");
+
+    await this.routePricing.setReviewed(id, reviewed);
+
+    this.logger.log("Route configuration review mark changed", {
+      routePricingId: id,
+      reviewed,
+    });
+
+    return this.findById(id);
   }
 
   private async requireConfiguration(

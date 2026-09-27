@@ -59,6 +59,19 @@ export interface RouteConfiguration {
   type: "NORMAL" | "COMBINATION";
   /** The Combination this record is a leg of, or null for an ordinary route. */
   combinationGroupId: string | null;
+  /**
+   * Whether an administrator has been through these prices.
+   *
+   * ── ADMINISTRATIVE PROGRESS ONLY ──────────────────────────────────────────
+   * It records that a person has looked, so a long price list can be worked
+   * through. It says nothing about whether the route is used and nothing about
+   * what a Trip is charged: an unreviewed route prices exactly as a reviewed one
+   * does, and the Pricing Engine never reads it.
+   *
+   * On a Combination LEG this is the group's own mark, repeated so a row can be
+   * read on its own — a leg is never reviewed by itself.
+   */
+  reviewed: boolean;
 }
 
 /**
@@ -75,6 +88,13 @@ export interface RouteConfiguration {
  */
 export interface CombinationRouteConfiguration {
   id: string;
+  /**
+   * Whether an administrator has been through this Combination's prices.
+   *
+   * On the group, because the group is what an operator configures, edits,
+   * removes — and therefore reviews.
+   */
+  reviewed: boolean;
   /** Exactly two, the outbound first. */
   legs: RouteConfiguration[];
 }
@@ -84,8 +104,14 @@ export interface RouteConfigurationPayload {
   departure: string;
   destination: string;
   tarief: number;
-  /** A distance, not an amount: the Engine turns it into the Toll. */
-  kilometres: number;
+  /**
+   * A distance, not an amount: the Engine turns it into the Toll.
+   *
+   * Null means nobody has stated how long the road is, which is not the same as
+   * a road of no length — the first is charged no toll, the second is charged
+   * nothing because somebody decided it costs nothing.
+   */
+  kilometres: number | null;
   tunnel: number;
 }
 
@@ -124,17 +150,27 @@ export function updateRouteConfiguration(
 }
 
 /**
- * Removes a route's configuration.
+ * Removes a route's configuration and answers with what was removed.
  *
  * The price and the route's tunnel cost go together — the backend guarantees
  * it — so the screen offers one action rather than three. Trips already priced
  * keep the amounts they were priced with; only the next calculation notices.
+ *
+ * ── WHY IT RETURNS THE ROUTE ────────────────────────────────────────────────
+ * Every response in this API carries the standard envelope, and an empty body is
+ * not one. These two endpoints used to answer 204 No Content: the deletion
+ * succeeded, the browser found no envelope to read, and the screen reported a
+ * failure for something that had already happened. They now answer 200 with the
+ * removed configuration, like every other DELETE here.
  */
 export function deleteRouteConfiguration(
   id: string,
   signal?: AbortSignal,
-): Promise<void> {
-  return request<void>(`${PATH}/${id}`, { method: "DELETE", signal });
+): Promise<RouteConfiguration> {
+  return request<RouteConfiguration>(`${PATH}/${id}`, {
+    method: "DELETE",
+    signal,
+  });
 }
 
 /*
@@ -183,11 +219,11 @@ export function updateCombinationRouteConfiguration(
 export function deleteCombinationRouteConfiguration(
   combinationGroupId: string,
   signal?: AbortSignal,
-): Promise<void> {
-  return request<void>(`${COMBINATIONS_PATH}/${combinationGroupId}`, {
-    method: "DELETE",
-    signal,
-  });
+): Promise<CombinationRouteConfiguration> {
+  return request<CombinationRouteConfiguration>(
+    `${COMBINATIONS_PATH}/${combinationGroupId}`,
+    { method: "DELETE", signal },
+  );
 }
 
 /*
@@ -257,4 +293,35 @@ export function runBulkRouteImport(
     body: document,
     signal,
   });
+}
+
+/*
+ * ── ADMINISTRATIVE PROGRESS ─────────────────────────────────────────────────
+ * Its own endpoint rather than part of the ordinary save: ticking a box is not an
+ * edit, and sending the amounts back to record one would rewrite prices nobody
+ * meant to touch. The value is SENT rather than toggled, so pressing twice leaves
+ * it where it was put and two administrators cannot flip each other's mark.
+ */
+
+export function markRouteConfigurationReviewed(
+  id: string,
+  reviewed: boolean,
+  signal?: AbortSignal,
+): Promise<RouteConfiguration> {
+  return request<RouteConfiguration>(`${PATH}/${id}/review`, {
+    method: "PATCH",
+    body: { reviewed },
+    signal,
+  });
+}
+
+export function markCombinationRouteConfigurationReviewed(
+  combinationGroupId: string,
+  reviewed: boolean,
+  signal?: AbortSignal,
+): Promise<CombinationRouteConfiguration> {
+  return request<CombinationRouteConfiguration>(
+    `${COMBINATIONS_PATH}/${combinationGroupId}/review`,
+    { method: "PATCH", body: { reviewed }, signal },
+  );
 }

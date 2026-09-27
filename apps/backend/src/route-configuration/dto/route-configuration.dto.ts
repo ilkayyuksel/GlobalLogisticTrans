@@ -9,6 +9,7 @@ import {
   Max,
   Min,
   MaxLength,
+  ValidateIf,
   ValidateNested,
 } from "class-validator";
 
@@ -129,6 +130,12 @@ export class RouteConfigurationDto {
       "The Combination this record is a leg of, or null for an ordinary route.",
   })
   combinationGroupId!: string | null;
+
+  @ApiProperty({
+    description:
+      "Whether an administrator has been through these prices. Administrative bookkeeping: nothing about pricing reads it, and an unreviewed route prices exactly as a reviewed one does. On a Combination LEG this is the group's own mark, repeated here so a row can be read on its own.",
+  })
+  reviewed!: boolean;
 }
 
 /**
@@ -142,6 +149,12 @@ export class RouteConfigurationDto {
 export function composeRouteConfiguration(
   route: RoutePricingResponseDto,
   tunnel: RouteCostResponseDto | null,
+  /**
+   * Whose review mark applies: the route's own for an ordinary route, and the
+   * GROUP's for a leg — a leg is never reviewed by itself, because it is never
+   * configured, edited or removed by itself.
+   */
+  reviewed: boolean,
 ): RouteConfigurationDto {
   return {
     id: route.id,
@@ -163,6 +176,7 @@ export function composeRouteConfiguration(
       ? RouteConfigurationType.COMBINATION
       : RouteConfigurationType.NORMAL,
     combinationGroupId: route.combinationGroupId ?? null,
+    reviewed,
   };
 }
 
@@ -217,19 +231,34 @@ export class SaveRouteConfigurationDto {
   /*
    * A DISTANCE, not an amount: the Toll is derived from it and the configured
    * rate per kilometre. Two decimals, as `trip.distance_km` has always had.
+   *
+   * ── NULL IS A VALUE HERE ──────────────────────────────────────────────────
+   * It means nobody has stated how long the road is, which is not the same as a
+   * road of no length: the first is charged no toll, the second is charged
+   * nothing because somebody decided it costs nothing. The column is nullable for
+   * exactly that reason, routes configured before distances existed carry it, and
+   * an export that could not express it would quietly turn "unmeasured" into
+   * "free" on the way back in.
+   *
+   * A MISSING field is still refused. `@ValidateIf` only spares an explicit null,
+   * so `undefined` runs into the validators below and is reported as required.
    */
   @ApiProperty({
     example: 25,
     minimum: 0,
     maximum: ROUTE_KILOMETRES_MAX,
+    nullable: true,
     description:
-      "Length of the route in kilometres. The Toll is this times the configured toll rate per kilometre; no toll amount is stored per route.",
+      "Length of the route in kilometres, or null when nobody has stated it. The Toll is this times the configured toll rate per kilometre; no toll amount is stored per route.",
   })
+  @ValidateIf(
+    (route: SaveRouteConfigurationDto) => route.kilometres !== null,
+  )
   @Transform(rawValueOf)
   @IsNumber({ maxDecimalPlaces: ROUTE_KILOMETRES_DECIMAL_PLACES })
   @Min(0)
   @Max(ROUTE_KILOMETRES_MAX)
-  kilometres!: number;
+  kilometres!: number | null;
 
   @ApiProperty({ example: 0, minimum: 0, maximum: MONEY_MAX_VALUE })
   @Transform(rawValueOf)
@@ -251,6 +280,12 @@ export class SaveRouteConfigurationDto {
 export class CombinationRouteConfigurationDto {
   @ApiProperty({ format: "uuid" })
   id!: string;
+
+  @ApiProperty({
+    description:
+      "Whether an administrator has been through this Combination's prices. On the group, because the group is what a person configures, edits, removes and therefore reviews.",
+  })
+  reviewed!: boolean;
 
   @ApiProperty({
     type: [RouteConfigurationDto],

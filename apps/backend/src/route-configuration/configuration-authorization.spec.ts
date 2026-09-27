@@ -159,12 +159,14 @@ describe("pricing configuration is protected", () => {
     create: jest.Mock;
     update: jest.Mock;
     remove: jest.Mock;
+    setReviewed: jest.Mock;
   };
   let combinationConfiguration: {
     findAll: jest.Mock;
     create: jest.Mock;
     update: jest.Mock;
     remove: jest.Mock;
+    setReviewed: jest.Mock;
   };
   let bulkImport: { check: jest.Mock; import: jest.Mock };
   let settings: { findAll: jest.Mock; update: jest.Mock; upsert: jest.Mock };
@@ -223,6 +225,7 @@ describe("pricing configuration is protected", () => {
       create: jest.fn().mockResolvedValue(CONFIGURATION),
       update: jest.fn().mockResolvedValue(CONFIGURATION),
       remove: jest.fn().mockResolvedValue(CONFIGURATION),
+      setReviewed: jest.fn().mockResolvedValue(CONFIGURATION),
     };
     /*
      * The Combination routes are configuration writes of exactly the same value:
@@ -233,7 +236,8 @@ describe("pricing configuration is protected", () => {
       findAll: jest.fn().mockResolvedValue([COMBINATION]),
       create: jest.fn().mockResolvedValue(COMBINATION),
       update: jest.fn().mockResolvedValue(COMBINATION),
-      remove: jest.fn().mockResolvedValue(undefined),
+      remove: jest.fn().mockResolvedValue(COMBINATION),
+      setReviewed: jest.fn().mockResolvedValue(COMBINATION),
     };
     /*
      * The bulk import is the single most valuable write on this controller: one
@@ -406,6 +410,22 @@ describe("pricing configuration is protected", () => {
       "/api/v1/route-configuration/bulk/check",
       BULK_BODY,
     ],
+    /*
+     * Administrative progress is still configuration: who has checked which
+     * prices is nobody's business but the operator's, and the endpoint writes.
+     */
+    [
+      "a route's review mark",
+      "patch",
+      `/api/v1/route-configuration/${ROUTE_ID}/review`,
+      { reviewed: true },
+    ],
+    [
+      "a Combination's review mark",
+      "patch",
+      `/api/v1/route-configuration/combinations/${COMBINATION_GROUP_ID}/review`,
+      { reviewed: true },
+    ],
   ];
 
   describe("without a token", () => {
@@ -455,6 +475,8 @@ describe("pricing configuration is protected", () => {
         expect(combinationConfiguration.remove).not.toHaveBeenCalled();
         expect(bulkImport.import).not.toHaveBeenCalled();
         expect(bulkImport.check).not.toHaveBeenCalled();
+        expect(routeConfiguration.setReviewed).not.toHaveBeenCalled();
+        expect(combinationConfiguration.setReviewed).not.toHaveBeenCalled();
       },
     );
 
@@ -555,13 +577,15 @@ describe("pricing configuration is protected", () => {
       expect(routeConfiguration.create).toHaveBeenCalledTimes(1);
     });
 
+    /** 200 with the removed configuration, the convention every DELETE follows. */
     it("deletes a route", async () => {
-      await request(application.getHttpServer())
+      const response = await request(application.getHttpServer())
         .delete(`/api/v1/route-configuration/${ROUTE_ID}`)
         .set("Authorization", `Bearer ${await signToken()}`)
-        .expect(204);
+        .expect(200);
 
       expect(routeConfiguration.remove).toHaveBeenCalledWith(ROUTE_ID);
+      expect(response.body.data.id).toBe(ROUTE_ID);
     });
 
     it("reads the route configuration", async () => {
@@ -600,16 +624,18 @@ describe("pricing configuration is protected", () => {
 
     /** The GROUP is removed, never one leg: the id is the group's. */
     it("deletes a Combination route configuration", async () => {
-      await request(application.getHttpServer())
+      const response = await request(application.getHttpServer())
         .delete(
           `/api/v1/route-configuration/combinations/${COMBINATION_GROUP_ID}`,
         )
         .set("Authorization", `Bearer ${await signToken()}`)
-        .expect(204);
+        .expect(200);
 
       expect(combinationConfiguration.remove).toHaveBeenCalledWith(
         COMBINATION_GROUP_ID,
       );
+      // Both legs come back, so a caller can say exactly what is gone.
+      expect(response.body.data.legs).toHaveLength(2);
     });
 
     it("imports route prices in bulk", async () => {
@@ -634,6 +660,35 @@ describe("pricing configuration is protected", () => {
       expect(bulkImport.check).toHaveBeenCalledWith(BULK_BODY);
       expect(bulkImport.import).not.toHaveBeenCalled();
       expect(response.body.data.isValid).toBe(true);
+    });
+
+    it("marks a route as checked", async () => {
+      await request(application.getHttpServer())
+        .patch(`/api/v1/route-configuration/${ROUTE_ID}/review`)
+        .set("Authorization", `Bearer ${await signToken()}`)
+        .send({ reviewed: true })
+        .expect(200);
+
+      expect(routeConfiguration.setReviewed).toHaveBeenCalledWith(
+        ROUTE_ID,
+        true,
+      );
+    });
+
+    /** The GROUP's mark: a Combination is reviewed as one record. */
+    it("marks a Combination as checked", async () => {
+      await request(application.getHttpServer())
+        .patch(
+          `/api/v1/route-configuration/combinations/${COMBINATION_GROUP_ID}/review`,
+        )
+        .set("Authorization", `Bearer ${await signToken()}`)
+        .send({ reviewed: true })
+        .expect(200);
+
+      expect(combinationConfiguration.setReviewed).toHaveBeenCalledWith(
+        COMBINATION_GROUP_ID,
+        true,
+      );
     });
 
     it("reads the Combination route configuration with both legs", async () => {

@@ -32,6 +32,8 @@ function buildRoutePricing(
     // An ordinary route: neither half of the Combination discriminator is set.
     combinationGroupId: null,
     combinationLegPosition: null,
+    // Administrative progress, false until somebody says otherwise.
+    reviewed: false,
     notes: null,
     createdAt: new Date("2026-01-01T00:00:00Z"),
     updatedAt: new Date("2026-01-01T00:00:00Z"),
@@ -364,15 +366,40 @@ describe("RoutePricingController (integration)", () => {
    * reads no configuration again, which is what made the kept row unnecessary.
    */
   describe("deleting a route", () => {
-    it("removes the record and answers 204", async () => {
+    /**
+     * 200 with the removed record, not 204: every response in this API carries
+     * the standard envelope, and an empty body is not one.
+     */
+    it("removes the record and answers 200 with it", async () => {
       repository.findById.mockResolvedValue(buildRoutePricing());
       repository.delete.mockResolvedValue(buildRoutePricing());
 
-      await request(app.getHttpServer())
+      const response = await request(app.getHttpServer())
         .delete(`${BASE}/${ROUTE_ID}`)
-        .expect(204);
+        .expect(200);
 
       expect(repository.delete).toHaveBeenCalledWith(ROUTE_ID);
+      expect(response.body.success).toBe(true);
+      expect(response.body.data).toMatchObject({ id: ROUTE_ID });
+    });
+
+    /** The envelope, in full: a caller reads `data` and nothing else. */
+    it("answers with a body a client can read", async () => {
+      repository.findById.mockResolvedValue(buildRoutePricing());
+      repository.delete.mockResolvedValue(buildRoutePricing());
+
+      const response = await request(app.getHttpServer())
+        .delete(`${BASE}/${ROUTE_ID}`)
+        .expect(200);
+
+      expect(response.headers["content-type"]).toContain("application/json");
+      expect(Object.keys(response.body).sort()).toEqual([
+        "data",
+        "path",
+        "statusCode",
+        "success",
+        "timestamp",
+      ]);
     });
 
     it("returns 404 for an unknown record", async () => {

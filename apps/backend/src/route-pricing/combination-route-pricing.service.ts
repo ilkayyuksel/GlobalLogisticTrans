@@ -186,6 +186,29 @@ export class CombinationRoutePricingService {
     });
   }
 
+  /**
+   * Records that somebody has been through this Combination's prices.
+   *
+   * Administrative bookkeeping and nothing else: no price, no leg and no
+   * relation changes, and the Pricing Engine never reads it. Idempotent, so
+   * marking a Combination that is already marked is not an error.
+   */
+  async setReviewed(
+    combinationGroupId: string,
+    reviewed: boolean,
+  ): Promise<CombinationRoutePricingDto> {
+    const group = await this.requireGroup(combinationGroupId);
+
+    await this.repository.setGroupReviewed(combinationGroupId, reviewed);
+
+    this.logger.log("Combination route configuration review mark changed", {
+      combinationGroupId,
+      reviewed,
+    });
+
+    return this.toResponse({ ...group, reviewed });
+  }
+
   private async requireGroup(
     combinationGroupId: string,
   ): Promise<CombinationRouteGroupWithLegs> {
@@ -312,6 +335,7 @@ export class CombinationRoutePricingService {
   ): CombinationRoutePricingDto {
     return {
       id: group.id,
+      reviewed: group.reviewed,
       legs: group.legs.map(toRoutePricingResponse),
       createdAt: group.createdAt,
       updatedAt: group.updatedAt,

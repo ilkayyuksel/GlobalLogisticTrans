@@ -61,6 +61,12 @@ export class RoutePricingResponseDto {
   })
   combinationLegPosition!: number | null;
 
+  @ApiProperty({
+    description:
+      "Whether an administrator has been through this route's prices. Bookkeeping only: nothing about pricing reads it, and an unreviewed route prices exactly as a reviewed one does. Meaningless on a Combination leg, whose group carries the mark.",
+  })
+  reviewed!: boolean;
+
   @ApiPropertyOptional({ nullable: true })
   notes!: string | null;
 
@@ -81,6 +87,12 @@ export class RoutePricingResponseDto {
 export class CombinationRoutePricingDto {
   @ApiProperty({ format: "uuid" })
   id!: string;
+
+  @ApiProperty({
+    description:
+      "Whether an administrator has been through this Combination's prices. On the group, because the group is what a person configures, edits, removes and therefore reviews.",
+  })
+  reviewed!: boolean;
 
   @ApiProperty({
     type: [RoutePricingResponseDto],
@@ -123,6 +135,7 @@ export function toRoutePricingResponse(
         : routePricing.kilometres.toFixed(ROUTE_KILOMETRES_DECIMAL_PLACES),
     combinationGroupId: routePricing.combinationGroupId,
     combinationLegPosition: routePricing.combinationLegPosition,
+    reviewed: routePricing.reviewed,
     notes: routePricing.notes,
     createdAt: routePricing.createdAt,
     updatedAt: routePricing.updatedAt,

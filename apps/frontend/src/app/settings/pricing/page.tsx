@@ -73,13 +73,31 @@ export default function PricingSettingsPage() {
     [],
   );
 
-  function reportSaved(): void {
-    setFeedback({ messageKey: "settings.pricing.saved", isError: false });
+  /**
+   * What happened, in the words of the action that happened.
+   *
+   * A removal that worked used to be announced as "Opgeslagen", which is the
+   * wrong verb for the button that was pressed.
+   */
+  function reportDone(
+    messageKey: TranslationKey = "settings.pricing.saved",
+  ): void {
+    setFeedback({ messageKey, isError: false });
   }
 
-  function reportFailure(error: unknown): void {
+  /**
+   * What went wrong, in the words of the action that went wrong.
+   *
+   * The key is given by the caller because this page does two different things:
+   * a failed deletion used to be announced as "Opslaan mislukt", which told an
+   * operator the wrong story about the wrong action.
+   */
+  function reportFailure(
+    error: unknown,
+    messageKey: TranslationKey = "settings.pricing.failed",
+  ): void {
     setFeedback({
-      messageKey: "settings.pricing.failed",
+      messageKey,
       detail: userFacingMessage(error),
       isError: true,
     });
@@ -113,11 +131,17 @@ export default function PricingSettingsPage() {
       <RoutePricesSection
         routes={routes}
         combinations={combinations}
-        onSaved={() => {
+        onSaved={(messageKey) => {
           routes.reload();
           combinations.reload();
-          reportSaved();
+          reportDone(messageKey);
         }}
+        /*
+         * An inline edit changes one route and the backend answered with it, so
+         * the section already holds the newer of the two answers. Reporting it
+         * without a refetch is the whole difference.
+         */
+        onReported={reportDone}
         onFailed={reportFailure}
       />
 
@@ -125,7 +149,7 @@ export default function PricingSettingsPage() {
         settings={settings}
         onSaved={() => {
           settings.reload();
-          reportSaved();
+          reportDone();
         }}
         onFailed={reportFailure}
       />

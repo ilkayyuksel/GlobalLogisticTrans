@@ -707,12 +707,27 @@ describe("the basic workbook's appearance", () => {
   /**
    * The reference's proportions, not nine independently autofitted columns.
    * `CONT NR` is wide enough for `EUCU1451295` on one line and no wider.
+   *
+   * ── WITH ONE EXCEPTION, AND ONLY ONE ──────────────────────────────────────
+   * BOEKING follows its content. At the reference's 9.63 a real booking number
+   * such as `ANRBEL2801529` was squeezed against the cell edge, and the number is
+   * the one thing this sheet exists to carry. The eight others are asserted here
+   * exactly as before; the booking column has its own suite,
+   * `basis-booking-width.xlsx.spec.ts`.
    */
   it("keeps the reference's column widths", async () => {
     const sheet = await openBasic();
     const widths = [
-      8.7265625, 8.7265625, 8.7265625, 9.6328125, 8.7265625, 11.54296875,
-      19.6328125, 25.90625, 41,
+      8.7265625,
+      8.7265625,
+      8.7265625,
+      // BOEKING: the fixture's `ANRDUB2602247` is thirteen characters.
+      "ANRDUB2602247".length + 0.54296875,
+      8.7265625,
+      11.54296875,
+      19.6328125,
+      25.90625,
+      41,
     ];
 
     widths.forEach((width, index) => {

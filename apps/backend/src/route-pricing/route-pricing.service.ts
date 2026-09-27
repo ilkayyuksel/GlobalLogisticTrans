@@ -174,7 +174,7 @@ export class RoutePricingService {
    * tomorrow finds no configuration for this route, which is exactly what
    * deleting it means.
    */
-  async remove(id: string): Promise<void> {
+  async remove(id: string): Promise<RoutePricingResponseDto> {
     const existing = await this.requireRoutePricing(id);
 
     /*
@@ -190,9 +190,34 @@ export class RoutePricingService {
       );
     }
 
-    await this.repository.delete(id);
+    const removed = await this.repository.delete(id);
 
     this.logger.log("Route pricing deleted", { routePricingId: id });
+
+    return toRoutePricingResponse(removed);
+  }
+
+  /**
+   * Records that somebody has been through this route's prices.
+   *
+   * Administrative bookkeeping: it changes no amount, no route and nothing the
+   * Pricing Engine reads. Idempotent, so marking a route that is already marked
+   * is not an error.
+   */
+  async setReviewed(
+    id: string,
+    reviewed: boolean,
+  ): Promise<RoutePricingResponseDto> {
+    await this.requireRoutePricing(id);
+
+    const updated = await this.repository.update(id, { reviewed });
+
+    this.logger.log("Route pricing review mark changed", {
+      routePricingId: id,
+      reviewed,
+    });
+
+    return toRoutePricingResponse(updated);
   }
 
   private async requireRoutePricing(id: string): Promise<RoutePricing> {

@@ -78,6 +78,8 @@ function storedLeg(
     kilometres: new Prisma.Decimal("25.00"),
     combinationGroupId: GROUP_ID,
     combinationLegPosition: position,
+    // A leg's own mark is never read: the group carries it.
+    reviewed: false,
     notes: null,
     createdAt: new Date("2026-09-26T00:00:00Z"),
     updatedAt: new Date("2026-09-26T00:00:00Z"),
@@ -100,6 +102,7 @@ function storedPair(): RoutePricing[] {
 const GROUP = {
   id: GROUP_ID,
   notes: null,
+  reviewed: false,
   createdAt: new Date("2026-09-26T00:00:00Z"),
   updatedAt: new Date("2026-09-26T00:00:00Z"),
 };

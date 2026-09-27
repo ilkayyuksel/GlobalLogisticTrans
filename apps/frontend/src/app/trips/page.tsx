@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 
+import { combinationPalette } from "@/lib/ritten/combination";
 import { CombinationDialog } from "@/components/ritten/combination-dialog";
 import { CustomPropertiesDialog } from "@/components/ritten/custom-properties-dialog";
 import { NotesDialog } from "@/components/ritten/notes-dialog";
@@ -468,6 +469,22 @@ export default function RittenPage() {
         }),
       ),
     [view, anchor, trips.data, rowUpdatesByTripId],
+  );
+
+  /*
+   * ── THE GROUPS SEEN TOGETHER DECIDE THE COLOURS ───────────────────────────
+   * One palette for the whole period, built from every Trip the view holds, so
+   * two groups on one day are given colours that are plainly different — which a
+   * colour derived from a group id alone cannot promise, because it cannot see
+   * the other groups. See `combinationPalette`.
+   *
+   * Built from `sections`, which is what is actually on screen, and keyed inside
+   * by day and group id rather than by row order: sorting the list, paging it or
+   * exporting it in another order moves no colour.
+   */
+  const palette = useMemo(
+    () => combinationPalette(sections.flatMap((section) => section.trips)),
+    [sections],
   );
 
   const isFiltered = hasActiveRittenFilters(filters);
@@ -1159,6 +1176,7 @@ export default function RittenPage() {
                   whatsAppStatus={whatsAppStatus}
                   onDeleteTrip={setDeletingTrip}
                   onReopenTrip={setReopeningTrip}
+                  palette={palette}
                 />
               ))}
             </div>
@@ -1227,6 +1245,7 @@ export default function RittenPage() {
       {openCombinationId ? (
         <CombinationDialog
           tripGroupId={openCombinationId}
+          palette={palette}
           onUnlink={actions.unlinkFromGroup}
           onClose={() => setOpenCombinationId(null)}
         />

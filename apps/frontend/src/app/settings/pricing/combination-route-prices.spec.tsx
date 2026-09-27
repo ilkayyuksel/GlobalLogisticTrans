@@ -424,13 +424,44 @@ describe("saving a Combination", () => {
 });
 
 describe("the configured Combinations", () => {
-  it("shows a Combination as one record with both legs", async () => {
+  /**
+   * ── THE SAME ROWS AS AN ORDINARY ROUTE ──────────────────────────────────
+   * A Combination is two rows of the same table, under a header row that says
+   * they belong together — not a card of its own. So its legs are read the way
+   * an ordinary route's cells are: one cell per value.
+   */
+  it("shows a Combination as two rows under one header", async () => {
     respondWith({ combinations: [combination()] });
     renderPage();
 
     expect(await screen.findByText("Combination #1")).toBeInTheDocument();
-    expect(screen.getByText("Antwerp → Kallo")).toBeInTheDocument();
-    expect(screen.getByText("Kallo → Antwerp")).toBeInTheDocument();
+
+    const legs = screen.getAllByRole("row").map((row) => row.textContent ?? "");
+
+    expect(legs.some((row) => row.includes("Antwerp") && row.includes("Kallo"))).toBe(
+      true,
+    );
+    expect(legs.some((row) => row.includes("Kallo") && row.includes("Antwerp"))).toBe(
+      true,
+    );
+  });
+
+  /** Drawn by the very component an ordinary route is drawn by. */
+  it("puts the legs in the same table as the ordinary routes", async () => {
+    respondWith({
+      routes: [route()],
+      combinations: [combination()],
+    });
+    renderPage();
+
+    await screen.findByText("Combination #1");
+
+    // One table on the page, holding both kinds.
+    const tables = screen.getAllByRole("table");
+
+    expect(tables).toHaveLength(1);
+    expect(tables[0]).toHaveTextContent("Combination #1");
+    expect(tables[0]).toHaveTextContent("Quay 869");
   });
 
   it("labels the legs in the order they were configured", async () => {
@@ -478,21 +509,23 @@ describe("the configured Combinations", () => {
     expect(screen.getByText("100.00")).toBeInTheDocument();
   });
 
-  it("names the Combination section", async () => {
+  /** The header row names it, and that is the only extra chrome it gets. */
+  it("labels the group without a section of its own", async () => {
     respondWith({ combinations: [combination()] });
     renderPage();
 
-    expect(await screen.findByText("Combination-routes")).toBeInTheDocument();
+    expect(await screen.findByText("Combination #1")).toBeInTheDocument();
+    expect(screen.queryByText("Combination-routes")).not.toBeInTheDocument();
   });
 
   /** Nothing to show and nothing to explain when none is configured. */
-  it("shows no Combination section when none is configured", async () => {
+  it("shows no Combination header when none is configured", async () => {
     respondWith({ routes: [route()] });
     renderPage();
 
     await waitFor(() => expect(requestMock).toHaveBeenCalled());
 
-    expect(screen.queryByText("Combination-routes")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Combination #/)).not.toBeInTheDocument();
   });
 });
 

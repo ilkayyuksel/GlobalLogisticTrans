@@ -14,7 +14,6 @@ import {
   ApiBadRequestResponse,
   ApiConflictResponse,
   ApiCreatedResponse,
-  ApiNoContentResponse,
   ApiNotFoundResponse,
   ApiOkResponse,
   ApiOperation,
@@ -124,17 +123,22 @@ export class RoutePricingController {
    * Pricing already calculated is unaffected. A TripPricing snapshot holds the
    * amounts it was priced with and reads no configuration again, so removing
    * the row explains yesterday's price exactly as well as keeping it did.
+   *
+   * 200 with the removed record rather than 204, the convention every DELETE in
+   * this API follows: each response carries the standard envelope.
    */
   @Delete(":id")
-  @HttpCode(HttpStatus.NO_CONTENT)
+  @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: "Delete a route pricing record",
     description:
       "Removes the configuration. Trips already priced keep the amounts they were priced with; Trips priced afterwards find no configuration for this route.",
   })
-  @ApiNoContentResponse({ description: "The configuration was removed." })
+  @ApiOkResponse({ type: RoutePricingResponseDto })
   @ApiNotFoundResponse({ description: "No route pricing with that id." })
-  remove(@Param() params: RoutePricingIdParamDto): Promise<void> {
+  remove(
+    @Param() params: RoutePricingIdParamDto,
+  ): Promise<RoutePricingResponseDto> {
     return this.routePricingService.remove(params.id);
   }
 }

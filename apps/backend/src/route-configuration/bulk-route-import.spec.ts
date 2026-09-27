@@ -922,6 +922,152 @@ describe("bulk route import", () => {
   });
 
   /**
+   * ── THE EXPORTED FILE GOES STRAIGHT BACK IN ────────────────────────────────
+   * Instellingen > Prijzen > Routeprijzen writes the configuration as JSON, and
+   * that file is only a backup if this importer reads it. The document below is
+   * the exporter's own output, field for field — `route-export.ts` in the
+   * frontend produces exactly this shape, and its own suite asserts so.
+   *
+   * If either side ever moves, one of the two suites fails.
+   */
+  describe("a document produced by the JSON export", () => {
+    const EXPORTED = {
+      routes: [
+        {
+          type: "NORMAL",
+          departure: "Quay 869",
+          destination: "Dourges",
+          tarief: 520.5,
+          kilometres: 310.25,
+          tunnel: 0,
+        },
+        {
+          type: "NORMAL",
+          departure: "Gent",
+          destination: "Lille",
+          tarief: 120,
+          kilometres: 55,
+          tunnel: 12.5,
+        },
+        {
+          type: "COMBINATION",
+          legs: [
+            {
+              departure: "Antwerp",
+              destination: "Kallo",
+              tarief: 100,
+              kilometres: 25,
+              tunnel: 0,
+            },
+            {
+              departure: "Kallo",
+              destination: "Antwerp",
+              tarief: 80,
+              kilometres: 30,
+              tunnel: 15,
+            },
+          ],
+        },
+      ],
+    };
+
+    it("is accepted as it stands", async () => {
+      const { isValid, errors } = await service.check(EXPORTED);
+
+      expect(errors).toEqual([]);
+      expect(isValid).toBe(true);
+    });
+
+    it("recreates the same counts", async () => {
+      const { summary } = await service.check(EXPORTED);
+
+      expect(summary).toEqual({
+        normalRoutes: 2,
+        combinationGroups: 1,
+        combinationLegs: 2,
+        totalRoutes: 4,
+      });
+    });
+
+    /** Every value survives the trip out and back — no information lost. */
+    it("recreates every route with its own amounts", async () => {
+      await service.import(EXPORTED);
+
+      expect(configurationServices.routes.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          departure: "Quay 869",
+          destination: "Dourges",
+          tarief: 520.5,
+          kilometres: 310.25,
+          tunnel: 0,
+        }),
+      );
+
+      const [combinationDto] =
+        configurationServices.combinations.create.mock.calls[0];
+
+      expect(combinationDto.legs).toEqual([
+        {
+          departure: "Antwerp",
+          destination: "Kallo",
+          tarief: 100,
+          kilometres: 25,
+          tunnel: 0,
+        },
+        {
+          departure: "Kallo",
+          destination: "Antwerp",
+          tarief: 80,
+          kilometres: 30,
+          tunnel: 15,
+        },
+      ]);
+    });
+
+    /**
+     * A road nobody has measured exports as null, and comes back as null. Zero
+     * would be a different statement: charged nothing because somebody decided
+     * it costs nothing, rather than because nobody has said how long it is.
+     */
+    it("accepts an unmeasured road as null", async () => {
+      const { isValid } = await service.check({
+        routes: [
+          {
+            type: "NORMAL",
+            departure: "Aalst",
+            destination: "Ninove",
+            tarief: 50,
+            kilometres: null,
+            tunnel: 0,
+          },
+        ],
+      });
+
+      expect(isValid).toBe(true);
+    });
+
+    it("still refuses a route with no kilometres field at all", async () => {
+      const entry = {
+        type: "NORMAL",
+        departure: "Aalst",
+        destination: "Ninove",
+        tarief: 50,
+        tunnel: 0,
+      };
+
+      expect(await refusalOf([entry])).toEqual([
+        "route 1: kilometres is required",
+      ]);
+    });
+
+    it("writes an empty configuration as a document that imports nothing", async () => {
+      const { errors } = await service.check({ routes: [] });
+
+      expect(errors[0].message).toBe("routes must not be empty");
+    });
+  });
+
+  /**
    * The bound exists because the whole import runs in one transaction, so its size
    * decides how long that transaction holds its locks. It is enforced by the
    * envelope DTO, which the ValidationPipe applies before this service is reached.

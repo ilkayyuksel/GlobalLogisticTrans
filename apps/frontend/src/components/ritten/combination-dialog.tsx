@@ -11,7 +11,10 @@ import type { Trip } from "@/lib/api/types";
 import { useTranslation } from "@/lib/i18n/language-provider";
 import { toClockLabel } from "@/lib/calendar/clock";
 import { formatCalendarDate } from "@/lib/calendar/calendar-dates";
-import { combinationClasses, combinationLabel } from "@/lib/ritten/combination";
+import {
+  combinationLabel,
+  type CombinationPalette,
+} from "@/lib/ritten/combination";
 import { toGroupDisplayOrder } from "@/lib/ritten/group-order";
 import { RittenDialog } from "./ritten-dialog";
 
@@ -38,10 +41,19 @@ import { RittenDialog } from "./ritten-dialog";
  */
 export function CombinationDialog({
   tripGroupId,
+  palette,
   onUnlink,
   onClose,
 }: {
   tripGroupId: string;
+  /**
+   * The colours of the groups visible in the period behind this dialog.
+   *
+   * The same object the list colours its rows from, so the tag here is the colour
+   * the operator just clicked on. A group the period does not hold — reached from
+   * somewhere else — falls back to its own id, which is what the palette does.
+   */
+  palette: CombinationPalette;
   /** Resolves once the backend accepted it AND the list was refetched. */
   onUnlink: (trip: Trip) => Promise<void>;
   onClose: () => void;
@@ -61,7 +73,7 @@ export function CombinationDialog({
       title={t("ritten.group.dialogTitle")}
       titleExtra={
         <span
-          className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold ring-1 ${combinationClasses(tripGroupId)}`}
+          className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold ring-1 ${palette.classesFor(tripGroupId)}`}
         >
           {combinationLabel(tripGroupId)}
         </span>

@@ -132,13 +132,24 @@ export class CombinationRouteConfigurationService {
    * Nothing priced changes. A TripPricing snapshot holds the amounts it was
    * priced with and reads no configuration ever again, so historical invoices
    * stay exactly as explainable as they were.
+   *
+   * Answers with the Combination that was removed, both legs included: the
+   * convention every DELETE in this API follows, and the one thing a caller
+   * needs to confirm which record is gone.
    */
-  async remove(combinationGroupId: string): Promise<void> {
+  async remove(
+    combinationGroupId: string,
+  ): Promise<CombinationRouteConfigurationDto> {
+    // Read before it goes: afterwards there is nothing left to describe.
+    const removed = await this.findById(combinationGroupId);
+
     await this.combinationPricing.remove(combinationGroupId);
 
     this.logger.log("Combination route configuration deleted", {
       combinationGroupId,
     });
+
+    return removed;
   }
 
   /** Each leg's tunnel, against the leg that was just written. */
@@ -156,17 +167,49 @@ export class CombinationRouteConfigurationService {
   ): Promise<CombinationRouteConfigurationDto> {
     return {
       id: group.id,
-      legs: await Promise.all(group.legs.map((leg) => this.composeLeg(leg))),
+      reviewed: group.reviewed,
+      legs: await Promise.all(
+        group.legs.map((leg) => this.composeLeg(leg, group.reviewed)),
+      ),
     };
   }
 
+  /**
+   * One leg, carrying the GROUP's review mark.
+   *
+   * A leg has a column of its own and it is never read: half a reviewed
+   * Combination is not a state this application can show or act on, so the group
+   * answers for both legs.
+   */
   private async composeLeg(
     leg: RoutePricingResponseDto,
+    reviewed: boolean,
   ): Promise<RouteConfigurationDto> {
     return composeRouteConfiguration(
       leg,
       await this.tunnelCosts.find(this.ownerOf(leg)),
+      reviewed,
     );
+  }
+
+  /**
+   * Records that somebody has been through this Combination's prices.
+   *
+   * On the GROUP, which is what an operator configures, edits, removes — and
+   * therefore reviews. Bookkeeping only: no price and no leg changes.
+   */
+  async setReviewed(
+    combinationGroupId: string,
+    reviewed: boolean,
+  ): Promise<CombinationRouteConfigurationDto> {
+    await this.combinationPricing.setReviewed(combinationGroupId, reviewed);
+
+    this.logger.log("Combination route configuration review mark changed", {
+      combinationGroupId,
+      reviewed,
+    });
+
+    return this.findById(combinationGroupId);
   }
 
   /**

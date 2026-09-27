@@ -993,6 +993,23 @@ model RoutePricing {
 
   notes String? @db.Text
 
+  /// Whether an administrator has been through this route's prices.
+  ///
+  /// ── BOOKKEEPING, NOT STATE ────────────────────────────────────────────────
+  /// It records that a person has looked, and nothing else. It does not decide
+  /// whether the route is used, what a Trip is charged, or anything the Pricing
+  /// Engine reads — the Engine never sees this column. An unreviewed route prices
+  /// exactly as a reviewed one does.
+  ///
+  /// Deliberately not called `active` or `status`: a route price has no lifecycle
+  /// and the flag that once suggested it had was removed for good reasons.
+  ///
+  /// Meaningful only for an ordinary route. A LEG of a Combination is not a
+  /// configuration on its own — it is never reviewed, edited or removed by
+  /// itself — so its own value is never read; the group carries the mark. See
+  /// `CombinationRouteGroup.reviewed`.
+  reviewed Boolean @default(false)
+
   /// The Combination route configuration this leg belongs to, or NULL.
   ///
   /// ── THE DISCRIMINATOR ─────────────────────────────────────────────────────
@@ -1065,6 +1082,17 @@ model CombinationRouteGroup {
   id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
 
   notes String? @db.Text
+
+  /// Whether an administrator has been through this Combination's prices.
+  ///
+  /// On the GROUP rather than on each leg, because the group is what a person
+  /// configures, edits, removes — and therefore reviews. Marking legs separately
+  /// would invent a state the screen has no way to show and no meaning for: a
+  /// Combination with one leg checked is not half reviewed, it is a question
+  /// nobody asked.
+  ///
+  /// Bookkeeping only. Nothing about pricing reads it.
+  reviewed Boolean @default(false)
 
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)

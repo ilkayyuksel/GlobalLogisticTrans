@@ -6,6 +6,7 @@ import {
   HttpCode,
   HttpStatus,
   Param,
+  Patch,
   Post,
   Put,
 } from "@nestjs/common";
@@ -14,7 +15,6 @@ import {
   ApiBody,
   ApiConflictResponse,
   ApiCreatedResponse,
-  ApiNoContentResponse,
   ApiNotFoundResponse,
   ApiOkResponse,
   ApiOperation,
@@ -29,6 +29,7 @@ import {
   BulkRouteImportSummaryDto,
 } from "./dto/bulk-route-import.dto";
 import { CombinationRouteGroupIdParamDto } from "./dto/combination-route-group-id-param.dto";
+import { ReviewRouteConfigurationDto } from "./dto/review-route-configuration.dto";
 import { RouteConfigurationIdParamDto } from "./dto/route-configuration-id-param.dto";
 import {
   CombinationRouteConfigurationDto,
@@ -134,18 +135,62 @@ export class RouteConfigurationController {
     return this.combinations.update(params.combinationGroupId, dto);
   }
 
+  /**
+   * 200 with the removed Combination rather than 204, the convention every
+   * DELETE in this API follows: each response carries the standard envelope.
+   *
+   * It used to answer 204. An empty body is not the envelope, so the browser
+   * reported a response it could not read on a deletion that had in fact
+   * succeeded — the record was gone and the screen said it had failed.
+   */
+  /**
+   * Marks a Combination as checked, or unchecks it.
+   *
+   * ── ADMINISTRATIVE PROGRESS, NOT STATE ────────────────────────────────────
+   * It records that a person has looked at these prices. It does not decide
+   * whether the Combination is used, what a Trip is charged, or anything the
+   * Pricing Engine reads — an unreviewed Combination prices exactly as a
+   * reviewed one does, and no Trip, snapshot or pricing line is touched.
+   *
+   * On the GROUP, because the group is what an operator configures, edits and
+   * removes. Marking legs separately would invent a half-reviewed Combination,
+   * which is a state the screen cannot show and nothing can act on.
+   *
+   * A sub-resource rather than a verb in the path, and separate from the ordinary
+   * edit: ticking a box is not an edit, and sending the amounts back to record one
+   * would rewrite prices nobody meant to touch.
+   */
+  @Patch("combinations/:combinationGroupId/review")
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: "Mark a Combination route as checked, or uncheck it",
+    description:
+      "Administrative progress only. Idempotent: sending the value it already has is not an error. No price, no leg and nothing the Pricing Engine reads is changed.",
+  })
+  @ApiOkResponse({ type: CombinationRouteConfigurationDto })
+  @ApiNotFoundResponse({ description: "No Combination with that id." })
+  reviewCombination(
+    @Param() params: CombinationRouteGroupIdParamDto,
+    @Body() dto: ReviewRouteConfigurationDto,
+  ): Promise<CombinationRouteConfigurationDto> {
+    return this.combinations.setReviewed(
+      params.combinationGroupId,
+      dto.reviewed,
+    );
+  }
+
   @Delete("combinations/:combinationGroupId")
-  @HttpCode(HttpStatus.NO_CONTENT)
+  @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: "Delete a Combination route configuration",
     description:
-      "Removes the Combination, both of its legs and each leg's own tunnel, in one statement — never one leg on its own. Historical Trip pricing is unaffected: a snapshot keeps the amounts it was priced with.",
+      "Removes the Combination, both of its legs and each leg's own tunnel, in one statement — never one leg on its own. Answers with the Combination that was removed. Historical Trip pricing is unaffected: a snapshot keeps the amounts it was priced with.",
   })
-  @ApiNoContentResponse({ description: "The Combination was removed." })
+  @ApiOkResponse({ type: CombinationRouteConfigurationDto })
   @ApiNotFoundResponse({ description: "No Combination with that id." })
   removeCombination(
     @Param() params: CombinationRouteGroupIdParamDto,
-  ): Promise<void> {
+  ): Promise<CombinationRouteConfigurationDto> {
     return this.combinations.remove(params.combinationGroupId);
   }
 
@@ -248,17 +293,52 @@ export class RouteConfigurationController {
    * The price record and the route's tunnel cost go together. Trips already
    * priced are untouched — a snapshot holds its own amounts and reads no
    * configuration again — and Trips priced afterwards simply find no route.
+   *
+   * 200 with the removed configuration rather than 204, the convention every
+   * DELETE in this API follows: each response carries the standard envelope. An
+   * empty body is not the envelope, and a browser reading one reported a
+   * response it could not read on a deletion that had already succeeded.
    */
+  /**
+   * Marks a route as checked, or unchecks it.
+   *
+   * Administrative progress and nothing else — see the Combination's own review
+   * endpoint above for why it is separate from the ordinary edit. A Combination
+   * leg is refused here: a leg is never reviewed on its own, and its group
+   * carries the mark.
+   */
+  @Patch(":id/review")
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: "Mark a route as checked, or uncheck it",
+    description:
+      "Administrative progress only. Idempotent. No amount, no route and nothing the Pricing Engine reads is changed.",
+  })
+  @ApiOkResponse({ type: RouteConfigurationDto })
+  @ApiNotFoundResponse({ description: "No configuration with that id." })
+  @ApiConflictResponse({
+    description:
+      "That id is a leg of a Combination, which is reviewed as a whole.",
+  })
+  review(
+    @Param() params: RouteConfigurationIdParamDto,
+    @Body() dto: ReviewRouteConfigurationDto,
+  ): Promise<RouteConfigurationDto> {
+    return this.service.setReviewed(params.id, dto.reviewed);
+  }
+
   @Delete(":id")
-  @HttpCode(HttpStatus.NO_CONTENT)
+  @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: "Delete a route configuration",
     description:
-      "Removes the route's price and its tunnel cost. Historical Trip pricing is unaffected: a snapshot keeps the amounts it was priced with.",
+      "Removes the route's price and its tunnel cost, and answers with the configuration that was removed. Historical Trip pricing is unaffected: a snapshot keeps the amounts it was priced with.",
   })
-  @ApiNoContentResponse({ description: "The configuration was removed." })
+  @ApiOkResponse({ type: RouteConfigurationDto })
   @ApiNotFoundResponse({ description: "No configuration with that id." })
-  remove(@Param() params: RouteConfigurationIdParamDto): Promise<void> {
+  remove(
+    @Param() params: RouteConfigurationIdParamDto,
+  ): Promise<RouteConfigurationDto> {
     return this.service.remove(params.id);
   }
 }

@@ -1,7 +1,12 @@
 "use client";
 
+import {
+  ReviewCheckbox,
+  RouteValueCells,
+} from "@/components/pricing/route-row";
 import { ConfirmDialog } from "@/components/ritten/confirm-dialog";
 import type { CombinationRouteConfiguration } from "@/lib/api/route-configuration";
+import type { RouteField } from "@/lib/pricing/route-draft";
 import { useTranslation } from "@/lib/i18n/language-provider";
 import type { TranslationKey } from "@/lib/i18n/translations";
 import {
@@ -32,135 +37,137 @@ export function combinationDraftOf(
 }
 
 /**
- * The configured Combinations, each shown as ONE record with two legs.
+ * One Combination, as rows of the Routeprijzen table.
  *
- * ── WHY NOT TWO ROWS IN THE TABLE ───────────────────────────────────────────
- * Two rows would look like two routes an operator could edit or delete
- * separately, and neither is true: a Combination is created, changed and removed
- * as a whole, because half of one prices the outbound and silently charges
- * nothing for the return. So the group carries the actions and the legs sit
- * inside it, labelled Leg 1 and Leg 2 in the order they were configured.
+ * ── THE SAME ROWS AS AN ORDINARY ROUTE ──────────────────────────────────────
+ * A Combination used to be drawn as a card of its own beside the table: a
+ * different border, different spacing, different type, and twice the height for
+ * the same information. It is the same information — two roads, each with a
+ * Tarief, a distance and a tunnel — so it is now the same two rows, in the same
+ * table, drawn by the very component an ordinary route uses.
  *
- * ── AND IT IS NOT A TRIP GROUP ──────────────────────────────────────────────
- * Nothing here relates to grouping Trips in the Rittenlijst. That decides which
- * Trips carry the Backload; this decides what the two legs COST.
+ * ── AND STILL PLAINLY ONE RECORD ────────────────────────────────────────────
+ * What a Combination needs beyond an ordinary route is the fact that its two
+ * rows belong together. That is a quiet header row — the word Combination, and
+ * the actions that apply to the PAIR — and the browser's own grouping: each
+ * Combination is one `<tbody>`, which is what that element is for, so a screen
+ * reader hears the legs as a group rather than as two loose rows. The same
+ * pattern the Ritten list uses to group a day's Trips under their truck.
+ *
+ * No leg carries actions of its own, because none exists on its own.
  */
-export function CombinationRouteList({
-  combinations,
-  editingId,
-  busyId,
+export function CombinationRows({
+  combination,
+  index,
+  isBusy,
+  columnCount,
   onEdit,
   onDelete,
+  onReview,
+  onSaveLegField,
 }: {
-  combinations: readonly CombinationRouteConfiguration[];
-  editingId: string | null;
-  busyId: string | null;
-  onEdit: (combination: CombinationRouteConfiguration) => void;
-  onDelete: (combination: CombinationRouteConfiguration) => void;
+  combination: CombinationRouteConfiguration;
+  /** Its place in the list, which is what the operator sees it called. */
+  index: number;
+  isBusy: boolean;
+  columnCount: number;
+  onEdit: () => void;
+  onDelete: () => void;
+  onReview: (reviewed: boolean) => void;
+  /**
+   * Persists one field of ONE leg.
+   *
+   * The leg is named by its index because that is what the Combination's own
+   * update needs: it replaces both legs in one transaction, and the untouched
+   * one is passed through unchanged. Rejects to keep the cell open.
+   */
+  onSaveLegField: (
+    legIndex: number,
+    field: RouteField,
+    value: string,
+  ) => Promise<void>;
 }) {
   const t = useTranslation();
-
-  if (combinations.length === 0) {
-    return null;
-  }
+  const label = `${t("settings.pricing.routes.combinations.label")} #${index + 1}`;
 
   return (
-    <div className="mt-6 space-y-3">
-      <h3 className="text-sm font-semibold text-foreground">
-        {t("settings.pricing.routes.combinations.title")}
-      </h3>
+    <tbody className="border-t border-border">
+      <tr>
+        {/*
+          A heading row rather than a card header: it spans the value columns and
+          leaves the last one to the actions, so the table's own column rhythm is
+          not broken by the group it introduces.
+        */}
+        <th
+          scope="colgroup"
+          colSpan={columnCount - 2}
+          className="px-3 py-1.5 text-left text-xs font-medium uppercase tracking-wide text-muted"
+        >
+          {label}
+        </th>
+        {/*
+          The tick belongs to the GROUP, beside the actions that also belong to
+          it. A Combination is reviewed as one record, because it is configured,
+          edited and removed as one.
+        */}
+        <td className="px-3 py-1.5">
+          <ReviewCheckbox
+            reviewed={combination.reviewed}
+            label={label}
+            isBusy={isBusy}
+            onChange={onReview}
+          />
+        </td>
+        <td className="px-3 py-1.5">
+          <span className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              disabled={isBusy}
+              onClick={onEdit}
+              aria-label={`${t("settings.pricing.routes.edit")} ${t("settings.pricing.routes.combinations.label")} ${index + 1}`}
+              className="rounded-md border border-border px-2 py-0.5 text-xs font-medium text-foreground hover:bg-hover disabled:opacity-50"
+            >
+              {t("settings.pricing.routes.edit")}
+            </button>
+            <button
+              type="button"
+              disabled={isBusy}
+              onClick={onDelete}
+              aria-label={`${t("settings.pricing.routes.delete")} ${t("settings.pricing.routes.combinations.label")} ${index + 1}`}
+              className="rounded-md border border-danger/40 px-2 py-0.5 text-xs font-medium text-danger hover:bg-danger/10 disabled:opacity-50"
+            >
+              {t("settings.pricing.routes.delete")}
+            </button>
+          </span>
+        </td>
+      </tr>
 
-      {combinations.map((combination, index) =>
-        combination.id === editingId ? null : (
-          <article
-            key={combination.id}
-            className="rounded-md border border-border"
-          >
-            <header className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-3 py-2">
-              {/*
-                Numbered by position rather than by its identifier: an operator
-                needs to tell two Combinations apart on screen, and a UUID does
-                that worse than "Combination #2".
-              */}
-              <span className="text-sm font-medium text-foreground">
-                {`${t("settings.pricing.routes.combinations.label")} #${index + 1}`}
-              </span>
-              <span className="flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  disabled={busyId === combination.id}
-                  onClick={() => onEdit(combination)}
-                  aria-label={`${t("settings.pricing.routes.edit")} ${t("settings.pricing.routes.combinations.label")} ${index + 1}`}
-                  className="rounded-md border border-border px-2 py-0.5 text-xs font-medium text-foreground hover:bg-hover disabled:opacity-50"
-                >
-                  {t("settings.pricing.routes.edit")}
-                </button>
-                <button
-                  type="button"
-                  disabled={busyId === combination.id}
-                  onClick={() => onDelete(combination)}
-                  aria-label={`${t("settings.pricing.routes.delete")} ${t("settings.pricing.routes.combinations.label")} ${index + 1}`}
-                  className="rounded-md border border-danger/40 px-2 py-0.5 text-xs font-medium text-danger hover:bg-danger/10 disabled:opacity-50"
-                >
-                  {t("settings.pricing.routes.delete")}
-                </button>
-              </span>
-            </header>
-
-            <ul className="divide-y divide-border">
-              {combination.legs.map((leg, legIndex) => (
-                <li
-                  key={leg.id}
-                  className="flex flex-wrap items-baseline gap-x-4 gap-y-1 px-3 py-2 text-sm"
-                >
-                  <span className="text-xs font-medium uppercase tracking-wide text-muted">
-                    {`${t("settings.pricing.routes.combinations.leg")} ${legIndex + 1}`}
-                  </span>
-                  <span className="text-foreground">
-                    {`${leg.departure} → ${leg.destination}`}
-                  </span>
-                  <LegAmount
-                    labelKey="settings.pricing.routes.tarief"
-                    value={leg.tarief}
-                  />
-                  {/*
-                    A leg configured without a distance is charged no toll. An em
-                    dash says that; a 0 would claim the road was measured.
-                  */}
-                  <LegAmount
-                    labelKey="settings.pricing.routes.kilometres"
-                    value={leg.kilometres ?? "—"}
-                  />
-                  <LegAmount
-                    labelKey="settings.pricing.routes.tunnel"
-                    value={leg.tunnel}
-                  />
-                </li>
-              ))}
-            </ul>
-          </article>
-        ),
-      )}
-    </div>
-  );
-}
-
-function LegAmount({
-  labelKey,
-  value,
-}: {
-  labelKey: TranslationKey;
-  value: string;
-}) {
-  const t = useTranslation();
-
-  return (
-    <span className="text-secondary">
-      <span className="text-xs uppercase tracking-wide text-muted">
-        {`${t(labelKey)} `}
-      </span>
-      <span className="tabular-nums">{value}</span>
-    </span>
+      {combination.legs.map((leg, legIndex) => (
+        <tr key={leg.id} className="border-b border-border last:border-0">
+          {/*
+            Every value of a leg is edited where it stands, exactly as an
+            ordinary route's is. What differs is only where the change goes: one
+            leg at a time, through the Combination's own transaction.
+          */}
+          <RouteValueCells
+            route={leg}
+            onSaveField={(field, value) =>
+              onSaveLegField(legIndex, field, value)
+            }
+          />
+          {/* No tick per leg: the group's mark above answers for both. */}
+          <td className="px-3 py-2" />
+          {/*
+            The actions column, left empty on purpose: a leg is never edited or
+            removed on its own, and a disabled button would invite the attempt.
+            The leg number goes here, where the eye already is.
+          */}
+          <td className="px-3 py-2 text-xs text-muted">
+            {`${t("settings.pricing.routes.combinations.leg")} ${legIndex + 1}`}
+          </td>
+        </tr>
+      ))}
+    </tbody>
   );
 }
 
