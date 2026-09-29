@@ -39,6 +39,77 @@ const nl = {
   "navigation.maintenance": "Onderhoud",
   "navigation.calendar": "Agenda",
   "navigation.notes": "Notities",
+
+  "navigation.invoiceAudit": "Excel factuurcontrole",
+
+  "invoiceAudit.title": "Excel factuurcontrole",
+  "invoiceAudit.description":
+    "Upload de weekfactuur van de klant. Elke regel wordt gezocht op planningsdatum, bookingnummer en containernummer, en telt alleen als die rit afgewerkt is.",
+  "invoiceAudit.dropHere": "Sleep de weekfactuur hierheen",
+  "invoiceAudit.onlyXlsx": "Alleen .xlsx-bestanden",
+  "invoiceAudit.choose": "Bestand kiezen",
+  "invoiceAudit.check": "Controleren",
+  "invoiceAudit.checking": "Bezig met controleren…",
+  "invoiceAudit.clear": "Wissen",
+  "invoiceAudit.summary.file": "Bestand",
+  "invoiceAudit.summary.period": "Periode",
+  "invoiceAudit.summary.total": "Factuurregels",
+  "invoiceAudit.summary.matched": "Gematcht",
+  "invoiceAudit.summary.notFound": "Niet gevonden",
+  "invoiceAudit.summary.notFinished": "Niet afgewerkt",
+  "invoiceAudit.summary.ambiguous": "Meerdere matches",
+  "invoiceAudit.summary.incomplete":
+    "Rijen zonder volledige gegevens, niet gecontroleerd:",
+  "invoiceAudit.status.matched": "Gematcht",
+  "invoiceAudit.status.notFound": "Niet gevonden",
+  "invoiceAudit.status.notFinished": "Niet afgewerkt",
+  "invoiceAudit.status.ambiguous": "Meerdere matches",
+  "invoiceAudit.status.addedMissing": "Door controle toegevoegd",
+  "invoiceAudit.column.row": "Rij",
+  "invoiceAudit.column.status": "Status",
+  "invoiceAudit.column.planningDate": "Planningsdatum",
+  "invoiceAudit.column.booking": "Bookingnr",
+  "invoiceAudit.column.container": "Containernr.",
+  "invoiceAudit.column.trip": "Rit in TRANO",
+  "invoiceAudit.column.pricing": "Prijscontrole",
+  "invoiceAudit.pricing.noChanges": "Gecontroleerd",
+  "invoiceAudit.pricing.corrected": "Prijs aangepast",
+  "invoiceAudit.pricing.notDistributable": "Verschil niet toewijsbaar",
+  "invoiceAudit.pricing.notCompared": "Niet vergeleken",
+  "invoiceAudit.pricing.notPlaced": "staat op meerdere regels, niets gewijzigd",
+  "invoiceAudit.summary.priceChecked": "Prijs gecontroleerd",
+  "invoiceAudit.summary.priceUnchanged": "Prijs klopt",
+  "invoiceAudit.summary.priceCorrected": "Prijs aangepast",
+  "invoiceAudit.summary.correctedCells": "Aangepaste cellen",
+  "invoiceAudit.summary.missingTrips": "Ontbrekende ritten",
+  "invoiceAudit.missing.title": "Ontbrekende afgewerkte ritten:",
+  "invoiceAudit.missing.description":
+    "Afgewerkte, nog niet betaalde ritten uit deze periode die niet op de factuur staan. Ze worden onderaan het bestand toegevoegd; er wordt niets aan de bestaande regels gewijzigd.",
+  "invoiceAudit.missing.added": "toegevoegd aan factuur",
+  "invoiceAudit.apply.description":
+    "Verwerken past de prijzen aan in dit bestand, voegt de ontbrekende ritten onderaan toe, markeert de probleemregels geel en zet de gecontroleerde ritten op betaald.",
+  "invoiceAudit.apply.action": "Verwerken en downloaden",
+  "invoiceAudit.apply.working": "Bezig met verwerken…",
+  "invoiceAudit.apply.willPay": "Ritten die op betaald gezet worden:",
+  "invoiceAudit.applied.title": "Excel verwerkt",
+  "invoiceAudit.applied.downloaded": "Gedownload als",
+  "invoiceAudit.applied.rows": "Factuurregels",
+  "invoiceAudit.applied.checked": "Gecontroleerd",
+  "invoiceAudit.applied.corrected": "Prijsaanpassingen",
+  "invoiceAudit.applied.problems": "Probleemregels",
+  "invoiceAudit.applied.added": "Ritten toegevoegd",
+  "invoiceAudit.applied.paid": "Op betaald gezet",
+  "invoiceAudit.applied.alreadyPaid": "Was al betaald",
+  "invoiceAudit.sharedKey": "zelfde sleutel als rij",
+  "invoiceAudit.ambiguousDetail": "Aantal afgewerkte ritten met deze sleutel:",
+  "invoiceAudit.noTrip": "Geen rit gevonden",
+  "invoiceAudit.nothing.title": "Nog geen controle",
+  "invoiceAudit.nothing.description":
+    "Kies een weekfactuur en klik op Controleren. Er wordt niets gewijzigd: geen prijs, geen betaling, en het bestand blijft zoals het is.",
+  "invoiceAudit.empty.title": "Geen factuurregels gevonden",
+  "invoiceAudit.empty.description":
+    "Het werkblad bevat geen regels met een planningsdatum, bookingnummer en containernummer.",
+
   "navigation.settings": "Instellingen",
   "navigation.customValues": "Custom waarden",
   "navigation.main": "Hoofdnavigatie",
@@ -414,7 +485,8 @@ const nl = {
   "ritten.whatsapp.unavailable.noDriver": "Geen chauffeur gekoppeld",
   "ritten.whatsapp.unavailable.noPhone":
     "Geen telefoonnummer voor deze chauffeur",
-  "ritten.whatsapp.unavailable.noDocument": "Geen transportopdracht beschikbaar",
+  "ritten.whatsapp.unavailable.noDocument":
+    "Geen transportopdracht beschikbaar",
   "ritten.whatsapp.unavailable.disconnected": "WhatsApp is niet verbonden",
   // De verbindingstoestand, per toestand verwoord. Een verbinding die zichzelf
   // herstelt vraagt niets van de operator; alleen bij een koppeling moet er
@@ -448,8 +520,7 @@ const nl = {
   "ritten.whatsapp.status.connecting": "Verbinden…",
   "ritten.whatsapp.status.disconnected":
     "Verbinding verbroken — opnieuw verbinden…",
-  "ritten.whatsapp.status.pairingRequired":
-    "Koppeling vereist — scan QR-code",
+  "ritten.whatsapp.status.pairingRequired": "Koppeling vereist — scan QR-code",
   "ritten.whatsapp.status.error": "WhatsApp is niet beschikbaar",
   "ritten.whatsapp.status.disabled": "WhatsApp staat uit in deze omgeving",
   "ritten.menu.restore": "Herstellen",
@@ -496,8 +567,7 @@ const nl = {
   "ritten.reopen.description":
     "Deze rit wordt opnieuw geopend en verschijnt weer als open in de planning.",
   "ritten.delete.title": "Rit verwijderen?",
-  "ritten.delete.description":
-    "Deze rit wordt verwijderd uit de planning.",
+  "ritten.delete.description": "Deze rit wordt verwijderd uit de planning.",
   "ritten.delete.consequence":
     "De rit en zijn documenten blijven bewaard, maar de rit verdwijnt uit de lijst en kan alleen door een beheerder worden hersteld.",
   "ritten.delete.confirm": "Verwijderen",
@@ -549,7 +619,6 @@ const nl = {
     "Deze selectie is te groot om te exporteren. Kies een kortere periode of scherpere filters.",
   "ritten.export.scope": "Exporteert alle ritten van de huidige filters",
 
-
   "drivers.title": "Chauffeurs",
   "drivers.loading": "Chauffeurs laden…",
   "drivers.value.empty": "—",
@@ -587,8 +656,7 @@ const nl = {
   "drivers.form.editTitle": "Chauffeur bewerken",
   "drivers.form.name": "Naam",
   "drivers.form.licenceNumber": "Rijbewijsnummer",
-  "drivers.form.licenceNumberHint":
-    "Mag maar bij één actieve chauffeur horen",
+  "drivers.form.licenceNumberHint": "Mag maar bij één actieve chauffeur horen",
   "drivers.form.phoneNumber": "Telefoon",
   "drivers.form.email": "E-mail",
   "drivers.form.emergencyContact": "Noodcontact",
@@ -906,8 +974,7 @@ const nl = {
   "tripDetail.loading": "Rit laden",
   "tripDetail.busy": "Bezig",
   "tripDetail.notFoundTitle": "Rit niet gevonden",
-  "tripDetail.notFoundDescription":
-    "Deze rit bestaat niet, of is verwijderd.",
+  "tripDetail.notFoundDescription": "Deze rit bestaat niet, of is verwijderd.",
   "tripDetail.deletedNotice":
     "Deze rit is verwijderd. Ze is verborgen in de planning maar bewaard voor de historiek. Herstel ze om ze weer te kunnen bewerken.",
   "tripDetail.field.city": "Bestemming stad",
@@ -978,7 +1045,8 @@ const nl = {
   "agenda.form.day": "Dag",
   "agenda.form.date": "Startdatum",
   "agenda.form.dateRequired": "Kies een datum.",
-  "agenda.form.endOptional": "Optioneel — zonder eindtijd duurt het item 1 uur.",
+  "agenda.form.endOptional":
+    "Optioneel — zonder eindtijd duurt het item 1 uur.",
   "agenda.form.titleRequired": "Vul een titel in.",
   "agenda.form.startRequired": "Vul een starttijd in.",
   "agenda.form.endAfterStart": "De eindtijd moet na de starttijd liggen.",
@@ -1031,6 +1099,78 @@ const tr: Translations = {
   "navigation.maintenance": "Bakım",
   "navigation.calendar": "Takvim",
   "navigation.notes": "Notlar",
+
+  "navigation.invoiceAudit": "Excel fatura kontrolü",
+
+  "invoiceAudit.title": "Excel fatura kontrolü",
+  "invoiceAudit.description":
+    "Müşterinin haftalık faturasını yükleyin. Her satır planlama tarihi, booking numarası ve konteyner numarasıyla aranır ve yalnızca sefer tamamlanmışsa sayılır.",
+  "invoiceAudit.dropHere": "Haftalık faturayı buraya sürükleyin",
+  "invoiceAudit.onlyXlsx": "Yalnızca .xlsx dosyaları",
+  "invoiceAudit.choose": "Dosya seç",
+  "invoiceAudit.check": "Kontrol et",
+  "invoiceAudit.checking": "Kontrol ediliyor…",
+  "invoiceAudit.clear": "Temizle",
+  "invoiceAudit.summary.file": "Dosya",
+  "invoiceAudit.summary.period": "Dönem",
+  "invoiceAudit.summary.total": "Fatura satırı",
+  "invoiceAudit.summary.matched": "Eşleşti",
+  "invoiceAudit.summary.notFound": "Bulunamadı",
+  "invoiceAudit.summary.notFinished": "Tamamlanmamış",
+  "invoiceAudit.summary.ambiguous": "Birden fazla eşleşme",
+  "invoiceAudit.summary.incomplete":
+    "Bilgileri eksik olduğu için kontrol edilmeyen satırlar:",
+  "invoiceAudit.status.matched": "Eşleşti",
+  "invoiceAudit.status.notFound": "Bulunamadı",
+  "invoiceAudit.status.notFinished": "Tamamlanmamış",
+  "invoiceAudit.status.ambiguous": "Birden fazla eşleşme",
+  "invoiceAudit.status.addedMissing": "Kontrol tarafından eklendi",
+  "invoiceAudit.column.row": "Satır",
+  "invoiceAudit.column.status": "Durum",
+  "invoiceAudit.column.planningDate": "Planlama tarihi",
+  "invoiceAudit.column.booking": "Booking no",
+  "invoiceAudit.column.container": "Konteyner no",
+  "invoiceAudit.column.trip": "TRANO seferi",
+  "invoiceAudit.column.pricing": "Fiyat kontrolü",
+  "invoiceAudit.pricing.noChanges": "Kontrol edildi",
+  "invoiceAudit.pricing.corrected": "Fiyat düzeltildi",
+  "invoiceAudit.pricing.notDistributable": "Fark satıra atanamıyor",
+  "invoiceAudit.pricing.notCompared": "Karşılaştırılmadı",
+  "invoiceAudit.pricing.notPlaced":
+    "birden fazla satırda, hiçbir şey değiştirilmedi",
+  "invoiceAudit.summary.priceChecked": "Fiyatı kontrol edilen",
+  "invoiceAudit.summary.priceUnchanged": "Fiyatı doğru",
+  "invoiceAudit.summary.priceCorrected": "Fiyatı düzeltilen",
+  "invoiceAudit.summary.correctedCells": "Düzeltilen hücre",
+  "invoiceAudit.summary.missingTrips": "Eksik seferler",
+  "invoiceAudit.missing.title": "Faturada olmayan tamamlanmış seferler:",
+  "invoiceAudit.missing.description":
+    "Bu dönemde tamamlanmış, henüz ödenmemiş ve faturada yer almayan seferler. Dosyanın altına eklenirler; mevcut satırlarda hiçbir şey değişmez.",
+  "invoiceAudit.missing.added": "faturaya eklendi",
+  "invoiceAudit.apply.description":
+    "İşleme, bu dosyadaki fiyatları düzeltir, eksik seferleri en alta ekler, sorunlu satırları sarıya boyar ve kontrol edilen seferleri ödendi olarak işaretler.",
+  "invoiceAudit.apply.action": "İşle ve indir",
+  "invoiceAudit.apply.working": "İşleniyor…",
+  "invoiceAudit.apply.willPay": "Ödendi yapılacak sefer sayısı:",
+  "invoiceAudit.applied.title": "Excel işlendi",
+  "invoiceAudit.applied.downloaded": "Şu adla indirildi",
+  "invoiceAudit.applied.rows": "Fatura satırı",
+  "invoiceAudit.applied.checked": "Kontrol edildi",
+  "invoiceAudit.applied.corrected": "Fiyat düzeltmesi",
+  "invoiceAudit.applied.problems": "Sorunlu satır",
+  "invoiceAudit.applied.added": "Eklenen sefer",
+  "invoiceAudit.applied.paid": "Ödendi yapıldı",
+  "invoiceAudit.applied.alreadyPaid": "Zaten ödenmişti",
+  "invoiceAudit.sharedKey": "aynı anahtar, satır",
+  "invoiceAudit.ambiguousDetail": "Bu anahtarla tamamlanmış sefer sayısı:",
+  "invoiceAudit.noTrip": "Sefer bulunamadı",
+  "invoiceAudit.nothing.title": "Henüz kontrol yok",
+  "invoiceAudit.nothing.description":
+    "Bir haftalık fatura seçip Kontrol et'e basın. Hiçbir şey değiştirilmez: fiyat da, ödeme de; dosya olduğu gibi kalır.",
+  "invoiceAudit.empty.title": "Fatura satırı bulunamadı",
+  "invoiceAudit.empty.description":
+    "Çalışma sayfasında planlama tarihi, booking numarası ve konteyner numarası olan satır yok.",
+
   "navigation.settings": "Ayarlar",
   "navigation.customValues": "Özel değerler",
   "navigation.main": "Ana menü",
@@ -1394,8 +1534,7 @@ const tr: Translations = {
   "ritten.whatsapp.unavailable.status":
     "Bu sefer iptal edildi. Taşıma emrini göndermeden önce seferi yeniden açın.",
   "ritten.whatsapp.unavailable.noDriver": "Bağlı şoför yok",
-  "ritten.whatsapp.unavailable.noPhone":
-    "Bu şoför için telefon numarası yok",
+  "ritten.whatsapp.unavailable.noPhone": "Bu şoför için telefon numarası yok",
   "ritten.whatsapp.unavailable.noDocument": "Gönderilecek taşıma emri yok",
   "ritten.whatsapp.unavailable.disconnected": "WhatsApp bağlı değil",
   "admin.whatsapp.title": "WhatsApp",
@@ -1405,8 +1544,7 @@ const tr: Translations = {
   "admin.whatsapp.statusLabel": "Durum",
   "admin.whatsapp.state.CONNECTED": "Bağlı",
   "admin.whatsapp.state.CONNECTING": "Verbinden…",
-  "admin.whatsapp.state.DISCONNECTED":
-    "Bağlantı koptu — yeniden bağlanılıyor…",
+  "admin.whatsapp.state.DISCONNECTED": "Bağlantı koptu — yeniden bağlanılıyor…",
   "admin.whatsapp.state.PAIRING_REQUIRED":
     "Eşleştirme gerekli — QR kodu okutun",
   "admin.whatsapp.state.ERROR": "WhatsApp kullanılamıyor",
@@ -1524,7 +1662,6 @@ const tr: Translations = {
     "Bu seçim dışa aktarmak için çok büyük. Daha kısa bir dönem veya daha dar filtreler seçin.",
   "ritten.export.scope": "Mevcut filtrelerdeki tüm seferleri dışa aktarır",
 
-
   "drivers.title": "Şoförler",
   "drivers.loading": "Şoförler yükleniyor…",
   "drivers.value.empty": "—",
@@ -1611,8 +1748,7 @@ const tr: Translations = {
   "vehicles.form.editTitle": "Aracı düzenle",
   "vehicles.form.licensePlate": "Plaka",
   "vehicles.form.displayColor": "Planlama rengi",
-  "vehicles.form.displayColorHint":
-    "Bu aracı planlamada tanıdığın renk",
+  "vehicles.form.displayColorHint": "Bu aracı planlamada tanıdığın renk",
   "vehicles.form.description": "Açıklama",
   "vehicles.form.brand": "Marka",
   "vehicles.form.model": "Model",
@@ -1949,7 +2085,8 @@ const tr: Translations = {
     "İsteğe bağlı — bitiş saati olmadan öğe 1 saat sürer.",
   "agenda.form.titleRequired": "Bir başlık girin.",
   "agenda.form.startRequired": "Bir başlangıç saati girin.",
-  "agenda.form.endAfterStart": "Bitiş saati başlangıç saatinden sonra olmalıdır.",
+  "agenda.form.endAfterStart":
+    "Bitiş saati başlangıç saatinden sonra olmalıdır.",
   "agenda.form.save": "Kaydet",
   "agenda.form.saving": "Kaydediliyor…",
   "agenda.form.cancel": "İptal",
@@ -1985,7 +2122,5 @@ const tr: Translations = {
 export const TRANSLATIONS: Record<Language, Translations> = { nl, tr };
 
 export function isLanguage(value: unknown): value is Language {
-  return (
-    typeof value === "string" && LANGUAGES.includes(value as Language)
-  );
+  return typeof value === "string" && LANGUAGES.includes(value as Language);
 }

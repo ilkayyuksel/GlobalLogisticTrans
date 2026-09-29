@@ -17,6 +17,7 @@ import { LoggerModule } from "./logger/logger.module";
 import { MaintenanceModule } from "./maintenance/maintenance.module";
 import { NoteModule } from "./notes/note.module";
 import { PdfDocumentModule } from "./pdf-documents/pdf-document.module";
+import { InvoiceAuditModule } from "./invoice-audit/invoice-audit.module";
 import { PdfImportModule } from "./pdf-import/pdf-import.module";
 import { PricingEngineModule } from "./pricing-engine/pricing-engine.module";
 import { PricingReprocessModule } from "./pricing-reprocess/pricing-reprocess.module";
@@ -79,6 +80,7 @@ import { WhatsAppModule } from "./whatsapp/whatsapp.module";
     PricingReprocessModule,
     PdfDocumentModule,
     PdfImportModule,
+    InvoiceAuditModule,
     ImapModule,
     WhatsAppModule,
   ],

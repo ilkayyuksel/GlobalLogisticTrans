@@ -59,6 +59,7 @@ describe("AppShell navigation", () => {
         "Onderhoud",
         "Agenda",
         "Notities",
+        "Excel factuurcontrole",
       ]);
     });
 
@@ -79,6 +80,7 @@ describe("AppShell navigation", () => {
       ["Onderhoud", "/maintenance"],
       ["Agenda", "/calendar"],
       ["Notities", "/notes"],
+      ["Excel factuurcontrole", "/invoice-audit"],
     ])("links %s to %s", (label, href) => {
       renderShell();
 

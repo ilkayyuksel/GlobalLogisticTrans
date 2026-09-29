@@ -29,6 +29,7 @@ export const MAIN_NAVIGATION: readonly NavigationItem[] = [
   { href: "/maintenance", labelKey: "navigation.maintenance" },
   { href: "/calendar", labelKey: "navigation.calendar" },
   { href: "/notes", labelKey: "navigation.notes" },
+  { href: "/invoice-audit", labelKey: "navigation.invoiceAudit" },
 ];
 
 /**

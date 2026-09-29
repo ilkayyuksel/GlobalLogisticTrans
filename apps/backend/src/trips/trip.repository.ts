@@ -114,6 +114,47 @@ export interface BookingNumberOnDateQuery extends BookingNumberQuery {
 }
 
 /**
+ * Every Trip a weekly invoice could be talking about, in ONE query.
+ *
+ * ── WHY IT TAKES LISTS ────────────────────────────────────────────────────
+ * An invoice is a hundred lines over one week. Asking per line would be a
+ * hundred round trips to answer one question, so the days and the bookings the
+ * document names are sent together and the lines are matched against the result
+ * in memory. The set that comes back is small by construction: the Trips of one
+ * week whose booking appears on the invoice.
+ *
+ * The container is deliberately NOT part of the query. It is compared in its
+ * normalised form — `PVDU 1123118` and `PVDU1123118` are one container — and
+ * SQL equality cannot say that.
+ */
+export interface TripsForInvoiceQuery {
+  /** The calendar days the invoice names, as midnight UTC. */
+  readonly planningDates: readonly Date[];
+  readonly bookingNumbers: readonly string[];
+  /** Only these statuses are candidates. DELETED is never one. */
+  readonly statuses: readonly TripStatus[];
+}
+
+/**
+ * The finished transports of one week that nobody has paid for yet.
+ *
+ * ── WHY THE THREE CONDITIONS TRAVEL TOGETHER ──────────────────────────────
+ * A weekly invoice is checked against the transports that week produced, and
+ * the ones missing from it are exactly those that are DONE (CLOSED), not yet
+ * settled (unpaid) and fall inside the days the document covers. An OPEN
+ * transport is not finished, a paid one has been invoiced already, and a Trip
+ * outside the period belongs to another week's document — so none of the three
+ * may be dropped, and the query states all three rather than filtering
+ * afterwards.
+ */
+export interface ClosedUnpaidTripsQuery {
+  /** The first day the invoice covers, as midnight UTC. Inclusive. */
+  readonly from: Date;
+  /** The last day it covers. Inclusive. */
+  readonly to: Date;
+}
+
+/**
  * A booking number reduced to its digits — the Cost Confirmation fallback.
  *
  * Deliberately NOT an extension of `BookingNumberQuery`: it carries digits
@@ -342,6 +383,35 @@ export class TripRepository {
   }
 
   /**
+   * Marks many Trips paid in ONE statement.
+   *
+   * ── WHY NOT A LOOP OF `setPaid` ───────────────────────────────────────────
+   * A weekly invoice settles a hundred transports at once. A hundred updates
+   * would be a hundred round trips, and — worse — a hundred separate moments at
+   * which the work could stop half done. One `updateMany` is a single atomic
+   * statement: either every Trip on that invoice is paid or none of them is.
+   *
+   * It writes ONE column. No status, no pricing, no date and no snapshot is
+   * touched, exactly as the single-Trip payment rule has it: what a transport
+   * is WORTH and whether it has been PAID are different questions.
+   *
+   * Idempotent by nature: a Trip already paid is set paid again, which changes
+   * nothing and fails nothing.
+   */
+  async setPaidMany(tripIds: readonly string[]): Promise<number> {
+    if (tripIds.length === 0) {
+      return 0;
+    }
+
+    const { count } = await this.prisma.trip.updateMany({
+      where: { id: { in: [...tripIds] } },
+      data: { isPaid: true },
+    });
+
+    return count;
+  }
+
+  /**
    * Appends events to the audit trail.
    *
    * Append-only: there is no update and no delete here, and there never will
@@ -540,6 +610,61 @@ export class TripRepository {
     return trips.filter(
       (trip) => bookingNumberDigits(trip.bookingNumber) === query.digits,
     );
+  }
+
+  /**
+   * The Trips a weekly invoice could be talking about.
+   *
+   * One query for the whole document — see `TripsForInvoiceQuery`. Both lists
+   * are narrowing filters rather than pairs: a Trip is returned when its day is
+   * one of the days AND its booking is one of the bookings, which is a superset
+   * of the lines and exactly what matching in memory needs.
+   *
+   * Empty lists return nothing rather than everything: an invoice that names no
+   * day and no booking has no candidates, and `IN ()` must not become "all".
+   */
+  findManyForInvoice(query: TripsForInvoiceQuery): Promise<Trip[]> {
+    if (query.planningDates.length === 0 || query.bookingNumbers.length === 0) {
+      return Promise.resolve([]);
+    }
+
+    return this.prisma.trip.findMany({
+      where: {
+        planningDate: { in: [...query.planningDates] },
+        bookingNumber: { in: [...query.bookingNumbers] },
+        status: { in: [...query.statuses] },
+      },
+      // Stable, so a caller that reports several candidates reports them in the
+      // same order every time.
+      orderBy: [{ planningDate: "asc" }, { createdAt: "asc" }, { id: "asc" }],
+    });
+  }
+
+  /**
+   * Every finished, unpaid Trip planned in a period.
+   *
+   * The candidates for "missing from this invoice": what they are compared
+   * against is the document's own lines, which is the caller's business — see
+   * `MissingTripsService`. The date is the CURRENT planning date, the one the
+   * invoice prints, never the original one a document happened to state.
+   *
+   * Ordered as an invoice reads: by day, then by the time of day, then by
+   * booking number. A database's own order would put the same week in a
+   * different sequence on every run.
+   */
+  findClosedUnpaidBetween(query: ClosedUnpaidTripsQuery): Promise<Trip[]> {
+    return this.prisma.trip.findMany({
+      where: {
+        status: TripStatus.CLOSED,
+        isPaid: false,
+        planningDate: { gte: query.from, lte: query.to },
+      },
+      orderBy: [
+        { planningDate: "asc" },
+        { startTime: "asc" },
+        { bookingNumber: "asc" },
+      ],
+    });
   }
 
   /** The Trip currently holding a booking number, if any. */

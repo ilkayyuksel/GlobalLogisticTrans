@@ -63,6 +63,13 @@ const DEFAULT_PDF_STORAGE_DIR = "../../storage/pdf";
 const DEFAULT_PDF_UPLOAD_MAX_SIZE_MB = 10;
 
 /**
+ * A weekly invoice is a spreadsheet of about a hundred lines; the reference
+ * documents are 25 KB. Five megabytes is three orders of magnitude of headroom
+ * and still bounds what one request can make the backend hold in memory.
+ */
+const DEFAULT_INVOICE_UPLOAD_MAX_SIZE_MB = 5;
+
+/**
  * `environment.md` names INBOX as the first folder example, and it is the only
  * folder every IMAP server is required to provide.
  */
@@ -312,6 +319,19 @@ export class EnvironmentVariables {
   @Min(1)
   @Max(100)
   PDF_UPLOAD_MAX_SIZE_MB: number = DEFAULT_PDF_UPLOAD_MAX_SIZE_MB;
+
+  /**
+   * The largest weekly-invoice workbook the check may carry, in megabytes.
+   *
+   * Its own setting rather than the PDF one: the two uploads carry different
+   * documents with different sizes, and sharing a limit would mean raising it
+   * for transport orders to accept a larger spreadsheet.
+   */
+  @Transform(parsePositiveInteger(DEFAULT_INVOICE_UPLOAD_MAX_SIZE_MB))
+  @IsInt()
+  @Min(1)
+  @Max(100)
+  INVOICE_UPLOAD_MAX_SIZE_MB: number = DEFAULT_INVOICE_UPLOAD_MAX_SIZE_MB;
 
   /**
    * Whether the mailbox is scanned at all.
