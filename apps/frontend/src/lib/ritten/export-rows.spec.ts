@@ -993,3 +993,186 @@ describe("COMBI in Info", () => {
     expect(row.info).toBe("Wachttijd 07:00-10:00");
   });
 });
+
+/**
+ * ── EVERY COST COMPONENT, SEPARATELY ────────────────────────────────────────
+ * COMBI EN KOST is an ENUMERATION and never a total: `50.00 + 137.50` says a
+ * Combination leg that also waited, and `187.50` says nothing anybody can act
+ * on. These walk the combinations of Combination, waiting time and a chosen
+ * Custom Property and pin both the cell and the word beside it.
+ *
+ * The amounts are the Engine's own stored lines throughout. Nothing here — and
+ * nothing in the export — decides that a leg is worth €50 or that three hours
+ * cost €137.50.
+ */
+describe("Wachttijd and Combi as separate components", () => {
+  const MANUAL_ID = "8b7dec0d-9af2-491c-8ff3-61b082381b49";
+  const CATALOG = toManualPropertyIds([
+    { id: MANUAL_ID, pricingComponentId: null, isSystemManaged: false },
+  ] as never);
+
+  const WAITING_WINDOW = {
+    waitingTimeStart: "07:00:00",
+    waitingTimeEnd: "10:00:00",
+    waitingTimeMinutes: 180,
+  };
+
+  const PROPERTY = {
+    customProperties: [{ id: MANUAL_ID, name: "Aan/Afkoppelen", isActive: true }],
+  } as Partial<Trip>;
+
+  function rowOf(
+    trip: ReturnType<typeof buildTrip>,
+    ...lines: ReturnType<typeof line>[]
+  ) {
+    return toBasicRow(
+      trip,
+      lines.length === 0 ? null : snapshotOf(...lines),
+      CATALOG,
+      "Wachttijd",
+    );
+  }
+
+  /** CASE A — a waiting time that was charged. */
+  it("names the window in Info and its price as its own component", () => {
+    const row = rowOf(
+      buildTrip(WAITING_WINDOW),
+      line("BASE_PRICE", "300.00"),
+      line("WAITING_TIME", "137.50"),
+    );
+
+    expect(row.info).toBe("Wachttijd 07:00-10:00");
+    expect(row.costs).toBe("137.50");
+  });
+
+  /**
+   * CASE A, continued — the window belongs to the WORK, not to the charge.
+   *
+   * The regression this whole change is about: a recorded waiting time the
+   * Engine did not bill used to leave Info empty, while the pricing export's
+   * Remarks column said it. The cost column stays silent, because there is no
+   * stored line to show.
+   */
+  it("names the window even when the Engine charged nothing for it", () => {
+    const row = rowOf(buildTrip(WAITING_WINDOW), line("BASE_PRICE", "300.00"));
+
+    expect(row.info).toBe("Wachttijd 07:00-10:00");
+    expect(row.costs).toBe("");
+  });
+
+  it("names the window on a Trip that has not been priced at all", () => {
+    expect(rowOf(buildTrip(WAITING_WINDOW)).info).toBe("Wachttijd 07:00-10:00");
+  });
+
+  /** CASE B — no waiting time: nothing is said and nothing is charged. */
+  it("says nothing when no waiting time was recorded", () => {
+    const row = rowOf(
+      buildTrip({ waitingTimeMinutes: null }),
+      line("BASE_PRICE", "300.00"),
+    );
+
+    expect(row.info).toBe("");
+    expect(row.costs).toBe("");
+  });
+
+  /**
+   * Zero is not a waiting time. `formatWaitingTime` spells it `0 min` so a
+   * table cell cannot look empty, but a Trip that waited no minutes did not
+   * wait — and the live data carries 0 on Trips nobody waited on.
+   */
+  it("says nothing for a waiting time of zero minutes", () => {
+    expect(rowOf(buildTrip({ waitingTimeMinutes: 0 })).info).toBe("");
+  });
+
+  /** CASE C — a Combination leg. */
+  it("says COMBI and prints the surcharge", () => {
+    const row = rowOf(
+      buildTrip({ tripGroupId: "group-1" }),
+      line("BASE_PRICE", "300.00"),
+      line("COMBINATION", "50.00"),
+    );
+
+    expect(row.info).toBe("COMBI");
+    expect(row.costs).toBe("50.00");
+  });
+
+  /** CASE D — both, side by side and never added up. */
+  it("keeps the surcharge and the waiting time apart", () => {
+    const row = rowOf(
+      buildTrip({ tripGroupId: "group-1", ...WAITING_WINDOW }),
+      line("COMBINATION", "50.00"),
+      line("WAITING_TIME", "137.50"),
+    );
+
+    expect(row.costs).toBe("50.00 + 137.50");
+    expect(row.costs).not.toBe("187.50");
+    expect(row.info).toBe("COMBI, Wachttijd 07:00-10:00");
+  });
+
+  /** CASE E — three components, each still readable. */
+  it("keeps a third component apart too", () => {
+    const row = rowOf(
+      buildTrip({ tripGroupId: "group-1", ...WAITING_WINDOW, ...PROPERTY }),
+      line("COMBINATION", "50.00"),
+      line("CUSTOM_PROPERTY", "25.00", MANUAL_ID),
+      line("WAITING_TIME", "137.50"),
+    );
+
+    expect(row.costs).toBe("50.00 + 25.00 + 137.50");
+    expect(row.costs).not.toBe("212.50");
+    expect(row.info).toBe("COMBI, Aan/Afkoppelen, Wachttijd 07:00-10:00");
+  });
+
+  /** CASE F — each leg answers for itself, from its own stored line. */
+  it("gives both legs of a Combination their own surcharge", () => {
+    const legs = ["leg-1", "leg-2"].map((id) =>
+      rowOf(
+        buildTrip({ id, tripGroupId: "group-1" }),
+        line("BASE_PRICE", "300.00"),
+        line("COMBINATION", "50.00"),
+      ),
+    );
+
+    for (const leg of legs) {
+      expect(leg.info).toBe("COMBI");
+      expect(leg.costs).toBe("50.00");
+    }
+  });
+
+  /** CASE G — no Combination: no word, no surcharge. */
+  it("says nothing about a Combination for a standalone Trip", () => {
+    const row = rowOf(
+      buildTrip({ tripGroupId: null }),
+      line("BASE_PRICE", "300.00"),
+    );
+
+    expect(row.info).not.toContain("COMBI");
+    expect(row.costs).toBe("");
+  });
+
+  /**
+   * A grouped Trip the Engine charged no surcharge — a manual grouping, which
+   * earns no automatic €50. Membership alone never produces the word or the
+   * amount: the stored line does.
+   */
+  it("says nothing about a Combination when the snapshot holds no surcharge", () => {
+    const row = rowOf(
+      buildTrip({ tripGroupId: "manual-group", ...WAITING_WINDOW }),
+      line("WAITING_TIME", "137.50"),
+    );
+
+    expect(row.info).toBe("Wachttijd 07:00-10:00");
+    expect(row.costs).toBe("137.50");
+  });
+
+  /** A surcharge of nothing is still a stored fact, and prints as one. */
+  it("prints a zero surcharge rather than hiding it", () => {
+    const row = rowOf(
+      buildTrip({ tripGroupId: "group-1" }),
+      line("COMBINATION", "0.00"),
+    );
+
+    expect(row.info).toBe("COMBI");
+    expect(row.costs).toBe("0.00");
+  });
+});

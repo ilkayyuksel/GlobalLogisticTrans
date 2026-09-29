@@ -616,3 +616,142 @@ describe("Backload per Combination leg", () => {
     expect(Number(first) + Number(second)).toBe(100);
   });
 });
+
+/**
+ * ── COMBI EN KOST, IN THE FILE ──────────────────────────────────────────────
+ * The unit tests pin the STRINGS; this opens the workbook an operator would
+ * download and reads the two cells side by side. What is asserted is that the
+ * costs cell enumerates its components and never states their total: a cell
+ * reading `187.50` is exactly the failure this guards against, and only the
+ * file can prove a spreadsheet did not quietly evaluate the text.
+ */
+describe("the COMBI EN KOST column in a real BASIS workbook", () => {
+  const COSTS_COLUMN = 8;
+
+  const WAITING_WINDOW = {
+    waitingTimeStart: "07:00:00",
+    waitingTimeEnd: "10:00:00",
+    waitingTimeMinutes: 180,
+  };
+
+  /** The Costs and Info cells of the first data row, read back from disk. */
+  async function cellsOf(
+    trip: Trip,
+    snapshot: PricingSnapshot | null,
+  ): Promise<{ costs: string; info: string }> {
+    const row = toBasicRow(trip, snapshot, MANUAL_IDS, "Wachttijd", TAR_ID);
+    const buffer = await buildBasicWorkbook([row], "nl", {
+      start: "2026-09-25",
+      end: "2026-09-25",
+    });
+
+    const directory = await mkdtemp(join(tmpdir(), "trano-kosten-"));
+    const file = join(directory, "basis.xlsx");
+
+    await writeFile(file, Buffer.from(buffer));
+
+    const reopened = new ExcelJS.Workbook();
+    await reopened.xlsx.load(
+      (await readFile(file)) as unknown as Parameters<
+        typeof reopened.xlsx.load
+      >[0],
+    );
+
+    const sheet = reopened.worksheets[0];
+    const data = reopened.worksheets[0].getRow(FIRST_DATA_ROW);
+
+    return {
+      costs: String(data.getCell(COSTS_COLUMN).value ?? ""),
+      info: String(sheet.getRow(FIRST_DATA_ROW).getCell(INFO_COLUMN).value ?? ""),
+    };
+  }
+
+  it("writes a Combination leg as COMBI and 50.00", async () => {
+    const cells = await cellsOf(
+      buildTrip({ tripGroupId: "group-1" } as Partial<Trip>),
+      snapshotOf(property("COMBINATION", "50.00", null)),
+    );
+
+    expect(cells.info).toBe("COMBI");
+    expect(cells.costs).toBe("50.00");
+  });
+
+  it("writes a waiting window and its price", async () => {
+    const cells = await cellsOf(
+      buildTrip(WAITING_WINDOW as Partial<Trip>),
+      snapshotOf(property("WAITING_TIME", "137.50", null)),
+    );
+
+    expect(cells.info).toBe("Wachttijd 07:00-10:00");
+    expect(cells.costs).toBe("137.50");
+  });
+
+  it("writes a waiting window the Engine did not charge for", async () => {
+    const cells = await cellsOf(
+      buildTrip(WAITING_WINDOW as Partial<Trip>),
+      snapshotOf(property("BASE_PRICE", "300.00", null)),
+    );
+
+    expect(cells.info).toBe("Wachttijd 07:00-10:00");
+    expect(cells.costs).toBe("");
+  });
+
+  it("enumerates a Combination and a waiting time, and never totals them", async () => {
+    const cells = await cellsOf(
+      buildTrip({ tripGroupId: "group-1", ...WAITING_WINDOW } as Partial<Trip>),
+      snapshotOf(
+        property("COMBINATION", "50.00", null),
+        property("WAITING_TIME", "137.50", null),
+      ),
+    );
+
+    expect(cells.costs).toBe("50.00 + 137.50");
+    expect(cells.costs).not.toBe("187.50");
+    expect(cells.info).toBe("COMBI, Wachttijd 07:00-10:00");
+  });
+
+  it("keeps a third component apart in the file too", async () => {
+    const cells = await cellsOf(
+      buildTrip({
+        tripGroupId: "group-1",
+        ...WAITING_WINDOW,
+        customProperties: [
+          { id: MANUAL_ID, name: "Aan/Afkoppelen", isActive: true },
+        ],
+      } as Partial<Trip>),
+      snapshotOf(
+        property("COMBINATION", "50.00", null),
+        property("CUSTOM_PROPERTY", "25.00", MANUAL_ID),
+        property("WAITING_TIME", "137.50", null),
+      ),
+    );
+
+    expect(cells.costs).toBe("50.00 + 25.00 + 137.50");
+    expect(cells.costs).not.toBe("212.50");
+    expect(cells.info).toBe("COMBI, Aan/Afkoppelen, Wachttijd 07:00-10:00");
+  });
+
+  /** A text cell, never a formula a spreadsheet could evaluate into a total. */
+  it("writes the enumeration as text", async () => {
+    const cells = await cellsOf(
+      buildTrip({ tripGroupId: "group-1", ...WAITING_WINDOW } as Partial<Trip>),
+      snapshotOf(
+        property("COMBINATION", "50.00", null),
+        property("WAITING_TIME", "137.50", null),
+      ),
+    );
+
+    expect(cells.costs).not.toMatch(/^=/);
+    expect(Number(cells.costs)).toBeNaN();
+  });
+
+  it("says nothing for a standalone Trip with no components", async () => {
+    const cells = await cellsOf(
+      buildTrip({ tripGroupId: null } as Partial<Trip>),
+      snapshotOf(property("BASE_PRICE", "300.00", null)),
+    );
+
+    expect(cells.info).toBe("");
+    expect(cells.costs).toBe("");
+  });
+});

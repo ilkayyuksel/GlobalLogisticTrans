@@ -466,7 +466,16 @@ export function toInfoLabel(
     names.push(TAR_MARK);
   }
 
-  if (lines.waitingTime !== null && waitingLabel) {
+  /*
+   * ── THE WINDOW IS A FACT ABOUT THE WORK, NOT ABOUT THE CHARGE ───────────
+   * Read from the TRIP, never from the priced line. A driver who stood at a
+   * terminal for three hours stood there whether or not the Engine billed for
+   * it, and this used to require a WAITING_TIME line — so a waiting time that
+   * was not charged, or one on a Trip not yet priced, left the cell empty while
+   * the pricing export's own Remarks column said it. The money column beside
+   * this one still answers what it COST, and that stays the stored line alone.
+   */
+  if (waitingLabel && recordsWaitingTime(trip)) {
     names.push(waitingLabel);
   }
 
@@ -483,6 +492,21 @@ export function toInfoLabel(
   }
 
   return names.join(", ");
+}
+
+/**
+ * Whether the Trip records a waiting time at all.
+ *
+ * ── WHY ZERO IS NOT A WAITING TIME ──────────────────────────────────────────
+ * `waitingTimeMinutes` is the single stored quantity — the window an operator
+ * enters is converted into it, and pricing bills from it — so it is the honest
+ * thing to ask. Zero is left out deliberately: `formatWaitingTime` spells it
+ * `0 min` so a table cell cannot be mistaken for an empty one, but a Trip that
+ * waited no minutes did not wait, and printing `Wachttijd 0 min` beside the
+ * route would put a note on the sheet about something that did not happen.
+ */
+function recordsWaitingTime(trip: Trip): boolean {
+  return (trip.waitingTimeMinutes ?? 0) > 0;
 }
 
 /** The word the sheet carries for a charged TAR. Never the number. */
