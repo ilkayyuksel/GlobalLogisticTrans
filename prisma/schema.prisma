@@ -189,6 +189,12 @@ model ImportedEmail {
   receivedAt  DateTime  @map("received_at") @db.Timestamptz(6)
   processedAt DateTime? @map("processed_at") @db.Timestamptz(6)
 
+  /// When the original email of a FAILED import was forwarded to a person.
+  /// Null until then. Written only after the mail server accepted the forward,
+  /// so an SMTP outage leaves it null and the next retry forwards again; set
+  /// once, so a failure retried all day produces exactly one forward.
+  failureForwardedAt DateTime? @map("failure_forwarded_at") @db.Timestamptz(6)
+
   processingStatus EmailProcessingStatus @default(RECEIVED) @map("processing_status")
   importType       ImportType            @map("import_type")
 

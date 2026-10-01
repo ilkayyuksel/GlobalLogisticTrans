@@ -195,6 +195,17 @@ services:
       MAIL_SUBJECT_NEW: ${MAIL_SUBJECT_NEW:-NEW:}
       IMAP_POLL_CRON: ${IMAP_POLL_CRON:-0 */5 * * * *}
 
+      # The original email of a failed mailbox import, forwarded once to a
+      # person. Off unless switched on; the SMTP settings are then required.
+      ENABLE_IMPORT_FAILURE_FORWARD: ${ENABLE_IMPORT_FAILURE_FORWARD:-false}
+      IMPORT_FAILURE_FORWARD_TO: ${IMPORT_FAILURE_FORWARD_TO:-info@iytechsolutions.be}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_SECURE: ${SMTP_SECURE:-false}
+      SMTP_USERNAME: ${SMTP_USERNAME:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM: ${SMTP_FROM:-}
+
       WHATSAPP_ENABLED: ${WHATSAPP_ENABLED:-false}
       # The compose service name on the internal network. The delivery service
       # publishes no port and is unreachable from anywhere else.

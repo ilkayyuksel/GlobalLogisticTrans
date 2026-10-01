@@ -210,6 +210,36 @@ export class ImapMailboxSession {
   }
 
   /**
+   * The whole message exactly as the server holds it: every header, the body
+   * and every attachment, in its original MIME encoding.
+   *
+   * Fetched only when an import has FAILED and somebody must be shown the
+   * email itself. Forwarding these bytes unchanged is what preserves the
+   * original — nothing is reparsed, re-encoded or summarised on the way.
+   */
+  async downloadSource(message: MailboxMessage): Promise<Buffer> {
+    try {
+      const fetched = await this.client.fetchOne(
+        String(message.uid),
+        { source: true },
+        { uid: true },
+      );
+
+      if (!fetched || !fetched.source) {
+        throw new Error("the server returned no message source");
+      }
+
+      return fetched.source;
+    } catch (error: unknown) {
+      throw new AttachmentDownloadException(
+        message.messageId,
+        "message source",
+        describe(error),
+      );
+    }
+  }
+
+  /**
    * Marks a message read, once its import succeeded.
    *
    * No longer what stops a second import — `imported_email` is — but it is what

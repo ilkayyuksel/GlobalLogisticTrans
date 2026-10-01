@@ -24,6 +24,7 @@ import {
   MailboxMessage,
 } from "./imap-mailbox.client";
 import { ImapScanService } from "./imap-scan.service";
+import { ImportFailureForwarder } from "./import-failure-forwarder.service";
 import { ImportedEmailService } from "./imported-email.service";
 
 /**
@@ -92,9 +93,17 @@ describe("ImapScanService", () => {
     warn: jest.Mock;
     error: jest.Mock;
   };
+  /**
+   * The forward, replaced: this file is about the SCAN — which outcome each
+   * email gets and when the forward is asked for. What the forward does is
+   * `import-failure-forwarder.service.spec.ts`'s business.
+   */
+  let forwarder: { forwardOnce: jest.Mock };
   let service: ImapScanService;
 
   beforeEach(() => {
+    forwarder = { forwardOnce: jest.fn().mockResolvedValue(undefined) };
+
     session = {
       findCandidates: jest.fn().mockResolvedValue([mailboxMessage()]),
       downloadAttachment: jest.fn().mockResolvedValue({
@@ -163,6 +172,7 @@ describe("ImapScanService", () => {
       importedEmailService as unknown as ImportedEmailService,
       pdfTripImporter as unknown as PdfTripImporter,
       configService as unknown as ConfigService,
+      forwarder as unknown as ImportFailureForwarder,
       logger as unknown as AppLoggerService,
     );
   });
@@ -746,6 +756,7 @@ describe("ImapScanService", () => {
         importedEmailService as unknown as ImportedEmailService,
         pdfTripImporter as unknown as PdfTripImporter,
         configService as unknown as ConfigService,
+        forwarder as unknown as ImportFailureForwarder,
         logger as unknown as AppLoggerService,
       );
     });

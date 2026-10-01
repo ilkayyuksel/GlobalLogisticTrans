@@ -193,6 +193,7 @@ Represents one email received by the IMAP Service. Exists only for the email imp
 | `message_id` | `TEXT` | NO | — | RFC Message-ID, used for duplicate detection |
 | `received_at` | `TIMESTAMPTZ` | NO | — | |
 | `processed_at` | `TIMESTAMPTZ` | YES | `NULL` | Set when processing completes |
+| `failure_forwarded_at` | `TIMESTAMPTZ` | YES | `NULL` | When the original email of a FAILED import was forwarded to a person. Set once, after the mail server accepted it, so a failure retried all day is forwarded exactly once; never cleared. See `importRules.md` → Forwarding a failed email import |
 | `processing_status` | `email_processing_status` | NO | `'RECEIVED'` | |
 | `import_type` | `import_type` | NO | — | Derived from the subject prefix |
 | `body` | `TEXT` | YES | `NULL` | Optional, debugging only |
@@ -218,7 +219,7 @@ None. The relationship to `pdf_document` is owned by `pdf_document`.
 
 ### Application-enforced rules
 
-- Records are immutable after successful processing, except `processing_status` and `processed_at`.
+- Records are immutable after successful processing, except `processing_status`, `processed_at` and `failure_forwarded_at`.
 - Records are never deleted.
 - Only emails from configured trusted senders with exactly one PDF attachment are stored.
 

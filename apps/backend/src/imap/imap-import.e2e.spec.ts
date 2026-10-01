@@ -26,6 +26,7 @@ import {
   MailboxMessage,
 } from "./imap-mailbox.client";
 import { ImapScanService } from "./imap-scan.service";
+import { ImportFailureForwarder } from "./import-failure-forwarder.service";
 import { ImportedEmailService } from "./imported-email.service";
 import { TripPlanningDataService } from "../trips/trip-planning-data.service";
 import { stubPricingRecalculation } from "../pricing-engine/pricing-recalculation.double";
@@ -435,6 +436,8 @@ describe("IMAP import, end to end with a real transport order", () => {
       importedEmailService,
       importer,
       configService,
+      // Replaced: this suite is the import path; forwarding has its own suite.
+      { forwardOnce: async () => undefined } as unknown as ImportFailureForwarder,
       logger,
     );
   }

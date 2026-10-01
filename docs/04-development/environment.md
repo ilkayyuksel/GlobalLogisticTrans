@@ -195,6 +195,56 @@ Sender filtering may be configured.
 
 ---
 
+# Import Failure Forward
+
+The original email of a FAILED email import is forwarded once to a person.
+Manual uploads never send mail. See `importRules.md` → Forwarding a failed
+email import.
+
+ENABLE_IMPORT_FAILURE_FORWARD
+
+Default
+
+false
+
+When `true`, every setting below is required and validated at startup.
+
+IMPORT_FAILURE_FORWARD_TO
+
+Who is told. `info@iytechsolutions.be`.
+
+SMTP_HOST
+
+SMTP_PORT
+
+Default
+
+587
+
+SMTP_SECURE
+
+Default
+
+false — the connection is upgraded with STARTTLS, which is REQUIRED: a server
+that does not offer it is refused rather than spoken to in plain text. Set
+`true` for implicit TLS on port 465.
+
+SMTP_USERNAME
+
+SMTP_PASSWORD
+
+Never logged, never returned by an endpoint.
+
+SMTP_FROM
+
+The system's own address, which the forward is sent from. Never the original
+sender's.
+
+Before this feature the application only received mail; there was no SMTP
+configuration. Nothing is sent until these settings are supplied.
+
+---
+
 # Parser
 
 Used by Parser Service.

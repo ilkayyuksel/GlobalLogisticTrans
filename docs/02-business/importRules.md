@@ -320,6 +320,38 @@ Every failure should be logged.
 
 No partial data should remain.
 
+## Forwarding a failed email import
+
+When an order that arrived BY EMAIL ends FAILED, the original email is
+forwarded once to `IMPORT_FAILURE_FORWARD_TO` (`info@iytechsolutions.be`), so a
+person sees a broken order the same day rather than on the imports page later.
+
+- **Email imports only.** A manual upload never sends mail: the forward is part
+  of the mailbox scan, and the upload path does not pass through it. The person
+  who uploaded the file already sees the error on screen.
+- **What is forwarded:** the original message exactly as the mail server holds
+  it — headers, body and every attachment — attached as `message/rfc822`
+  (`origineel-bericht.eml`), below a short note naming the attachment, the error
+  and the time. Sent from `SMTP_FROM`, the system's own address; the original
+  sender is named in the note and never placed in From.
+- **Subject:** `[TRANO IMPORT ERROR] <original subject>`. Because the email
+  scan only carries out a subject that STARTS with `NEW:`, `UPDATE:`, `CANCEL:`
+  or `COST CONFIRMATION`, a forward can never be imported, even if it reached
+  the scanned mailbox from a trusted sender.
+- **Once per email.** A failed email is retried on every scan for the rest of
+  the day. `imported_email.failure_forwarded_at` records the forward, so those
+  retries send nothing more. A retry that succeeds imports normally.
+- **Which failures.** Every failure of an email that was accepted (trusted
+  sender, recognised subject): an unreadable PDF, an order or cost
+  confirmation that cannot be imported, a mail with no PDF or with several.
+  NOT a failed attachment download (a network problem the next scan simply
+  retries), not a duplicate booking (recorded as already imported), and not an
+  email that was never accepted.
+- **A broken mail server changes nothing about the import.** The email is
+  recorded FAILED first; a forward that cannot be sent is logged and tried
+  again on the next scan.
+- **Off by default** (`ENABLE_IMPORT_FAILURE_FORWARD`). See `environment.md`.
+
 ---
 
 # Import History

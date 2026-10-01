@@ -90,4 +90,11 @@ export class ImportedEmailRepository {
       data: { processingStatus: status, processedAt },
     });
   }
+
+  markFailureForwarded(id: string, forwardedAt: Date): Promise<ImportedEmail> {
+    return this.prisma.importedEmail.update({
+      where: { id },
+      data: { failureForwardedAt: forwardedAt },
+    });
+  }
 }

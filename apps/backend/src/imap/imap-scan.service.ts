@@ -20,6 +20,7 @@ import {
   ImapMailboxSession,
   MailboxMessage,
 } from "./imap-mailbox.client";
+import { ImportFailureForwarder } from "./import-failure-forwarder.service";
 import { ImportedEmailService } from "./imported-email.service";
 import { MessageAction, selectMessage } from "./message-selection";
 import { RescanDecision, decideRescan } from "./rescan-decision";
@@ -62,6 +63,7 @@ export class ImapScanService {
     private readonly importedEmailService: ImportedEmailService,
     private readonly pdfTripImporter: PdfTripImporter,
     private readonly configService: ConfigService,
+    private readonly forwarder: ImportFailureForwarder,
     private readonly logger: AppLoggerService,
   ) {
     this.logger.setContext(ImapScanService.name);
@@ -296,7 +298,7 @@ export class ImapScanService {
         ),
       });
     } catch (error: unknown) {
-      await this.recordFailure(message, importedEmail.id, error, counters);
+      await this.recordFailure(session, message, importedEmail, error, counters);
     }
   }
 
@@ -373,13 +375,14 @@ export class ImapScanService {
    * a permanent error in the log for a system working correctly.
    */
   private async recordFailure(
+    session: ImapMailboxSession,
     message: MailboxMessage,
-    importedEmailId: string,
+    importedEmail: ImportedEmail,
     error: unknown,
     counters: ImapScanResultDto,
   ): Promise<void> {
     if (error instanceof DuplicateBookingNumberException) {
-      await this.importedEmailService.markAlreadyImported(importedEmailId);
+      await this.importedEmailService.markAlreadyImported(importedEmail.id);
       counters.alreadyProcessed += 1;
 
       this.logger.log("Email skipped: its Trips already exist", {
@@ -389,7 +392,7 @@ export class ImapScanService {
       return;
     }
 
-    await this.importedEmailService.markFailed(importedEmailId);
+    await this.importedEmailService.markFailed(importedEmail.id);
     counters.failed += 1;
 
     // Left unread deliberately: the next scan retries it.
@@ -397,6 +400,16 @@ export class ImapScanService {
       messageId: message.messageId,
       errorCode: errorCodeOf(error),
       reason: error instanceof Error ? error.message : String(error),
+    });
+
+    /*
+     * Only now, with the failure already recorded: a mail server that is down
+     * cannot hide it, and the forward never decides what the import's status
+     * is. Once per email, however many scans retry it — see the forwarder.
+     */
+    await this.forwarder.forwardOnce(session, message, importedEmail, {
+      error,
+      errorCode: errorCodeOf(error),
     });
   }
 

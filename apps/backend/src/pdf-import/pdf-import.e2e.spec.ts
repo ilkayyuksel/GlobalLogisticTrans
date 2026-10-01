@@ -1,6 +1,6 @@
 import { Global, INestApplication, Module, VersioningType } from "@nestjs/common";
 import { ConfigModule } from "@nestjs/config";
-import { Test } from "@nestjs/testing";
+import { Test, TestingModule } from "@nestjs/testing";
 import { ImportSource, TripStatus } from "@prisma/client";
 import { existsSync, readFileSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
@@ -17,6 +17,8 @@ import { PdfDocumentRepository } from "../pdf-documents/pdf-document.repository"
 import { PrismaService } from "../prisma/prisma.service";
 import { TripPlanningDataService } from "../trips/trip-planning-data.service";
 import { TripRepository } from "../trips/trip.repository";
+import { ImportFailureForwarder } from "../imap/import-failure-forwarder.service";
+import { SmtpMailClient } from "../mail/smtp-mail.client";
 import { PdfImportModule } from "./pdf-import.module";
 
 /**
@@ -65,6 +67,9 @@ describe("Manual PDF upload, end to end over HTTP", () => {
   let createdTrips: CreatedTrip[];
   let createdPdfDocuments: Record<string, unknown>[];
   let publishedEvents: unknown[];
+  /** Every message the upload path asked a mail server to send. */
+  let mailSends: unknown[];
+  let uploadModule: TestingModule;
 
   beforeEach(async () => {
     storageDirectory = await mkdtemp(join(tmpdir(), "tms-upload-e2e-"));
@@ -215,10 +220,27 @@ describe("Manual PDF upload, end to end over HTTP", () => {
      * EventsModule are: the modules under test inject these without importing
      * anything.
      */
+    mailSends = [];
+
     @Global()
     @Module({
       providers: [
         { provide: AppLoggerService, useValue: logger },
+        /*
+         * A mail server that records instead of sending, and is GLOBAL: any
+         * code on the upload path that reached for one would be handed this,
+         * and the tests below would see it. None does.
+         */
+        {
+          provide: SmtpMailClient,
+          useValue: {
+            send: jest.fn((message: unknown) => {
+              mailSends.push(message);
+
+              return Promise.resolve();
+            }),
+          },
+        },
         // Never queried: every repository that would use it is replaced below.
         { provide: PrismaService, useValue: {} },
         {
@@ -231,11 +253,11 @@ describe("Manual PDF upload, end to end over HTTP", () => {
           },
         },
       ],
-      exports: [AppLoggerService, PrismaService, DomainEventBus],
+      exports: [AppLoggerService, PrismaService, DomainEventBus, SmtpMailClient],
     })
     class TestInfrastructureModule {}
 
-    const moduleRef = await Test.createTestingModule({
+    const moduleRef = (uploadModule = await Test.createTestingModule({
       imports: [
         ConfigModule.forRoot({
           isGlobal: true,
@@ -271,7 +293,7 @@ describe("Manual PDF upload, end to end over HTTP", () => {
             ),
           ),
       })
-      .compile();
+      .compile());
 
     application = moduleRef.createNestApplication();
 
@@ -569,6 +591,48 @@ describe("Manual PDF upload, end to end over HTTP", () => {
       expect(body).not.toContain("parserMetadata");
       expect(body).not.toContain("storagePath");
       expect(body).not.toContain("fileHash");
+    });
+  });
+
+  /**
+   * ── AN UPLOAD NEVER SENDS MAIL ────────────────────────────────────────────
+   * A failed MAILBOX import forwards the original email to a person. A failed
+   * UPLOAD must not: the person who uploaded the file is looking at the error
+   * on screen, and there is no email to forward.
+   *
+   * That is guaranteed by construction rather than by a flag — the forwarder
+   * lives in the mailbox module and is not part of the upload path at all —
+   * and these tests pin both halves: the behaviour, and the construction.
+   */
+  describe("an upload and outgoing mail", () => {
+    /** TEST 3 — UI upload + parser failure: no forward. */
+    it("sends nothing when an uploaded PDF cannot be read", async () => {
+      const response = await upload()
+        .attach("files", Buffer.from("%PDF-1.4 truncated"), "transportorder1385766.pdf")
+        .expect(200);
+
+      expect(response.body.data.results[0]).toMatchObject({
+        ok: false,
+        code: "IMPORT_UNREADABLE_PDF",
+      });
+      expect(mailSends).toEqual([]);
+    });
+
+    /** TEST 4 — UI upload + success: no forward. */
+    it("sends nothing when an uploaded PDF imports", async () => {
+      const response = await upload()
+        .attach("files", readFixture("1page.pdf"), "1page.pdf")
+        .expect(200);
+
+      expect(response.body.data.results[0].ok).toBe(true);
+      expect(mailSends).toEqual([]);
+    });
+
+    /** The construction: the upload path has no forwarder to call. */
+    it("has no failure forwarder anywhere in its module graph", () => {
+      expect(() =>
+        uploadModule.get(ImportFailureForwarder, { strict: false }),
+      ).toThrow();
     });
   });
 });

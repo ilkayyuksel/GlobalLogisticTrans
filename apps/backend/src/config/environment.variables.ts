@@ -2,6 +2,7 @@ import { Transform, plainToInstance } from "class-transformer";
 import {
   IsArray,
   IsBoolean,
+  IsEmail,
   IsEnum,
   IsInt,
   IsNotEmpty,
@@ -93,6 +94,12 @@ const WHATSAPP_SERVICE_TOKEN_MIN_LENGTH = 24;
 
 /** Every five minutes: orders arrive a few times a day, not continuously. */
 const DEFAULT_IMAP_POLL_CRON = "0 */5 * * * *";
+
+/**
+ * STARTTLS on 587 is the submission port every hosted mailbox offers for an
+ * authenticated client. Implicit TLS on 465 is selected with SMTP_SECURE.
+ */
+const DEFAULT_SMTP_PORT = 587;
 
 /**
  * A variable present but empty (`API_PORT=`) is the normal state of a freshly
@@ -449,6 +456,89 @@ export class EnvironmentVariables {
   @IsString()
   @IsNotEmpty()
   IMAP_POLL_CRON: string = DEFAULT_IMAP_POLL_CRON;
+
+  /**
+   * Whether an email whose import FAILED is forwarded to a person.
+   *
+   * Off by default, and the switch that makes every SMTP setting below
+   * conditional — the same arrangement as ENABLE_IMAP, for the same reason: a
+   * developer with no outgoing mailbox must still be able to start the backend,
+   * and when the feature IS on, a missing credential stops the boot instead of
+   * surfacing as a silent non-delivery on the first broken order.
+   *
+   * This system only RECEIVED mail before this setting existed. There was no
+   * SMTP configuration to reuse, so these settings are new, and nothing is
+   * sent until somebody supplies them.
+   */
+  @Transform(parseBoolean(false))
+  @IsBoolean()
+  ENABLE_IMPORT_FAILURE_FORWARD: boolean = false;
+
+  /** Who is told. One address: the people who can act on a broken order. */
+  @ValidateIf(
+    (environment: EnvironmentVariables) =>
+      environment.ENABLE_IMPORT_FAILURE_FORWARD,
+  )
+  @IsEmail()
+  IMPORT_FAILURE_FORWARD_TO: string = "";
+
+  @ValidateIf(
+    (environment: EnvironmentVariables) =>
+      environment.ENABLE_IMPORT_FAILURE_FORWARD,
+  )
+  @IsString()
+  @IsNotEmpty()
+  SMTP_HOST: string = "";
+
+  @Transform(parsePositiveInteger(DEFAULT_SMTP_PORT))
+  @IsInt()
+  @Min(1)
+  @Max(65535)
+  SMTP_PORT: number = DEFAULT_SMTP_PORT;
+
+  /**
+   * Implicit TLS from the first byte (port 465). False means the connection is
+   * upgraded with STARTTLS — and nodemailer REQUIRES that upgrade when it is
+   * told to, see `SmtpMailClient` — so neither setting sends a password in the
+   * clear.
+   */
+  @Transform(parseBoolean(false))
+  @IsBoolean()
+  SMTP_SECURE: boolean = false;
+
+  @ValidateIf(
+    (environment: EnvironmentVariables) =>
+      environment.ENABLE_IMPORT_FAILURE_FORWARD,
+  )
+  @IsString()
+  @IsNotEmpty()
+  SMTP_USERNAME: string = "";
+
+  /**
+   * Never logged, never returned by an endpoint, never stored in a Setting.
+   * It exists only to authenticate one connection.
+   */
+  @ValidateIf(
+    (environment: EnvironmentVariables) =>
+      environment.ENABLE_IMPORT_FAILURE_FORWARD,
+  )
+  @IsString()
+  @IsNotEmpty()
+  SMTP_PASSWORD: string = "";
+
+  /**
+   * The system's own address, which the forward is sent FROM.
+   *
+   * Never the original sender's: putting their address in From would be
+   * spoofing, and the receiving server would rightly reject it under SPF and
+   * DMARC. Who originally sent the order is stated inside the forward instead.
+   */
+  @ValidateIf(
+    (environment: EnvironmentVariables) =>
+      environment.ENABLE_IMPORT_FAILURE_FORWARD,
+  )
+  @IsEmail()
+  SMTP_FROM: string = "";
 }
 
 /**

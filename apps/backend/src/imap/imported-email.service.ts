@@ -190,6 +190,17 @@ export class ImportedEmailService {
     );
   }
 
+  /**
+   * Records that a person has been sent this failed email.
+   *
+   * Kept apart from the processing status on purpose: the email is still
+   * FAILED, still unread and still retried. Forwarding it told somebody; it did
+   * not change what happened to the import.
+   */
+  markFailureForwarded(importedEmailId: string): Promise<ImportedEmail> {
+    return this.repository.markFailureForwarded(importedEmailId, new Date());
+  }
+
   markAlreadyImported(importedEmailId: string): Promise<ImportedEmail> {
     return this.repository.updateStatus(
       importedEmailId,
