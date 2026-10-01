@@ -16,7 +16,7 @@
     "@auth0/nextjs-auth0": "^4.26.0",
     "clsx": "^2.1.1",
     "exceljs": "^4.4.0",
-    "next": "^15.5.4",
+    "next": "^15.5.24",
     "pdfjs-dist": "4.10.38",
     "qrcode.react": "^4.2.0",
     "react": "^19.2.0",
