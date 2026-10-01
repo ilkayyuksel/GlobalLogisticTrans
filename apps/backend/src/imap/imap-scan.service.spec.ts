@@ -6,7 +6,10 @@ import {
 } from "@prisma/client";
 
 import { AppLoggerService } from "../logger/app-logger.service";
-import { UnknownTerminalException } from "../pdf-import/exceptions/pdf-import.exceptions";
+import {
+  UnknownTerminalException,
+  UnreadablePdfException,
+} from "../pdf-import/exceptions/pdf-import.exceptions";
 import { PdfTripImporter } from "../pdf-import/pdf-trip-importer.service";
 import { DuplicateBookingNumberException } from "../trips/exceptions/trip.exceptions";
 import {
@@ -570,6 +573,62 @@ describe("ImapScanService", () => {
       );
       expect(importedEmailService.markFailed).not.toHaveBeenCalled();
       expect(result).toMatchObject({ alreadyProcessed: 1, failed: 0 });
+    });
+
+    /**
+     * ── TWO ORDERS, ONE SUBJECT, AND ONLY ONE OF THEM READABLE ──────────────
+     * The concrete case this was written from: two near-identical mails both
+     * subjected `NEW: [DEL] Quay 869 - COULOGNE`, carrying
+     * `transportorder1385766.pdf` and `transportorder1385767.pdf`. The second
+     * imported; the first was refused by the parser for its address.
+     *
+     * Each mail is its OWN unit of work, and this pins that. The attachment of
+     * the refused one was downloaded and handed to the parser — the download
+     * happens before any parsing — the mail is recorded FAILED and left UNREAD
+     * so the next scan offers it again, and the mail that succeeded is marked
+     * read independently. Neither outcome can hide the other.
+     */
+    it("keeps two mails on one subject independent of each other", async () => {
+      const unreadable = mailboxMessage({
+        messageId: "<1385766@carrier.test>",
+        subject: "NEW: [DEL] Quay 869 - COULOGNE",
+        attachments: [pdfAttachment({ filename: "transportorder1385766.pdf" })],
+      });
+      const readable = mailboxMessage({
+        uid: 102,
+        messageId: "<1385767@carrier.test>",
+        subject: "NEW: [DEL] Quay 869 - COULOGNE",
+        attachments: [pdfAttachment({ filename: "transportorder1385767.pdf" })],
+      });
+
+      session.findCandidates.mockResolvedValue([unreadable, readable]);
+      pdfTripImporter.import
+        .mockRejectedValueOnce(
+          new UnreadablePdfException(
+            "transportorder1385766.pdf",
+            "No readable city line was found under 'DELIVERY 1:'.",
+          ),
+        )
+        .mockResolvedValueOnce({
+          trips: [{ id: "trip-1385767" }],
+          combination: false,
+          cancellations: [],
+          revisions: [],
+          costConfirmations: [],
+        });
+
+      const result = await service.scan();
+
+      // Both were fetched, and the parser was reached for both.
+      expect(session.downloadAttachment).toHaveBeenCalledTimes(2);
+      expect(pdfTripImporter.import).toHaveBeenCalledTimes(2);
+      expect(result).toMatchObject({ scanned: 2, imported: 1, failed: 1 });
+
+      // Only the readable one is marked read; the other stays for the next scan.
+      expect(session.markSeen).toHaveBeenCalledTimes(1);
+      expect(session.markSeen).toHaveBeenCalledWith(readable);
+      expect(importedEmailService.markFailed).toHaveBeenCalledTimes(1);
+      expect(importedEmailService.markProcessed).toHaveBeenCalledTimes(1);
     });
 
     it("continues to the next email after one fails", async () => {

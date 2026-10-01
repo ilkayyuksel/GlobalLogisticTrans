@@ -200,14 +200,40 @@ export class CostConfirmationMatchingService {
     return eligible;
   }
 
-  /** Whether this Trip was ordered for the date the confirmation states. */
+  /**
+   * Whether this Trip is the transport the confirmation states a date for.
+   *
+   * ── WHY TWO COLUMNS, AND NOT A LOOSENING OF THE DATE RULE ─────────────────
+   * This compared `originalPlanningDate` alone, and that column is written once
+   * when the Trip is created and is deliberately immutable afterwards — see
+   * `TripRevisionService`. `planningDate` is the date the transport is actually
+   * on: an operator moves it, or a revised order does, and from then on the two
+   * disagree.
+   *
+   * A Cost Confirmation prints its own LOADING/DELIVERY date/time, which is
+   * when the work was done. For a re-planned transport that is the CURRENT
+   * date, so the confirmation named a day this Trip genuinely was on while the
+   * only column being compared still held the day it was first ordered for —
+   * and the money was refused for a Trip that plainly owned it. A Trip created
+   * by hand has no original date at all and could never be confirmed.
+   *
+   * ── THE DATE IS STILL NOT LOOSENED ────────────────────────────────────────
+   * Both values are dates this Trip states about ITSELF, and a confirmation
+   * must still equal one of them exactly: nothing near, nothing inferred, no
+   * range. A booking that comes round again on another day still cannot be
+   * reached, because that other Trip states neither date. And the count rule
+   * above is untouched — should two Trips on one booking both answer to the
+   * date, the confirmation is reported AMBIGUOUS and a person decides, exactly
+   * as before.
+   */
   private isOnTransportDate(
     trip: Trip,
     identity: ConfirmationIdentity,
   ): boolean {
-    return (
-      trip.originalPlanningDate !== null &&
-      toIsoDate(trip.originalPlanningDate) === identity.transportDate
+    const dates = [trip.originalPlanningDate, trip.planningDate];
+
+    return dates.some(
+      (date) => date !== null && toIsoDate(date) === identity.transportDate,
     );
   }
 

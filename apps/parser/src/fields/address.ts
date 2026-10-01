@@ -242,6 +242,22 @@ export function extractAddress(
      * fails loudly — that signal is what found the last three parser bugs, and
      * `statesNoPlace` is deliberately narrow to preserve it.
      */
+    /*
+     * The same fact in the other layout this form produces: the postcode is
+     * printed on the city's own line, with the country below it. The country the
+     * document states is kept — see `cityReplacedByPostcode`.
+     */
+    const replaced = cityReplacedByPostcode(block);
+
+    if (replaced) {
+      return {
+        destinationCity: null,
+        destinationCountry: replaced.country,
+        rawAddress: joinText(block),
+        section: sectionHeader.text.replace(/:$/, ""),
+      };
+    }
+
     if (statesNoPlace(block)) {
       return {
         destinationCity: null,
@@ -1310,6 +1326,76 @@ function resolveCountry(prefix: string, next: Fragment | null): string {
  * block whose only candidate is a country, and that refusal is louder and more
  * specific than this one, so it keeps its own message.
  */
+/**
+ * Whether the block prints its POSTCODE on the line where the city belongs.
+ *
+ * ── THE TWO DOCUMENTS THIS WAS READ OFF ─────────────────────────────────────
+ * Two real orders for the same consignee, sent a week apart, print the same
+ * address with one line of difference:
+ *
+ *   transportorder1385767           transportorder1385766
+ *   [62137]                         [62137]
+ *   Calais City Bond                Calais City Bond
+ *   Chemin Departement No. 4        Chemin Departement No. 4,
+ *   Le Grand Duc                    Le Grand Duc,
+ *   COULOGNE          <- the city   62137,            <- the postcode instead
+ *   France                          France
+ *
+ * The second states no commune at all. In the position where the first prints
+ * `COULOGNE` it prints the postcode it already printed in the bracket, and the
+ * country follows underneath. That is the same fact `statesNoPlace` recognises
+ * on a block ending `8700` — a postcode standing in for a city — with a country
+ * line below it, which is the only reason the existing test does not see it.
+ *
+ * ── WHY NOT READ A CITY OUT OF IT ANYWAY ────────────────────────────────────
+ * `Le Grand Duc` is the obvious candidate and it is the wrong answer: 1385767
+ * prints it too, ABOVE its real city, so it is part of the street address and
+ * not the commune. `Calais City Bond` is the consignee. And 62137 is Coulogne
+ * only if a postcode may name a place, which this parser does not allow — a
+ * postcode belongs to no country on its own, let alone to one town.
+ *
+ * So the city is ABSENT rather than unreadable, and that is what is reported: a
+ * null city imports the Trip and an operator fills the destination in from the
+ * Ritten list, exactly as for the block ending in a bare postcode.
+ *
+ * ── AND WHY THE LOUD SIGNAL SURVIVES ────────────────────────────────────────
+ * Deliberately narrow, and positional rather than a search:
+ *
+ *   * the block must OPEN with the bracketed postcode and hold a full address,
+ *     the same anchor and completeness rule every last-resort rule applies;
+ *   * its LAST line must be a known country name;
+ *   * the line DIRECTLY above that country must be the block's own bracketed
+ *     postcode and nothing else;
+ *   * and that line must sit at or after the earliest position a city may
+ *     occupy, so a truncated block is still refused.
+ *
+ * A line holding letters there — `COULOGNE`, `be-8580 Avelgem`,
+ * `9160 9160 Lokeren` — fails the third test, so every block whose city is
+ * present is read or refused exactly as it was before.
+ */
+function cityReplacedByPostcode(
+  block: readonly Fragment[],
+): { country: string } | null {
+  const ownPostcode = bracketedPostcodeOf(block);
+
+  if (block.length < MINIMUM_ADDRESS_LINES || ownPostcode === null) {
+    return null;
+  }
+
+  const countryIndex = block.length - 1;
+  const country = countryFromName(block[countryIndex].text);
+  const cityLineIndex = countryIndex - 1;
+
+  if (country === null || cityLineIndex < MINIMUM_ADDRESS_LINES - 1) {
+    return null;
+  }
+
+  // The punctuation the comma-separated form prints is not part of the number.
+  const cityLine = block[cityLineIndex].text.trim().replace(/[,;]+$/, "").trim();
+
+  return cityLine === ownPostcode ? { country } : null;
+}
+
 function statesNoPlace(block: readonly Fragment[]): boolean {
   if (
     block.length < MINIMUM_ADDRESS_LINES ||

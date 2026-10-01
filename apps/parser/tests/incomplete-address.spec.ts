@@ -206,3 +206,169 @@ describe("an absent city and an unreadable one are different answers", () => {
     expect(() => read(["[8700]", "Acme BV", "8700"])).toThrow(ExtractionError);
   });
 });
+
+/**
+ * ── THE SAME ABSENCE, WITH A COUNTRY UNDERNEATH ─────────────────────────────
+ * Two real orders for one consignee, a week apart. They print the same address
+ * and differ by a single line:
+ *
+ *   transportorder1385767           transportorder1385766
+ *   [62137]                         [62137]
+ *   Calais City Bond                Calais City Bond
+ *   Chemin Departement No. 4        Chemin Departement No. 4,
+ *   Le Grand Duc                    Le Grand Duc,
+ *   COULOGNE          <- the city   62137,            <- the postcode instead
+ *   France                          France
+ *
+ * The second names no commune. Where the first prints `COULOGNE` it repeats the
+ * postcode from its own bracket, so this is the placeless block above with a
+ * country line below it — and that country line is the only reason the original
+ * test did not recognise it.
+ *
+ * `Le Grand Duc` is NOT the answer, and 1385767 is the proof: it prints that
+ * line too, above its real city, so it belongs to the street address. Nor is
+ * 62137 read as Coulogne — a postcode names no place in this parser.
+ */
+describe("the real order whose postcode stands where its city belongs", () => {
+  const ABSENT = "BUG-CITY/transportorder1385766.pdf";
+  const PRESENT = "BUG-CITY/transportorder1385767.pdf";
+
+  async function tripOf(file: string) {
+    const result = await parseFixture(file);
+
+    if (!result.ok) {
+      throw new Error(`expected a parse: ${result.reason} — ${result.message}`);
+    }
+
+    return result.trips[0];
+  }
+
+  it("is parsed rather than refused", async () => {
+    expect((await parseFixture(ABSENT)).ok).toBe(true);
+  });
+
+  it("reports the city as absent and keeps the country the document states", async () => {
+    const trip = await tripOf(ABSENT);
+
+    expect(trip.destinationCity).toBeNull();
+    expect(trip.destinationCountry).toBe("France");
+  });
+
+  /** Neither the street line nor the consignee becomes the destination. */
+  it("never reads the locality or the company as the city", async () => {
+    const trip = await tripOf(ABSENT);
+
+    expect(trip.destinationCity).not.toBe("Le Grand Duc");
+    expect(trip.destinationCity).not.toBe("Calais City Bond");
+  });
+
+  /** And the postcode is not resolved to the town it happens to belong to. */
+  it("does not infer a city from the postcode", async () => {
+    expect((await tripOf(ABSENT)).destinationCity).not.toBe("Coulogne");
+  });
+
+  /**
+   * THE REGRESSION GUARD: the sibling order still reads its city. If the rule
+   * above ever widens into "a line above a country may be skipped", this fails.
+   */
+  it("still reads the city of the order that prints one", async () => {
+    const trip = await tripOf(PRESENT);
+
+    expect(trip.destinationCity).toBe("Coulogne");
+    expect(trip.destinationCountry).toBe("France");
+  });
+
+  /** Both orders are read, and only one of them states a place. */
+  it("tells the two documents apart", async () => {
+    expect([
+      (await tripOf(ABSENT)).destinationCity,
+      (await tripOf(PRESENT)).destinationCity,
+    ]).toEqual([null, "Coulogne"]);
+  });
+
+  /*
+   * ── AND THE NARROWNESS, LINE BY LINE ──────────────────────────────────────
+   * Each of these is the same shape with one element changed, and every one of
+   * them must still refuse — otherwise the rule has become "a city may be
+   * missing whenever a country is printed".
+   */
+
+  /** A name in the city position is a city, and is read as one. */
+  it("reads the city when the city line holds a name instead of the postcode", () => {
+    expect(
+      read([
+        "[62137]",
+        "Calais City Bond",
+        "Chemin Departement No. 4,",
+        "Le Grand Duc,",
+        "be-62137 Somewhere,",
+        "France",
+      ]),
+    ).toMatchObject({ destinationCity: "Somewhere", destinationCountry: "France" });
+  });
+
+  it("refuses when the line above the country is a different number", () => {
+    expect(() =>
+      read([
+        "[62137]",
+        "Calais City Bond",
+        "Chemin Departement No. 4,",
+        "Le Grand Duc,",
+        "99999,",
+        "France",
+      ]),
+    ).toThrow(ExtractionError);
+  });
+
+  it("refuses when the block does not open with its bracketed postcode", () => {
+    expect(() =>
+      read([
+        "Calais City Bond",
+        "Chemin Departement No. 4,",
+        "Le Grand Duc,",
+        "62137,",
+        "France",
+      ]),
+    ).toThrow(ExtractionError);
+  });
+
+  /**
+   * The last line must be a KNOWN country for the placeless reading to apply.
+   * `Francia` is not one, so the rule declines and the existing bracketed
+   * last-resort reads that line as the city — which is the behaviour this
+   * change had to leave alone.
+   */
+  it("does not call the block placeless when the last line is not a known country", () => {
+    expect(
+      read([
+        "[62137]",
+        "Calais City Bond",
+        "Chemin Departement No. 4,",
+        "Le Grand Duc,",
+        "62137,",
+        "Francia",
+      ]),
+    ).toMatchObject({ destinationCity: "Francia" });
+  });
+
+  /** The postcode must stand where a city may stand, not where the street does. */
+  it("refuses when the postcode sits too high to be the city line", () => {
+    expect(() =>
+      read(["[62137]", "Calais City Bond", "62137,", "France"]),
+    ).toThrow(ExtractionError);
+  });
+
+  /** The placeless reading yields a NULL city — it never invents one. */
+  it("yields a null city for the recognised shape", () => {
+    expect(
+      read([
+        "[62137]",
+        "Calais City Bond",
+        "Chemin Departement No. 4,",
+        "Le Grand Duc,",
+        "62137,",
+        "France",
+      ]),
+    ).toMatchObject({ destinationCity: null, destinationCountry: "France" });
+  });
+});

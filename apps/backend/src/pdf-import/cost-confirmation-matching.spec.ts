@@ -170,7 +170,14 @@ describe("Phase 1 — the exact booking number", () => {
       const { service } = matcherOver([
         buildTrip({
           containerNumber: CONTAINER,
+        /*
+         * BOTH dates, which is what a Trip on another day actually looks like:
+         * an import writes the document's date into each column. Stating only
+         * the immutable one would leave the Trip still planned on the confirmed
+         * date, which is the re-planned case a confirmation SHOULD reach.
+         */
           originalPlanningDate: new Date("2026-08-21T00:00:00.000Z"),
+          planningDate: new Date("2026-08-21T00:00:00.000Z"),
         }),
       ]);
 
@@ -292,7 +299,9 @@ describe("Phase 1 — the exact booking number", () => {
     it("still requires the date", async () => {
       const { service } = matcherOver([
         buildTrip({
+          // Both columns: see the note in Phase 1's container case above.
           originalPlanningDate: new Date("2026-08-21T00:00:00.000Z"),
+          planningDate: new Date("2026-08-21T00:00:00.000Z"),
         }),
       ]);
 
@@ -409,7 +418,9 @@ describe("Phase 2 — the digit-normalized booking number", () => {
     const { service } = matcherOver([
       buildTrip({
         ...digitsOnly,
+        // Both columns: a Trip on another day states that day in each.
         originalPlanningDate: new Date("2026-08-21T00:00:00.000Z"),
+        planningDate: new Date("2026-08-21T00:00:00.000Z"),
       }),
     ]);
 
@@ -645,7 +656,9 @@ describe("Phase 3 — booking and date, container ignored", () => {
     const { service } = matcherOver([
       buildTrip({
         containerNumber: "PVDU9999999",
+        // Both columns: a Trip on another day states that day in each.
         originalPlanningDate: new Date("2026-08-21T00:00:00.000Z"),
+        planningDate: new Date("2026-08-21T00:00:00.000Z"),
       }),
     ]);
 
@@ -756,5 +769,243 @@ describe("the phases run in order and stop", () => {
     expect(
       (await service.findTripForCostConfirmation(confirmation())).kind,
     ).toBe("AMBIGUOUS");
+  });
+});
+
+/**
+ * ── A RE-PLANNED TRANSPORT STILL OWNS ITS CONFIRMATION ──────────────────────
+ * `original_planning_date` is written once, when the Trip is created, and is
+ * immutable from then on. `planning_date` is the date the transport is actually
+ * on — an operator moves it, or a revised order does.
+ *
+ * A Cost Confirmation prints the LOADING/DELIVERY date/time of the work it is
+ * paying for, so for a re-planned transport it names the CURRENT date. Matching
+ * the immutable column alone refused money for a Trip that plainly owned it, and
+ * left a Trip created by hand unable to receive a confirmation at all.
+ *
+ * The case these were written from: Cost Confirmation 4208847, booking
+ * ANRBEL2808541, container EUCU4591789, 2026-09-28 — a waiting-time charge,
+ * which by its nature is issued after the transport ran.
+ */
+describe("the date a confirmation may name", () => {
+  const CONFIRMED_BOOKING = "ANRBEL2808541";
+  const CONFIRMED_CONTAINER = "EUCU4591789";
+  const CONFIRMED_DATE = "2026-09-28";
+
+  /** The one real Trip, with its two dates stated separately. */
+  function closedTrip(dates: {
+    originalPlanningDate: string | null;
+    planningDate: string | null;
+  }) {
+    return buildTrip({
+      id: "trip-4208847",
+      status: TripStatus.CLOSED,
+      bookingNumber: CONFIRMED_BOOKING,
+      containerNumber: CONFIRMED_CONTAINER,
+      originalPlanningDate:
+        dates.originalPlanningDate === null
+          ? null
+          : new Date(`${dates.originalPlanningDate}T00:00:00.000Z`),
+      planningDate:
+        dates.planningDate === null
+          ? null
+          : new Date(`${dates.planningDate}T00:00:00.000Z`),
+      // It names a container, so provenance is never consulted.
+      sourceFixture: ORDER_WITH_CONTAINER,
+    } as Partial<Trip> & { sourceFixture?: string });
+  }
+
+  function confirmationFor4208847() {
+    return confirmation({
+      bookingNumber: CONFIRMED_BOOKING,
+      transportDate: CONFIRMED_DATE,
+      containerReference: CONFIRMED_CONTAINER,
+    });
+  }
+
+  /** The concrete case: the transport was moved onto the confirmed day. */
+  it("matches a Trip whose CURRENT planning date the confirmation names", async () => {
+    const { service } = matcherOver([
+      closedTrip({
+        originalPlanningDate: "2026-09-21",
+        planningDate: CONFIRMED_DATE,
+      }),
+    ]);
+
+    const match = await service.findTripForCostConfirmation(
+      confirmationFor4208847(),
+    );
+
+    expect(match).toEqual({
+      kind: "MATCHED",
+      trip: expect.objectContaining({ id: "trip-4208847" }),
+    });
+  });
+
+  /** The ordinary case, which must keep working exactly as it did. */
+  it("matches a Trip that was never re-planned", async () => {
+    const { service } = matcherOver([
+      closedTrip({
+        originalPlanningDate: CONFIRMED_DATE,
+        planningDate: CONFIRMED_DATE,
+      }),
+    ]);
+
+    expect(
+      (await service.findTripForCostConfirmation(confirmationFor4208847()))
+        .kind,
+    ).toBe("MATCHED");
+  });
+
+  /** The order was placed for the confirmed day and then moved away from it. */
+  it("still matches on the date the transport was ORDERED for", async () => {
+    const { service } = matcherOver([
+      closedTrip({
+        originalPlanningDate: CONFIRMED_DATE,
+        planningDate: "2026-10-05",
+      }),
+    ]);
+
+    expect(
+      (await service.findTripForCostConfirmation(confirmationFor4208847()))
+        .kind,
+    ).toBe("MATCHED");
+  });
+
+  /** A Trip entered by hand has no original date, and must still be payable. */
+  it("matches a Trip created by hand, which has no original date", async () => {
+    const { service } = matcherOver([
+      closedTrip({ originalPlanningDate: null, planningDate: CONFIRMED_DATE }),
+    ]);
+
+    expect(
+      (await service.findTripForCostConfirmation(confirmationFor4208847()))
+        .kind,
+    ).toBe("MATCHED");
+  });
+
+  /**
+   * ── THE DATE IS STILL NOT LOOSENED ────────────────────────────────────────
+   * The day before and the day after are different transports, and the widened
+   * comparison must not reach either. This test is what fails if the rule ever
+   * becomes "near enough".
+   */
+  it.each(["2026-09-27", "2026-09-29"])(
+    "refuses a Trip that states neither date (%s)",
+    async (otherDate) => {
+      const { service } = matcherOver([
+        closedTrip({
+          originalPlanningDate: otherDate,
+          planningDate: otherDate,
+        }),
+      ]);
+
+      expect(
+        (await service.findTripForCostConfirmation(confirmationFor4208847()))
+          .kind,
+      ).toBe("NO_MATCHING_TRIP");
+    },
+  );
+
+  /** A Trip stating neither date is refused however its dates disagree. */
+  it("refuses a Trip re-planned away from the confirmed date entirely", async () => {
+    const { service } = matcherOver([
+      closedTrip({
+        originalPlanningDate: "2026-09-21",
+        planningDate: "2026-10-05",
+      }),
+    ]);
+
+    expect(
+      (await service.findTripForCostConfirmation(confirmationFor4208847()))
+        .kind,
+    ).toBe("NO_MATCHING_TRIP");
+  });
+
+  /**
+   * Phase 1 still prefers the Trip holding the confirmed container.
+   *
+   * Both Trips are on the confirmed day and both are re-planned onto it, so the
+   * widened date comparison brings both into the phase. The container is what
+   * separates them, exactly as before.
+   */
+  it("still prefers the Trip holding the confirmed container", async () => {
+    const { service } = matcherOver([
+      closedTrip({
+        originalPlanningDate: "2026-09-21",
+        planningDate: CONFIRMED_DATE,
+      }),
+      {
+        ...closedTrip({
+          originalPlanningDate: "2026-09-21",
+          planningDate: CONFIRMED_DATE,
+        }),
+        id: "other-box",
+        containerNumber: "EUCU0000000",
+        pdfDocumentId: "pdf-other-box",
+      },
+    ]);
+
+    const match = await service.findTripForCostConfirmation(
+      confirmationFor4208847(),
+    );
+
+    expect(match).toEqual({
+      kind: "MATCHED",
+      trip: expect.objectContaining({ id: "trip-4208847" }),
+    });
+  });
+
+  /**
+   * ── PHASE 3 IS UNCHANGED, AND STILL LAST ──────────────────────────────────
+   * A confirmation naming a container no Trip holds falls through to the phase
+   * that drops the container rule, and is matched on booking and date alone.
+   * That is the documented safety net, and widening WHICH date counts must not
+   * alter it: the Trip is reached because it is the only one on the day, not
+   * because of its container.
+   */
+  it("keeps reaching a re-planned Trip through the container-less phase", async () => {
+    const { service } = matcherOver([
+      {
+        ...closedTrip({
+          originalPlanningDate: "2026-09-21",
+          planningDate: CONFIRMED_DATE,
+        }),
+        containerNumber: "EUCU0000000",
+      },
+    ]);
+
+    const match = await service.findTripForCostConfirmation(
+      confirmationFor4208847(),
+    );
+
+    expect(match.kind).toBe("MATCHED");
+  });
+
+  /**
+   * Two Trips on one booking, one answering by each date. Nothing is chosen —
+   * the count rule is untouched by the widened comparison.
+   */
+  it("reports an ambiguity rather than preferring one date over the other", async () => {
+    const { service } = matcherOver([
+      closedTrip({
+        originalPlanningDate: CONFIRMED_DATE,
+        planningDate: "2026-10-05",
+      }),
+      {
+        ...closedTrip({
+          originalPlanningDate: "2026-09-21",
+          planningDate: CONFIRMED_DATE,
+        }),
+        id: "trip-second",
+        pdfDocumentId: "pdf-second",
+      },
+    ]);
+
+    const match = await service.findTripForCostConfirmation(
+      confirmationFor4208847(),
+    );
+
+    expect(match.kind).toBe("AMBIGUOUS");
   });
 });

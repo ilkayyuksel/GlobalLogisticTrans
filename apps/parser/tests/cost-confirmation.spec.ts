@@ -334,3 +334,62 @@ describe("the fields Cost Confirmation matching depends on", () => {
     expect(result.confirmation.containerReference).toBeNull();
   });
 });
+
+/**
+ * ── THE CONFIRMATION THAT COULD NOT FIND ITS TRIP ───────────────────────────
+ * `COST_CONFIRMATION_NR_4208847__ANRBEL2808541__EUCU4591789.pdf` was reported
+ * as matching no Trip, and the parser turned out to be innocent: it reads the
+ * booking, the date and the container exactly. The fault was in the MATCHER,
+ * which compared the confirmation's date against the Trip's immutable
+ * `original_planning_date` alone and so could not reach a transport that had
+ * been re-planned onto the confirmed day — see
+ * `cost-confirmation-matching.service.ts`.
+ *
+ * These assertions exist so that the parser side of that case stays pinned: if
+ * any of these four values ever drifts, the matching tests downstream would be
+ * proving something about different data.
+ */
+describe("the waiting-time confirmation 4208847", () => {
+  const FILE = "BUG-CITY/COST_CONFIRMATION_NR_4208847__ANRBEL2808541__EUCU4591789.pdf";
+
+  async function confirmationOf() {
+    const result = await parseCostConfirmation(readFixture(FILE));
+
+    if (!result.ok) {
+      throw new Error(`expected a confirmation: ${result.reason}`);
+    }
+
+    return result.confirmation;
+  }
+
+  it("reads the number, the booking and the amount", async () => {
+    expect(await confirmationOf()).toMatchObject({
+      ccNumber: "4208847",
+      bookingNumber: "ANRBEL2808541",
+      amount: "27.50",
+      currency: "EUR",
+    });
+  });
+
+  /** `EUCU 459178/9` on the page, canonical on the way out. */
+  it("reads the container the document prints", async () => {
+    expect((await confirmationOf()).containerReference).toBe("EUCU4591789");
+  });
+
+  /**
+   * The date the matcher compares, taken from the confirmation's OWN
+   * loading/delivery line — `28/09/2026 08:30 till 14:00` — and from nothing
+   * else.
+   */
+  it("reads the transport date from its own loading line", async () => {
+    expect((await confirmationOf()).transportDate).toBe("2026-09-28");
+  });
+
+  /** A waiting-time charge, which is issued after the transport has run. */
+  it("reads it as a waiting-time charge", async () => {
+    expect(await confirmationOf()).toMatchObject({
+      costCode: "WAIT",
+      costDescription: "Waiting Time",
+    });
+  });
+});
