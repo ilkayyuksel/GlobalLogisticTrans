@@ -5,9 +5,9 @@ import { join } from "node:path";
 
 import ExcelJS from "exceljs";
 
-import { findAutomaticPropertyId } from "@/lib/api/settings";
 import type { Setting } from "@/lib/api/settings";
 import type { CustomProperty, PricingSnapshot, Trip } from "@/lib/api/types";
+import { captureLabels } from "./__fixtures__/capture-labels";
 import { buildBasicWorkbook } from "./export-workbooks";
 import { toBasicRow, toManualPropertyIds } from "./export-rows";
 
@@ -64,8 +64,7 @@ async function sheetOf(capture: Capture): Promise<ExcelJS.Worksheet> {
         trip,
         capture.snapshots.find((s) => s.pricing.tripId === trip.id) ?? null,
         toManualPropertyIds(capture.catalog),
-        "Wachttijd",
-        findAutomaticPropertyId(capture.settings),
+        captureLabels(trip.id),
       ),
     ),
     "nl",

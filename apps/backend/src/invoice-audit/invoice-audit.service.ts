@@ -5,6 +5,7 @@ import { AppLoggerService } from "../logger/app-logger.service";
 import { TripRepository } from "../trips/trip.repository";
 import {
   InvoiceRowStatus,
+  type ContainerCorrection,
   type InvoiceRowMatch,
 } from "./matching/invoice-row-matching.service";
 import {
@@ -145,6 +146,7 @@ export class InvoiceAuditService {
       examined.pricing,
       examined.missing,
       toProblemRowNumbers(examined.result),
+      toContainerCorrections(examined.matches),
     );
 
     // The bytes first. A failure here throws before a single Trip is touched.
@@ -296,7 +298,11 @@ export class InvoiceAuditService {
      * ones: a line that found no Trip still names a transport, and adding a row
      * for it would put the same transport on the invoice twice.
      */
-    const missing = await this.missingTrips.find(period, opened.sheet.rows);
+    const missing = await this.missingTrips.find(
+      period,
+      opened.sheet.rows,
+      toNamedTripIds(matches),
+    );
     // Where each of them will be written. Pure arithmetic over the sheet, so the
     // report and the corrected workbook cannot disagree about it.
     const firstAddedRowNumber = toFirstAddedRowNumber(opened.sheet);
@@ -387,6 +393,33 @@ function toProblemRowNumbers(result: InvoiceAuditResultDto): number[] {
         row.pricingStatus === InvoicePricingStatus.NOT_DISTRIBUTABLE,
     )
     .map((row) => row.rowNumber);
+}
+
+/**
+ * Every Trip some line of the document is about: the one it was matched to, and
+ * every candidate a line could not choose between. None of them is missing from
+ * the invoice, whatever values the line happens to print.
+ */
+function toNamedTripIds(matches: readonly InvoiceRowMatch[]): Set<string> {
+  return new Set(
+    matches.flatMap((match) => [
+      ...(match.trip ? [match.trip.id] : []),
+      ...match.candidates.map((candidate) => candidate.id),
+    ]),
+  );
+}
+
+/** The lines whose misprinted container the corrected document replaces. */
+function toContainerCorrections(
+  matches: readonly InvoiceRowMatch[],
+): Map<number, ContainerCorrection> {
+  return new Map(
+    matches.flatMap((match) =>
+      match.containerCorrection === null
+        ? []
+        : [[match.row.rowNumber, match.containerCorrection] as const],
+    ),
+  );
 }
 
 /** A file name with any path a client sent stripped off. */

@@ -1,0 +1,27 @@
+{
+  "cccccccc-0000-4000-8000-000000000001": {
+    "remarks": "Wachttijd 0 min",
+    "waitingLabel": "Wachttijd 0 min",
+    "tarCharged": false
+  },
+  "cccccccc-0000-4000-8000-000000000002": {
+    "remarks": "TAR | Wachttijd 0 min",
+    "waitingLabel": "Wachttijd 0 min",
+    "tarCharged": true
+  },
+  "cccccccc-0000-4000-8000-000000000003": {
+    "remarks": "TAR | Wachttijd 0 min",
+    "waitingLabel": "Wachttijd 0 min",
+    "tarCharged": true
+  },
+  "cccccccc-0000-4000-8000-000000000004": {
+    "remarks": "TAR | Wachttijd 0 min",
+    "waitingLabel": "Wachttijd 0 min",
+    "tarCharged": true
+  },
+  "cccccccc-0000-4000-8000-000000000005": {
+    "remarks": "TAR | Wachttijd 0 min",
+    "waitingLabel": "Wachttijd 0 min",
+    "tarCharged": true
+  }
+}

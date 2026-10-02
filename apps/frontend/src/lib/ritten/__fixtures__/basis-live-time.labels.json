@@ -1,0 +1,27 @@
+{
+  "eeeeeeee-0000-4000-8000-00000000e001": {
+    "remarks": "ZZ Aan/Afkoppelen | TAR | Wachttijd 0 min",
+    "waitingLabel": "Wachttijd 0 min",
+    "tarCharged": true
+  },
+  "eeeeeeee-0000-4000-8000-00000000e002": {
+    "remarks": "Wachttijd 0 min",
+    "waitingLabel": "Wachttijd 0 min",
+    "tarCharged": false
+  },
+  "eeeeeeee-0000-4000-8000-00000000e003": {
+    "remarks": "Wachttijd 0 min",
+    "waitingLabel": "Wachttijd 0 min",
+    "tarCharged": false
+  },
+  "eeeeeeee-0000-4000-8000-00000000e004": {
+    "remarks": "Wachttijd 0 min",
+    "waitingLabel": "Wachttijd 0 min",
+    "tarCharged": false
+  },
+  "eeeeeeee-0000-4000-8000-00000000e005": {
+    "remarks": "Wachttijd 0 min | CC4139509 | CC4132482",
+    "waitingLabel": "Wachttijd 0 min",
+    "tarCharged": false
+  }
+}

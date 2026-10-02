@@ -6,6 +6,7 @@ import { toIsoDate, toUtcDate } from "../../common/dates";
 import { AppLoggerService } from "../../logger/app-logger.service";
 import type { EffectivePricing } from "../../trip-pricing/effective-pricing";
 import { EffectivePricingService } from "../../trip-pricing/effective-pricing.service";
+import { TripExportLabelsService } from "../../trip-export/trip-export-labels.service";
 import { TripRepository } from "../../trips/trip.repository";
 import { toTripRoute } from "../../trips/trip-route";
 import type { InvoiceSheetRow } from "../workbook/invoice-sheet";
@@ -23,6 +24,12 @@ export interface MissingTrip {
   readonly pricing: EffectivePricing | null;
   /** `Quay 869 -> ZEMST`, as `toTripRoute` derives it. */
   readonly route: string;
+  /**
+   * What the Remarks column says about it — its Custom Properties, TAR when
+   * charged, its waiting window, every Cost Confirmation — in the exports' own
+   * vocabulary. Empty when there is nothing to say.
+   */
+  readonly remarks: string;
 }
 
 /**
@@ -45,6 +52,14 @@ export interface MissingTrip {
  * about would put the same transport on the invoice twice — so the comparison
  * is against every line the document states, whatever the check made of it.
  *
+ * ── AND BY WHAT THE MATCH FOUND, NOT ONLY BY WHAT THE LINE SAYS ─────────────
+ * A line can name its Trip without stating its exact values: it may carry the
+ * day the transport was ORIGINALLY ordered for, or a misprinted container. The
+ * match still resolves it, so comparing the line's text alone would call that
+ * Trip missing and append it a second time. Every Trip the match resolved a line
+ * to — or named as one of several a line could mean — is therefore on the
+ * invoice too, alongside every Trip whose values a line states outright.
+ *
  * ── AND WHY THIS IS IDEMPOTENT ──────────────────────────────────────────────
  * Nothing is remembered. A corrected document that already carries the added
  * rows states those identities, so on the next check they are no longer missing
@@ -55,6 +70,7 @@ export class MissingTripsService {
   constructor(
     private readonly trips: TripRepository,
     private readonly effectivePricing: EffectivePricingService,
+    private readonly exportLabels: TripExportLabelsService,
     private readonly logger: AppLoggerService,
   ) {
     this.logger.setContext(MissingTripsService.name);
@@ -63,6 +79,8 @@ export class MissingTripsService {
   async find(
     period: { readonly from: string; readonly to: string } | null,
     rows: readonly InvoiceSheetRow[],
+    /** Every Trip the match resolved a line to, or named as a candidate. */
+    namedTripIds: ReadonlySet<string> = new Set(),
   ): Promise<readonly MissingTrip[]> {
     // No line, no period, nothing to be missing FROM: an empty document is not
     // a claim that a week went uninvoiced.
@@ -79,13 +97,20 @@ export class MissingTripsService {
     const missing = candidates.filter((trip) => {
       const identity = toTripIdentity(trip);
 
-      return identity !== null && !stated.has(identity);
+      return (
+        identity !== null &&
+        !stated.has(identity) &&
+        !namedTripIds.has(trip.id)
+      );
     });
 
-    // One pricing read for all of them, as the rest of this module does.
-    const pricingByTrip = await this.effectivePricing.findForTrips(
-      missing.map((trip) => trip.id),
-    );
+    // One pricing read and one label read for all of them, as the rest of this
+    // module does. The invoice is Dutch, so the documents' own waiting word.
+    const missingIds = missing.map((trip) => trip.id);
+    const [pricingByTrip, labelsByTrip] = await Promise.all([
+      this.effectivePricing.findForTrips(missingIds),
+      this.exportLabels.findForTrips(missingIds),
+    ]);
 
     this.logger.log("Missing finished transports found", {
       periodFrom: period.from,
@@ -101,6 +126,7 @@ export class MissingTripsService {
       trip,
       pricing: pricingByTrip.get(trip.id) ?? null,
       route: toRouteLabel(trip),
+      remarks: labelsByTrip.get(trip.id)?.remarks ?? "",
     }));
   }
 }

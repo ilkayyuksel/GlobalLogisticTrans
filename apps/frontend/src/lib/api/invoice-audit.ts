@@ -54,6 +54,20 @@ export interface InvoiceAuditTrip {
   readonly containerNumber: string | null;
 }
 
+/**
+ * The invoice named the right transport with the wrong container.
+ *
+ * Decided by the backend: set only on a MATCHED line found by its date and
+ * booking because its container matched no Trip. The screen shows it; it never
+ * compares containers itself.
+ */
+export interface InvoiceContainerCorrection {
+  /** As the sheet spelled it — the value that was wrong. */
+  readonly invoiceContainerNumber: string;
+  /** What the corrected workbook writes in its place, in red. */
+  readonly tripContainerNumber: string;
+}
+
 export interface InvoiceAuditRow {
   /** The row's number in the worksheet, which is where a correction would go. */
   readonly rowNumber: number;
@@ -70,6 +84,8 @@ export interface InvoiceAuditRow {
   readonly sharedKeyRowNumbers: readonly number[];
   readonly pricingStatus: InvoicePricingStatus;
   readonly differences: readonly InvoicePricingDifference[];
+  /** Null unless the invoice's container was wrong and is corrected. */
+  readonly containerCorrection: InvoiceContainerCorrection | null;
 }
 
 /**
@@ -107,6 +123,8 @@ export interface InvoiceAuditSummary {
   readonly missingTrips: number;
   /** Lines a previous run wrote into this document. Never settled. */
   readonly addedMissing: number;
+  /** Matched lines whose container was wrong. Counted within `matched` too. */
+  readonly containerCorrected: number;
 }
 
 export interface InvoiceAuditResult {

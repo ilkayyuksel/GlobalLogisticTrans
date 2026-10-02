@@ -352,6 +352,15 @@ export function respondWith(
       return Promise.resolve(responses.pricingSnapshots ?? []);
     }
 
+    /*
+     * The export words the backend composes. None by default — the backend's
+     * own answer for a Trip with no properties, no TAR, no waiting time and no
+     * confirmation — so a page test about something else is not decided by it.
+     */
+    if (path === "/api/v1/trip-export/labels") {
+      return Promise.resolve([]);
+    }
+
     if (path === "/api/v1/settings") {
       return Promise.resolve(
         responses.settings ?? [

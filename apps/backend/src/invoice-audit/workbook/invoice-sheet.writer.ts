@@ -9,6 +9,8 @@ import {
 } from "../pricing/invoice-reconciliation";
 import { normalizeContainerNumber } from "@tms/parser";
 
+import type { ContainerCorrection } from "../matching/invoice-row-matching.service";
+
 import { toIsoDate } from "../../common/dates";
 import type { MissingTrip } from "../missing/missing-trips.service";
 import { writeAuditMarkers } from "./invoice-audit-marker";
@@ -18,7 +20,9 @@ import {
   toAddedRowTemplate,
   toFirstAddedRowNumber,
   writeAddedRow,
+  type AddedRowTemplate,
 } from "./invoice-row-appender";
+import { openRowsAt, releaseSharedFormulasFrom } from "./invoice-row-inserter";
 import type { InvoiceSheet } from "./invoice-sheet";
 
 /**
@@ -45,9 +49,6 @@ interface SharedFormulaCell {
   readonly result?: unknown;
 }
 
-/** `SUM(L2:L130)` — the shape the totals row is written in. */
-const SUM_OF_RANGE = /^\s*SUM\(\s*\$?([A-Z]+)\$?(\d+)\s*:\s*\$?([A-Z]+)\$?(\d+)\s*\)\s*$/i;
-
 /**
  * The fluorescent yellow a problem line is marked with.
  *
@@ -62,7 +63,17 @@ const PROBLEM_FILL: ExcelJS.FillPattern = {
   fgColor: { argb: "FFFFFF00" },
 };
 
-/** The same, once it covers the added block too: `SUM(L2:L99,L102:L103)`. */
+/**
+ * The colour of a container this check corrected: red text, on the one cell.
+ *
+ * Text rather than fill, and nothing else on the row: the line is not a
+ * problem — its transport was found and it is settled like any other — so it
+ * must not look like the yellow lines that are. The red says only "this value
+ * is not what you sent".
+ */
+const CORRECTED_TEXT_ARGB = "FFFF0000";
+
+/** A SUM over one or more ranges: `SUM(L2:L101)`, `SUM(L102:T102)`. */
 const SUM_CALL = /^\s*SUM\(([^)]*)\)\s*$/i;
 const RANGE = /^\s*\$?([A-Z]+)\$?(\d+)\s*:\s*\$?([A-Z]+)\$?(\d+)\s*$/i;
 
@@ -110,15 +121,23 @@ export class InvoiceSheetWriter {
     pricing: ReadonlyMap<number, InvoiceRowPricing>,
     missing: readonly MissingTrip[] = [],
     problemRowNumbers: readonly number[] = [],
+    containerCorrections: ReadonlyMap<number, ContainerCorrection> = new Map(),
   ): {
     cellsWritten: number;
     rowsCorrected: number;
     rowsAdded: number;
     firstAddedRowNumber: number | null;
     rowsMarked: number;
+    containersCorrected: number;
   } {
     let cellsWritten = 0;
     let rowsCorrected = 0;
+
+    /*
+     * Read before ANYTHING is written: the added lines take the look the
+     * customer's lines have as they were sent, not as this check marked them.
+     */
+    const template = toAddedRowTemplate(worksheet, sheet);
 
     this.releaseBorrowedFormulas(worksheet, sheet, pricing);
 
@@ -135,11 +154,21 @@ export class InvoiceSheetWriter {
       rowsCorrected += written > 0 ? 1 : 0;
     }
 
-    const added = this.appendMissing(workbook, worksheet, sheet, missing);
+    const containersCorrected = this.correctContainers(
+      worksheet,
+      sheet,
+      containerCorrections,
+    );
+    /*
+     * Everything addressed by the row numbers the check reported happens
+     * BEFORE the added lines open space above the totals row; after that, a
+     * row below the opening is on another number.
+     */
     const rowsMarked = this.markProblems(worksheet, sheet, problemRowNumbers);
+    const added = this.appendMissing(workbook, worksheet, sheet, template, missing);
 
     if (cellsWritten > 0 || added.rowsAdded > 0) {
-      this.refreshTotals(worksheet, sheet);
+      this.refreshTotals(worksheet, sheet, added.rowsAdded);
 
       /*
        * Excel recalculates everything on open. The cached results this writer
@@ -155,9 +184,61 @@ export class InvoiceSheetWriter {
       rowsCorrected,
       rowsAdded: added.rowsAdded,
       rowsMarked,
+      containersCorrected,
     });
 
-    return { cellsWritten, rowsCorrected, ...added, rowsMarked };
+    return {
+      cellsWritten,
+      rowsCorrected,
+      ...added,
+      rowsMarked,
+      containersCorrected,
+    };
+  }
+
+  /**
+   * Writes the Trip's own container over a misprinted one, in red.
+   *
+   * ── ONE CELL, ONE PROPERTY OF ITS STYLE ───────────────────────────────────
+   * Only the `Container nr.` cell of a corrected line, and only its font
+   * colour: the fill, the border, the alignment, the font's own face, size and
+   * weight all stay exactly as the customer had them.
+   *
+   * The style is REBUILT rather than edited in place. ExcelJS gives every cell
+   * that shares a style in the file ONE shared style object — `getStyleModel`
+   * caches it per style id — so editing it would recolour every cell with that
+   * style. On the real `week 13` invoice one row edited in place recoloured
+   * 1,543 of its 1,690 cells. A fresh style object carrying a fresh font object
+   * is this cell's alone.
+   *
+   * The value written is the Trip's container exactly as this system stores
+   * it. No spelling is invented for it: it is the transport's own container.
+   */
+  private correctContainers(
+    worksheet: ExcelJS.Worksheet,
+    sheet: InvoiceSheet,
+    corrections: ReadonlyMap<number, ContainerCorrection>,
+  ): number {
+    const position = sheet.columns.containerNumber;
+
+    if (position === undefined || corrections.size === 0) {
+      return 0;
+    }
+
+    for (const [rowNumber, correction] of corrections) {
+      const cell = worksheet.getRow(rowNumber).getCell(position);
+
+      cell.value = correction.tripContainerNumber;
+      cell.style = {
+        ...cell.style,
+        font: {
+          ...cell.style.font,
+          color: { argb: CORRECTED_TEXT_ARGB },
+        },
+      };
+    }
+
+    return corrections.size;
   }
 
   /**
@@ -172,6 +253,13 @@ export class InvoiceSheetWriter {
    *
    * The transports added below are never marked: they are not a problem, they
    * are what the invoice was missing.
+   *
+   * ── WHY THIS NO LONGER TURNS THE WHOLE WORKBOOK YELLOW ───────────────────
+   * It used to write `cell.fill = …`, and ExcelJS implements that as
+   * `this.style.fill = …` on a style object EVERY cell with the same style
+   * shares. Marking one line painted every ordinary cell in the document — on
+   * the real `week 13` invoice, 1,543 of 1,690 cells. Each marked cell now gets
+   * a style object of its own, so the fill lands on the line and nowhere else.
    */
   private markProblems(
     worksheet: ExcelJS.Worksheet,
@@ -189,7 +277,7 @@ export class InvoiceSheetWriter {
       worksheet
         .getRow(row.rowNumber)
         .eachCell({ includeEmpty: true }, (cell) => {
-          cell.fill = PROBLEM_FILL;
+          cell.style = { ...cell.style, fill: { ...PROBLEM_FILL } };
         });
       count += 1;
     }
@@ -198,28 +286,26 @@ export class InvoiceSheetWriter {
   }
 
   /**
-   * Writes the finished transports the invoice never mentioned, below it.
+   * Writes the finished transports the invoice never mentioned, directly below
+   * its last line and directly above its totals.
    *
-   * ── NOTHING EXISTING MOVES ────────────────────────────────────────────────
-   * Not one row is inserted, shifted or renumbered: the lines the customer wrote
-   * keep the row numbers the check reported them by, and these go underneath,
-   * past the summary block, after one blank line. That is the only placement
-   * ExcelJS can perform on a workbook with shared formulas at all — inserting
-   * throws — and it is what `§8` of the specification calls for.
-   *
-   * The totals then grow to cover them, so the document still adds up.
+   * ── ROOM IS MADE, NOT FOUND ───────────────────────────────────────────────
+   * The totals row and everything below it move down by the number of added
+   * lines — see `openRowsAt`, which does it without `spliceRows` and rewrites
+   * every formula for the move. The totals' ranges grow over the added lines,
+   * the summary block follows the totals it reads, and no line the customer
+   * wrote changes its row, because all of them are above the opening.
    */
   private appendMissing(
     workbook: ExcelJS.Workbook,
     worksheet: ExcelJS.Worksheet,
     sheet: InvoiceSheet,
+    template: AddedRowTemplate | null,
     missing: readonly MissingTrip[],
   ): { rowsAdded: number; firstAddedRowNumber: number | null } {
     if (missing.length === 0) {
       return { rowsAdded: 0, firstAddedRowNumber: null };
     }
-
-    const template = toAddedRowTemplate(worksheet, sheet);
 
     if (template === null) {
       // A document with no line of its own offers no convention to follow, and
@@ -233,11 +319,11 @@ export class InvoiceSheetWriter {
 
     const firstAddedRowNumber = toFirstAddedRowNumber(sheet);
 
+    openRowsAt(worksheet, firstAddedRowNumber, missing.length);
+
     missing.forEach((trip, index) => {
       writeAddedRow(worksheet, sheet, template, trip, firstAddedRowNumber + index);
     });
-
-    this.extendTotals(worksheet, sheet, firstAddedRowNumber, missing.length);
 
     /*
      * ── THE DOCUMENT REMEMBERS WHAT WE WROTE INTO IT ──────────────────────
@@ -245,9 +331,18 @@ export class InvoiceSheetWriter {
      * twice still knows all of its added lines. Without this the next upload
      * would read them as the customer's own and settle transports nobody
      * invoiced — see `invoice-audit-marker.ts`.
+     *
+     * A line an earlier run added BELOW the opening — a document produced
+     * before added lines went above the totals — has just moved down with
+     * everything else, and its record moves with it. A record left on the old
+     * number would stop recognising its line, and the next upload would pay it.
      */
     writeAuditMarkers(workbook, [
-      ...sheet.addedByAudit.values(),
+      ...[...sheet.addedByAudit.values()].map((marker) =>
+        marker.rowNumber >= firstAddedRowNumber
+          ? { ...marker, rowNumber: marker.rowNumber + missing.length }
+          : marker,
+      ),
       ...missing.map((trip, index) => ({
         rowNumber: firstAddedRowNumber + index,
         tripId: trip.trip.id,
@@ -265,47 +360,6 @@ export class InvoiceSheetWriter {
     });
 
     return { rowsAdded: missing.length, firstAddedRowNumber };
-  }
-
-  /**
-   * Grows each total so the added lines count towards it.
-   *
-   * ── THE FORMULA STAYS A FORMULA ───────────────────────────────────────────
-   * `SUM(L2:L99)` becomes `SUM(L2:L99,L102:L103)` — the customer's own range,
-   * untouched, with the added block beside it. No total is ever replaced by a
-   * figure, and a totals cell that is itself a shared master keeps its shape.
-   */
-  private extendTotals(
-    worksheet: ExcelJS.Worksheet,
-    sheet: InvoiceSheet,
-    firstAddedRowNumber: number,
-    count: number,
-  ): void {
-    if (sheet.totalsRowNumber === null) {
-      return;
-    }
-
-    const lastAddedRowNumber = firstAddedRowNumber + count - 1;
-
-    worksheet
-      .getRow(sheet.totalsRowNumber)
-      .eachCell({ includeEmpty: false }, (cell) => {
-        const formula = toFormula(cell.value);
-        const match = formula === null ? null : SUM_OF_RANGE.exec(formula);
-
-        if (formula === null || match === null) {
-          return;
-        }
-
-        const letter = match[1];
-        const shared = cell.value as SharedFormulaCell;
-
-        cell.value = {
-          formula: `SUM(${match[1]}${match[2]}:${match[3]}${match[4]},${letter}${firstAddedRowNumber}:${letter}${lastAddedRowNumber})`,
-          result: 0,
-          ...(shared.shareType ? { shareType: shared.shareType, ref: shared.ref } : {}),
-        } as ExcelJS.CellFormulaValue;
-      });
   }
 
   /**
@@ -436,12 +490,30 @@ export class InvoiceSheetWriter {
    * Only the two shapes these documents actually use are recomputed: a SUM over
    * a range, and a reference to a single cell. Anything else keeps whatever it
    * had, and `fullCalcOnLoad` is what covers it when the file is opened.
+   *
+   * ── EVERY TOTALS CELL, NOT ONLY THE MASTER ────────────────────────────────
+   * The customer's totals row writes its SUMs as one shared formula, and a cell
+   * that BORROWS a formula holds none of its own — so it was never refreshed
+   * here, and its cached figure stayed what the customer's file said. The
+   * totals' group is given back as ordinary formulas first, so each cell is
+   * refreshed with the formula it actually calculates.
+   *
+   * `rowsAdded` is how far the totals and the summary moved when added lines
+   * opened space above them; their reported row numbers are from before.
    */
-  private refreshTotals(worksheet: ExcelJS.Worksheet, sheet: InvoiceSheet): void {
+  private refreshTotals(
+    worksheet: ExcelJS.Worksheet,
+    sheet: InvoiceSheet,
+    rowsAdded: number,
+  ): void {
     const rowNumbers = [
       ...(sheet.totalsRowNumber === null ? [] : [sheet.totalsRowNumber]),
       ...sheet.summaryRowNumbers,
-    ];
+    ].map((rowNumber) => rowNumber + rowsAdded);
+
+    if (rowNumbers.length > 0) {
+      releaseSharedFormulasFrom(worksheet, Math.min(...rowNumbers));
+    }
 
     for (const rowNumber of rowNumbers) {
       worksheet.getRow(rowNumber).eachCell({ includeEmpty: false }, (cell) => {
@@ -459,15 +531,22 @@ export class InvoiceSheetWriter {
           return;
         }
 
-        const shared = cell.value as SharedFormulaCell;
-
-        // A totals cell may itself be a master. Its shape is kept, so the cells
-        // borrowing from it keep working.
         cell.value = {
           formula,
           result: toNumber(result),
-          ...(shared.shareType ? { shareType: shared.shareType, ref: shared.ref } : {}),
         } as ExcelJS.CellFormulaValue;
+
+        /*
+         * A total of nothing prints as nothing. The customer's money format
+         * spells zero as `- €`; only that section of the format is emptied, on
+         * the totals and summary cells this writer recalculates, and every
+         * other figure keeps its exact format.
+         */
+        const numFmt = withBlankZero(cell.style.numFmt);
+
+        if (numFmt !== cell.style.numFmt) {
+          cell.style = { ...cell.style, numFmt };
+        }
       });
     }
   }
@@ -484,24 +563,24 @@ export class InvoiceSheetWriter {
 
     let total = new Prisma.Decimal(0);
 
-    // `SUM(L2:L99,L102:L103)`: the customer's own range and the added block.
+    // `SUM(L2:L101)` down a column, or `SUM(L102:T102)` — the grand total —
+    // across one; any rectangle of cells, each counted once.
     for (const part of inside[1].split(",")) {
       const range = RANGE.exec(part);
 
-      if (range === null || range[1].toUpperCase() !== range[3].toUpperCase()) {
+      if (range === null) {
         return null;
       }
 
-      const column = worksheet.getColumn(range[1]).number;
+      const firstColumn = worksheet.getColumn(range[1]).number;
+      const lastColumn = worksheet.getColumn(range[3]).number;
 
-      for (
-        let rowNumber = Number(range[2]);
-        rowNumber <= Number(range[4]);
-        rowNumber += 1
-      ) {
-        total = total.plus(
-          toAmountCell(worksheet.getRow(rowNumber).getCell(column).value).value ?? 0,
-        );
+      for (let rowNumber = Number(range[2]); rowNumber <= Number(range[4]); rowNumber += 1) {
+        for (let column = firstColumn; column <= lastColumn; column += 1) {
+          total = total.plus(
+            toAmountCell(worksheet.getRow(rowNumber).getCell(column).value).value ?? 0,
+          );
+        }
       }
     }
 
@@ -538,6 +617,62 @@ function isFormulaMaster(value: unknown): boolean {
     typeof value === "object" &&
     (value as SharedFormulaCell).shareType === "shared"
   );
+}
+
+/**
+ * A number format whose ZERO section prints nothing.
+ *
+ * Excel formats have up to four `;`-separated sections — positive, negative,
+ * zero, text. The customer's money format puts `"-"` in the third, which is the
+ * `- €` an empty total shows. That section is emptied and the other three are
+ * kept exactly. A format with fewer sections gets an empty zero section added
+ * behind what it has; `General` and an absent format are left alone.
+ */
+export function withBlankZero(numFmt: string | undefined): string | undefined {
+  if (!numFmt || numFmt === "General") {
+    return numFmt;
+  }
+
+  const sections = splitFormatSections(numFmt);
+
+  if (sections.length === 1) {
+    return `${sections[0]};-${sections[0]};`;
+  }
+
+  if (sections.length === 2) {
+    return `${sections[0]};${sections[1]};`;
+  }
+
+  return [sections[0], sections[1], "", ...sections.slice(3)].join(";");
+}
+
+/** The `;`-separated sections, ignoring any `;` inside quotes or brackets. */
+function splitFormatSections(numFmt: string): string[] {
+  const sections: string[] = [];
+  let current = "";
+  let quoted = false;
+  let bracketed = false;
+
+  for (const character of numFmt) {
+    if (character === '"' && !bracketed) {
+      quoted = !quoted;
+    } else if (character === "[" && !quoted) {
+      bracketed = true;
+    } else if (character === "]" && !quoted) {
+      bracketed = false;
+    }
+
+    if (character === ";" && !quoted && !bracketed) {
+      sections.push(current);
+      current = "";
+    } else {
+      current += character;
+    }
+  }
+
+  sections.push(current);
+
+  return sections;
 }
 
 /** Money as a cell holds it: a number at the money precision, never a string. */

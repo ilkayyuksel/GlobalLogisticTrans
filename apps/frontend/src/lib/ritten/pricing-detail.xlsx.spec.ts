@@ -6,6 +6,7 @@ import ExcelJS from "exceljs";
 
 import type { PricingSnapshot, Trip } from "@/lib/api/types";
 import { combinationFillArgb } from "./combination";
+import type { TripExportLabels } from "@/lib/api/trip-export-labels";
 import { toPricingRow } from "./export-rows";
 import { buildPricingWorkbook } from "./export-workbooks";
 
@@ -37,9 +38,6 @@ import { buildPricingWorkbook } from "./export-workbooks";
  */
 const GROUP_A = "5a1e7c1e-0000-4000-8000-00000000c0b1";
 const GROUP_B = "7fd2a904-0000-4000-8000-00000000d0c3";
-
-/** The Custom Property the Engine applies on its own, as Settings names it. */
-const TAR_ID = "b36469b0-37ec-40ba-81da-9bc272e05d60";
 
 interface Line {
   readonly code: string;
@@ -129,10 +127,15 @@ interface Sheet {
  * them, and what is asserted is what the file holds.
  */
 async function writeSheet(
-  trips: { trip: Trip; snapshot: PricingSnapshot | null }[],
+  trips: {
+    trip: Trip;
+    snapshot: PricingSnapshot | null;
+    /** The backend's words for this Trip; none unless a test supplies them. */
+    labels?: TripExportLabels;
+  }[],
 ): Promise<Sheet> {
-  const rows = trips.map(({ trip, snapshot }) =>
-    toPricingRow(trip, snapshot, { automaticPropertyId: TAR_ID }),
+  const rows = trips.map(({ trip, snapshot, labels }) =>
+    toPricingRow(trip, snapshot, labels),
   );
   const buffer = await buildPricingWorkbook(rows, "nl");
 
@@ -286,51 +289,53 @@ describe("Brandstof is a price, not a percentage", () => {
   });
 });
 
-describe("the Cost Confirmation references in Remarks", () => {
-  const WITH_PROPERTY = buildTrip({
-    customProperties: [{ id: "prop-1", name: "Aan/Afkoppelen", isActive: true }],
-  } as Partial<Trip>);
+/**
+ * ── REMARKS: THE BACKEND'S WORDS, PLACED ────────────────────────────────────
+ * What Remarks SAYS — the properties, TAR, the waiting window, every Cost
+ * Confirmation reference, and their order — is composed by the backend
+ * (`trip-export-labels.ts`), whose own tests hold every case this file used to.
+ * What is tested here is the browser's part: the text lands in the Remarks
+ * column of its OWN Trip's row, exactly as given.
+ */
+describe("the Remarks column", () => {
+  const SAID: TripExportLabels = {
+    remarks: "Aan/Afkoppelen | TAR | Wachttijd 07:00-10:00 | CC4139505",
+    waitingLabel: "Wachttijd 07:00-10:00",
+    tarCharged: true,
+  };
 
-  it("says nothing when the Trip has no confirmation", async () => {
+  it("prints the backend's Remarks text exactly as given", async () => {
     const sheet = await writeSheet([
-      {
-        trip: WITH_PROPERTY,
-        snapshot: snapshotOf({ code: "BASE_PRICE", amount: "100.00" }),
-      },
+      { trip: buildTrip(), snapshot: snapshotOf({ code: "BASE_PRICE", amount: "100.00" }), labels: SAID },
     ]);
 
-    expect(sheet.cell("Remarks").value).toBe("Aan/Afkoppelen");
+    expect(sheet.cell("Remarks").value).toBe(SAID.remarks);
   });
 
-  it("adds the reference of the one confirmation, keeping the remarks", async () => {
+  it("leaves Remarks empty when there is nothing to say", async () => {
     const sheet = await writeSheet([
-      {
-        trip: WITH_PROPERTY,
-        snapshot: snapshotOf(
-          { code: "BASE_PRICE", amount: "100.00" },
-          {
-            code: "COST_CONFIRMATION",
-            amount: "121.25",
-            description: confirmedBy("4139505"),
-          },
-        ),
-      },
+      { trip: buildTrip(), snapshot: snapshotOf({ code: "BASE_PRICE", amount: "100.00" }) },
     ]);
 
-    expect(sheet.cell("Remarks").value).toBe("Aan/Afkoppelen | CC4139505");
-    expect(sheet.cell("EK").value).toBe(121.25);
+    expect(sheet.cell("Remarks").value).toBe("");
   });
 
-  /**
-   * ── INSTALMENTS: EVERY REFERENCE, AND THEIR TOTAL ─────────────────────────
-   * A Trip confirmed at €100, then €25, then €40 is worth €165 and names three
-   * documents. The backend already summed them into the one EK line and wrote
-   * their references on it, so the sheet loses neither.
-   */
-  it("names every confirmation, with their sum in EK", async () => {
+  /** Each row carries its OWN Trip's words, never its neighbour's. */
+  it("keeps each Trip's Remarks on its own row", async () => {
+    const sheet = await writeSheet([
+      { trip: buildTrip(), snapshot: null, labels: { ...SAID, remarks: "CC4139505" } },
+      { trip: buildTrip({ id: "trip-2" }), snapshot: null, labels: { ...SAID, remarks: "CC4156173" } },
+    ]);
+
+    expect(sheet.cell("Remarks", 0).value).toBe("CC4139505");
+    expect(sheet.cell("Remarks", 1).value).toBe("CC4156173");
+  });
+
+  /** EK is an amount, and the browser still reads it off the stored line. */
+  it("prints the sum of every confirmation in EK", async () => {
     const sheet = await writeSheet([
       {
-        trip: WITH_PROPERTY,
+        trip: buildTrip(),
         snapshot: snapshotOf(
           { code: "BASE_PRICE", amount: "100.00" },
           {
@@ -342,167 +347,23 @@ describe("the Cost Confirmation references in Remarks", () => {
       },
     ]);
 
-    expect(sheet.cell("Remarks").value).toBe(
-      "Aan/Afkoppelen | CC4139505 | CC4156173 | CC4161980",
-    );
     expect(sheet.cell("EK").value).toBe(165);
   });
 
-  /** One document counts once, however often it was processed. */
-  it("never repeats a reference", async () => {
+  /** The waiting time's own column is the stored amount, whatever Remarks says. */
+  it("prints the waiting time's price in its own column", async () => {
     const sheet = await writeSheet([
       {
         trip: buildTrip(),
-        snapshot: snapshotOf({
-          code: "COST_CONFIRMATION",
-          amount: "121.25",
-          description: confirmedBy("4139505", "4139505"),
-        }),
-      },
-    ]);
-
-    expect(sheet.cell("Remarks").value).toBe("CC4139505");
-  });
-
-  /** Each row carries its OWN Trip's confirmation, never its neighbour's. */
-  it("keeps each Trip's references on its own row", async () => {
-    const sheet = await writeSheet([
-      {
-        trip: buildTrip(),
-        snapshot: snapshotOf({
-          code: "COST_CONFIRMATION",
-          amount: "100.00",
-          description: confirmedBy("4139505"),
-        }),
-      },
-      {
-        trip: buildTrip({ id: "trip-2" }),
-        snapshot: snapshotOf({
-          code: "COST_CONFIRMATION",
-          amount: "25.00",
-          description: confirmedBy("4156173"),
-        }),
-      },
-    ]);
-
-    expect(sheet.cell("Remarks", 0).value).toBe("CC4139505");
-    expect(sheet.cell("Remarks", 1).value).toBe("CC4156173");
-  });
-});
-
-describe("TAR and the waiting time in Remarks", () => {
-  /**
-   * TAR is charged BY THE ENGINE, not ticked by anybody, so a Trip that owes it
-   * carries no property naming it. The word comes from the charge in the stored
-   * snapshot — the same rule the BASIS sheet's Info column follows — and the
-   * TAR-nummer itself never leaves the office.
-   */
-  it("names a TAR the Engine charged", async () => {
-    const sheet = await writeSheet([
-      {
-        trip: buildTrip({ tarNummer: "TAR123" } as Partial<Trip>),
-        snapshot: snapshotOf(
-          { code: "BASE_PRICE", amount: "100.00" },
-          { code: "CUSTOM_PROPERTY", amount: "20.00", customPropertyId: TAR_ID },
-        ),
-      },
-    ]);
-
-    expect(sheet.cell("Remarks").value).toBe("TAR");
-    expect(String(sheet.cell("Remarks").value)).not.toContain("TAR123");
-  });
-
-  /** The same-day rule withheld the charge, so there is nothing to name. */
-  it("says nothing when the charge was withheld", async () => {
-    const sheet = await writeSheet([
-      {
-        trip: buildTrip({ tarNummer: "TAR123" } as Partial<Trip>),
-        snapshot: snapshotOf({ code: "BASE_PRICE", amount: "100.00" }),
-      },
-    ]);
-
-    expect(sheet.cell("Remarks").value).toBe("");
-  });
-
-  /** Assigned by hand AND charged: said once, not twice. */
-  it("does not repeat a TAR the Trip already carries as a property", async () => {
-    const sheet = await writeSheet([
-      {
-        trip: buildTrip({
-          customProperties: [{ id: TAR_ID, name: "TAR", isActive: true }],
-        } as Partial<Trip>),
-        snapshot: snapshotOf({
-          code: "CUSTOM_PROPERTY",
-          amount: "20.00",
-          customPropertyId: TAR_ID,
-        }),
-      },
-    ]);
-
-    expect(sheet.cell("Remarks").value).toBe("TAR");
-  });
-
-  /** The window an operator read off a clock, beside what it cost. */
-  it("prints the waiting window", async () => {
-    const sheet = await writeSheet([
-      {
-        trip: buildTrip({
-          waitingTimeStart: "07:00:00",
-          waitingTimeEnd: "10:00:00",
-          waitingTimeMinutes: 180,
-        } as Partial<Trip>),
         snapshot: snapshotOf(
           { code: "BASE_PRICE", amount: "100.00" },
           { code: "WAITING_TIME", amount: "55.00" },
         ),
+        labels: SAID,
       },
     ]);
 
-    expect(sheet.cell("Remarks").value).toBe("Wachttijd 07:00-10:00");
     expect(sheet.cell("Wachttijd").value).toBe(55);
-  });
-
-  /** No window recorded: the duration it does have, rather than an invented one. */
-  it("falls back to the duration", async () => {
-    const sheet = await writeSheet([
-      {
-        trip: buildTrip({ waitingTimeMinutes: 90 } as Partial<Trip>),
-        snapshot: snapshotOf({ code: "WAITING_TIME", amount: "25.00" }),
-      },
-    ]);
-
-    expect(sheet.cell("Remarks").value).toBe("Wachttijd 1 u 30 min");
-  });
-
-  /** Everything at once, in the order the column assembles it. */
-  it("puts the properties, TAR, the waiting time and the confirmations in order", async () => {
-    const sheet = await writeSheet([
-      {
-        trip: buildTrip({
-          tarNummer: "TAR123",
-          waitingTimeStart: "07:00:00",
-          waitingTimeEnd: "10:00:00",
-          waitingTimeMinutes: 180,
-          customProperties: [
-            { id: "prop-1", name: "Aan/Afkoppelen", isActive: true },
-          ],
-        } as Partial<Trip>),
-        snapshot: snapshotOf(
-          { code: "BASE_PRICE", amount: "100.00" },
-          { code: "CUSTOM_PROPERTY", amount: "20.00", customPropertyId: TAR_ID },
-          { code: "WAITING_TIME", amount: "55.00" },
-          {
-            code: "COST_CONFIRMATION",
-            amount: "121.25",
-            description: confirmedBy("4139505"),
-          },
-        ),
-      },
-    ]);
-
-    expect(sheet.cell("Remarks").value).toBe(
-      "Aan/Afkoppelen | TAR | Wachttijd 07:00-10:00 | CC4139505",
-    );
   });
 });
 

@@ -137,6 +137,23 @@ export class TripService {
     );
   }
 
+  /**
+   * Several Trips by id, as the API describes them, in one batch.
+   *
+   * For a reader that needs the Trip exactly as a client receives it — its
+   * Custom Properties, its latest Cost Confirmation, its waiting window as
+   * clock text — without going through a page of the list. An unknown id is
+   * simply absent from the answer; a known one is returned whatever its status,
+   * because the caller names Trips it already holds.
+   */
+  async findManyByIds(ids: readonly string[]): Promise<TripResponseDto[]> {
+    if (ids.length === 0) {
+      return [];
+    }
+
+    return this.toResponses(await this.repository.findManyByIds(ids));
+  }
+
   async findAll(query: ListTripsQueryDto): Promise<PaginatedTripsDto> {
     const { items, totalItems } = await this.repository.findPage({
       status: query.status,

@@ -8,6 +8,7 @@ import ExcelJS from "exceljs";
 
 import { buildTrip } from "@/app/trips/ritten-test-support";
 import { request } from "@/lib/api/client";
+import { NO_LABELS, type TripExportLabels } from "@/lib/api/trip-export-labels";
 import type { PricingSnapshot, Trip } from "@/lib/api/types";
 import { LanguageProvider } from "@/lib/i18n/language-provider";
 import { downloadWorkbook } from "@/lib/ritten/export-workbook";
@@ -147,6 +148,12 @@ function genuinePair(deliveryDate: string, collectionDate: string) {
 interface Backend {
   readonly trips: readonly Trip[];
   readonly snapshots: readonly PricingSnapshot[];
+  /**
+   * The export words the backend composes, by Trip id. A Trip with none says
+   * nothing — the backend's own answer for a Trip with no properties, no TAR,
+   * no waiting time and no confirmation.
+   */
+  readonly labels?: Readonly<Record<string, TripExportLabels>>;
 }
 
 /** Every request the export made, so a spec can say what was — and was not — asked. */
@@ -188,6 +195,14 @@ function serve(backend: Backend): void {
 
       return Promise.resolve(
         backend.snapshots.filter((snapshot) => ids.includes(snapshot.pricing.tripId)),
+      );
+    }
+
+    if (path === "/api/v1/trip-export/labels") {
+      const ids = String(query.tripIds).split(",");
+
+      return Promise.resolve(
+        ids.map((tripId) => ({ tripId, ...(backend.labels?.[tripId] ?? NO_LABELS) })),
       );
     }
 
@@ -416,6 +431,9 @@ describe("BASIS Backload comes from each Trip's own snapshot", () => {
           snapshotOf(delivery.id, COMBINATION_LEG),
           snapshotOf(waited.id, [...COMBINATION_LEG, ["WAITING_TIME", "55.00"]]),
         ],
+        labels: {
+          [waited.id]: { ...NO_LABELS, waitingLabel: "Wachttijd 07:00-10:00" },
+        },
       },
       "day",
       DAY_2,
@@ -441,6 +459,8 @@ describe("BASIS Backload comes from each Trip's own snapshot", () => {
           ]),
           snapshotOf(collection.id, COMBINATION_LEG),
         ],
+        // The backend reads the charge off the numbered leg's snapshot.
+        labels: { [numbered.id]: { ...NO_LABELS, tarCharged: true } },
       };
     }
 

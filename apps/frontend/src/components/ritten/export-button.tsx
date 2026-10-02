@@ -5,11 +5,8 @@ import { useState } from "react";
 import { userFacingMessage } from "@/lib/api/client";
 import { listCustomProperties } from "@/lib/api/custom-properties";
 import { fetchPricingSnapshots } from "@/lib/api/pricing";
-import {
-  findAutomaticPropertyId,
-  listSettings,
-} from "@/lib/api/settings";
 import { ExportTooLargeError, fetchTripsForExport } from "@/lib/api/trip-export";
+import { fetchTripExportLabels } from "@/lib/api/trip-export-labels";
 import { MAX_PAGE_SIZE, type ListTripsParams } from "@/lib/api/trips";
 import { useLanguage, useTranslation } from "@/lib/i18n/language-provider";
 import { combinationPalette } from "@/lib/ritten/combination";
@@ -78,8 +75,19 @@ export function ExportButton({
        * the basic export, because its Kosten column is made of stored pricing
        * lines rather than of anything this browser could work out.
        */
-      const snapshots = await fetchPricingSnapshots(
-        trips.map((trip) => trip.id),
+      const tripIds = trips.map((trip) => trip.id);
+      const snapshots = await fetchPricingSnapshots(tripIds);
+
+      /*
+       * What each Trip's cells SAY — Remarks, the waiting window, whether TAR
+       * was charged — composed by the backend, which owns that vocabulary. The
+       * same words the invoice check writes into the customer's workbook, so
+       * the two can never disagree. Only the word for waiting time is ours: it
+       * is the operator's language.
+       */
+      const labels = await fetchTripExportLabels(
+        tripIds,
+        t("ritten.export.waitingWord"),
       );
 
       /*
@@ -93,19 +101,8 @@ export function ExportButton({
       const palette = combinationPalette(trips);
 
       if (kind === "pricing") {
-        /*
-         * Which property is TAR, so its line can be RECOGNISED in a stored
-         * snapshot — the same lookup the BASIS export makes, and for the same
-         * reason: whether TAR applied was decided by the Engine, not here.
-         */
-        const automaticPropertyId = findAutomaticPropertyId(await listSettings());
-        const waitingWord = t("ritten.export.waitingWord");
-
         const rows = trips.map((trip) =>
-          toPricingRow(trip, snapshots.get(trip.id) ?? null, {
-            automaticPropertyId,
-            waitingWord,
-          }),
+          toPricingRow(trip, snapshots.get(trip.id) ?? null, labels.get(trip.id)),
         );
 
         downloadWorkbook(
@@ -123,23 +120,13 @@ export function ExportButton({
           pageSize: MAX_PAGE_SIZE,
         });
         const manualPropertyIds = toManualPropertyIds(properties.items);
-        const waitingWord = t("ritten.export.waitingWord");
-        /*
-         * Which property is TAR, so its line can be RECOGNISED in a stored
-         * snapshot. Whether TAR applied is never decided here — the Engine
-         * already decided it, same-day rule included, and the snapshot says so.
-         */
-        const automaticPropertyId = findAutomaticPropertyId(
-          await listSettings(),
-        );
 
         const rows = trips.map((trip) =>
           toBasicRow(
             trip,
             snapshots.get(trip.id) ?? null,
             manualPropertyIds,
-            waitingWord,
-            automaticPropertyId,
+            labels.get(trip.id),
           ),
         );
 

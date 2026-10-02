@@ -5,9 +5,9 @@ import { join } from "node:path";
 
 import ExcelJS from "exceljs";
 
-import { findAutomaticPropertyId } from "@/lib/api/settings";
 import type { Setting } from "@/lib/api/settings";
 import type { CustomProperty, PricingSnapshot, Trip } from "@/lib/api/types";
+import { captureLabels } from "./__fixtures__/capture-labels";
 import { buildBasicWorkbook, buildPricingWorkbook } from "./export-workbooks";
 import { toBasicRow, toManualPropertyIds, toPricingRow } from "./export-rows";
 
@@ -89,8 +89,7 @@ async function basisCosts(): Promise<Map<string, string>> {
           trip,
           snapshotOf(trip),
           toManualPropertyIds(CAPTURE.catalog),
-          "Wachttijd",
-          findAutomaticPropertyId(CAPTURE.settings),
+          captureLabels(trip.id),
         ),
       ),
       "nl",

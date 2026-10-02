@@ -112,6 +112,24 @@ export class InvoiceAuditTripDto {
  * corrected document is produced by writing into those exact rows, and the
  * screen shows it so an operator can find the line in their own file.
  */
+/**
+ * The invoice named the right transport with the wrong container.
+ *
+ * Present only on a line matched by its date and booking alone, because no Trip
+ * held the container it printed and exactly one Trip shared its booking and day.
+ * The corrected document states `tripContainerNumber` in that cell, in red.
+ */
+export class InvoiceContainerCorrectionDto {
+  @ApiProperty({ example: "EUCU 9999999", description: "As the sheet spelled it." })
+  invoiceContainerNumber!: string;
+
+  @ApiProperty({
+    example: "EUCU4581604",
+    description: "The Trip's own container, exactly as this system stores it.",
+  })
+  tripContainerNumber!: string;
+}
+
 export class InvoiceAuditRowDto {
   @ApiProperty({ example: 7, description: "The row's number in the worksheet." })
   rowNumber!: number;
@@ -163,6 +181,14 @@ export class InvoiceAuditRowDto {
 
   @ApiProperty({ type: [InvoicePricingDifferenceDto] })
   differences!: InvoicePricingDifferenceDto[];
+
+  @ApiProperty({
+    type: InvoiceContainerCorrectionDto,
+    nullable: true,
+    description:
+      "Null for every line whose container was right. Set only on a MATCHED line found by its date and booking because its container matched no Trip.",
+  })
+  containerCorrection!: InvoiceContainerCorrectionDto | null;
 }
 
 /**
@@ -260,6 +286,13 @@ export class InvoiceAuditSummaryDto {
       "Lines a previous run of this check wrote into this document. They are priced and corrected like any other line and are never settled.",
   })
   addedMissing!: number;
+
+  @ApiProperty({
+    example: 1,
+    description:
+      "MATCHED lines whose container was wrong and is corrected to the Trip's own. Counted within `matched` too.",
+  })
+  containerCorrected!: number;
 }
 
 /** The days the invoice covers, read from the lines themselves. */
@@ -330,6 +363,9 @@ export function toInvoiceAuditRowDto(
     sharedKeyRowNumbers: [...match.sharedKeyRowNumbers],
     pricingStatus: pricing?.status ?? InvoicePricingStatus.NOT_COMPARED,
     differences: (pricing?.differences ?? []).map(toDifferenceDto),
+    containerCorrection: match.containerCorrection
+      ? { ...match.containerCorrection }
+      : null,
   };
 }
 
@@ -404,6 +440,9 @@ export function toInvoiceAuditSummaryDto(
     notFinished: count(InvoiceRowStatus.NOT_FINISHED),
     ambiguous: count(InvoiceRowStatus.AMBIGUOUS),
     addedMissing: count(InvoiceRowStatus.ADDED_MISSING),
+    containerCorrected: matches.filter(
+      (match) => match.containerCorrection !== null,
+    ).length,
     priceChecked:
       priced(InvoicePricingStatus.MATCHED_NO_CHANGES) +
       priced(InvoicePricingStatus.PRICING_CORRECTED) +

@@ -5,9 +5,10 @@ import { join } from "node:path";
 
 import ExcelJS from "exceljs";
 
-import { findAutomaticPropertyId, type Setting } from "@/lib/api/settings";
+import type { Setting } from "@/lib/api/settings";
 import type { CustomProperty, PricingSnapshot, Trip } from "@/lib/api/types";
 import { COMBINATION_COLOR_COUNT } from "./combination";
+import { captureLabels } from "./__fixtures__/capture-labels";
 import { buildBasicWorkbook } from "./export-workbooks";
 import { toBasicRow, toManualPropertyIds } from "./export-rows";
 
@@ -44,7 +45,10 @@ const CAPTURE = JSON.parse(
   readFileSync(join(__dirname, "__fixtures__", "basis-live-tar.json"), "utf8"),
 ) as Capture;
 
-const TAR_ID = findAutomaticPropertyId(CAPTURE.settings);
+/** The TAR property, read off the capture's own Settings to find its lines. */
+const TAR_ID = CAPTURE.settings.find(
+  (setting) => setting.key === "AUTOMATIC_CUSTOM_PROPERTY_ID",
+)?.value;
 
 /** Row 1 is the date, row 2 the headers. */
 const FIRST_ROW = 3;
@@ -64,8 +68,7 @@ beforeAll(async () => {
       trip,
       byTrip.get(trip.id) ?? null,
       manualPropertyIds,
-      "Wachttijd",
-      TAR_ID,
+      captureLabels(trip.id),
     ),
   );
 

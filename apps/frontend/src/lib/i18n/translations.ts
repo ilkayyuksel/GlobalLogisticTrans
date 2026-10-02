@@ -101,6 +101,9 @@ const nl = {
   "invoiceAudit.applied.paid": "Op betaald gezet",
   "invoiceAudit.applied.alreadyPaid": "Was al betaald",
   "invoiceAudit.sharedKey": "zelfde sleutel als rij",
+  "invoiceAudit.containerCorrected": "Container gecorrigeerd",
+  "invoiceAudit.containerCorrected.detail":
+    "Rit gevonden op datum en booking; het containernummer op de factuur was fout en wordt gecorrigeerd:",
   "invoiceAudit.ambiguousDetail": "Aantal afgewerkte ritten met deze sleutel:",
   "invoiceAudit.noTrip": "Geen rit gevonden",
   "invoiceAudit.nothing.title": "Nog geen controle",
@@ -1162,6 +1165,9 @@ const tr: Translations = {
   "invoiceAudit.applied.paid": "Ödendi yapıldı",
   "invoiceAudit.applied.alreadyPaid": "Zaten ödenmişti",
   "invoiceAudit.sharedKey": "aynı anahtar, satır",
+  "invoiceAudit.containerCorrected": "Konteyner düzeltildi",
+  "invoiceAudit.containerCorrected.detail":
+    "Sefer tarih ve rezervasyon ile bulundu; faturadaki konteyner numarası hatalıydı ve düzeltiliyor:",
   "invoiceAudit.ambiguousDetail": "Bu anahtarla tamamlanmış sefer sayısı:",
   "invoiceAudit.noTrip": "Sefer bulunamadı",
   "invoiceAudit.nothing.title": "Henüz kontrol yok",

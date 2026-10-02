@@ -1,6 +1,7 @@
 import ExcelJS from "exceljs";
 import { Prisma, TripStatus } from "@prisma/client";
 
+import { TripExportLabelsService } from "../trip-export/trip-export-labels.service";
 import { AppLoggerService } from "../logger/app-logger.service";
 import type { EffectivePricing } from "../trip-pricing/effective-pricing";
 import { EffectivePricingService } from "../trip-pricing/effective-pricing.service";
@@ -86,6 +87,9 @@ function line(bookingNumber: string, containerNumber: string, amounts: Record<st
   };
 }
 
+/** The export words: none unless a test supplies them. */
+const exportLabels = { findForTrips: jest.fn(async () => new Map()) };
+
 describe("processing a weekly invoice", () => {
   let trips: {
     findManyForInvoice: jest.Mock;
@@ -123,6 +127,7 @@ describe("processing a weekly invoice", () => {
       new MissingTripsService(
         trips as unknown as TripRepository,
         effectivePricing as unknown as EffectivePricingService,
+        exportLabels as unknown as TripExportLabelsService,
         logger,
       ),
       writer,

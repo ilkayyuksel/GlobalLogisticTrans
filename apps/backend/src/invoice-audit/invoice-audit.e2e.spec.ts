@@ -7,7 +7,9 @@ import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import request from "supertest";
 
+import { DomainEventBus } from "../common/events/domain-event-bus";
 import { AllExceptionsFilter } from "../common/filters/all-exceptions.filter";
+import { TripExportLabelsService } from "../trip-export/trip-export-labels.service";
 import { ResponseInterceptor } from "../common/interceptors/response.interceptor";
 import { AppLoggerService } from "../logger/app-logger.service";
 import { PrismaService } from "../prisma/prisma.service";
@@ -79,8 +81,13 @@ describe("Weekly invoice check, end to end over HTTP", () => {
         { provide: AppLoggerService, useValue: logger },
         // Never queried: the one repository that would use it is replaced.
         { provide: PrismaService, useValue: {} },
+        /*
+         * Global in the running application. The Trip domain the export words
+         * are read through needs one to be constructed; nothing here publishes.
+         */
+        { provide: DomainEventBus, useValue: { publish: jest.fn(), subscribe: jest.fn() } },
       ],
-      exports: [AppLoggerService, PrismaService],
+      exports: [AppLoggerService, PrismaService, DomainEventBus],
     })
     class TestInfrastructureModule {}
 
@@ -103,6 +110,9 @@ describe("Weekly invoice check, end to end over HTTP", () => {
       } as unknown as TripRepository)
       .overrideProvider(EffectivePricingService)
       .useValue({ findForTrips } as unknown as EffectivePricingService)
+      // The export words of an added line; this suite is about the HTTP path.
+      .overrideProvider(TripExportLabelsService)
+      .useValue({ findForTrips: jest.fn(async () => new Map()) })
       .compile();
 
     application = moduleRef.createNestApplication();

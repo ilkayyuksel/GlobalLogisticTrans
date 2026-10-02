@@ -1,5 +1,6 @@
 import { TripStatus } from "@prisma/client";
 
+import { TripExportLabelsService } from "../trip-export/trip-export-labels.service";
 import { AppLoggerService } from "../logger/app-logger.service";
 import { EffectivePricingService } from "../trip-pricing/effective-pricing.service";
 import { TripRepository } from "../trips/trip.repository";
@@ -38,6 +39,9 @@ function uploaded(buffer: Buffer, originalname = "week 13 - 2026 GLT.xlsx") {
   return { buffer, originalname, size: buffer.length };
 }
 
+/** The export words: none unless a test supplies them. */
+const exportLabels = { findForTrips: jest.fn(async () => new Map()) };
+
 describe("InvoiceAuditService", () => {
   let trips: {
     findManyForInvoice: jest.Mock;
@@ -74,6 +78,7 @@ describe("InvoiceAuditService", () => {
       new MissingTripsService(
         trips as unknown as TripRepository,
         effectivePricing as unknown as EffectivePricingService,
+        exportLabels as unknown as TripExportLabelsService,
         logger,
       ),
       new InvoiceSheetWriter(logger),

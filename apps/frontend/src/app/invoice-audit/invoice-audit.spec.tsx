@@ -81,6 +81,7 @@ function result(overrides: Record<string, unknown> = {}) {
       correctedCells: 2,
       missingTrips: 1,
       addedMissing: 0,
+      containerCorrected: 0,
     },
     rows: [
       {
@@ -100,6 +101,7 @@ function result(overrides: Record<string, unknown> = {}) {
         candidates: [],
         sharedKeyRowNumbers: [],
         pricingStatus: "PRICING_CORRECTED",
+        containerCorrection: null,
         differences: [
           {
             component: "Tarief",
@@ -136,6 +138,7 @@ function result(overrides: Record<string, unknown> = {}) {
         candidates: [],
         sharedKeyRowNumbers: [],
         pricingStatus: "NOT_COMPARED",
+        containerCorrection: null,
         differences: [],
       },
       {
@@ -157,6 +160,7 @@ function result(overrides: Record<string, unknown> = {}) {
         ],
         sharedKeyRowNumbers: [],
         pricingStatus: "NOT_COMPARED",
+        containerCorrection: null,
         differences: [],
       },
       {
@@ -185,6 +189,7 @@ function result(overrides: Record<string, unknown> = {}) {
         ],
         sharedKeyRowNumbers: [],
         pricingStatus: "NOT_COMPARED",
+        containerCorrection: null,
         differences: [],
       },
     ],
@@ -446,6 +451,7 @@ describe("Excel factuurcontrole", () => {
             {
               ...result().rows[0],
               pricingStatus: "MATCHED_NO_CHANGES",
+              containerCorrection: null,
               differences: [],
             },
           ],
@@ -473,6 +479,7 @@ describe("Excel factuurcontrole", () => {
             {
               ...result().rows[0],
               pricingStatus: "NOT_DISTRIBUTABLE",
+              containerCorrection: null,
               differences: [
                 {
                   component: "EK",
@@ -570,6 +577,7 @@ describe("Excel factuurcontrole", () => {
             correctedCells: 0,
             missingTrips: 0,
             addedMissing: 0,
+            containerCorrected: 0,
           },
           rows: [
             {
@@ -577,6 +585,7 @@ describe("Excel factuurcontrole", () => {
               rowNumber: 8,
               sharedKeyRowNumbers: [9],
               pricingStatus: "MATCHED_NO_CHANGES",
+              containerCorrection: null,
               differences: [],
             },
             {
@@ -584,6 +593,7 @@ describe("Excel factuurcontrole", () => {
               rowNumber: 9,
               sharedKeyRowNumbers: [8],
               pricingStatus: "MATCHED_NO_CHANGES",
+              containerCorrection: null,
               differences: [],
             },
           ],
@@ -836,6 +846,7 @@ describe("Excel factuurcontrole", () => {
             bookingNumber: "BELANR2720016",
             containerNumber: "EUCU2451828",
             pricingStatus: "PRICING_CORRECTED",
+            containerCorrection: null,
             differences: [
               {
                 component: "Tarief",
@@ -884,6 +895,90 @@ describe("Excel factuurcontrole", () => {
       expect(
         screen.getByText(/Ritten die op betaald gezet worden/),
       ).toHaveTextContent("Ritten die op betaald gezet worden: 0");
+    });
+  });
+
+  /**
+   * A line whose transport was found by date and booking because the invoice
+   * misprinted its container. The backend decides it; the screen says it in one
+   * short line beside the container and nowhere else.
+   */
+  describe("a line whose container was corrected", () => {
+    function withCorrectedLine() {
+      return result({
+        summary: { ...result().summary, containerCorrected: 1 },
+        rows: [
+          {
+            ...result().rows[0],
+            rowNumber: 7,
+            bookingNumber: "ANRBEL2808541",
+            containerNumber: "EUCU 9999999",
+            normalizedContainerNumber: "EUCU9999999",
+            trip: {
+              id: "3f1b0d2e-0000-4000-8000-000000000007",
+              status: "CLOSED",
+              planningDate: "2026-09-28",
+              bookingNumber: "ANRBEL2808541",
+              containerNumber: "EUCU4591789",
+            },
+            containerCorrection: {
+              invoiceContainerNumber: "EUCU 9999999",
+              tripContainerNumber: "EUCU4591789",
+            },
+          },
+          { ...result().rows[0] },
+        ],
+      });
+    }
+
+    /** K — compact, visible, and inline with the line it is about. */
+    it("says so in one short line beside the container", async () => {
+      requestMock.mockResolvedValue(withCorrectedLine());
+
+      await check();
+
+      const row = rowFor("ANRBEL2808541");
+      const note = within(row).getByText(/Container gecorrigeerd/);
+
+      expect(note).toHaveTextContent("⚠Container gecorrigeerd → EUCU4591789");
+      // What the invoice printed is still shown, so the change is visible.
+      expect(row).toHaveTextContent("EUCU 9999999");
+    });
+
+    it("explains the correction in full on hover", async () => {
+      requestMock.mockResolvedValue(withCorrectedLine());
+
+      await check();
+
+      const note = within(rowFor("ANRBEL2808541")).getByText(/Container gecorrigeerd/);
+
+      expect(note.closest("[title]")).toHaveAttribute(
+        "title",
+        expect.stringContaining("EUCU 9999999 → EUCU4591789"),
+      );
+    });
+
+    /** Found and settled like any matched line: not a problem row. */
+    it("is a matched line, not a problem line", async () => {
+      requestMock.mockResolvedValue(withCorrectedLine());
+
+      await check();
+
+      const row = rowFor("ANRBEL2808541");
+
+      expect(within(row).getByText("Gematcht")).toBeInTheDocument();
+      expect(row.className).not.toContain("bg-[#fdfd66]");
+    });
+
+    /** L — an ordinary matched line carries no such note. */
+    it("shows nothing on a line whose container was right", async () => {
+      requestMock.mockResolvedValue(withCorrectedLine());
+
+      await check();
+
+      expect(
+        within(rowFor("DUBANR2718284")).queryByText(/Container gecorrigeerd/),
+      ).not.toBeInTheDocument();
     });
   });
 

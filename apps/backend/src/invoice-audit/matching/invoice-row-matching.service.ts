@@ -37,6 +37,21 @@ export const InvoiceRowStatus = {
 export type InvoiceRowStatus =
   (typeof InvoiceRowStatus)[keyof typeof InvoiceRowStatus];
 
+/**
+ * The invoice named the right transport with the wrong container.
+ *
+ * Present only on a line matched by booking and date ALONE — see the hierarchy
+ * on `InvoiceRowMatchingService` — and only when the Trip states a container of
+ * its own to correct it to. The line is an ordinary MATCHED line in every other
+ * respect: priced, payable, never marked as a problem.
+ */
+export interface ContainerCorrection {
+  /** Exactly as the sheet spells it — the value that was wrong. */
+  readonly invoiceContainerNumber: string;
+  /** The Trip's own container, exactly as this system stores it. */
+  readonly tripContainerNumber: string;
+}
+
 export interface InvoiceRowMatch {
   readonly row: InvoiceSheetRow;
   readonly status: InvoiceRowStatus;
@@ -62,6 +77,8 @@ export interface InvoiceRowMatch {
    * instead of comparing each against the whole.
    */
   readonly sharedKeyRowNumbers: readonly number[];
+  /** Null unless the invoice's container was wrong and is to be corrected. */
+  readonly containerCorrection: ContainerCorrection | null;
 }
 
 /**
@@ -81,13 +98,29 @@ const CANDIDATE_STATUSES: readonly TripStatus[] = [
 /**
  * Which Trip each invoice line is about.
  *
- * ── THE IDENTITY IS EXACTLY THREE VALUES ────────────────────────────────────
- * The planning date, the booking number and the container number — the last one
- * compared in its normalised form, because the customer's sheet writes
- * `PVDU 1123118` where this system stores `PVDU1123118`. There is deliberately
- * NO fallback: not the booking alone, not the booking with the date, not a
- * fuzzy comparison of anything. A line that does not match on all three does
- * not match, and says so.
+ * ── THE DATE IS EITHER OF THE TRIP'S TWO DATES ──────────────────────────────
+ * A Trip states two days: `originalPlanningDate`, the day the order was placed
+ * for and fixed when the Trip was created, and `planningDate`, the day the
+ * transport is actually on — moved by an operator or a revised order. The
+ * customer invoices whichever their own system holds, so a line answers to a
+ * Trip when its date EXACTLY equals either one. There is no range and no
+ * nearest day: a date that equals neither is not that transport.
+ *
+ * A Trip answering by both dates is still one Trip. Candidates are Trips, not
+ * date matches, so it is counted once.
+ *
+ * ── THE HIERARCHY, STRONGEST EVIDENCE FIRST ─────────────────────────────────
+ *   1. date + booking + container — `decideByContainer`. Whatever else shares
+ *      the booking and the day, a Trip holding the invoice's own container
+ *      answers. This is the rule the module always had.
+ *   2. date + booking alone — `decideByBookingAndDate` — reached ONLY when no
+ *      Trip of any status holds the invoice's container. The invoice is then
+ *      taken to have misprinted it, but only when exactly ONE Trip shares the
+ *      booking and the day; anything else is an ambiguity a person resolves.
+ *   3. nothing — NOT_FOUND.
+ *
+ * The booking number is always required, compared as it is written, and never
+ * relaxed: no line is ever matched on its container or its date alone.
  *
  * ── ONE QUERY FOR THE WHOLE DOCUMENT ────────────────────────────────────────
  * The days and the bookings the invoice names go to the database together and
@@ -108,34 +141,42 @@ export class InvoiceRowMatchingService {
     addedByAudit: ReadonlyMap<number, AuditMarkedRow> = new Map(),
   ): Promise<readonly InvoiceRowMatch[]> {
     const candidates = await this.loadCandidates(rows);
-    const byKey = this.groupByIdentity(candidates);
+    const byBooking = this.groupByBooking(candidates);
     const rowNumbersByKey = this.rowNumbersByIdentity(rows);
 
-    const matches = rows.map((row) => {
+    const matches = rows.map((row): InvoiceRowMatch => {
+      const onDate = (byBooking.get(row.bookingNumber) ?? []).filter((trip) =>
+        isOnInvoiceDate(trip, row.planningDate),
+      );
+      const decided =
+        decideByContainer(row, onDate) ?? decideByBookingAndDate(row, onDate);
       const key = toIdentityKey(
         row.planningDate,
         row.bookingNumber,
         row.normalizedContainerNumber,
       );
-      const forRow = byKey.get(key) ?? [];
-      const closed = forRow.filter((trip) => trip.status === TripStatus.CLOSED);
-      const matched = toStatus(closed.length, forRow.length);
+
+      /*
+       * A line this system added to this document keeps its own answer. It
+       * still resolves to its Trip — the prices are compared and corrected
+       * exactly as any other line's — but it can never be settled.
+       *
+       * And its container is never rewritten. The document's record of that
+       * line holds the identity it was written with; changing the container
+       * would make the record stop recognising it, and the next upload would
+       * then settle a transport nobody invoiced.
+       */
+      const added = wasAddedByAudit(row, addedByAudit);
 
       return {
         row,
-        /*
-         * A line this system added to this document keeps its own answer. It
-         * still resolves to its Trip — the prices below are compared and
-         * corrected exactly as any other line's — but it can never be settled.
-         */
-        status: wasAddedByAudit(row, addedByAudit)
-          ? InvoiceRowStatus.ADDED_MISSING
-          : matched,
-        trip: closed.length === 1 ? closed[0] : null,
-        candidates: forRow,
+        status: added ? InvoiceRowStatus.ADDED_MISSING : decided.status,
+        trip: decided.trip,
+        candidates: decided.candidates,
         sharedKeyRowNumbers: (rowNumbersByKey.get(key) ?? []).filter(
           (rowNumber) => rowNumber !== row.rowNumber,
         ),
+        containerCorrection: added ? null : decided.containerCorrection,
       };
     });
 
@@ -145,6 +186,9 @@ export class InvoiceRowMatchingService {
       // Counts only. A booking number is an identifier and may be logged; what
       // any of it COSTS is commercial data and is not logged anywhere.
       matched: matches.filter((match) => match.status === "MATCHED").length,
+      containerCorrected: matches.filter(
+        (match) => match.containerCorrection !== null,
+      ).length,
       notFound: matches.filter((match) => match.status === "NOT_FOUND").length,
       notFinished: matches.filter((match) => match.status === "NOT_FINISHED").length,
       ambiguous: matches.filter((match) => match.status === "AMBIGUOUS").length,
@@ -158,32 +202,41 @@ export class InvoiceRowMatchingService {
 
   /** Every Trip the document could be talking about, in one query. */
   private loadCandidates(rows: readonly InvoiceSheetRow[]): Promise<Trip[]> {
-    const planningDates = [...new Set(rows.map((row) => row.planningDate))].map(
+    const invoiceDates = [...new Set(rows.map((row) => row.planningDate))].map(
       toUtcDate,
     );
     const bookingNumbers = [...new Set(rows.map((row) => row.bookingNumber))];
 
     return this.trips.findManyForInvoice({
-      planningDates,
+      invoiceDates,
       bookingNumbers,
       statuses: CANDIDATE_STATUSES,
     });
   }
 
-  private groupByIdentity(trips: readonly Trip[]): Map<string, Trip[]> {
-    const byKey = new Map<string, Trip[]>();
+  /**
+   * The Trips holding each booking number, each Trip once.
+   *
+   * Deduplicated by id here, whatever the query returned, so that every count
+   * below — one, several, none — counts transports and never rows of a result.
+   */
+  private groupByBooking(trips: readonly Trip[]): Map<string, Trip[]> {
+    const byBooking = new Map<string, Trip[]>();
+    const seen = new Set<string>();
 
     for (const trip of trips) {
-      const key = toTripIdentityKey(trip);
-
-      if (key === null) {
+      if (trip.bookingNumber === null || seen.has(trip.id)) {
         continue;
       }
 
-      byKey.set(key, [...(byKey.get(key) ?? []), trip]);
+      seen.add(trip.id);
+      byBooking.set(trip.bookingNumber, [
+        ...(byBooking.get(trip.bookingNumber) ?? []),
+        trip,
+      ]);
     }
 
-    return byKey;
+    return byBooking;
   }
 
   private rowNumbersByIdentity(
@@ -203,6 +256,127 @@ export class InvoiceRowMatchingService {
 
     return byKey;
   }
+}
+
+/** What one line was decided to be, before it is told where it came from. */
+interface Decision {
+  readonly status: InvoiceRowStatus;
+  readonly trip: Trip | null;
+  readonly candidates: readonly Trip[];
+  readonly containerCorrection: ContainerCorrection | null;
+}
+
+/**
+ * STEP 1 — the Trips on the line's date and booking that hold its container.
+ *
+ * Null when none does, which is the only way step 2 is ever reached. A Trip of
+ * ANY status holding the invoice's exact container ends the search here:
+ *
+ *   one CLOSED Trip        MATCHED, whatever else shares the booking and day
+ *   several CLOSED Trips   AMBIGUOUS
+ *   only unfinished ones   NOT_FINISHED — the invoice named this very
+ *                          transport, it simply is not closed yet, and
+ *                          handing the line to step 2 could settle it against
+ *                          a DIFFERENT, closed Trip on the same booking
+ */
+function decideByContainer(
+  row: InvoiceSheetRow,
+  onDate: readonly Trip[],
+): Decision | null {
+  const holding = onDate.filter(
+    (trip) =>
+      normalizeContainerNumber(trip.containerNumber) ===
+      row.normalizedContainerNumber,
+  );
+
+  if (holding.length === 0) {
+    return null;
+  }
+
+  const closed = holding.filter((trip) => trip.status === TripStatus.CLOSED);
+
+  return {
+    status: toStatus(closed.length, holding.length),
+    trip: closed.length === 1 ? closed[0] : null,
+    candidates: holding,
+    containerCorrection: null,
+  };
+}
+
+/**
+ * STEP 2 — the line's date and booking alone: the invoice misprinted the
+ * container.
+ *
+ * ── EXACTLY ONE TRIP, OF ANY STATUS ─────────────────────────────────────────
+ * Every Trip sharing the booking and either date is counted — OPEN and
+ * CANCELLED ones too, not only CLOSED. With the container gone, nothing on the
+ * line says WHICH of them it is: a booking carrying a closed Trip and an open
+ * one could be invoicing either, and settling the closed one because the open
+ * one "cannot be invoiced yet" would pay a transport on a guess. So:
+ *
+ *   no Trip                    NOT_FOUND
+ *   several Trips              AMBIGUOUS — nothing corrected, nothing paid
+ *   one Trip, not CLOSED       NOT_FINISHED
+ *   one CLOSED Trip            MATCHED, with the container corrected to the
+ *                              Trip's own
+ *
+ * A sole CLOSED Trip that states no container has nothing to correct the line
+ * to, and a correction that blanked the customer's value would destroy the one
+ * container the line does state. It is left NOT_FOUND, as it always was.
+ */
+function decideByBookingAndDate(
+  row: InvoiceSheetRow,
+  onDate: readonly Trip[],
+): Decision {
+  if (onDate.length > 1) {
+    return {
+      status: InvoiceRowStatus.AMBIGUOUS,
+      trip: null,
+      candidates: onDate,
+      containerCorrection: null,
+    };
+  }
+
+  const only = onDate[0];
+
+  if (only === undefined || !only.containerNumber?.trim()) {
+    return {
+      status: InvoiceRowStatus.NOT_FOUND,
+      trip: null,
+      candidates: [],
+      containerCorrection: null,
+    };
+  }
+
+  if (only.status !== TripStatus.CLOSED) {
+    return {
+      status: InvoiceRowStatus.NOT_FINISHED,
+      trip: null,
+      candidates: [only],
+      containerCorrection: null,
+    };
+  }
+
+  return {
+    status: InvoiceRowStatus.MATCHED,
+    trip: only,
+    candidates: [only],
+    containerCorrection: {
+      invoiceContainerNumber: row.containerNumber,
+      tripContainerNumber: only.containerNumber,
+    },
+  };
+}
+
+/**
+ * Whether the Trip is on the line's date: its planned day or the day it was
+ * originally ordered for, exactly. Never a range.
+ */
+function isOnInvoiceDate(trip: Trip, invoiceDate: string): boolean {
+  return [trip.planningDate, trip.originalPlanningDate].some(
+    (date) =>
+      date !== null && date !== undefined && toIsoDate(date) === invoiceDate,
+  );
 }
 
 /**
@@ -249,11 +423,8 @@ function toStatus(closedCount: number, candidateCount: number): InvoiceRowStatus
 }
 
 /**
- * The three values, as one comparable string.
- *
- * The booking number is compared as it is written — it is an identifier this
- * system stores exactly as the document printed it — while the container is
- * already normalised by both sides before it arrives here.
+ * The line's three values, as one comparable string — used only to find the
+ * other lines of the same document stating exactly the same three.
  */
 function toIdentityKey(
   planningDate: string,
@@ -261,15 +432,4 @@ function toIdentityKey(
   normalizedContainerNumber: string,
 ): string {
   return `${planningDate}|${bookingNumber}|${normalizedContainerNumber}`;
-}
-
-/** A stored Trip's identity, or null when it states too little to have one. */
-function toTripIdentityKey(trip: Trip): string | null {
-  const container = normalizeContainerNumber(trip.containerNumber);
-
-  if (!trip.planningDate || !trip.bookingNumber || container === null) {
-    return null;
-  }
-
-  return toIdentityKey(toIsoDate(trip.planningDate), trip.bookingNumber, container);
 }

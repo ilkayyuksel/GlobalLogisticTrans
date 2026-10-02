@@ -1,6 +1,7 @@
 import ExcelJS from "exceljs";
 import { Prisma, TripStatus } from "@prisma/client";
 
+import { TripExportLabelsService } from "../trip-export/trip-export-labels.service";
 import { AppLoggerService } from "../logger/app-logger.service";
 import type { EffectivePricing } from "../trip-pricing/effective-pricing";
 import { EffectivePricingService } from "../trip-pricing/effective-pricing.service";
@@ -94,6 +95,9 @@ function formulaAt(sheet: ExcelJS.Worksheet, rowNumber: number, column: number) 
     : null;
 }
 
+/** The export words: none unless a test supplies them. */
+const exportLabels = { findForTrips: jest.fn(async () => new Map()) };
+
 describe("the corrected weekly invoice", () => {
   let trips: {
     findManyForInvoice: jest.Mock;
@@ -128,6 +132,7 @@ describe("the corrected weekly invoice", () => {
       new MissingTripsService(
         trips as unknown as TripRepository,
         effectivePricing as unknown as EffectivePricingService,
+        exportLabels as unknown as TripExportLabelsService,
         logger,
       ),
       new InvoiceSheetWriter(logger),
@@ -623,12 +628,60 @@ describe("the corrected weekly invoice", () => {
   });
 
   /**
+   * ── ONE PROBLEM LINE IS ONE YELLOW LINE ───────────────────────────────────
+   * ExcelJS gives every cell sharing a style in the file ONE style object, and
+   * the marking used to assign `cell.fill`, which writes into that shared
+   * object — so marking one line painted every ordinary cell of the document.
+   * The real-invoice suite proves this on the customer's file; this proves it
+   * wherever that file is absent.
+   */
+  describe("marking a problem line", () => {
+    const YELLOW = "FFFFFF00";
+
+    it("paints the problem line and no other line", async () => {
+      // Line 2 is found; line 3 matches nothing and is the one problem.
+      trips.findManyForInvoice.mockResolvedValue([
+        trip("trip-1", "DUBANR2718284", "EUCU4581604"),
+      ]);
+
+      const { sheet, result } = await correct(
+        await buildInvoiceWorkbook({
+          lines: [
+            { planningDate: MONDAY, bookingNumber: "DUBANR2718284", containerNumber: "EUCU 4581604", tarief: 135 },
+            { planningDate: MONDAY, bookingNumber: "ANRDUB2725107", containerNumber: "TLLU 1595717", tarief: 149 },
+          ],
+        }),
+      );
+
+      const yellowOn = (rowNumber: number) => {
+        let count = 0;
+        sheet.getRow(rowNumber).eachCell({ includeEmpty: false }, (cell) => {
+          if ((cell.fill as ExcelJS.FillPattern | undefined)?.fgColor?.argb === YELLOW) count += 1;
+        });
+
+        return count;
+      };
+
+      expect(result.rowsMarked).toBe(1);
+      expect(yellowOn(3)).toBeGreaterThan(0);
+      // The found line, the totals and the summary keep their own fills.
+      for (const rowNumber of [2, 4, 6, 7]) {
+        expect(yellowOn(rowNumber)).toBe(0);
+      }
+    });
+  });
+
+  /**
    * ── THE TRANSPORTS THE INVOICE FORGOT ─────────────────────────────────────
    * A finished, unpaid transport of the same week that the document does not
-   * mention is written underneath it: past the totals row and the summary
-   * block, after one blank line. Nothing existing moves — these workbooks carry
-   * shared formulas and ExcelJS cannot insert a row through them — and the
-   * totals grow to cover what was added.
+   * mention is written directly below its last line and directly above its
+   * totals. The totals row and the summary block move down to make room, their
+   * formulas rewritten for the move — the totals grow over the added line and
+   * the summary follows the totals.
+   *
+   * The fixture: one line on row 2, the totals on 3, a blank row, then the
+   * summary on 5–14. With one transport added: the line on 2, the ADDED line on
+   * 3, the totals on 4, a blank row, the summary on 6–15.
    */
   describe("adding a transport the invoice forgot", () => {
     /** A CLOSED, unpaid Trip of the same week, priced. */
@@ -699,19 +752,20 @@ describe("the corrected weekly invoice", () => {
       totaal: "681.08",
     });
 
-    it("writes it below the summary block, not among the invoice's own lines", async () => {
+    it("writes it directly below the last line, above the totals", async () => {
       const { sheet, result } = await aWeekMissing([missingTrip()], {
         "trip-1": pricing({ tarief: "135", brandstof: "13.50", tol: "12" }),
         "missing-1": FULL_PRICING,
       });
 
-      // One line on row 2, the totals on 3, ten summary rows through 14; the
-      // added line therefore lands on 16, after one blank row.
       expect(result.result.missingTrips).toHaveLength(1);
-      expect(result.result.missingTrips[0].rowNumber).toBe(16);
-      expect(sheet.getRow(16).getCell(COLUMN.bookingNumber).value).toBe(
+      expect(result.result.missingTrips[0].rowNumber).toBe(3);
+      expect(sheet.getRow(3).getCell(COLUMN.bookingNumber).value).toBe(
         "BELANR2720016",
       );
+      // The totals moved down beneath it; nothing was written below the summary.
+      expect(formulaAt(sheet, 4, COLUMN.tarief)).toBe("SUM(L2:L3)");
+      expect(sheet.getRow(16).getCell(COLUMN.bookingNumber).value).toBeNull();
       // And the document's own line is exactly where it was.
       expect(sheet.getRow(2).getCell(COLUMN.bookingNumber).value).toBe(
         "DUBANR2718284",
@@ -724,7 +778,7 @@ describe("the corrected weekly invoice", () => {
         "missing-1": FULL_PRICING,
       });
 
-      const row = sheet.getRow(16);
+      const row = sheet.getRow(3);
 
       expect(row.getCell(COLUMN.planningDate).value).toBeInstanceOf(Date);
       expect(row.getCell(2).value).toBe("GLT"); // the document's own Supplier
@@ -733,12 +787,12 @@ describe("the corrected weekly invoice", () => {
       expect(row.getCell(COLUMN.containerNumber).value).toBe("EUCU2451828");
       expect(row.getCell(8).value).toBe("Quay 869 -> MELSELE"); // Trip
       expect(row.getCell(9).value).toBe(31); // Distance
-      expect(amountAt(sheet, 16, COLUMN.tarief)).toBe(517.2);
-      expect(amountAt(sheet, 16, COLUMN.fuel)).toBe(51.72);
-      expect(amountAt(sheet, 16, COLUMN.tolB)).toBe(24.98);
-      expect(amountAt(sheet, 16, COLUMN.tunnel)).toBe(18.18);
-      expect(amountAt(sheet, 16, COLUMN.others)).toBe(14);
-      expect(amountAt(sheet, 16, COLUMN.ek)).toBe(55);
+      expect(amountAt(sheet, 3, COLUMN.tarief)).toBe(517.2);
+      expect(amountAt(sheet, 3, COLUMN.fuel)).toBe(51.72);
+      expect(amountAt(sheet, 3, COLUMN.tolB)).toBe(24.98);
+      expect(amountAt(sheet, 3, COLUMN.tunnel)).toBe(18.18);
+      expect(amountAt(sheet, 3, COLUMN.others)).toBe(14);
+      expect(amountAt(sheet, 3, COLUMN.ek)).toBe(55);
     });
 
     /** The toll convention of phase 3, unchanged: Tol B, and nothing else. */
@@ -748,8 +802,8 @@ describe("the corrected weekly invoice", () => {
         "missing-1": FULL_PRICING,
       });
 
-      expect(amountAt(sheet, 16, COLUMN.maut)).toBeNull();
-      expect(amountAt(sheet, 16, COLUMN.tolFr)).toBeNull();
+      expect(amountAt(sheet, 3, COLUMN.maut)).toBeNull();
+      expect(amountAt(sheet, 3, COLUMN.tolFr)).toBeNull();
     });
 
     /**
@@ -765,7 +819,7 @@ describe("the corrected weekly invoice", () => {
         },
       );
 
-      expect(amountAt(sheet, 16, COLUMN.backload)).toBe(50);
+      expect(amountAt(sheet, 3, COLUMN.backload)).toBe(50);
     });
 
     it("adds every missing transport, in the order it was given", async () => {
@@ -782,12 +836,14 @@ describe("the corrected weekly invoice", () => {
       );
 
       expect(result.result.summary.missingTrips).toBe(2);
-      expect(sheet.getRow(16).getCell(COLUMN.bookingNumber).value).toBe(
+      expect(sheet.getRow(3).getCell(COLUMN.bookingNumber).value).toBe(
         "BELANR2720016",
       );
-      expect(sheet.getRow(17).getCell(COLUMN.bookingNumber).value).toBe(
+      expect(sheet.getRow(4).getCell(COLUMN.bookingNumber).value).toBe(
         "ANRDUB2727180",
       );
+      // Both above the totals, which moved down by two.
+      expect(formulaAt(sheet, 5, COLUMN.tarief)).toBe("SUM(L2:L4)");
     });
 
     it("grows the totals to cover them, still as formulas", async () => {
@@ -796,11 +852,12 @@ describe("the corrected weekly invoice", () => {
         "missing-1": FULL_PRICING,
       });
 
-      expect(formulaAt(sheet, 3, COLUMN.tarief)).toBe("SUM(L2:L2,L16:L16)");
+      // One contiguous range over the invoice's line AND the added one.
+      expect(formulaAt(sheet, 4, COLUMN.tarief)).toBe("SUM(L2:L3)");
       // 135 from the invoice's own line, 517.20 from the added one.
-      expect(amountAt(sheet, 3, COLUMN.tarief)).toBe(652.2);
-      expect(formulaAt(sheet, 3, COLUMN.ek)).toBe("SUM(T2:T2,T16:T16)");
-      expect(amountAt(sheet, 3, COLUMN.ek)).toBe(55);
+      expect(amountAt(sheet, 4, COLUMN.tarief)).toBe(652.2);
+      expect(formulaAt(sheet, 4, COLUMN.ek)).toBe("SUM(T2:T3)");
+      expect(amountAt(sheet, 4, COLUMN.ek)).toBe(55);
     });
 
     it("keeps the summary block pointing at the grown totals", async () => {
@@ -809,8 +866,9 @@ describe("the corrected weekly invoice", () => {
         "missing-1": FULL_PRICING,
       });
 
-      expect(formulaAt(sheet, 5, 12)).toBe("L3");
-      expect(amountAt(sheet, 5, 12)).toBe(652.2);
+      // The summary moved with the totals, and reads them where they now are.
+      expect(formulaAt(sheet, 6, 12)).toBe("L4");
+      expect(amountAt(sheet, 6, 12)).toBe(652.2);
     });
 
     it("gives the added line the look of the document's own lines", async () => {
@@ -819,9 +877,9 @@ describe("the corrected weekly invoice", () => {
         "missing-1": FULL_PRICING,
       });
 
-      expect(sheet.getRow(16).getCell(COLUMN.tarief).numFmt).toBe(MONEY_FORMAT);
+      expect(sheet.getRow(3).getCell(COLUMN.tarief).numFmt).toBe(MONEY_FORMAT);
       // Not a problem row: no highlight of any kind.
-      expect(sheet.getRow(16).getCell(COLUMN.bookingNumber).fill).toEqual(
+      expect(sheet.getRow(3).getCell(COLUMN.bookingNumber).fill).toEqual(
         sheet.getRow(2).getCell(COLUMN.bookingNumber).fill,
       );
     });
@@ -838,8 +896,8 @@ describe("the corrected weekly invoice", () => {
         { sharedFuelFormula: true },
       );
 
-      expect(formulaAt(sheet, 16, COLUMN.fuel)).toBe("10%*L16");
-      expect(amountAt(sheet, 16, COLUMN.fuel)).toBe(51.72);
+      expect(formulaAt(sheet, 3, COLUMN.fuel)).toBe("10%*L3");
+      expect(amountAt(sheet, 3, COLUMN.fuel)).toBe(51.72);
     });
 
     it("writes the amount when the document's percentage would not produce it", async () => {
@@ -853,8 +911,8 @@ describe("the corrected weekly invoice", () => {
         { sharedFuelFormula: true },
       );
 
-      expect(formulaAt(sheet, 16, COLUMN.fuel)).toBeNull();
-      expect(amountAt(sheet, 16, COLUMN.fuel)).toBe(62.06);
+      expect(formulaAt(sheet, 3, COLUMN.fuel)).toBeNull();
+      expect(amountAt(sheet, 3, COLUMN.fuel)).toBe(62.06);
     });
 
     it("leaves a Trip that was never priced without invented amounts", async () => {
@@ -862,10 +920,10 @@ describe("the corrected weekly invoice", () => {
         "trip-1": pricing({ tarief: "135", brandstof: "13.50", tol: "12" }),
       });
 
-      expect(sheet.getRow(16).getCell(COLUMN.bookingNumber).value).toBe(
+      expect(sheet.getRow(3).getCell(COLUMN.bookingNumber).value).toBe(
         "BELANR2720016",
       );
-      expect(amountAt(sheet, 16, COLUMN.tarief)).toBeNull();
+      expect(amountAt(sheet, 3, COLUMN.tarief)).toBeNull();
     });
 
     /**

@@ -1,0 +1,32 @@
+{
+  "dddddddd-0000-4000-8000-0000000000f6": {
+    "remarks": "TAR | Wachttijd 0 min",
+    "waitingLabel": "Wachttijd 0 min",
+    "tarCharged": true
+  },
+  "dddddddd-0000-4000-8000-0000000000f4": {
+    "remarks": "TAR | Wachttijd 0 min",
+    "waitingLabel": "Wachttijd 0 min",
+    "tarCharged": true
+  },
+  "dddddddd-0000-4000-8000-0000000000f3": {
+    "remarks": "TAR | Wachttijd 0 min",
+    "waitingLabel": "Wachttijd 0 min",
+    "tarCharged": true
+  },
+  "dddddddd-0000-4000-8000-0000000000f2": {
+    "remarks": "TAR | Wachttijd 0 min",
+    "waitingLabel": "Wachttijd 0 min",
+    "tarCharged": true
+  },
+  "dddddddd-0000-4000-8000-0000000000f1": {
+    "remarks": "TAR | Wachttijd 0 min",
+    "waitingLabel": "Wachttijd 0 min",
+    "tarCharged": true
+  },
+  "dddddddd-0000-4000-8000-0000000000f5": {
+    "remarks": "Wachttijd 0 min",
+    "waitingLabel": "Wachttijd 0 min",
+    "tarCharged": false
+  }
+}

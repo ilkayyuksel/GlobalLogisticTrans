@@ -252,6 +252,31 @@ describe("Ritten export", () => {
     });
   });
 
+  /**
+   * What a Trip's cells SAY is composed by the backend: both exports ask it for
+   * the export words of exactly the Trips they export, in the operator's own
+   * word for waiting time.
+   */
+  it.each(["Excel — Prijsoverzicht", "Excel — Basis"] as const)(
+    "%s asks the backend for the exported Trips' words",
+    async (which) => {
+      respondWith(requestMock, { trips: buildPage([buildTrip({ id: "trip-export-1" })]) });
+
+      await startExport(which);
+      await waitFor(() => expect(clicked).toHaveLength(1));
+
+      const asked = requestMock.mock.calls.filter(
+        ([path]) => path === "/api/v1/trip-export/labels",
+      );
+
+      expect(asked).toHaveLength(1);
+      expect((asked[0][1] as { query: Record<string, string> }).query).toEqual({
+        tripIds: "trip-export-1",
+        waitingWord: "Wachttijd",
+      });
+    },
+  );
+
   it("is translated", async () => {
     window.localStorage.setItem("tms.language", "tr");
     respondWith(requestMock, { trips: buildPage([buildTrip()]) });

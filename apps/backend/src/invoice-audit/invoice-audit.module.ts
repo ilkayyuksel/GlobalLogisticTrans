@@ -5,6 +5,7 @@ import { memoryStorage } from "multer";
 
 import type { EnvironmentVariables } from "../config/environment.variables";
 import { EffectivePricingModule } from "../trip-pricing/effective-pricing.module";
+import { TripExportModule } from "../trip-export/trip-export.module";
 import { TripRepository } from "../trips/trip.repository";
 import { InvoiceAuditController } from "./invoice-audit.controller";
 import { InvoiceAuditService } from "./invoice-audit.service";
@@ -45,6 +46,12 @@ const BYTES_PER_MEGABYTE = 1024 * 1024;
      * nothing here can price, correct or reprocess anything.
      */
     EffectivePricingModule,
+    /*
+     * The words a Trip's line says in Remarks. A transport added to the
+     * customer's invoice is described in exactly the vocabulary the Excel
+     * exports use, from the one place it lives.
+     */
+    TripExportModule,
     MulterModule.registerAsync({
       inject: [ConfigService],
       useFactory: (configService: ConfigService<EnvironmentVariables, true>) => ({

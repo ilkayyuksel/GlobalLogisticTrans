@@ -5,6 +5,7 @@ import Link from "next/link";
 import { InvoicePricingCell } from "@/components/invoice-audit/invoice-pricing-cell";
 import type {
   InvoiceAuditRow,
+  InvoiceContainerCorrection,
   InvoiceRowStatus,
 } from "@/lib/api/invoice-audit";
 import { useTranslation } from "@/lib/i18n/language-provider";
@@ -138,6 +139,9 @@ function InvoiceAuditRowLine({ row }: { row: InvoiceAuditRow }) {
           document: one transport, several charges. Said plainly, because it is
           the reason two rows can point at one Trip without either being wrong.
         */}
+        {row.containerCorrection ? (
+          <ContainerCorrectionNote correction={row.containerCorrection} />
+        ) : null}
         {row.sharedKeyRowNumbers.length > 0 ? (
           <span className="ml-2 text-xs text-muted">
             {t("invoiceAudit.sharedKey")} {row.sharedKeyRowNumbers.join(", ")}
@@ -151,6 +155,31 @@ function InvoiceAuditRowLine({ row }: { row: InvoiceAuditRow }) {
         <InvoicePricingCell row={row} />
       </td>
     </tr>
+  );
+}
+
+/**
+ * The transport was found; the container the invoice printed was not its own.
+ *
+ * One short line beside the container, in the warning colour the page already
+ * uses for an unfinished Trip — no alert, no block of text. It says what the
+ * corrected workbook will state instead; the hover text says it in full.
+ */
+function ContainerCorrectionNote({
+  correction,
+}: {
+  correction: InvoiceContainerCorrection;
+}) {
+  const t = useTranslation();
+
+  return (
+    <span
+      className="ml-2 inline-flex items-center gap-1 whitespace-nowrap rounded border border-warning/40 bg-warning/10 px-1.5 py-0.5 text-xs font-medium text-warning"
+      title={`${t("invoiceAudit.containerCorrected.detail")} ${correction.invoiceContainerNumber} → ${correction.tripContainerNumber}`}
+    >
+      <span aria-hidden="true">⚠</span>
+      {t("invoiceAudit.containerCorrected")} → {correction.tripContainerNumber}
+    </span>
   );
 }
 

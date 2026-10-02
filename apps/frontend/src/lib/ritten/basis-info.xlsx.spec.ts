@@ -6,6 +6,7 @@ import ExcelJS from "exceljs";
 
 import type { PricingSnapshot, Trip } from "@/lib/api/types";
 import { buildBasicWorkbook, buildPricingWorkbook } from "./export-workbooks";
+import { NO_LABELS, type TripExportLabels } from "@/lib/api/trip-export-labels";
 import { toBasicRow, toManualPropertyIds, toPricingRow } from "./export-rows";
 
 /**
@@ -26,6 +27,17 @@ import { toBasicRow, toManualPropertyIds, toPricingRow } from "./export-rows";
 const TAR_ID = "b36469b0-37ec-40ba-81da-9bc272e05d60";
 const MANUAL_ID = "8b7dec0d-9af2-491c-8ff3-61b082381b49";
 const FLAT_ID = "30e65f2f-9b55-45a7-a53d-73df9930e8ee";
+
+/*
+ * The words the BACKEND gives for the inputs these tests use. Composing them is
+ * its job (`trip-export-labels.ts`, with its own tests); what is tested here is
+ * where the browser PLACES them — the Info cell, and its order.
+ */
+const TAR_CHARGED: TripExportLabels = { ...NO_LABELS, tarCharged: true };
+const WAITED_WINDOW: TripExportLabels = {
+  ...NO_LABELS,
+  waitingLabel: "Wachttijd 07:00-10:00",
+};
 
 /** The catalog as the export reads it. */
 const MANUAL_IDS = toManualPropertyIds([
@@ -95,8 +107,12 @@ function property(componentCode: string, amount: string, customPropertyId: strin
 }
 
 /** Writes the workbook to a temp file, reads it back, returns the Info cell. */
-async function infoCellOf(trip: Trip, snapshot: PricingSnapshot | null): Promise<string> {
-  const row = toBasicRow(trip, snapshot, MANUAL_IDS, "Wachttijd", TAR_ID);
+async function infoCellOf(
+  trip: Trip,
+  snapshot: PricingSnapshot | null,
+  labels: TripExportLabels = NO_LABELS,
+): Promise<string> {
+  const row = toBasicRow(trip, snapshot, MANUAL_IDS, labels);
   const buffer = await buildBasicWorkbook([row], "nl", {
     start: "2026-09-25",
     end: "2026-09-25",
@@ -142,6 +158,7 @@ describe("the Info column in a real BASIS workbook", () => {
     const info = await infoCellOf(
       buildTrip({ tarNummer: "TAR123" }),
       snapshotOf(property("CUSTOM_PROPERTY", "50.00", TAR_ID)),
+      TAR_CHARGED,
     );
 
     expect(info).toBe("TAR");
@@ -201,6 +218,7 @@ describe("the Info column in a real BASIS workbook", () => {
         property("CUSTOM_PROPERTY", "50.00", TAR_ID),
         property("WAITING_TIME", "25.00", null),
       ),
+      { tarCharged: true, waitingLabel: "Wachttijd 1 u 30 min", remarks: "" },
     );
 
     expect(info).toBe(
@@ -235,9 +253,12 @@ describe("the Info column in a real BASIS workbook", () => {
         ],
       } as Partial<Trip>);
 
-      const built = toBasicRow(trip, snapshot, MANUAL_IDS, "Wachttijd", TAR_ID);
+      // The backend's reading of THIS snapshot: TAR charged exactly when its
+      // line is there. The browser places the word; the amount it reads itself.
+      const labels = charged ? TAR_CHARGED : NO_LABELS;
+      const built = toBasicRow(trip, snapshot, MANUAL_IDS, labels);
 
-      return { info: await infoCellOf(trip, snapshot), costs: built.costs };
+      return { info: await infoCellOf(trip, snapshot, labels), costs: built.costs };
     }
 
     it("says TAR exactly when the amount is there", async () => {
@@ -389,9 +410,9 @@ describe("a whole BASIS workbook", () => {
   function row(
     trip: Partial<Trip>,
     snapshot: PricingSnapshot | null,
-    tarId: string | null = TAR_ID,
+    labels: TripExportLabels = NO_LABELS,
   ) {
-    return toBasicRow(buildTrip(trip), snapshot, MANUAL_IDS, "Wachttijd", tarId);
+    return toBasicRow(buildTrip(trip), snapshot, MANUAL_IDS, labels);
   }
 
   /** The sheet every assertion below reads. */
@@ -415,6 +436,7 @@ describe("a whole BASIS workbook", () => {
           property("COMBINATION", "50.00", null),
           property("CUSTOM_PROPERTY", "50.00", TAR_ID),
         ),
+        TAR_CHARGED,
       ),
       // 3 — Combination leg B, same group, its OWN Backload (so COMBI), TAR
       //     withheld by the same-day rule so no TAR line and no TAR word.
@@ -638,8 +660,9 @@ describe("the COMBI EN KOST column in a real BASIS workbook", () => {
   async function cellsOf(
     trip: Trip,
     snapshot: PricingSnapshot | null,
+    labels: TripExportLabels = NO_LABELS,
   ): Promise<{ costs: string; info: string }> {
-    const row = toBasicRow(trip, snapshot, MANUAL_IDS, "Wachttijd", TAR_ID);
+    const row = toBasicRow(trip, snapshot, MANUAL_IDS, labels);
     const buffer = await buildBasicWorkbook([row], "nl", {
       start: "2026-09-25",
       end: "2026-09-25",
@@ -680,6 +703,7 @@ describe("the COMBI EN KOST column in a real BASIS workbook", () => {
     const cells = await cellsOf(
       buildTrip(WAITING_WINDOW as Partial<Trip>),
       snapshotOf(property("WAITING_TIME", "137.50", null)),
+      WAITED_WINDOW,
     );
 
     expect(cells.info).toBe("Wachttijd 07:00-10:00");
@@ -690,6 +714,7 @@ describe("the COMBI EN KOST column in a real BASIS workbook", () => {
     const cells = await cellsOf(
       buildTrip(WAITING_WINDOW as Partial<Trip>),
       snapshotOf(property("BASE_PRICE", "300.00", null)),
+      WAITED_WINDOW,
     );
 
     expect(cells.info).toBe("Wachttijd 07:00-10:00");
@@ -703,6 +728,7 @@ describe("the COMBI EN KOST column in a real BASIS workbook", () => {
         property("COMBINATION", "50.00", null),
         property("WAITING_TIME", "137.50", null),
       ),
+      WAITED_WINDOW,
     );
 
     expect(cells.costs).toBe("50.00 + 137.50");
@@ -724,6 +750,7 @@ describe("the COMBI EN KOST column in a real BASIS workbook", () => {
         property("CUSTOM_PROPERTY", "25.00", MANUAL_ID),
         property("WAITING_TIME", "137.50", null),
       ),
+      WAITED_WINDOW,
     );
 
     expect(cells.costs).toBe("50.00 + 25.00 + 137.50");
@@ -749,6 +776,7 @@ describe("the COMBI EN KOST column in a real BASIS workbook", () => {
     const cells = await cellsOf(
       buildTrip({ tripGroupId: null } as Partial<Trip>),
       snapshotOf(property("BASE_PRICE", "300.00", null)),
+      WAITED_WINDOW,
     );
 
     expect(cells.info).toBe("");

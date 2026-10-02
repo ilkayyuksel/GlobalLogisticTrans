@@ -1,11 +1,11 @@
+import {
+  NO_LABELS,
+  type TripExportLabels,
+} from "@/lib/api/trip-export-labels";
 import type { CustomProperty, PricingSnapshot, Trip } from "@/lib/api/types";
-import { toClockLabel } from "@/lib/calendar/clock";
-import { toCostConfirmationLabel } from "@/lib/trips/cost-confirmation";
-import { formatWaitingTime } from "@/lib/waiting-time";
 import { toRouteLabels } from "./export-route-labels";
 import { toRouteText } from "./route-label";
 import {
-  PRICING_CODES,
   toPricedTripLines,
   type PricedTripLines,
 } from "./pricing-lines";
@@ -107,140 +107,19 @@ export function toRemarks(trip: Trip): string {
   return trip.customProperties.map((property) => property.name).join(", ");
 }
 
-/** Between the operator's own remarks and each confirmation reference. */
-const REMARKS_SEPARATOR = " | ";
-
-/**
- * The Cost Confirmation references on the stored EK line.
- *
- * The Engine writes them there itself — `Cost confirmation 4139505`, or
- * `Cost confirmations 4139505, 4156173` when a Trip was confirmed in
- * instalments — so the line that carries the money also says which documents
- * produced it. See `cost-confirmation.calculator.ts`.
+/*
+ * ── THE WORDS ARE THE BACKEND'S ─────────────────────────────────────────────
+ * The Remarks text, the waiting-time label and whether TAR was charged are
+ * composed by the server (`trip-export-labels.ts`, served at
+ * `GET /trip-export/labels`) and only PLACED here. The invoice check writes the
+ * same Trips into the customer's workbook from the server, and one vocabulary
+ * with one owner is what keeps the two from ever saying different things.
  */
-const CONFIRMATION_REFERENCES = /^Cost confirmations?\s+(.+)$/i;
-
-/**
- * Every confirmation reference belonging to THIS Trip, newest first.
- *
- * ── WHY THE SNAPSHOT AND NOT A SEARCH ───────────────────────────────────────
- * The references are read off the Trip's own stored pricing, which is the only
- * source that cannot name somebody else's document: a snapshot belongs to one
- * Trip, and the Engine put those references on it from the confirmations it
- * actually priced. Nothing is matched on a booking number here, and no code is
- * constructed — `CC` is added by `toCostConfirmationLabel`, which is where the
- * prefix has always lived.
- *
- * A Trip confirmed several times therefore keeps every reference. Duplicates
- * cannot arise: the backend refuses a second confirmation carrying a
- * `cc_number` it already holds, so one document counts once however often it
- * arrives.
- *
- * The Trip's own `costConfirmation` is the fallback, and it is the LATEST one
- * only — the Ritten list's display rule. It answers for a Trip whose snapshot
- * predates the confirmation, which is the one case the stored line cannot.
- */
-export function toCostConfirmationLabels(
-  trip: Trip,
-  snapshot: PricingSnapshot | null,
-): string[] {
-  const stored = referencesOnSnapshot(snapshot);
-  const references =
-    stored.length > 0
-      ? stored
-      : trip.costConfirmation
-        ? [trip.costConfirmation.ccNumber]
-        : [];
-
-  return [...new Set(references)].map((ccNumber) =>
-    toCostConfirmationLabel({ ccNumber }),
-  );
-}
-
-function referencesOnSnapshot(snapshot: PricingSnapshot | null): string[] {
-  const line = snapshot?.items.find(
-    (item) => item.pricingComponentCode === PRICING_CODES.costConfirmation,
-  );
-
-  const references = line
-    ? CONFIRMATION_REFERENCES.exec(line.description)
-    : null;
-
-  if (references === null) {
-    return [];
-  }
-
-  return references[1]
-    .split(",")
-    .map((reference) => reference.trim())
-    .filter((reference) => reference !== "");
-}
-
-/**
- * The Remarks column: everything about a Trip that is not an amount.
- *
- * ── WHAT IT GATHERS, AND IN WHICH ORDER ─────────────────────────────────────
- * The operator's own Custom Properties first, then three things the sheet used
- * to leave unsaid:
- *
- *   TAR        the word, never the number. Whether it was charged comes from
- *              the stored snapshot — the Engine's own answer, same-day rule
- *              included — so an automatic charge is named even though nobody
- *              ticked it. A Trip that carries TAR as an assigned property
- *              already shows it, and it is not said twice.
- *   Wachttijd  the window an operator read off a clock, or the duration when no
- *              window was recorded. It appears whenever the Trip HAS a waiting
- *              time, whether or not it was charged: the money column beside it
- *              says what it cost, and a free half hour is still a half hour the
- *              driver stood there.
- *   CC         every confirmation reference, as `toCostConfirmationLabels`
- *              reads them off the EK line.
- *
- * Nothing replaces what was already there, and nothing is invented: each part
- * is either the operator's own text or the Engine's own stored answer.
- */
-export function toPricingRemarks(
-  trip: Trip,
-  snapshot: PricingSnapshot | null,
-  { automaticPropertyId = null, waitingWord = "Wachttijd" }: PricingRowContext = {},
-): string {
-  const names = trip.customProperties.map((property) => property.name);
-  const parts = [...names];
-
-  // Charged by the Engine rather than chosen by anybody, so it is named here —
-  // unless the Trip also carries it as an assignment, which already says it.
-  if (wasTarChargedIn(snapshot, automaticPropertyId) && !names.includes(TAR_MARK)) {
-    parts.push(TAR_MARK);
-  }
-
-  const waiting = toWaitingLabel(trip, waitingWord);
-
-  if (waiting !== null) {
-    parts.push(waiting);
-  }
-
-  parts.push(...toCostConfirmationLabels(trip, snapshot));
-
-  return parts.filter((part) => part !== "").join(REMARKS_SEPARATOR);
-}
-
-/** What the Remarks column needs beyond the Trip itself. */
-export interface PricingRowContext {
-  /**
-   * The Custom Property the Engine applies on its own — TAR.
-   *
-   * Needed to RECOGNISE its line in a stored snapshot. Whether TAR applied is
-   * never decided here: the Engine already decided it, same-day rule included.
-   */
-  readonly automaticPropertyId?: string | null;
-  /** The word for waiting time, in the operator's own language. */
-  readonly waitingWord?: string;
-}
 
 export function toPricingRow(
   trip: Trip,
   snapshot: PricingSnapshot | null,
-  { automaticPropertyId = null, waitingWord = "Wachttijd" }: PricingRowContext = {},
+  labels: TripExportLabels = NO_LABELS,
 ): PricingExportRow {
   const lines: PricedTripLines = toPricedTripLines(snapshot);
   /** What the Trip is worth NOW, corrections included. See `corrected`. */
@@ -288,10 +167,7 @@ export function toPricingRow(
      * been confirmed for in full. Nothing is added up here.
      */
     ek: corrected(lines.ek, effective?.ek),
-    remarks: toPricingRemarks(trip, snapshot, {
-      automaticPropertyId,
-      waitingWord,
-    }),
+    remarks: labels.remarks,
   };
 }
 
@@ -373,35 +249,6 @@ export function toCostsLabel(lines: PricedTripLines): string {
 export const LOOSE_TRIP_MARK = "LOSRIT";
 
 /**
- * The waiting time as the printed sheet says it: `Wachttijd 07:00-10:00`.
- *
- * ── THE WINDOW, NOT A NEW CALCULATION ───────────────────────────────────────
- * These are the two clock times an operator actually read and the system
- * actually stored. Nothing here works out a duration and nothing here bills:
- * `waitingTimeMinutes` remains the stored value pricing charges from, and this
- * only says where it came from.
- *
- * A Trip whose waiting time was entered before the window was recorded has no
- * two times to show, so it falls back to the duration it does have. Inventing a
- * window for it would put hours on a page that nobody ever read off a clock.
- */
-export function toWaitingLabel(
-  trip: Trip,
-  waitingWord: string,
-): string | null {
-  const begin = toClockLabel(trip.waitingTimeStart);
-  const end = toClockLabel(trip.waitingTimeEnd);
-
-  if (begin && end) {
-    return `${waitingWord} ${begin}-${end}`;
-  }
-
-  const duration = formatWaitingTime(trip.waitingTimeMinutes);
-
-  return duration ? `${waitingWord} ${duration}` : null;
-}
-
-/**
  * The words behind those numbers, in the same order.
  *
  * ── WHICH PROPERTIES ARE NAMED ──────────────────────────────────────────────
@@ -457,8 +304,8 @@ export function toInfoLabel(
    * to is already in the pricing columns — so the word says "this Trip was
    * charged TAR" and nothing more.
    *
-   * Whether it WAS charged is not decided here. `wasTarCharged` comes from the
-   * stored snapshot — see `wasTarChargedIn` — so the stated number, the
+   * Whether it WAS charged is not decided here. `wasTarCharged` is the backend's
+   * reading of the stored snapshot — see `trip-export-labels.ts` — so the stated number, the
    * Combination leg and the same-day rule that withholds a number already
    * charged that day are all honoured exactly as the Engine applied them.
    */
@@ -516,31 +363,6 @@ const TAR_MARK = "TAR";
 const COMBINATION_MARK = "COMBI";
 
 /**
- * Whether the Engine actually charged TAR, read from the stored snapshot.
- *
- * The snapshot is the Engine's own answer and the only honest source: it
- * already reflects the stated number, the Combination allocation and the
- * same-day rule. Recomputing any of that here would be a second opinion about
- * money, and the two would drift the first time a rule changed.
- *
- * `automaticPropertyId` is the configured TAR property. Without it — no
- * setting, or an unreadable one — no line can be recognised and nothing is
- * labelled.
- */
-export function wasTarChargedIn(
-  snapshot: PricingSnapshot | null,
-  automaticPropertyId: string | null,
-): boolean {
-  if (snapshot === null || automaticPropertyId === null) {
-    return false;
-  }
-
-  return snapshot.items.some(
-    (item) => item.customPropertyId === automaticPropertyId,
-  );
-}
-
-/**
  * Free text that says something, or null.
  *
  * The same reading `hasTarNummer` applies on the backend: whitespace is
@@ -578,8 +400,7 @@ export function toBasicRow(
   trip: Trip,
   snapshot: PricingSnapshot | null,
   manualPropertyIds: ReadonlySet<string>,
-  waitingWord: string,
-  automaticPropertyId: string | null = null,
+  labels: TripExportLabels = NO_LABELS,
 ): BasicExportRow {
   const lines = toPricedTripLines(snapshot);
 
@@ -597,8 +418,8 @@ export function toBasicRow(
       trip,
       lines,
       manualPropertyIds,
-      toWaitingLabel(trip, waitingWord),
-      wasTarChargedIn(snapshot, automaticPropertyId),
+      labels.waitingLabel,
+      labels.tarCharged,
     ),
   };
 }

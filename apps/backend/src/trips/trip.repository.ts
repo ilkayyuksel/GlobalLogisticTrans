@@ -128,8 +128,12 @@ export interface BookingNumberOnDateQuery extends BookingNumberQuery {
  * SQL equality cannot say that.
  */
 export interface TripsForInvoiceQuery {
-  /** The calendar days the invoice names, as midnight UTC. */
-  readonly planningDates: readonly Date[];
+  /**
+   * The calendar days the invoice names, as midnight UTC. A Trip is a
+   * candidate when EITHER of its two dates is one of them — see
+   * `findManyForInvoice`.
+   */
+  readonly invoiceDates: readonly Date[];
   readonly bookingNumbers: readonly string[];
   /** Only these statuses are candidates. DELETED is never one. */
   readonly statuses: readonly TripStatus[];
@@ -620,17 +624,27 @@ export class TripRepository {
    * one of the days AND its booking is one of the bookings, which is a superset
    * of the lines and exactly what matching in memory needs.
    *
+   * ── "ITS DAY" IS EITHER OF TWO ──────────────────────────────────────────
+   * `planning_date` is the day the transport is on now; `original_planning_date`
+   * the day it was ordered for, fixed at creation. A customer invoices
+   * whichever their own system holds, and this used to ask for the first only —
+   * so a re-planned transport invoiced on its ordered day was never even
+   * fetched, and its line could only ever be NOT_FOUND.
+   *
    * Empty lists return nothing rather than everything: an invoice that names no
    * day and no booking has no candidates, and `IN ()` must not become "all".
    */
   findManyForInvoice(query: TripsForInvoiceQuery): Promise<Trip[]> {
-    if (query.planningDates.length === 0 || query.bookingNumbers.length === 0) {
+    if (query.invoiceDates.length === 0 || query.bookingNumbers.length === 0) {
       return Promise.resolve([]);
     }
 
     return this.prisma.trip.findMany({
       where: {
-        planningDate: { in: [...query.planningDates] },
+        OR: [
+          { planningDate: { in: [...query.invoiceDates] } },
+          { originalPlanningDate: { in: [...query.invoiceDates] } },
+        ],
         bookingNumber: { in: [...query.bookingNumbers] },
         status: { in: [...query.statuses] },
       },

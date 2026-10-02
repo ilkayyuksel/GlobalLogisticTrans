@@ -8,6 +8,7 @@ import {
   toRouteLabel,
 } from "./export-rows";
 import { toPricedTripLines } from "./pricing-lines";
+import { NO_LABELS, type TripExportLabels } from "@/lib/api/trip-export-labels";
 
 /**
  * What a Trip becomes in each export.
@@ -303,6 +304,21 @@ describe("the pricing row", () => {
   });
 });
 
+/*
+ * What the BACKEND says about the inputs these tests use. Composing these words
+ * is its job (`trip-export-labels.ts`, which holds every wording case this file
+ * used to); these tests pin where the browser PLACES them and in which order.
+ */
+const TAR_CHARGED: TripExportLabels = { ...NO_LABELS, tarCharged: true };
+const WAITED_WINDOW: TripExportLabels = {
+  ...NO_LABELS,
+  waitingLabel: "Wachttijd 07:00-10:00",
+};
+const WAITED_90_MINUTES: TripExportLabels = {
+  ...NO_LABELS,
+  waitingLabel: "Wachttijd 1 u 30 min",
+};
+
 describe("the basic row", () => {
   /**
    * The catalog as the export reads it: two ordinary properties an operator
@@ -327,14 +343,13 @@ describe("the basic row", () => {
         buildTrip({ tripGroupId: "group-1" }),
         null,
         FIXED,
-        "Wachttijd",
       ).tripGroupId,
     ).toBe("group-1");
   });
 
   it("carries null for a Trip in no group", () => {
     expect(
-      toBasicRow(buildTrip({ tripGroupId: null }), null, FIXED, "Wachttijd")
+      toBasicRow(buildTrip({ tripGroupId: null }), null, FIXED)
         .tripGroupId,
     ).toBeNull();
   });
@@ -344,7 +359,7 @@ describe("the basic row", () => {
     "exposes no completed flag for a %s Trip",
     (status) => {
       expect(
-        toBasicRow(buildTrip({ status }), null, FIXED, "Wachttijd"),
+        toBasicRow(buildTrip({ status }), null, FIXED),
       ).not.toHaveProperty("isCompleted");
     },
   );
@@ -361,7 +376,6 @@ describe("the basic row", () => {
       }),
       null,
       FIXED,
-      "Wachttijd",
     );
 
     expect(row.licensePlate).toBe("1-ABC-123");
@@ -369,7 +383,7 @@ describe("the basic row", () => {
   });
 
   it("leaves the plate blank when no truck is assigned", () => {
-    expect(toBasicRow(buildTrip(), null, FIXED, "Wachttijd").licensePlate).toBe("");
+    expect(toBasicRow(buildTrip(), null, FIXED).licensePlate).toBe("");
   });
 
   /** Fixed properties and waiting time — not base price, fuel, toll, tunnel. */
@@ -384,7 +398,6 @@ describe("the basic row", () => {
         line("WAITING_TIME", "25.00"),
       ),
       FIXED,
-      "Wachttijd",
     );
 
     expect(row.costs).toBe("35.00 + 50.00 + 25.00");
@@ -395,7 +408,6 @@ describe("the basic row", () => {
       buildTrip(),
       snapshotOf(line("CUSTOM_PROPERTY", "35.00", "prop-1")),
       FIXED,
-      "Wachttijd",
     );
 
     expect(row.costs).toBe("35.00");
@@ -416,7 +428,7 @@ describe("the basic row", () => {
         line("WAITING_TIME", "25.00"),
       ),
       FIXED,
-      "Wachttijd",
+      WAITED_90_MINUTES,
     );
 
     expect(row.info).toBe("Aan/Afkoppelen, Over/EX, Wachttijd 1 u 30 min");
@@ -442,7 +454,6 @@ describe("the basic row", () => {
         line("CUSTOM_PROPERTY", "20.00", "flat"),
       ),
       FIXED,
-      "Wachttijd",
     );
 
     expect(row.info).toBe("Aan/Afkoppelen");
@@ -465,7 +476,6 @@ describe("the basic row", () => {
         line("CUSTOM_PROPERTY", "15.00", "prop-2"),
       ),
       FIXED,
-      "Wachttijd",
     );
 
     expect(row.info).toBe("Aan/Afkoppelen, Over/EX");
@@ -490,7 +500,6 @@ describe("the basic row", () => {
       closed,
       snapshotOf(line("CUSTOM_PROPERTY", "20.00", "prop-1")),
       FIXED,
-      "Wachttijd",
     );
 
     expect(row.info).toBe("Aan/Afkoppelen");
@@ -502,7 +511,6 @@ describe("the basic row", () => {
       buildTrip({ status: "CLOSED", customProperties: [] }),
       snapshotOf(),
       FIXED,
-      "Wachttijd",
     );
 
     expect(row.info).toBe("");
@@ -525,13 +533,13 @@ describe("the basic row", () => {
 
     it("says TAR when the Engine charged it", () => {
       expect(
-        toBasicRow(buildTrip({ tarNummer: "TAR123" }), withTarCharged(), FIXED, "Wachttijd", TAR_ID).info,
+        toBasicRow(buildTrip({ tarNummer: "TAR123" }), withTarCharged(), FIXED, TAR_CHARGED).info,
       ).toBe("TAR");
     });
 
     /** The whole point: the number is business data and never leaves here. */
     it("never prints the number itself", () => {
-      const row = toBasicRow(buildTrip({ tarNummer: "TAR123" }), withTarCharged(), FIXED, "Wachttijd", TAR_ID);
+      const row = toBasicRow(buildTrip({ tarNummer: "TAR123" }), withTarCharged(), FIXED, TAR_CHARGED);
 
       expect(row.info).not.toContain("TAR123");
       expect(JSON.stringify(row)).not.toContain("TAR123");
@@ -543,7 +551,7 @@ describe("the basic row", () => {
      */
     it("says nothing when the charge was withheld, even with a number stated", () => {
       expect(
-        toBasicRow(buildTrip({ tarNummer: "TAR123" }), snapshotOf(line("BASE_PRICE", "300.00")), FIXED, "Wachttijd", TAR_ID).info,
+        toBasicRow(buildTrip({ tarNummer: "TAR123" }), snapshotOf(line("BASE_PRICE", "300.00")), FIXED).info,
       ).toBe("");
     });
 
@@ -553,23 +561,20 @@ describe("the basic row", () => {
       ["whitespace only", "   "],
     ])("says nothing when the number is %s", (_label, tarNummer) => {
       expect(
-        toBasicRow(buildTrip({ tarNummer }), snapshotOf(line("BASE_PRICE", "300.00")), FIXED, "Wachttijd", TAR_ID).info,
+        toBasicRow(buildTrip({ tarNummer }), snapshotOf(line("BASE_PRICE", "300.00")), FIXED).info,
       ).toBe("");
     });
 
     /** The AMOUNT stays where amounts live. */
     it("leaves the amount in the pricing columns", () => {
-      const row = toBasicRow(buildTrip({ tarNummer: "TAR123" }), withTarCharged(), FIXED, "Wachttijd", TAR_ID);
+      const row = toBasicRow(buildTrip({ tarNummer: "TAR123" }), withTarCharged(), FIXED, TAR_CHARGED);
 
       expect(row.costs).toBe("50.00");
       expect(row.info).toBe("TAR");
     });
 
-    it("says nothing when the automatic property is not configured", () => {
-      expect(
-        toBasicRow(buildTrip({ tarNummer: "TAR123" }), withTarCharged(), FIXED, "Wachttijd", null).info,
-      ).toBe("");
-    });
+    // Whether TAR can be recognised without the TAR setting is the backend's
+    // question now: see `trip-export-labels.spec.ts`.
   });
 
   /**
@@ -579,7 +584,7 @@ describe("the basic row", () => {
    */
   describe("internal notes in Info", () => {
     function infoFor(internalNotes: string | null): string {
-      return toBasicRow(buildTrip({ internalNotes }), snapshotOf(), FIXED, "Wachttijd").info;
+      return toBasicRow(buildTrip({ internalNotes }), snapshotOf(), FIXED).info;
     }
 
     it("includes the text as it was written", () => {
@@ -627,8 +632,7 @@ describe("the basic row", () => {
         line("WAITING_TIME", "25.00"),
       ),
       FIXED,
-      "Wachttijd",
-      TAR_ID,
+      { ...WAITED_90_MINUTES, tarCharged: true },
     );
 
     expect(row.info).toBe(
@@ -652,7 +656,6 @@ describe("the basic row", () => {
         line("TOLL", "9.75", "toll"),
       ),
       FIXED,
-      "Wachttijd",
     );
 
     expect(row.info).toBe("Aan/Afkoppelen");
@@ -660,61 +663,11 @@ describe("the basic row", () => {
   });
 
 
-  /**
-   * The window an operator actually read off a clock, in the printed sheet's
-   * own compact form. It is a DISPLAY of the stored times — the minutes stay
-   * what pricing bills from, and nothing here recomputes them.
+  /*
+   * How a waiting time READS — the window, or the duration when no window or
+   * only half of one was stored — is the backend's to say, and its suite holds
+   * those cases. The placement of whatever it says is pinned below.
    */
-  it("shows the stored waiting window rather than a duration", () => {
-    const row = toBasicRow(
-      buildTrip({
-        waitingTimeStart: "07:00:00",
-        waitingTimeEnd: "10:00:00",
-        waitingTimeMinutes: 180,
-      }),
-      snapshotOf(line("WAITING_TIME", "25.00")),
-      FIXED,
-      "Wachttijd",
-    );
-
-    expect(row.info).toBe("Wachttijd 07:00-10:00");
-  });
-
-  /**
-   * A Trip whose waiting time was entered before the two times were recorded
-   * has no window to show, so it shows the duration it does have. Inventing a
-   * window would put hours on the page that nobody ever read.
-   */
-  it("falls back to the duration when no window was stored", () => {
-    const row = toBasicRow(
-      buildTrip({
-        waitingTimeStart: null,
-        waitingTimeEnd: null,
-        waitingTimeMinutes: 90,
-      }),
-      snapshotOf(line("WAITING_TIME", "25.00")),
-      FIXED,
-      "Wachttijd",
-    );
-
-    expect(row.info).toBe("Wachttijd 1 u 30 min");
-  });
-
-  /** A half-filled window is not a window; an end with no beginning is not one. */
-  it("falls back to the duration when only one side was stored", () => {
-    const row = toBasicRow(
-      buildTrip({
-        waitingTimeStart: "07:00:00",
-        waitingTimeEnd: null,
-        waitingTimeMinutes: 45,
-      }),
-      snapshotOf(line("WAITING_TIME", "25.00")),
-      FIXED,
-      "Wachttijd",
-    );
-
-    expect(row.info).toBe("Wachttijd 45 min");
-  });
 
   /**
    * LOSRIT is an operational note about the work, so it goes in INFO with the
@@ -728,7 +681,6 @@ describe("the basic row", () => {
       }),
       snapshotOf(line("CUSTOM_PROPERTY", "35.00", "prop-1")),
       FIXED,
-      "Wachttijd",
     );
 
     expect(row.info).toBe("LOSRIT, TAR");
@@ -739,7 +691,6 @@ describe("the basic row", () => {
       buildTrip({ isLooseTrip: false }),
       snapshotOf(line("CUSTOM_PROPERTY", "35.00", "prop-1")),
       FIXED,
-      "Wachttijd",
     );
 
     expect(row.info).not.toContain("LOSRIT");
@@ -751,14 +702,13 @@ describe("the basic row", () => {
       buildTrip({ isLooseTrip: true }),
       null,
       FIXED,
-      "Wachttijd",
     );
 
     expect(row.costs).toBe("");
     expect(row.info).toBe("LOSRIT");
   });
   it("leaves costs and info empty for an unpriced Trip", () => {
-    const row = toBasicRow(buildTrip(), null, FIXED, "Wachttijd");
+    const row = toBasicRow(buildTrip(), null, FIXED);
 
     expect(row.costs).toBe("");
     expect(row.info).toBe("");
@@ -791,7 +741,7 @@ describe("the Combination surcharge in COMBI EN KOST", () => {
   ] as never);
 
   function costsOf(...lines: ReturnType<typeof line>[]): string {
-    return toBasicRow(buildTrip(), snapshotOf(...lines), MANUAL, "Wachttijd")
+    return toBasicRow(buildTrip(), snapshotOf(...lines), MANUAL)
       .costs;
   }
 
@@ -822,7 +772,6 @@ describe("the Combination surcharge in COMBI EN KOST", () => {
         buildTrip({ tripGroupId: "manual-group" }),
         snapshotOf(line("BASE_PRICE", "300.00")),
         MANUAL,
-        "Wachttijd",
       ).costs,
     ).toBe("");
   });
@@ -834,7 +783,6 @@ describe("the Combination surcharge in COMBI EN KOST", () => {
         buildTrip({ tripGroupId: "genuine-group", planningDate: "2026-09-11" }),
         snapshotOf(line("COMBINATION", "50.00")),
         MANUAL,
-        "Wachttijd",
       ).costs,
     ).toBe("50.00");
   });
@@ -846,7 +794,6 @@ describe("the Combination surcharge in COMBI EN KOST", () => {
         buildTrip({ tripGroupId: "manual-group" }),
         snapshotOf(line("BASE_PRICE", "100.00"), line("COMBINATION", "50.00")),
         MANUAL,
-        "Wachttijd",
       ).costs,
     ).toBe("50.00");
   });
@@ -858,7 +805,6 @@ describe("the Combination surcharge in COMBI EN KOST", () => {
         buildTrip({ tripGroupId: null }),
         snapshotOf(line("BASE_PRICE", "100.00"), line("WAITING_TIME", "55.00")),
         MANUAL,
-        "Wachttijd",
       ).costs,
     ).toBe("55.00");
   });
@@ -888,7 +834,7 @@ describe("the Combination surcharge in COMBI EN KOST", () => {
 
   it("leaves the cell empty for an unpriced Trip", () => {
     expect(
-      toBasicRow(buildTrip(), null, MANUAL, "Wachttijd").costs,
+      toBasicRow(buildTrip(), null, MANUAL).costs,
     ).toBe("");
   });
 });
@@ -910,14 +856,16 @@ describe("COMBI in Info", () => {
 
   function basicRowOf(
     trip: ReturnType<typeof buildTrip>,
+    labels: TripExportLabels,
     ...lines: ReturnType<typeof line>[]
   ) {
-    return toBasicRow(trip, snapshotOf(...lines), NO_MANUAL_PROPERTIES, "Wachttijd", TAR_ID);
+    return toBasicRow(trip, snapshotOf(...lines), NO_MANUAL_PROPERTIES, labels);
   }
 
   it("says COMBI beside a grouped Trip's stored surcharge", () => {
     const row = basicRowOf(
       buildTrip({ tripGroupId: "manual-group" }),
+      NO_LABELS,
       line("BASE_PRICE", "100.00"),
       line("COMBINATION", "50.00"),
     );
@@ -929,6 +877,7 @@ describe("COMBI in Info", () => {
   it("puts COMBI first, in the order of the amounts", () => {
     const row = basicRowOf(
       buildTrip({ tripGroupId: "manual-group", ...WAITED }),
+      WAITED_WINDOW,
       line("COMBINATION", "50.00"),
       line("WAITING_TIME", "55.00"),
     );
@@ -940,6 +889,7 @@ describe("COMBI in Info", () => {
   it("puts a charged TAR after COMBI", () => {
     const row = basicRowOf(
       buildTrip({ tripGroupId: "manual-group", tarNummer: "TAR123" }),
+      TAR_CHARGED,
       line("COMBINATION", "50.00"),
       line("CUSTOM_PROPERTY", "20.00", TAR_ID),
     );
@@ -955,6 +905,7 @@ describe("COMBI in Info", () => {
         tripGroupId: "manual-group",
         customProperties: [{ id: "prop-flat", name: "Flat", isActive: true }],
       }),
+      NO_LABELS,
       line("COMBINATION", "50.00"),
       line("CUSTOM_PROPERTY", "20.00", "prop-flat"),
     );
@@ -966,6 +917,7 @@ describe("COMBI in Info", () => {
   it("says COMBI whatever surcharge the Engine stored", () => {
     const row = basicRowOf(
       buildTrip({ tripGroupId: "manual-group" }),
+      NO_LABELS,
       line("COMBINATION", "75.00"),
     );
 
@@ -976,6 +928,7 @@ describe("COMBI in Info", () => {
   it("says nothing for a grouped Trip whose snapshot has no surcharge", () => {
     const row = basicRowOf(
       buildTrip({ tripGroupId: "manual-group" }),
+      NO_LABELS,
       line("BASE_PRICE", "100.00"),
     );
 
@@ -985,6 +938,7 @@ describe("COMBI in Info", () => {
   it("drops COMBI once the ungrouped Trip's new snapshot has no surcharge", () => {
     const row = basicRowOf(
       buildTrip({ tripGroupId: null, ...WAITED }),
+      WAITED_WINDOW,
       line("BASE_PRICE", "100.00"),
       line("WAITING_TIME", "55.00"),
     );
@@ -1023,20 +977,21 @@ describe("Wachttijd and Combi as separate components", () => {
 
   function rowOf(
     trip: ReturnType<typeof buildTrip>,
+    labels: TripExportLabels,
     ...lines: ReturnType<typeof line>[]
   ) {
     return toBasicRow(
       trip,
       lines.length === 0 ? null : snapshotOf(...lines),
       CATALOG,
-      "Wachttijd",
+      labels,
     );
   }
 
   /** CASE A — a waiting time that was charged. */
   it("names the window in Info and its price as its own component", () => {
     const row = rowOf(
-      buildTrip(WAITING_WINDOW),
+      buildTrip(WAITING_WINDOW), WAITED_WINDOW,
       line("BASE_PRICE", "300.00"),
       line("WAITING_TIME", "137.50"),
     );
@@ -1054,20 +1009,20 @@ describe("Wachttijd and Combi as separate components", () => {
    * stored line to show.
    */
   it("names the window even when the Engine charged nothing for it", () => {
-    const row = rowOf(buildTrip(WAITING_WINDOW), line("BASE_PRICE", "300.00"));
+    const row = rowOf(buildTrip(WAITING_WINDOW), WAITED_WINDOW, line("BASE_PRICE", "300.00"));
 
     expect(row.info).toBe("Wachttijd 07:00-10:00");
     expect(row.costs).toBe("");
   });
 
   it("names the window on a Trip that has not been priced at all", () => {
-    expect(rowOf(buildTrip(WAITING_WINDOW)).info).toBe("Wachttijd 07:00-10:00");
+    expect(rowOf(buildTrip(WAITING_WINDOW), WAITED_WINDOW).info).toBe("Wachttijd 07:00-10:00");
   });
 
   /** CASE B — no waiting time: nothing is said and nothing is charged. */
   it("says nothing when no waiting time was recorded", () => {
     const row = rowOf(
-      buildTrip({ waitingTimeMinutes: null }),
+      buildTrip({ waitingTimeMinutes: null }), NO_LABELS,
       line("BASE_PRICE", "300.00"),
     );
 
@@ -1081,13 +1036,16 @@ describe("Wachttijd and Combi as separate components", () => {
    * wait — and the live data carries 0 on Trips nobody waited on.
    */
   it("says nothing for a waiting time of zero minutes", () => {
-    expect(rowOf(buildTrip({ waitingTimeMinutes: 0 })).info).toBe("");
+    // The backend states "0 min"; Info's own rule is what keeps it silent.
+    const zero = { ...NO_LABELS, waitingLabel: "Wachttijd 0 min" };
+
+    expect(rowOf(buildTrip({ waitingTimeMinutes: 0 }), zero).info).toBe("");
   });
 
   /** CASE C — a Combination leg. */
   it("says COMBI and prints the surcharge", () => {
     const row = rowOf(
-      buildTrip({ tripGroupId: "group-1" }),
+      buildTrip({ tripGroupId: "group-1" }), NO_LABELS,
       line("BASE_PRICE", "300.00"),
       line("COMBINATION", "50.00"),
     );
@@ -1099,7 +1057,7 @@ describe("Wachttijd and Combi as separate components", () => {
   /** CASE D — both, side by side and never added up. */
   it("keeps the surcharge and the waiting time apart", () => {
     const row = rowOf(
-      buildTrip({ tripGroupId: "group-1", ...WAITING_WINDOW }),
+      buildTrip({ tripGroupId: "group-1", ...WAITING_WINDOW }), WAITED_WINDOW,
       line("COMBINATION", "50.00"),
       line("WAITING_TIME", "137.50"),
     );
@@ -1112,7 +1070,7 @@ describe("Wachttijd and Combi as separate components", () => {
   /** CASE E — three components, each still readable. */
   it("keeps a third component apart too", () => {
     const row = rowOf(
-      buildTrip({ tripGroupId: "group-1", ...WAITING_WINDOW, ...PROPERTY }),
+      buildTrip({ tripGroupId: "group-1", ...WAITING_WINDOW, ...PROPERTY }), WAITED_WINDOW,
       line("COMBINATION", "50.00"),
       line("CUSTOM_PROPERTY", "25.00", MANUAL_ID),
       line("WAITING_TIME", "137.50"),
@@ -1127,7 +1085,7 @@ describe("Wachttijd and Combi as separate components", () => {
   it("gives both legs of a Combination their own surcharge", () => {
     const legs = ["leg-1", "leg-2"].map((id) =>
       rowOf(
-        buildTrip({ id, tripGroupId: "group-1" }),
+        buildTrip({ id, tripGroupId: "group-1" }), NO_LABELS,
         line("BASE_PRICE", "300.00"),
         line("COMBINATION", "50.00"),
       ),
@@ -1142,7 +1100,7 @@ describe("Wachttijd and Combi as separate components", () => {
   /** CASE G — no Combination: no word, no surcharge. */
   it("says nothing about a Combination for a standalone Trip", () => {
     const row = rowOf(
-      buildTrip({ tripGroupId: null }),
+      buildTrip({ tripGroupId: null }), NO_LABELS,
       line("BASE_PRICE", "300.00"),
     );
 
@@ -1157,7 +1115,7 @@ describe("Wachttijd and Combi as separate components", () => {
    */
   it("says nothing about a Combination when the snapshot holds no surcharge", () => {
     const row = rowOf(
-      buildTrip({ tripGroupId: "manual-group", ...WAITING_WINDOW }),
+      buildTrip({ tripGroupId: "manual-group", ...WAITING_WINDOW }), WAITED_WINDOW,
       line("WAITING_TIME", "137.50"),
     );
 
@@ -1168,7 +1126,7 @@ describe("Wachttijd and Combi as separate components", () => {
   /** A surcharge of nothing is still a stored fact, and prints as one. */
   it("prints a zero surcharge rather than hiding it", () => {
     const row = rowOf(
-      buildTrip({ tripGroupId: "group-1" }),
+      buildTrip({ tripGroupId: "group-1" }), NO_LABELS,
       line("COMBINATION", "0.00"),
     );
 
