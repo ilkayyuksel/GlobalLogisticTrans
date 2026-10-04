@@ -436,6 +436,32 @@ const nl = {
   "settings.pricing.routes.empty": "Nog geen routeprijzen",
   "settings.pricing.routes.emptyDescription":
     "Ritten op een route zonder configuratie krijgen Tarief, Toll en Tunnel op €0.",
+  "settings.pricing.routes.select": "Selecteren",
+  "settings.pricing.routes.selection.selectAll": "Alles selecteren",
+  "settings.pricing.routes.selection.deselectAll": "Alles deselecteren",
+  "settings.pricing.routes.selection.count": "{count} geselecteerd",
+  "settings.pricing.routes.selection.delete": "Geselecteerde verwijderen ({count})",
+  "settings.pricing.routes.selection.deleteTitle": "Selectie verwijderen",
+  "settings.pricing.routes.selection.deleteDescription":
+    "Alle geselecteerde routeprijzen worden in één keer verwijderd. Een Combination wordt altijd met beide legs verwijderd. Lukt één ervan niet, dan wordt niets verwijderd.",
+  "settings.pricing.routes.selection.summary":
+    "{routes} route(s) en {combinations} Combination(s)",
+  "settings.pricing.routes.selection.deleted": "Selectie verwijderd.",
+  "settings.pricing.routes.sync.action": "Sync",
+  "settings.pricing.routes.sync.actionLabel":
+    "Prijzen van {leg} \"{route}\" synchroniseren",
+  "settings.pricing.routes.sync.title": "Prijzen synchroniseren",
+  "settings.pricing.routes.sync.description":
+    "Tarief, KM en Tunnel van deze leg worden exact overgenomen op dezelfde leg (zelfde Van, Naar en legpositie) van andere Combinations. Normale routes, de andere leg en de Toll prijs per km worden niet gewijzigd.",
+  "settings.pricing.routes.sync.question":
+    "Prijzen van {leg} \"{route}\" synchroniseren naar {count} andere Combination-routes?",
+  "settings.pricing.routes.sync.confirm": "Synchroniseren",
+  "settings.pricing.routes.sync.noTargets":
+    "Geen andere Combination-legs gevonden",
+  "settings.pricing.routes.sync.noTargetsDescription":
+    "Geen enkele andere Combination heeft deze leg met exact dezelfde Van en Naar op dezelfde legpositie. Er is niets gewijzigd.",
+  "settings.pricing.routes.sync.done": "Prijzen gesynchroniseerd.",
+  "settings.pricing.routes.sync.failed": "Synchroniseren mislukt.",
   "navigation.pricingSettings": "Prijzen",
 
   "ritten.payment.paid": "Betaald",
@@ -1493,6 +1519,32 @@ const tr: Translations = {
   "settings.pricing.routes.empty": "Henüz rota fiyatı yok",
   "settings.pricing.routes.emptyDescription":
     "Yapılandırılmamış bir rotadaki seferlerde Tarife, Geçiş ücreti ve Tünel €0 olur.",
+  "settings.pricing.routes.select": "Seç",
+  "settings.pricing.routes.selection.selectAll": "Tümünü seç",
+  "settings.pricing.routes.selection.deselectAll": "Seçimi kaldır",
+  "settings.pricing.routes.selection.count": "{count} seçili",
+  "settings.pricing.routes.selection.delete": "Seçilenleri sil ({count})",
+  "settings.pricing.routes.selection.deleteTitle": "Seçimi sil",
+  "settings.pricing.routes.selection.deleteDescription":
+    "Seçilen tüm rota fiyatları tek seferde silinir. Bir Combination her zaman iki bacağıyla birlikte silinir. Biri silinemezse hiçbiri silinmez.",
+  "settings.pricing.routes.selection.summary":
+    "{routes} rota ve {combinations} Combination",
+  "settings.pricing.routes.selection.deleted": "Seçim silindi.",
+  "settings.pricing.routes.sync.action": "Sync",
+  "settings.pricing.routes.sync.actionLabel":
+    "{leg} \"{route}\" fiyatlarını eşitle",
+  "settings.pricing.routes.sync.title": "Fiyatları eşitle",
+  "settings.pricing.routes.sync.description":
+    "Bu bacağın Tarife, KM ve Tünel değerleri, diğer Combination'ların aynı bacağına (aynı Nereden, Nereye ve bacak pozisyonu) aynen kopyalanır. Normal rotalar, diğer bacak ve km başına Toll fiyatı değişmez.",
+  "settings.pricing.routes.sync.question":
+    "{leg} \"{route}\" fiyatları {count} diğer Combination rotasına eşitlensin mi?",
+  "settings.pricing.routes.sync.confirm": "Eşitle",
+  "settings.pricing.routes.sync.noTargets":
+    "Başka Combination bacağı bulunamadı",
+  "settings.pricing.routes.sync.noTargetsDescription":
+    "Başka hiçbir Combination'da aynı bacak pozisyonunda tam olarak aynı Nereden ve Nereye ile bu bacak yok. Hiçbir şey değiştirilmedi.",
+  "settings.pricing.routes.sync.done": "Fiyatlar eşitlendi.",
+  "settings.pricing.routes.sync.failed": "Eşitleme başarısız.",
   "navigation.pricingSettings": "Fiyatlar",
 
   "ritten.payment.paid": "Ödendi",

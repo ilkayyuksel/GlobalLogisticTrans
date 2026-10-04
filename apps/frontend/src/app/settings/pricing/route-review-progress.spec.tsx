@@ -283,7 +283,13 @@ describe("a Combination is reviewed as one record", () => {
 
     await screen.findByText("Combination #1");
 
-    expect(screen.getAllByRole("checkbox")).toHaveLength(1);
+    // The selection tick is the group's too — a bulk delete never takes one leg.
+    expect(
+      screen.getAllByRole("checkbox", { name: /^Gecontroleerd:/ }),
+    ).toHaveLength(1);
+    expect(
+      screen.getAllByRole("checkbox", { name: /^Selecteren:/ }),
+    ).toHaveLength(1);
   });
 
   it("marks the group, by the group's id", async () => {

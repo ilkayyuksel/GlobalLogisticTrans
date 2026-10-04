@@ -1,4 +1,8 @@
-import { ConflictException, NotFoundException } from "@nestjs/common";
+import {
+  BadRequestException,
+  ConflictException,
+  NotFoundException,
+} from "@nestjs/common";
 
 /**
  * Domain exceptions for the route configuration screen.
@@ -28,5 +32,12 @@ export class UnknownPricingComponentException extends ConflictException {
     super(
       `Pricing component "${componentCode}" is not in the catalog, so a route cost cannot be configured for it.`,
     );
+  }
+}
+
+/** A bulk deletion that names nothing to delete. */
+export class EmptyBulkRemovalException extends BadRequestException {
+  constructor() {
+    super("Name at least one route or Combination to delete.");
   }
 }

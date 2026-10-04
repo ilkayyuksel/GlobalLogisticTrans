@@ -1,4 +1,8 @@
-import { INestApplication, VersioningType } from "@nestjs/common";
+import {
+  INestApplication,
+  ValidationPipe,
+  VersioningType,
+} from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR, Reflector } from "@nestjs/core";
 import { Test } from "@nestjs/testing";
@@ -16,6 +20,9 @@ import { SettingsController } from "../settings/settings.controller";
 import { SettingsService } from "../settings/settings.service";
 import { BulkRouteImportService } from "./bulk-route-import.service";
 import { CombinationRouteConfigurationService } from "./combination-route-configuration.service";
+import { CombinationLegSyncService } from "./combination-leg-sync.service";
+import { RouteConfigurationActionsController } from "./route-configuration-actions.controller";
+import { RouteConfigurationBulkRemovalService } from "./route-configuration-bulk-removal.service";
 import { RouteConfigurationController } from "./route-configuration.controller";
 import { RouteConfigurationService } from "./route-configuration.service";
 
@@ -169,6 +176,8 @@ describe("pricing configuration is protected", () => {
     setReviewed: jest.Mock;
   };
   let bulkImport: { check: jest.Mock; import: jest.Mock };
+  let bulkRemoval: { remove: jest.Mock };
+  let legSync: { preview: jest.Mock; sync: jest.Mock };
   let settings: { findAll: jest.Mock; update: jest.Mock; upsert: jest.Mock };
   let bootstrap: { plan: jest.Mock; apply: jest.Mock };
 
@@ -245,6 +254,22 @@ describe("pricing configuration is protected", () => {
      * would be worse than an open single-route endpoint, not better, so it is held
      * to exactly the same rule here.
      */
+    bulkRemoval = {
+      remove: jest.fn().mockResolvedValue({ removedRoutes: 1, removedCombinations: 1 }),
+    };
+    const SYNC_ANSWER = {
+      combinationGroupId: COMBINATION_GROUP_ID,
+      legPosition: 1,
+      departure: "PSA Quay 869",
+      destination: "GENT",
+      prices: { tarief: "100.00", kilometres: "25.00", tunnel: "10.00" },
+      targetCombinationGroupIds: [],
+    };
+    legSync = {
+      preview: jest.fn().mockResolvedValue(SYNC_ANSWER),
+      sync: jest.fn().mockResolvedValue(SYNC_ANSWER),
+    };
+
     bulkImport = {
       check: jest.fn().mockResolvedValue({
         isValid: true,
@@ -288,7 +313,11 @@ describe("pricing configuration is protected", () => {
     };
 
     const moduleRef = await Test.createTestingModule({
-      controllers: [RouteConfigurationController, SettingsController],
+      controllers: [
+        RouteConfigurationController,
+        RouteConfigurationActionsController,
+        SettingsController,
+      ],
       providers: [
         Reflector,
         AccessTokenVerifier,
@@ -301,6 +330,8 @@ describe("pricing configuration is protected", () => {
           useValue: combinationConfiguration,
         },
         { provide: BulkRouteImportService, useValue: bulkImport },
+        { provide: RouteConfigurationBulkRemovalService, useValue: bulkRemoval },
+        { provide: CombinationLegSyncService, useValue: legSync },
         { provide: SettingsService, useValue: settings },
         { provide: PricingBootstrapService, useValue: bootstrap },
         {
@@ -317,6 +348,16 @@ describe("pricing configuration is protected", () => {
     }).compile();
 
     application = moduleRef.createNestApplication();
+    // The same validation `main.ts` installs, so a route parameter arrives here
+    // exactly as it does in the running application: converted and checked.
+    application.useGlobalPipes(
+      new ValidationPipe({
+        whitelist: true,
+        forbidNonWhitelisted: true,
+        transform: true,
+        transformOptions: { enableImplicitConversion: true },
+      }),
+    );
     application.setGlobalPrefix("api");
     application.enableVersioning({
       type: VersioningType.URI,
@@ -426,6 +467,28 @@ describe("pricing configuration is protected", () => {
       `/api/v1/route-configuration/combinations/${COMBINATION_GROUP_ID}/review`,
       { reviewed: true },
     ],
+    [
+      "several routes and Combinations at once through a bulk delete",
+      "post",
+      "/api/v1/route-configuration/bulk-delete",
+      { routeIds: [ROUTE_ID], combinationGroupIds: [COMBINATION_GROUP_ID] },
+    ],
+    [
+      "every matching Combination leg through a price sync",
+      "post",
+      `/api/v1/route-configuration/combinations/${COMBINATION_GROUP_ID}/legs/1/sync`,
+      {},
+    ],
+    /*
+     * The preview writes nothing, and is still protected: it says which
+     * Combinations share a road and what that road costs.
+     */
+    [
+      "a price sync preview",
+      "get",
+      `/api/v1/route-configuration/combinations/${COMBINATION_GROUP_ID}/legs/1/sync-targets`,
+      {},
+    ],
   ];
 
   describe("without a token", () => {
@@ -475,6 +538,9 @@ describe("pricing configuration is protected", () => {
         expect(combinationConfiguration.remove).not.toHaveBeenCalled();
         expect(bulkImport.import).not.toHaveBeenCalled();
         expect(bulkImport.check).not.toHaveBeenCalled();
+        expect(bulkRemoval.remove).not.toHaveBeenCalled();
+        expect(legSync.sync).not.toHaveBeenCalled();
+        expect(legSync.preview).not.toHaveBeenCalled();
         expect(routeConfiguration.setReviewed).not.toHaveBeenCalled();
         expect(combinationConfiguration.setReviewed).not.toHaveBeenCalled();
       },
@@ -538,6 +604,39 @@ describe("pricing configuration is protected", () => {
    * make the refusals mean something.
    */
   describe("with a valid token", () => {
+    it("lets an authorised administrator delete a selection in bulk", async () => {
+      const response = await request(application.getHttpServer())
+        .post("/api/v1/route-configuration/bulk-delete")
+        .set("Authorization", `Bearer ${await signToken()}`)
+        .send({ routeIds: [ROUTE_ID], combinationGroupIds: [COMBINATION_GROUP_ID] })
+        .expect(200);
+
+      expect(bulkRemoval.remove).toHaveBeenCalledWith({
+        routeIds: [ROUTE_ID],
+        combinationGroupIds: [COMBINATION_GROUP_ID],
+      });
+      expect(response.body.data).toEqual({ removedRoutes: 1, removedCombinations: 1 });
+    });
+
+    it("lets an authorised administrator sync a leg's prices", async () => {
+      await request(application.getHttpServer())
+        .post(`/api/v1/route-configuration/combinations/${COMBINATION_GROUP_ID}/legs/1/sync`)
+        .set("Authorization", `Bearer ${await signToken()}`)
+        .expect(200);
+
+      expect(legSync.sync).toHaveBeenCalledWith(COMBINATION_GROUP_ID, 1);
+    });
+
+    /** A leg position is 1 or 2 — anything else is refused before any service. */
+    it.each(["0", "3", "first"])("refuses leg position %s", async (position) => {
+      await request(application.getHttpServer())
+        .post(`/api/v1/route-configuration/combinations/${COMBINATION_GROUP_ID}/legs/${position}/sync`)
+        .set("Authorization", `Bearer ${await signToken()}`)
+        .expect(400);
+
+      expect(legSync.sync).not.toHaveBeenCalled();
+    });
+
     it("changes the fuel percentage", async () => {
       const response = await request(application.getHttpServer())
         .patch("/api/v1/settings/PRICING/FUEL_PERCENTAGE")
@@ -745,6 +844,7 @@ describe("pricing configuration is protected", () => {
   it("marks no configuration route as public", () => {
     const handlers = [
       ...Object.getOwnPropertyNames(RouteConfigurationController.prototype),
+      ...Object.getOwnPropertyNames(RouteConfigurationActionsController.prototype),
       ...Object.getOwnPropertyNames(SettingsController.prototype),
     ];
 

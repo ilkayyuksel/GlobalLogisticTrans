@@ -45,6 +45,36 @@ export function ReviewCheckbox({
   );
 }
 
+/**
+ * The selection tick for a bulk action — a different checkbox from the review
+ * tick, in its own first column, and never sent anywhere until the operator
+ * acts on the selection.
+ */
+export function SelectionCell({
+  isSelected,
+  label,
+  onToggle,
+}: {
+  isSelected: boolean;
+  /** Which record this selects, for anyone not looking at the screen. */
+  label: string;
+  onToggle: () => void;
+}) {
+  const t = useTranslation();
+
+  return (
+    <td className="w-px px-3 py-2">
+      <input
+        type="checkbox"
+        checked={isSelected}
+        onChange={onToggle}
+        aria-label={`${t("settings.pricing.routes.select")}: ${label}`}
+        className="h-4 w-4 rounded border-border accent-primary"
+      />
+    </td>
+  );
+}
+
 /** Each editable value, with the control its field calls for. */
 const FIELDS: readonly {
   readonly field: RouteField;
@@ -134,12 +164,16 @@ function displayValueOf(route: RouteConfiguration, field: RouteField): string {
 export function RouteRow({
   route,
   isBusy,
+  isSelected,
+  onToggleSelected,
   onDelete,
   onReview,
   onSaveField,
 }: {
   route: RouteConfiguration;
   isBusy: boolean;
+  isSelected: boolean;
+  onToggleSelected: () => void;
   onDelete: () => void;
   onReview: (reviewed: boolean) => void;
   onSaveField: (field: RouteField, value: string) => Promise<void>;
@@ -148,6 +182,11 @@ export function RouteRow({
 
   return (
     <tr className="border-b border-border last:border-0">
+      <SelectionCell
+        isSelected={isSelected}
+        label={`${route.departure} ${route.destination}`}
+        onToggle={onToggleSelected}
+      />
       <RouteValueCells route={route} onSaveField={onSaveField} />
       <td className="px-3 py-2">
         <ReviewCheckbox

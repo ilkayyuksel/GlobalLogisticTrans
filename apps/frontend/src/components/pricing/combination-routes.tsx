@@ -3,6 +3,7 @@
 import {
   ReviewCheckbox,
   RouteValueCells,
+  SelectionCell,
 } from "@/components/pricing/route-row";
 import { ConfirmDialog } from "@/components/ritten/confirm-dialog";
 import type { CombinationRouteConfiguration } from "@/lib/api/route-configuration";
@@ -44,7 +45,9 @@ export const BLANK_COMBINATION_DRAFT: CombinationDraft = {
  * reader hears the legs as a group rather than as two loose rows. The same
  * pattern the Ritten list uses to group a day's Trips under their truck.
  *
- * No leg carries actions of its own, because none exists on its own.
+ * No leg is selected, reviewed or removed on its own, because none exists on
+ * its own. The one action a leg does carry is Sync: copying its prices to the
+ * same leg of other Combinations, which is about that leg and nothing else.
  *
  * ── AND NO BEWERKEN, ON THE GROUP EITHER ────────────────────────────────────
  * A leg's Van, Naar, Tarief, KM and Tunnel are edited by clicking them, exactly
@@ -56,8 +59,11 @@ export function CombinationRows({
   combination,
   index,
   isBusy,
+  isSelected,
   columnCount,
+  onToggleSelected,
   onDelete,
+  onSyncLeg,
   onReview,
   onSaveLegField,
 }: {
@@ -65,8 +71,16 @@ export function CombinationRows({
   /** Its place in the list, which is what the operator sees it called. */
   index: number;
   isBusy: boolean;
+  /** Selected for a bulk action — the whole Combination, never one leg. */
+  isSelected: boolean;
   columnCount: number;
+  onToggleSelected: () => void;
   onDelete: () => void;
+  /**
+   * Starts copying one leg's prices to the same leg of other Combinations.
+   * Named by index, as `onSaveLegField` is: index 0 is leg position 1.
+   */
+  onSyncLeg: (legIndex: number) => void;
   onReview: (reviewed: boolean) => void;
   /**
    * Persists one field of ONE leg.
@@ -88,13 +102,22 @@ export function CombinationRows({
     <tbody className="border-t border-border">
       <tr>
         {/*
+          The selection belongs to the GROUP, like the review tick: a bulk delete
+          removes a Combination whole, so there is no leg to select on its own.
+        */}
+        <SelectionCell
+          isSelected={isSelected}
+          label={label}
+          onToggle={onToggleSelected}
+        />
+        {/*
           A heading row rather than a card header: it spans the value columns and
           leaves the last one to the actions, so the table's own column rhythm is
           not broken by the group it introduces.
         */}
         <th
           scope="colgroup"
-          colSpan={columnCount - 2}
+          colSpan={columnCount - 3}
           className="px-3 py-1.5 text-left text-xs font-medium uppercase tracking-wide text-muted"
         >
           {label}
@@ -131,6 +154,8 @@ export function CombinationRows({
 
       {combination.legs.map((leg, legIndex) => (
         <tr key={leg.id} className="border-b border-border last:border-0">
+          {/* Selected with the group, in the header row above. */}
+          <td className="px-3 py-2" />
           {/*
             Every value of a leg is edited where it stands, exactly as an
             ordinary route's is. What differs is only where the change goes: one
@@ -145,12 +170,29 @@ export function CombinationRows({
           {/* No tick per leg: the group's mark above answers for both. */}
           <td className="px-3 py-2" />
           {/*
-            The actions column, left empty on purpose: a leg is never edited or
-            removed on its own, and a disabled button would invite the attempt.
-            The leg number goes here, where the eye already is.
+            The leg number, where the eye already is, and the one action that IS
+            a leg's own: copying its prices to the same leg of other
+            Combinations. A leg is still never edited as a form or removed on its
+            own.
           */}
           <td className="px-3 py-2 text-xs text-muted">
-            {`${t("settings.pricing.routes.combinations.leg")} ${legIndex + 1}`}
+            <span className="flex items-center gap-2">
+              {`${t("settings.pricing.routes.combinations.leg")} ${legIndex + 1}`}
+              <button
+                type="button"
+                disabled={isBusy}
+                onClick={() => onSyncLeg(legIndex)}
+                aria-label={t("settings.pricing.routes.sync.actionLabel")
+                  .replace(
+                    "{leg}",
+                    `${t("settings.pricing.routes.combinations.leg")} ${legIndex + 1}`,
+                  )
+                  .replace("{route}", `${leg.departure} → ${leg.destination}`)}
+                className="rounded-md border border-border px-2 py-0.5 text-xs font-medium text-foreground hover:bg-hover disabled:opacity-50"
+              >
+                {t("settings.pricing.routes.sync.action")}
+              </button>
+            </span>
           </td>
         </tr>
       ))}

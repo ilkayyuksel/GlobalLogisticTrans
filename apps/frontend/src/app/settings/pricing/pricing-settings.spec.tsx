@@ -589,6 +589,8 @@ describe("the route prices", () => {
       .map((header) => header.textContent);
 
     expect(headings).toEqual([
+      // The selection tick for a bulk action; its heading is for a screen reader.
+      "Selecteren",
       "Van",
       "Naar",
       "Tarief",

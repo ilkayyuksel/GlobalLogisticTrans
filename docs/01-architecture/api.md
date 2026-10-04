@@ -163,3 +163,44 @@ emptied every entry on its way in, and its field paths (`routes.3.kilometres`)
 cannot name the entry at fault. Each entry is therefore validated
 programmatically against the same DTO classes the manual endpoints use, with the
 same options the pipe applies.
+
+---
+
+# Bulk delete of route prices
+
+`POST /api/v1/route-configuration/bulk-delete`
+
+```json
+{ "routeIds": ["<uuid>"], "combinationGroupIds": ["<uuid>"] }
+```
+
+Deletes a selection of ordinary routes and Combinations in **one transaction**:
+all of them, or — when any record is refused (missing, or a Combination leg
+named as a route) — none. Each record is removed through the same service
+method as the single delete, so a Combination always goes with both legs and
+their tunnels. A Combination is named by its group id, never by a leg. An empty
+selection is refused with 400. Historical TripPricing is unaffected: a snapshot
+stores its amounts and reads no configuration again.
+
+POST rather than DELETE, because the selection is a body and a DELETE with a
+body is ignored or refused by enough proxies to be a trap.
+
+# Combination leg price sync
+
+`GET  /api/v1/route-configuration/combinations/{combinationGroupId}/legs/{1|2}/sync-targets`
+`POST /api/v1/route-configuration/combinations/{combinationGroupId}/legs/{1|2}/sync`
+
+Copies one Combination leg's stored **Tarief, KM and Tunnel** to every OTHER
+Combination whose leg in the **same position** is the **same road** by the
+application's one road identity, `isSameRoad` (`route-pricing/route-identity.ts`)
+— the rule RoutePricing and RouteCost are matched by. The departure is compared
+as a terminal through `isSameTerminal`, so `PSA Quay 869` and `Quay 869` are one
+place (case and whitespace ignored); the destination is compared exactly. Never an
+ordinary route, never the other leg position, never the global toll rate, From,
+To, the review mark or the group itself.
+
+The GET is the preview the confirmation shows and writes nothing. The POST
+reads the source and the targets inside one transaction and saves each target
+through the same Combination update an inline leg edit uses, so there is no
+second way prices are written. Both answer with the source leg, its values and
+`targetCombinationGroupIds`; an empty list means nothing was changed.

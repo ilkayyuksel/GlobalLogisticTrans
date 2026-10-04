@@ -5,7 +5,10 @@ import { RouteCostRepository } from "../route-costs/route-cost.repository";
 import { RoutePricingModule } from "../route-pricing/route-pricing.module";
 import { BulkRouteImportService } from "./bulk-route-import.service";
 import { BulkRouteImportValidator } from "./bulk-route-import.validator";
+import { CombinationLegSyncService } from "./combination-leg-sync.service";
 import { CombinationRouteConfigurationService } from "./combination-route-configuration.service";
+import { RouteConfigurationActionsController } from "./route-configuration-actions.controller";
+import { RouteConfigurationBulkRemovalService } from "./route-configuration-bulk-removal.service";
 import { RouteConfigurationUnitOfWork } from "./route-configuration.unit-of-work";
 import { RouteConfigurationController } from "./route-configuration.controller";
 import { RouteConfigurationService } from "./route-configuration.service";
@@ -30,7 +33,7 @@ import { RouteTunnelCostService } from "./route-tunnel-cost.service";
  */
 @Module({
   imports: [RoutePricingModule, RouteCostModule],
-  controllers: [RouteConfigurationController],
+  controllers: [RouteConfigurationController, RouteConfigurationActionsController],
   providers: [
     RouteConfigurationService,
     CombinationRouteConfigurationService,
@@ -51,6 +54,8 @@ import { RouteTunnelCostService } from "./route-tunnel-cost.service";
     BulkRouteImportService,
     BulkRouteImportValidator,
     RouteConfigurationUnitOfWork,
+    RouteConfigurationBulkRemovalService,
+    CombinationLegSyncService,
   ],
   exports: [RouteConfigurationService, CombinationRouteConfigurationService],
 })

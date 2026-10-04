@@ -325,3 +325,99 @@ export function markCombinationRouteConfigurationReviewed(
     { method: "PATCH", body: { reviewed }, signal },
   );
 }
+
+/*
+ * ── ACTIONS ON SEVERAL CONFIGURATIONS AT ONCE ───────────────────────────────
+ * Each runs its whole selection in ONE backend transaction, through the very
+ * services the single-record endpoints use. Nothing on this side loops over
+ * records or decides which ones belong together.
+ */
+
+const BULK_DELETE_PATH = `${PATH}/bulk-delete`;
+
+/** What a bulk delete removes: ordinary routes, and Combinations as a whole. */
+export interface BulkRemoveRouteConfigurationPayload {
+  routeIds: string[];
+  combinationGroupIds: string[];
+}
+
+export interface BulkRemoveRouteConfigurationResult {
+  removedRoutes: number;
+  removedCombinations: number;
+}
+
+/**
+ * Removes the whole selection, or nothing at all.
+ *
+ * A Combination is named by its group, never by a leg, so it always goes with
+ * both legs. If any record cannot be removed the backend removes none, and the
+ * refusal is reported with its reason.
+ */
+export function bulkDeleteRouteConfigurations(
+  payload: BulkRemoveRouteConfigurationPayload,
+  signal?: AbortSignal,
+): Promise<BulkRemoveRouteConfigurationResult> {
+  return request<BulkRemoveRouteConfigurationResult>(BULK_DELETE_PATH, {
+    method: "POST",
+    body: payload,
+    signal,
+  });
+}
+
+/** 1 is the outbound leg, listed first; 2 the return. */
+export type CombinationLegPosition = 1 | 2;
+
+/**
+ * One leg's price sync: the leg, its values, and which other Combinations it
+ * reaches.
+ *
+ * The targets are decided by the backend — same leg position, exactly the same
+ * Van and Naar — and the preview and the sync ask the same rule, so the count a
+ * confirmation shows is the count the sync works from.
+ */
+export interface CombinationLegSync {
+  combinationGroupId: string;
+  legPosition: CombinationLegPosition;
+  departure: string;
+  destination: string;
+  prices: {
+    tarief: string;
+    kilometres: string | null;
+    tunnel: string;
+  };
+  targetCombinationGroupIds: string[];
+}
+
+function legSyncPath(
+  combinationGroupId: string,
+  legPosition: CombinationLegPosition,
+): string {
+  return `${COMBINATIONS_PATH}/${combinationGroupId}/legs/${legPosition}`;
+}
+
+/** Which Combinations a sync of this leg would reach. Writes nothing. */
+export function previewCombinationLegSync(
+  combinationGroupId: string,
+  legPosition: CombinationLegPosition,
+  signal?: AbortSignal,
+): Promise<CombinationLegSync> {
+  return request<CombinationLegSync>(
+    `${legSyncPath(combinationGroupId, legPosition)}/sync-targets`,
+    { signal },
+  );
+}
+
+/**
+ * Copies this leg's stored Tarief, KM and Tunnel to every matching leg, in one
+ * transaction. Never an ordinary route, never the other leg position.
+ */
+export function syncCombinationLeg(
+  combinationGroupId: string,
+  legPosition: CombinationLegPosition,
+  signal?: AbortSignal,
+): Promise<CombinationLegSync> {
+  return request<CombinationLegSync>(
+    `${legSyncPath(combinationGroupId, legPosition)}/sync`,
+    { method: "POST", signal },
+  );
+}
