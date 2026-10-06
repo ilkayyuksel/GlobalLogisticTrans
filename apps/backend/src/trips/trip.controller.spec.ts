@@ -53,6 +53,7 @@ function buildTrip(overrides: Partial<Trip> = {}): Trip {
     executionDatetime: null,
     waitingTimeStart: null,
     waitingTimeEnd: null,
+    waitingTimeEndsNextDay: false,
     waitingTimeMinutes: null,
     distanceKm: null,
     tarNummer: null,
@@ -460,7 +461,6 @@ describe("TripController (integration)", () => {
       ["tripGroupId", PDF_ID],
       ["parserMetadata", {}],
       ["containerType", "20TK"],
-      ["terminal", "Other"],
     ])("rejects %s, which is not a manual field", async (field, value) => {
       await request(app.getHttpServer())
         .patch(`${BASE}/${TRIP_ID}`)
@@ -469,24 +469,55 @@ describe("TripController (integration)", () => {
     });
 
     /**
-     * The fields a transport order states are the ones whose owner depends on
-     * the TRIP: the destination and the transport times.
-     *
-     * This fixture came from a PDF, so the document is still the authority and
-     * the request is refused — but as a 409, not a 400: the field exists and is
-     * well-formed, and it is this Trip that cannot take it. A Trip created by
-     * hand accepts the same body; see the service tests.
+     * The address is the operator's to correct on ANY Trip, by decision of the
+     * business — this fixture came from a PDF and still accepts it. Whitespace
+     * is trimmed, and whitespace alone is stored as null.
      */
     it.each([
-      ["destinationCity", "Rotterdam"],
+      ["terminal", "DP World Antwerp Gateway"],
+      ["destinationCity", "Saint-Étienne-du-Rouvray"],
       ["destinationCountry", "Netherlands"],
-    ])("refuses %s on an imported Trip", async (field, value) => {
+    ])("accepts %s on an imported Trip", async (field, value) => {
       await request(app.getHttpServer())
         .patch(`${BASE}/${TRIP_ID}`)
-        .send({ [field]: value })
-        .expect(409);
+        .send({ [field]: `  ${value}  ` })
+        .expect(200);
+
+      expect(repository.update).toHaveBeenCalledWith(
+        TRIP_ID,
+        expect.objectContaining({ [field]: value }),
+      );
+    });
+
+    it("stores a whitespace-only terminal as null", async () => {
+      await request(app.getHttpServer())
+        .patch(`${BASE}/${TRIP_ID}`)
+        .send({ terminal: "   " })
+        .expect(200);
+
+      expect(repository.update).toHaveBeenCalledWith(
+        TRIP_ID,
+        expect.objectContaining({ terminal: null }),
+      );
+    });
+
+    it.each([
+      ["terminal", 201],
+      ["destinationCity", 201],
+    ])("refuses a %s longer than %i characters", async (field, length) => {
+      await request(app.getHttpServer())
+        .patch(`${BASE}/${TRIP_ID}`)
+        .send({ [field]: "x".repeat(length) })
+        .expect(400);
 
       expect(repository.update).not.toHaveBeenCalled();
+    });
+
+    it("refuses a terminal that is not text", async () => {
+      await request(app.getHttpServer())
+        .patch(`${BASE}/${TRIP_ID}`)
+        .send({ terminal: 42 })
+        .expect(400);
     });
 
     /** The transport times are an operator field on any Trip. */

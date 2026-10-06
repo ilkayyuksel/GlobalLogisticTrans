@@ -1,4 +1,6 @@
 import type {
+  CombinationOverSt,
+  CombinationOverStPayload,
   RouteConfiguration,
   RouteConfigurationPayload,
 } from "@/lib/api/route-configuration";
@@ -7,8 +9,8 @@ import type {
  * A route being typed — an ordinary one, or one leg of a Combination.
  *
  * ── WHY IT IS THE SAME SHAPE FOR BOTH ───────────────────────────────────────
- * A Combination leg IS a route: it has a Van, a Naar, a Tarief, a distance and a
- * tunnel of its own, which is exactly why the two legs can cost different
+ * A Combination leg IS a route: it has a Van, a Naar, a Tarief, a Toll and a
+ * Tunnel of its own, which is exactly why the two legs can cost different
  * amounts. What differs is how the record is saved — a leg only ever together
  * with its partner — and that difference belongs to the form, not to the draft.
  *
@@ -21,7 +23,7 @@ export interface RouteDraft {
   departure: string;
   destination: string;
   tarief: string;
-  kilometres: string;
+  toll: string;
   tunnel: string;
 }
 
@@ -30,7 +32,7 @@ export const BLANK_ROUTE_DRAFT: RouteDraft = {
   departure: "",
   destination: "",
   tarief: "",
-  kilometres: "",
+  toll: "",
   tunnel: "",
 };
 
@@ -38,27 +40,20 @@ export const BLANK_ROUTE_DRAFT: RouteDraft = {
  * What goes to the backend.
  *
  * Sent as typed: the backend validates the range and the decimals, and a check
- * repeated here would be the same rule kept in two places. An empty distance
- * reaches it as zero rather than as a guess, which is what the input's own
- * minimum already implies.
+ * repeated here would be the same rule kept in two places.
  */
 export function toRoutePayload(draft: RouteDraft): RouteConfigurationPayload {
   return {
     departure: draft.departure.trim(),
     destination: draft.destination.trim(),
     tarief: Number(draft.tarief),
-    kilometres: Number(draft.kilometres),
+    toll: Number(draft.toll),
     tunnel: Number(draft.tunnel),
   };
 }
 
 /** The five fields of a route that can be edited in place. */
-export type RouteField =
-  | "departure"
-  | "destination"
-  | "tarief"
-  | "kilometres"
-  | "tunnel";
+export type RouteField = "departure" | "destination" | "tarief" | "toll" | "tunnel";
 
 /**
  * A stored route as a payload, with ONE field replaced.
@@ -68,12 +63,6 @@ export type RouteField =
  * add form makes — so an inline edit of one value sends the other four exactly
  * as they are. Read from the route on screen, so nothing else can move: the one
  * field an operator changed is the one field that differs.
- *
- * ── AND WHY NULL SURVIVES ───────────────────────────────────────────────────
- * A route whose distance nobody has stated carries null, not zero, and the two
- * mean different things: no toll because nobody measured the road, against no
- * toll because somebody decided it is free. Editing the TARIEF of such a route
- * must not quietly measure it at zero on the way past.
  */
 export function toUpdatedRoutePayload(
   route: RouteConfiguration,
@@ -91,7 +80,7 @@ export function toRouteValues(
     departure: route.departure,
     destination: route.destination,
     tarief: Number(route.tarief),
-    kilometres: route.kilometres === null ? null : Number(route.kilometres),
+    toll: Number(route.toll),
     tunnel: Number(route.tunnel),
   };
 }
@@ -99,21 +88,58 @@ export function toRouteValues(
 /**
  * What one typed value means for its field.
  *
- * An empty DISTANCE is null: nobody has stated how long the road is, which is
- * what the column has always meant. An empty amount is not turned into zero —
- * `Number("")` would make it one silently — so it goes out as it is and the
- * backend refuses it in its own words. No rule is invented here.
+ * An empty amount is not turned into zero — `Number("")` would make it one
+ * silently — so it goes out as it is and the backend refuses it in its own
+ * words. No rule is invented here.
  */
-function toFieldValue(field: RouteField, value: string): string | number | null {
+function toFieldValue(field: RouteField, value: string): string | number {
   if (field === "departure" || field === "destination") {
     return value.trim();
   }
 
-  if (field === "kilometres" && value.trim() === "") {
-    return null;
-  }
+  return value.trim() === "" ? value : Number(value);
+}
 
-  return Number(value);
+/**
+ * ── OVER ST ──────────────────────────────────────────────────────────────────
+ * The three amounts a Combination carries beside its legs. Edited in place like
+ * a leg's amounts; the whole Over ST goes back with one value replaced.
+ */
+export type OverStField = "tarief" | "toll" | "tunnel";
+
+export interface OverStDraft {
+  tarief: string;
+  toll: string;
+  tunnel: string;
+}
+
+export const BLANK_OVER_ST_DRAFT: OverStDraft = { tarief: "", toll: "", tunnel: "" };
+
+/** An empty Over ST box means "not stated", which the backend stores as null. */
+function toOverStAmount(value: string | null): number | null {
+  return value === null || value.trim() === "" ? null : Number(value);
+}
+
+export function toOverStPayload(draft: OverStDraft): CombinationOverStPayload {
+  return {
+    tarief: toOverStAmount(draft.tarief),
+    toll: toOverStAmount(draft.toll),
+    tunnel: toOverStAmount(draft.tunnel),
+  };
+}
+
+/** The stored Over ST as a payload, with ONE field replaced. */
+export function toUpdatedOverStPayload(
+  overSt: CombinationOverSt,
+  field: OverStField,
+  value: string,
+): CombinationOverStPayload {
+  return {
+    tarief: toOverStAmount(overSt.tarief),
+    toll: toOverStAmount(overSt.toll),
+    tunnel: toOverStAmount(overSt.tunnel),
+    [field]: toOverStAmount(value),
+  };
 }
 
 /** A stored route, opened for editing. */
@@ -123,9 +149,7 @@ export function draftOf(route: RouteConfiguration): RouteDraft {
     departure: route.departure,
     destination: route.destination,
     tarief: route.tarief,
-    // An empty box rather than a 0: nobody has stated this road's length, and
-    // typing a zero would claim somebody decided it is free.
-    kilometres: route.kilometres ?? "",
+    toll: route.toll,
     tunnel: route.tunnel,
   };
 }

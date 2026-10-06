@@ -135,7 +135,6 @@ export class RoutePricingService {
           departure: dto.departure,
           destination: dto.destination,
           basePrice: dto.basePrice,
-          kilometres: dto.kilometres ?? null,
           notes: dto.notes ?? null,
         }),
     );
@@ -315,7 +314,6 @@ export class RoutePricingService {
        * service and was dropped here, so an edited distance was accepted and
        * never stored.
        */
-      kilometres: dto.kilometres,
       notes: dto.notes,
     };
   }

@@ -66,7 +66,7 @@ export function CombinationLegSyncDialog({
       <p className="mt-2 text-xs tabular-nums text-secondary">
         {[
           `${t("settings.pricing.routes.tarief")} ${preview.prices.tarief}`,
-          `${t("settings.pricing.routes.kilometres")} ${preview.prices.kilometres ?? "—"}`,
+          `${t("settings.pricing.routes.toll")} ${preview.prices.toll}`,
           `${t("settings.pricing.routes.tunnel")} ${preview.prices.tunnel}`,
         ].join(" · ")}
       </p>

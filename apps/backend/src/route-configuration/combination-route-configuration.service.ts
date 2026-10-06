@@ -13,16 +13,18 @@ import {
   routeNameOf,
 } from "./dto/route-configuration.dto";
 import {
-  RouteTunnelCostService,
-  TunnelCostOwner,
-} from "./route-tunnel-cost.service";
+  RouteComponentCostService,
+  RouteCostOwner,
+  TOLL_CODE,
+  TUNNEL_CODE,
+} from "./route-component-cost.service";
 
 /**
  * A Combination route configuration, as an operator configures it.
  *
  * ── WHAT AN OPERATOR SEES ───────────────────────────────────────────────────
- * One record with two legs: Antwerp to Kallo at 100 over 25 km, and Kallo back
- * to Antwerp at 80 over the same 25 km. They are configured, edited and removed
+ * One record with two legs: Antwerp to Kallo at 100 with a toll of 25, and Kallo back
+ * to Antwerp at 80 with the same toll. They are configured, edited and removed
  * as one thing, because half a Combination prices one direction and silently
  * charges nothing for the other.
  *
@@ -36,7 +38,7 @@ import {
  * Nothing. Like the ordinary configuration service it is an application-layer
  * composition: the legs are written by CombinationRoutePricingService, which
  * holds the transaction and the exactly-two rule, and each leg's tunnel by
- * RouteTunnelCostService. This service decides only how the two are put
+ * RouteComponentCostService. This service decides only how the two are put
  * together, which is why it stays short.
  * ────────────────────────────────────────────────────────────────────────────
  */
@@ -44,7 +46,7 @@ import {
 export class CombinationRouteConfigurationService {
   constructor(
     private readonly combinationPricing: CombinationRoutePricingService,
-    private readonly tunnelCosts: RouteTunnelCostService,
+    private readonly routeCosts: RouteComponentCostService,
     private readonly logger: AppLoggerService,
   ) {
     this.logger.setContext(CombinationRouteConfigurationService.name);
@@ -72,16 +74,17 @@ export class CombinationRouteConfigurationService {
    * the records that identify the configuration, and a Combination refused for
    * any reason must leave nothing behind. Only once both exist does each leg's
    * tunnel follow, written against the LEG rather than against the road — see
-   * `TunnelCostOwner`.
+   * `RouteCostOwner`.
    */
   async create(
     dto: SaveCombinationRouteConfigurationDto,
   ): Promise<CombinationRouteConfigurationDto> {
     const created = await this.combinationPricing.create(
       dto.legs.map((leg) => this.toLegPrice(leg)),
+      dto.overSt,
     );
 
-    await this.saveTunnels(created.legs, dto.legs);
+    await this.saveLegCosts(created.legs, dto.legs);
 
     this.logger.log("Combination route configuration created", {
       combinationGroupId: created.id,
@@ -107,9 +110,11 @@ export class CombinationRouteConfigurationService {
     const updated = await this.combinationPricing.replaceLegs(
       combinationGroupId,
       dto.legs.map((leg) => this.toLegPrice(leg)),
+      // Undefined leaves the stored Over ST alone — the leg sync relies on it.
+      dto.overSt,
     );
 
-    await this.saveTunnels(updated.legs, dto.legs);
+    await this.saveLegCosts(updated.legs, dto.legs);
 
     this.logger.log("Combination route configuration updated", {
       combinationGroupId,
@@ -153,12 +158,13 @@ export class CombinationRouteConfigurationService {
   }
 
   /** Each leg's tunnel, against the leg that was just written. */
-  private async saveTunnels(
+  private async saveLegCosts(
     legs: readonly RoutePricingResponseDto[],
     configured: readonly SaveRouteConfigurationDto[],
   ): Promise<void> {
     for (const [index, leg] of legs.entries()) {
-      await this.tunnelCosts.save(this.ownerOf(leg), configured[index].tunnel);
+      await this.routeCosts.save(this.ownerOf(leg), TOLL_CODE, configured[index].toll);
+      await this.routeCosts.save(this.ownerOf(leg), TUNNEL_CODE, configured[index].tunnel);
     }
   }
 
@@ -171,6 +177,7 @@ export class CombinationRouteConfigurationService {
       legs: await Promise.all(
         group.legs.map((leg) => this.composeLeg(leg, group.reviewed)),
       ),
+      overSt: group.overSt,
     };
   }
 
@@ -187,7 +194,7 @@ export class CombinationRouteConfigurationService {
   ): Promise<RouteConfigurationDto> {
     return composeRouteConfiguration(
       leg,
-      await this.tunnelCosts.find(this.ownerOf(leg)),
+      await this.routeCosts.findAll(this.ownerOf(leg)),
       reviewed,
     );
   }
@@ -220,7 +227,7 @@ export class CombinationRouteConfigurationService {
    * tunnel would otherwise silently change what every ordinary Trip on that road
    * pays.
    */
-  private ownerOf(leg: RoutePricingResponseDto): TunnelCostOwner {
+  private ownerOf(leg: RoutePricingResponseDto): RouteCostOwner {
     return {
       kind: "ROUTE",
       routePricingId: leg.id,
@@ -236,7 +243,6 @@ export class CombinationRouteConfigurationService {
       departure: leg.departure,
       destination: leg.destination,
       basePrice: leg.tarief,
-      kilometres: leg.kilometres,
     };
   }
 }

@@ -57,6 +57,18 @@ export function periodQuery(view: RittenView, anchor: string): PeriodQuery {
   };
 }
 
+/**
+ * The one day this period IS, or null when it spans several.
+ *
+ * A new Trip is pre-dated with it: an operator working through 4 October who
+ * clicks "Nieuwe rit" means 4 October. A week or a month names no single day,
+ * and picking one for them — the Monday, the first, today — would be a guess
+ * that silently plans a Trip on the wrong date.
+ */
+export function singleDayOf(view: RittenView, anchor: string): string | null {
+  return view === "day" ? anchor : null;
+}
+
 export function periodStart(view: RittenView, anchor: string): string {
   if (view === "day") {
     return anchor;

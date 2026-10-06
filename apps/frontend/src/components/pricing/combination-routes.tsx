@@ -6,11 +6,18 @@ import {
   SelectionCell,
 } from "@/components/pricing/route-row";
 import { ConfirmDialog } from "@/components/ritten/confirm-dialog";
+import { InlineCell } from "@/components/ritten/inline-cell";
 import type { CombinationRouteConfiguration } from "@/lib/api/route-configuration";
-import type { RouteField } from "@/lib/pricing/route-draft";
 import { useTranslation } from "@/lib/i18n/language-provider";
 import type { TranslationKey } from "@/lib/i18n/translations";
-import { BLANK_ROUTE_DRAFT, type RouteDraft } from "@/lib/pricing/route-draft";
+import {
+  BLANK_OVER_ST_DRAFT,
+  BLANK_ROUTE_DRAFT,
+  type OverStDraft,
+  type OverStField,
+  type RouteDraft,
+  type RouteField,
+} from "@/lib/pricing/route-draft";
 
 /**
  * A Combination being ADDED: both legs, typed together.
@@ -21,11 +28,20 @@ import { BLANK_ROUTE_DRAFT, type RouteDraft } from "@/lib/pricing/route-draft";
  */
 export interface CombinationDraft {
   readonly legs: readonly [RouteDraft, RouteDraft];
+  readonly overSt: OverStDraft;
 }
 
 export const BLANK_COMBINATION_DRAFT: CombinationDraft = {
   legs: [{ ...BLANK_ROUTE_DRAFT }, { ...BLANK_ROUTE_DRAFT }],
+  overSt: { ...BLANK_OVER_ST_DRAFT },
 };
+
+/** Over ST's three amounts, in the order of the table's amount columns. */
+export const OVER_ST_FIELDS: readonly { field: OverStField; labelKey: TranslationKey }[] = [
+  { field: "tarief", labelKey: "settings.pricing.routes.tarief" },
+  { field: "toll", labelKey: "settings.pricing.routes.toll" },
+  { field: "tunnel", labelKey: "settings.pricing.routes.tunnel" },
+];
 
 /**
  * One Combination, as rows of the Routeprijzen table.
@@ -49,8 +65,13 @@ export const BLANK_COMBINATION_DRAFT: CombinationDraft = {
  * its own. The one action a leg does carry is Sync: copying its prices to the
  * same leg of other Combinations, which is about that leg and nothing else.
  *
+ * ── OVER ST: PART OF THE COMBINATION, NOT A THIRD LEG ───────────────────────
+ * Beneath the two legs sits Over ST — the Combination's own Tarief, Toll and
+ * Tunnel. It has no Van or Naar, so it fills only the amount columns, carries no
+ * selection, no review tick and no sync: it belongs to the group above it.
+ *
  * ── AND NO BEWERKEN, ON THE GROUP EITHER ────────────────────────────────────
- * A leg's Van, Naar, Tarief, KM and Tunnel are edited by clicking them, exactly
+ * A leg's Van, Naar, Tarief, Toll and Tunnel are edited by clicking them, exactly
  * as an ordinary route's are, so the pair has nothing left for a form to do. The
  * transaction that keeps both legs in step is the backend's, not the form's: one
  * leg at a time reaches it, and the other is passed through unchanged.
@@ -66,6 +87,7 @@ export function CombinationRows({
   onSyncLeg,
   onReview,
   onSaveLegField,
+  onSaveOverStField,
 }: {
   combination: CombinationRouteConfiguration;
   /** Its place in the list, which is what the operator sees it called. */
@@ -94,6 +116,8 @@ export function CombinationRows({
     field: RouteField,
     value: string,
   ) => Promise<void>;
+  /** Persists one Over ST amount. Rejects to keep the cell open. */
+  onSaveOverStField: (field: OverStField, value: string) => Promise<void>;
 }) {
   const t = useTranslation();
   const label = `${t("settings.pricing.routes.combinations.label")} #${index + 1}`;
@@ -196,151 +220,39 @@ export function CombinationRows({
           </td>
         </tr>
       ))}
-    </tbody>
-  );
-}
 
-/**
- * The ADD form for a Combination: both legs, always together.
- *
- * ── WHY ONE FORM AND NOT TWO ────────────────────────────────────────────────
- * A Combination is created in one request and the backend writes both legs in one
- * transaction, so there is no moment at which it has a single leg. A form that
- * saved one leg at a time would have to invent that moment.
- *
- * It only ever adds. A Combination that exists is changed in its own rows.
- *
- * Van and Naar are free TEXT, as they are for an ordinary route: there is no
- * terminal master data in this system and no city list, so a dropdown could only
- * offer a guess.
- */
-export function CombinationRouteForm({
-  draft,
-  isBusy,
-  onChange,
-  onSave,
-  onCancel,
-}: {
-  draft: CombinationDraft;
-  isBusy: boolean;
-  onChange: (draft: CombinationDraft) => void;
-  onSave: () => void;
-  onCancel: () => void;
-}) {
-  const t = useTranslation();
-
-  function changeLeg(index: number, leg: RouteDraft): void {
-    onChange({
-      ...draft,
-      legs: (index === 0 ? [leg, draft.legs[1]] : [draft.legs[0], leg]) as [
-        RouteDraft,
-        RouteDraft,
-      ],
-    });
-  }
-
-  return (
-    <div className="mt-4 rounded-md border border-border bg-hover/40 p-3">
-      <h3 className="text-sm font-semibold text-foreground">
-        {t("settings.pricing.routes.combinations.formTitle")}
-      </h3>
-      {/*
-        Two legs is not a limit to work around — it is what a Combination IS, and
-        saying so prevents an operator hunting for a way to add a third.
-      */}
-      <p className="mt-1 text-[11px] text-muted">
-        {t("settings.pricing.routes.combinations.note")}
-      </p>
-
-      <div className="mt-3 space-y-3">
-        {draft.legs.map((leg, index) => (
-          <LegFields
-            key={index}
-            legNumber={index + 1}
-            leg={leg}
-            onChange={(changed) => changeLeg(index, changed)}
-          />
+      <tr className="border-b border-border last:border-0">
+        {/* Selected with the group; Over ST is no record of its own. */}
+        <td className="px-3 py-2" />
+        {/* It has no Van or Naar: its label spans the two route columns. */}
+        <th
+          scope="row"
+          colSpan={2}
+          className="px-3 py-2 text-left text-xs font-medium text-muted"
+        >
+          {t("settings.pricing.routes.overSt")}
+        </th>
+        {OVER_ST_FIELDS.map(({ field, labelKey }) => (
+          <td
+            key={field}
+            className="px-3 py-2 text-right tabular-nums text-secondary"
+          >
+            <InlineCell
+              label={`${t("settings.pricing.routes.overSt")} ${t(labelKey)}: ${label}`}
+              // An em dash for an amount nobody has stated, which is not a zero.
+              displayValue={combination.overSt[field] ?? "—"}
+              editValue={combination.overSt[field] ?? ""}
+              kind="number"
+              min={0}
+              onSave={(value) => onSaveOverStField(field, value)}
+            />
+          </td>
         ))}
-      </div>
-
-      <div className="mt-3 flex flex-wrap gap-2">
-        <button
-          type="button"
-          disabled={isBusy}
-          onClick={onSave}
-          className="rounded-md bg-primary px-3 py-1 text-xs font-medium text-white hover:bg-primary-hover disabled:opacity-50"
-        >
-          {isBusy ? t("settings.pricing.saving") : t("settings.pricing.save")}
-        </button>
-        <button
-          type="button"
-          disabled={isBusy}
-          onClick={onCancel}
-          className="rounded-md border border-border px-3 py-1 text-xs font-medium text-foreground hover:bg-hover disabled:opacity-50"
-        >
-          {t("settings.pricing.cancel")}
-        </button>
-      </div>
-    </div>
-  );
-}
-
-/**
- * One leg's five fields.
- *
- * Every label names the leg it belongs to — "Leg 2: Tarief" — because the form
- * shows the same five fields twice, and a screen reader on a field called
- * "Tarief" could not say which leg it is priced for.
- */
-function LegFields({
-  legNumber,
-  leg,
-  onChange,
-}: {
-  legNumber: number;
-  leg: RouteDraft;
-  onChange: (leg: RouteDraft) => void;
-}) {
-  const t = useTranslation();
-  const legLabel = `${t("settings.pricing.routes.combinations.leg")} ${legNumber}`;
-
-  const field = (
-    name: keyof Omit<RouteDraft, "id">,
-    labelKey: TranslationKey,
-    isAmount: boolean,
-  ) => (
-    <label className="block">
-      <span className="mb-1 block text-[11px] font-medium uppercase tracking-wide text-muted">
-        {t(labelKey)}
-      </span>
-      <input
-        type={isAmount ? "number" : "text"}
-        inputMode={isAmount ? "decimal" : undefined}
-        min={isAmount ? 0 : undefined}
-        step={isAmount ? "0.01" : undefined}
-        aria-label={`${legLabel}: ${t(labelKey)}`}
-        value={leg[name]}
-        onChange={(event) => onChange({ ...leg, [name]: event.target.value })}
-        className={`rounded-md border border-border bg-card px-2 py-1 text-sm text-foreground ${
-          isAmount ? "w-24 text-right" : "w-40"
-        }`}
-      />
-    </label>
-  );
-
-  return (
-    <fieldset className="rounded-md border border-border p-3">
-      <legend className="px-1 text-xs font-medium uppercase tracking-wide text-muted">
-        {legLabel}
-      </legend>
-      <div className="flex flex-wrap gap-3">
-        {field("departure", "settings.pricing.routes.from", false)}
-        {field("destination", "settings.pricing.routes.to", false)}
-        {field("tarief", "settings.pricing.routes.tarief", true)}
-        {field("kilometres", "settings.pricing.routes.kilometres", true)}
-        {field("tunnel", "settings.pricing.routes.tunnel", true)}
-      </div>
-    </fieldset>
+        {/* No review tick and no action of its own. */}
+        <td className="px-3 py-2" />
+        <td className="px-3 py-2" />
+      </tr>
+    </tbody>
   );
 }
 

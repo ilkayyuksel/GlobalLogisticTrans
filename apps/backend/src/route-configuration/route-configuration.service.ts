@@ -17,9 +17,11 @@ import {
 } from "../route-pricing/exceptions/route-pricing.exceptions";
 import { RouteConfigurationNotFoundException } from "./exceptions/route-configuration.exceptions";
 import {
-  RouteTunnelCostService,
+  RouteComponentCostService,
+  RouteCostOwner,
+  TOLL_CODE,
   TUNNEL_CODE,
-} from "./route-tunnel-cost.service";
+} from "./route-component-cost.service";
 
 /**
  * The route-dependent components this screen configures, by catalog code.
@@ -31,7 +33,7 @@ import {
  * route-priced", so `pricing-component.catalog.spec.ts` asserts the two lists
  * agree.
  */
-export const ROUTE_CONFIGURED_COMPONENT_CODES = [TUNNEL_CODE] as const;
+export const ROUTE_CONFIGURED_COMPONENT_CODES = [TOLL_CODE, TUNNEL_CODE] as const;
 
 /**
  * One route, as an operator configures it — composed from the tables that
@@ -74,7 +76,7 @@ export const ROUTE_CONFIGURED_COMPONENT_CODES = [TUNNEL_CODE] as const;
 export class RouteConfigurationService {
   constructor(
     private readonly routePricing: RoutePricingService,
-    private readonly tunnelCosts: RouteTunnelCostService,
+    private readonly routeCosts: RouteComponentCostService,
     private readonly logger: AppLoggerService,
   ) {
     this.logger.setContext(RouteConfigurationService.name);
@@ -123,10 +125,9 @@ export class RouteConfigurationService {
       departure: dto.departure,
       destination: dto.destination,
       basePrice: dto.tarief,
-      kilometres: dto.kilometres,
     });
 
-    await this.tunnelCosts.save(this.ownerOf(dto), dto.tunnel);
+    await this.saveCosts(this.ownerOf(dto), dto);
 
     this.logger.log("Route configuration created", { routePricingId: route.id });
 
@@ -154,7 +155,6 @@ export class RouteConfigurationService {
       departure: dto.departure,
       destination: dto.destination,
       basePrice: dto.tarief,
-      kilometres: dto.kilometres,
     });
 
     const hasMoved =
@@ -162,10 +162,10 @@ export class RouteConfigurationService {
       existing.destination !== dto.destination;
 
     if (hasMoved) {
-      await this.tunnelCosts.deactivate(this.ownerOf(existing));
+      await this.routeCosts.deactivate(this.ownerOf(existing));
     }
 
-    await this.tunnelCosts.save(this.ownerOf(dto), dto.tunnel);
+    await this.saveCosts(this.ownerOf(dto), dto);
 
     this.logger.log("Route configuration updated", {
       routePricingId: id,
@@ -206,7 +206,7 @@ export class RouteConfigurationService {
      */
     this.assertOrdinaryRoute(existing, "REMOVE");
 
-    await this.tunnelCosts.deactivate(this.ownerOf(existing));
+    await this.routeCosts.deactivate(this.ownerOf(existing));
     await this.routePricing.remove(id);
 
     this.logger.log("Route configuration deleted", { routePricingId: id });
@@ -254,7 +254,16 @@ export class RouteConfigurationService {
    * the road, and every existing row says so. Only a Combination leg owns its
    * tunnel, because the road it runs may be an ordinary route's as well.
    */
-  private ownerOf(route: { departure: string; destination: string }) {
+  /** The route's Toll and Tunnel — the two amounts it carries beside its Tarief. */
+  private async saveCosts(
+    owner: RouteCostOwner,
+    dto: SaveRouteConfigurationDto,
+  ): Promise<void> {
+    await this.routeCosts.save(owner, TOLL_CODE, dto.toll);
+    await this.routeCosts.save(owner, TUNNEL_CODE, dto.tunnel);
+  }
+
+  private ownerOf(route: { departure: string; destination: string }): RouteCostOwner {
     return {
       kind: "ROAD" as const,
       departure: route.departure,
@@ -268,7 +277,7 @@ export class RouteConfigurationService {
   ): Promise<RouteConfigurationDto> {
     return composeRouteConfiguration(
       route,
-      await this.tunnelCosts.find(this.ownerOf(route)),
+      await this.routeCosts.findAll(this.ownerOf(route)),
       route.reviewed,
     );
   }

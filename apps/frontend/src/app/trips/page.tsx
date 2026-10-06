@@ -85,6 +85,7 @@ import {
   periodEnd,
   periodQuery,
   periodStart,
+  singleDayOf,
   todayAnchor,
   type RittenView,
 } from "@/lib/ritten/period";
@@ -193,6 +194,7 @@ const NO_ROW_UPDATES: ReadonlyMap<string, Partial<Trip>> = new Map();
 const ROW_LOCAL_FIELDS: readonly (keyof UpdateTripPayload)[] = [
   "waitingTimeStart",
   "waitingTimeEnd",
+  "waitingTimeEndsNextDay",
   "internalNotes",
 ];
 
@@ -1254,6 +1256,7 @@ export default function RittenPage() {
       {isCreating ? (
         <NewTripDialog
           vehicles={vehicles.data ? vehicles.data.items : []}
+          defaultPlanningDate={singleDayOf(view, anchor)}
           onCreate={async (payload: CreateTripPayload) => {
             await createTrip(payload);
             /*

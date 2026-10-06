@@ -1,9 +1,11 @@
 import { Prisma } from "@prisma/client";
 
 import { AppLoggerService } from "../logger/app-logger.service";
+import { PricingComponentResolver } from "../pricing-engine/pricing-component.resolver";
 import { PricingEngineService } from "../pricing-engine/pricing-engine.service";
 import { PricingRecalculationService } from "../pricing-engine/pricing-recalculation.service";
 import { TripPricingItemRepository } from "../trip-pricing-items/trip-pricing-item.repository";
+import { TripReadService } from "../trips/trip-read.service";
 import { toEffectivePricingDto } from "./dto/effective-pricing.dto";
 import { EffectivePricingService } from "./effective-pricing.service";
 import { TripPricingOverrideRepository } from "./trip-pricing-override.repository";
@@ -99,6 +101,8 @@ describe("a mutation's pricing equals the Ritten list's pricing", () => {
         }),
       } as unknown as PricingEngineService,
       effectivePricing,
+      {} as unknown as TripReadService,
+      {} as unknown as PricingComponentResolver,
       {
         setContext: jest.fn(),
         log: jest.fn(),

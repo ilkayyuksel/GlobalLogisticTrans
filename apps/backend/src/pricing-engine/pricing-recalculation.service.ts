@@ -6,8 +6,10 @@ import {
   toEffectivePricingDto,
 } from "../trip-pricing/dto/effective-pricing.dto";
 import { EffectivePricingService } from "../trip-pricing/effective-pricing.service";
+import { TripReadService } from "../trips/trip-read.service";
 import { CombinationMember, tripsRepricedByRegrouping } from "./combination-leg";
 import { PricingEngineException } from "./exceptions/pricing-engine.exceptions";
+import { PricingComponentResolver } from "./pricing-component.resolver";
 import { PricingEngineService } from "./pricing-engine.service";
 
 /**
@@ -83,6 +85,8 @@ export class PricingRecalculationService {
   constructor(
     private readonly engine: PricingEngineService,
     private readonly effectivePricing: EffectivePricingService,
+    private readonly trips: TripReadService,
+    private readonly components: PricingComponentResolver,
     private readonly logger: AppLoggerService,
   ) {
     this.logger.setContext(PricingRecalculationService.name);
@@ -137,6 +141,36 @@ export class PricingRecalculationService {
     after: readonly CombinationMember[],
   ): string[] {
     return tripsRepricedByRegrouping(before, after);
+  }
+
+  /**
+   * The Trips whose price a change to this Trip's planningDate can move.
+   *
+   * Asked AFTER the new date is stored, so the answer reads the dates pricing
+   * will read. For a genuine Combination that is its Leg 2, whichever leg's
+   * date changed — Over ST is owed by Leg 2 exactly when the two dates differ.
+   * For every other Trip it is nothing: planningDate is not one of its pricing
+   * inputs, and an ordinary Trip keeps the repricing it always had.
+   *
+   * Like `recalculate`, it never throws: the date change has committed, and a
+   * failure to answer is logged as an error rather than undoing it.
+   */
+  async tripsAffectedByPlanningDate(tripId: string): Promise<string[]> {
+    try {
+      const trip = await this.trips.findById(tripId);
+
+      return trip ? await this.components.legsPricedByPlanningDate(trip) : [];
+    } catch (error) {
+      this.logger.error(
+        "Could not determine which Trips a planningDate change reprices",
+        {
+          tripId,
+          reason: error instanceof Error ? error.message : String(error),
+        },
+      );
+
+      return [];
+    }
   }
 
   /**

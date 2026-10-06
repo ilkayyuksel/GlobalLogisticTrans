@@ -60,6 +60,7 @@ function buildTrip(id: string): Trip {
     executionDatetime: null,
     waitingTimeStart: null,
     waitingTimeEnd: null,
+    waitingTimeEndsNextDay: false,
     waitingTimeMinutes: null,
     distanceKm: null,
     tarNummer: null,

@@ -54,8 +54,9 @@ function route(overrides: Record<string, unknown> = {}) {
     departure: "Quay 869",
     destination: "Dourges",
     tarief: "520.00",
-    kilometres: "40.00",
+    toll: "40.00",
     tunnel: "0.00",
+    hasToll: true,
     hasTunnel: true,
     type: "NORMAL",
     combinationGroupId: null,
@@ -67,13 +68,14 @@ function route(overrides: Record<string, unknown> = {}) {
 function combination(overrides: Record<string, unknown> = {}) {
   return {
     id: COMBINATION_GROUP_ID,
+    overSt: { tarief: null, toll: null, tunnel: null },
     legs: [
       route({
         id: "leg-1",
         departure: "Antwerp",
         destination: "Kallo",
         tarief: "100.00",
-        kilometres: "25.00",
+        toll: "25.00",
         tunnel: "0.00",
         type: "COMBINATION",
         combinationGroupId: COMBINATION_GROUP_ID,
@@ -83,7 +85,7 @@ function combination(overrides: Record<string, unknown> = {}) {
         departure: "Kallo",
         destination: "Antwerp",
         tarief: "80.00",
-        kilometres: "31.50",
+        toll: "31.50",
         tunnel: "3.75",
         type: "COMBINATION",
         combinationGroupId: COMBINATION_GROUP_ID,
@@ -158,13 +160,19 @@ function routeSection(): HTMLElement {
   return screen.getAllByText("Routeprijzen")[0].closest("section") as HTMLElement;
 }
 
-async function chooseType(label: string): Promise<void> {
-  await userEvent.click(screen.getByRole("radio", { name: label }));
+/** Each section adds its own kind: "Route toevoegen" or "Combi toevoegen". */
+async function addOfType(label: "Normaal" | "Combination"): Promise<void> {
+  // The sections, and their add buttons, appear once the lists have loaded.
+  await userEvent.click(
+    await screen.findByRole("button", {
+      name: label === "Combination" ? "Combi toevoegen" : "Route toevoegen",
+    }),
+  );
 }
 
-async function addOfType(label: string): Promise<void> {
-  await chooseType(label);
-  await userEvent.click(screen.getByRole("button", { name: "Route toevoegen" }));
+/** The header button of a section, which opens and closes it. */
+function sectionToggle(name: RegExp): HTMLElement {
+  return screen.getByRole("button", { name });
 }
 
 /** Fills one leg of the Combination form. */
@@ -174,7 +182,7 @@ async function fillLeg(
     departure: string;
     destination: string;
     tarief: string;
-    kilometres: string;
+    toll: string;
     tunnel: string;
   },
 ): Promise<void> {
@@ -182,7 +190,7 @@ async function fillLeg(
     ["Van", values.departure],
     ["Naar", values.destination],
     ["Tarief", values.tarief],
-    ["KM", values.kilometres],
+    ["Toll", values.toll],
     ["Tunnel", values.tunnel],
   ];
 
@@ -199,25 +207,89 @@ beforeEach(() => {
   respondWith();
 });
 
-describe("choosing what kind of route to add", () => {
-  it("offers both kinds", async () => {
+/**
+ * ── TWO SECTIONS ────────────────────────────────────────────────────────────
+ * "Normale ritten" and "Combi's", each opening and closing on its own, each
+ * adding its own kind of record.
+ */
+describe("the two sections", () => {
+  it("shows Normale ritten and Combi's, both open", async () => {
+    respondWith({ routes: [route()], combinations: [combination()] });
     renderPage();
-    await waitFor(() => expect(requestMock).toHaveBeenCalled());
 
-    expect(screen.getByRole("radio", { name: "Normaal" })).toBeInTheDocument();
+    expect(await screen.findByText("Dourges")).toBeVisible();
+    expect(sectionToggle(/Normale ritten/)).toHaveAttribute("aria-expanded", "true");
+    expect(sectionToggle(/Combi's/)).toHaveAttribute("aria-expanded", "true");
+  });
+
+  it("closes and opens Normale ritten on its own", async () => {
+    respondWith({ routes: [route()], combinations: [combination()] });
+    renderPage();
+    await screen.findByText("Dourges");
+
+    await userEvent.click(sectionToggle(/Normale ritten/));
+
+    expect(sectionToggle(/Normale ritten/)).toHaveAttribute("aria-expanded", "false");
+    expect(screen.getByText("Dourges")).not.toBeVisible();
+    // The other section keeps what it shows.
+    expect(screen.getAllByText("Kallo")[0]).toBeVisible();
+
+    await userEvent.click(sectionToggle(/Normale ritten/));
+
+    expect(screen.getByText("Dourges")).toBeVisible();
+  });
+
+  it("closes and opens Combi's on its own", async () => {
+    respondWith({ routes: [route()], combinations: [combination()] });
+    renderPage();
+    await screen.findByText("Dourges");
+
+    await userEvent.click(sectionToggle(/Combi's/));
+
+    expect(sectionToggle(/Combi's/)).toHaveAttribute("aria-expanded", "false");
+    expect(screen.getAllByText("Kallo")[0]).not.toBeVisible();
+    expect(screen.getByText("Dourges")).toBeVisible();
+  });
+
+  /** The add form comes first in its section, above every stored Combination. */
+  it("puts the Combination form at the top of Combi's", async () => {
+    respondWith({ combinations: [combination()] });
+    renderPage();
+    await screen.findAllByText("Kallo");
+
+    await addOfType("Combination");
+
+    const form = screen.getByLabelText("Leg 1: Van");
+    const firstStored = screen.getAllByText("Kallo")[0];
+
     expect(
-      screen.getByRole("radio", { name: "Combination" }),
-    ).toBeInTheDocument();
+      form.compareDocumentPosition(firstStored) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
   });
 
-  /** An ordinary route is the common case, so it is the one already selected. */
-  it("starts on Normaal", async () => {
+  it("asks for Over ST's Tarief, Toll and Tunnel in the form", async () => {
     renderPage();
     await waitFor(() => expect(requestMock).toHaveBeenCalled());
 
-    expect(screen.getByRole("radio", { name: "Normaal" })).toBeChecked();
+    await addOfType("Combination");
+
+    for (const label of ["Tarief", "Toll", "Tunnel"]) {
+      expect(screen.getByLabelText(`Over ST: ${label}`)).toBeInTheDocument();
+    }
   });
 
+  /** KM is gone from Routeprijzen: Toll is an amount now. */
+  it("shows no KM anywhere", async () => {
+    respondWith({ routes: [route()], combinations: [combination()] });
+    renderPage();
+    await screen.findByText("Dourges");
+
+    expect(within(routeSection()).queryByText("KM")).toBeNull();
+    expect(within(routeSection()).getAllByText("Toll").length).toBeGreaterThan(0);
+  });
+});
+
+describe("choosing what kind of route to add", () => {
   it("opens the two-leg form when Combination is chosen", async () => {
     renderPage();
     await waitFor(() => expect(requestMock).toHaveBeenCalled());
@@ -236,7 +308,7 @@ describe("choosing what kind of route to add", () => {
     await addOfType("Combination");
 
     for (const legNumber of [1, 2]) {
-      for (const label of ["Van", "Naar", "Tarief", "KM", "Tunnel"]) {
+      for (const label of ["Van", "Naar", "Tarief", "Toll", "Tunnel"]) {
         expect(
           screen.getByLabelText(`Leg ${legNumber}: ${label}`),
         ).toBeInTheDocument();
@@ -292,14 +364,14 @@ describe("saving a Combination", () => {
       departure: "Antwerp",
       destination: "Kallo",
       tarief: "100",
-      kilometres: "25",
+      toll: "25",
       tunnel: "0",
     });
     await fillLeg(2, {
       departure: "Kallo",
       destination: "Antwerp",
       tarief: "80",
-      kilometres: "25",
+      toll: "25",
       tunnel: "0",
     });
     await userEvent.click(
@@ -323,14 +395,14 @@ describe("saving a Combination", () => {
       departure: "Antwerp",
       destination: "Kallo",
       tarief: "100",
-      kilometres: "25",
+      toll: "25",
       tunnel: "0",
     });
     await fillLeg(2, {
       departure: "Kallo",
       destination: "Antwerp",
       tarief: "80",
-      kilometres: "31.5",
+      toll: "31.5",
       tunnel: "3.75",
     });
     await userEvent.click(
@@ -339,19 +411,20 @@ describe("saving a Combination", () => {
 
     await waitFor(() => expect(writes).toHaveLength(1));
     expect(writes[0].body).toEqual({
+      overSt: { tarief: null, toll: null, tunnel: null },
       legs: [
         {
           departure: "Antwerp",
           destination: "Kallo",
           tarief: 100,
-          kilometres: 25,
+          toll: 25,
           tunnel: 0,
         },
         {
           departure: "Kallo",
           destination: "Antwerp",
           tarief: 80,
-          kilometres: 31.5,
+          toll: 31.5,
           tunnel: 3.75,
         },
       ],
@@ -367,14 +440,14 @@ describe("saving a Combination", () => {
       departure: "Antwerp",
       destination: "Kallo",
       tarief: "100",
-      kilometres: "25",
+      toll: "25",
       tunnel: "0",
     });
     await fillLeg(2, {
       departure: "Kallo",
       destination: "Antwerp",
       tarief: "80",
-      kilometres: "25",
+      toll: "25",
       tunnel: "0",
     });
     await userEvent.click(
@@ -401,14 +474,14 @@ describe("saving a Combination", () => {
       departure: "Antwerp",
       destination: "Kallo",
       tarief: "100",
-      kilometres: "25",
+      toll: "25",
       tunnel: "0",
     });
     await fillLeg(2, {
       departure: "Kallo",
       destination: "Antwerp",
       tarief: "80",
-      kilometres: "25",
+      toll: "25",
       tunnel: "0",
     });
     await userEvent.click(
@@ -447,7 +520,8 @@ describe("the configured Combinations", () => {
   });
 
   /** Drawn by the very component an ordinary route is drawn by. */
-  it("puts the legs in the same table as the ordinary routes", async () => {
+  /** Each kind in its own section, both with the same columns. */
+  it("puts the legs in the Combi's table, the routes in their own", async () => {
     respondWith({
       routes: [route()],
       combinations: [combination()],
@@ -456,12 +530,25 @@ describe("the configured Combinations", () => {
 
     await screen.findByText("Combination #1");
 
-    // One table on the page, holding both kinds.
-    const tables = screen.getAllByRole("table");
+    const [normal, combinations] = screen.getAllByRole("table");
 
-    expect(tables).toHaveLength(1);
-    expect(tables[0]).toHaveTextContent("Combination #1");
-    expect(tables[0]).toHaveTextContent("Quay 869");
+    expect(normal).toHaveTextContent("Quay 869");
+    expect(normal).not.toHaveTextContent("Combination #1");
+    expect(combinations).toHaveTextContent("Combination #1");
+    for (const table of [normal, combinations]) {
+      expect(within(table).getAllByRole("columnheader").map((each) => each.textContent))
+        .toEqual(expect.arrayContaining(["Van", "Naar", "Tarief", "Toll", "Tunnel"]));
+    }
+  });
+
+  it("shows Over ST beneath the two legs, with a dash when not stated", async () => {
+    respondWith({ combinations: [combination()] });
+    renderPage();
+
+    await screen.findByText("Combination #1");
+
+    expect(screen.getByText("Over ST")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Over ST Tarief: Combination #1" })).toHaveTextContent("—");
   });
 
   it("labels the legs in the order they were configured", async () => {
@@ -679,7 +766,7 @@ describe("an ordinary route is unaffected", () => {
     await userEvent.type(screen.getByLabelText("Van"), "Quay 869");
     await userEvent.type(screen.getByLabelText("Naar"), "Dourges");
     await userEvent.type(screen.getByLabelText("Tarief"), "520");
-    await userEvent.type(screen.getByLabelText("KM"), "40");
+    await userEvent.type(screen.getByLabelText("Toll"), "40");
     await userEvent.type(screen.getByLabelText("Tunnel"), "0");
     await userEvent.click(
       within(routeSection()).getByRole("button", { name: "Opslaan" }),
@@ -691,7 +778,7 @@ describe("an ordinary route is unaffected", () => {
       departure: "Quay 869",
       destination: "Dourges",
       tarief: 520,
-      kilometres: 40,
+      toll: 40,
       tunnel: 0,
     });
   });

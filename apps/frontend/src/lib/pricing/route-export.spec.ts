@@ -27,8 +27,9 @@ function route(overrides: Partial<RouteConfiguration> = {}): RouteConfiguration 
     departure: "Quay 869",
     destination: "Dourges",
     tarief: "520.50",
-    kilometres: "310.25",
+    toll: "310.25",
     tunnel: "0.00",
+    hasToll: true,
     hasTunnel: true,
     type: "NORMAL",
     combinationGroupId: null,
@@ -45,6 +46,8 @@ function combination(
   return {
     id,
     reviewed: true,
+    // Over ST is filled in on the screen and is not part of the export.
+    overSt: { tarief: "50.00", toll: "5.00", tunnel: null },
     legs: legs.map((leg, index) =>
       route({
         id: `${id}-leg-${index + 1}`,
@@ -61,14 +64,14 @@ const ANTWERP_KALLO = combination("group-1", [
     departure: "Antwerp",
     destination: "Kallo",
     tarief: "100.00",
-    kilometres: "25.00",
+    toll: "25.00",
     tunnel: "0.00",
   },
   {
     departure: "Kallo",
     destination: "Antwerp",
     tarief: "80.00",
-    kilometres: "30.00",
+    toll: "30.00",
     tunnel: "15.00",
   },
 ]);
@@ -82,7 +85,7 @@ describe("the exported document", () => {
       departure: "Quay 869",
       destination: "Dourges",
       tarief: 520.5,
-      kilometres: 310.25,
+      toll: 310.25,
       tunnel: 0,
     });
   });
@@ -97,14 +100,14 @@ describe("the exported document", () => {
           departure: "Antwerp",
           destination: "Kallo",
           tarief: 100,
-          kilometres: 25,
+          toll: 25,
           tunnel: 0,
         },
         {
           departure: "Kallo",
           destination: "Antwerp",
           tarief: 80,
-          kilometres: 30,
+          toll: 30,
           tunnel: 15,
         },
       ],
@@ -136,18 +139,29 @@ describe("the exported document", () => {
     const [entry] = toRouteConfigurationDocument([route()], []).routes;
 
     expect(typeof (entry as { tarief: unknown }).tarief).toBe("number");
-    expect(typeof (entry as { kilometres: unknown }).kilometres).toBe("number");
+    expect(typeof (entry as { toll: unknown }).toll).toBe("number");
     expect(typeof (entry as { tunnel: unknown }).tunnel).toBe("number");
   });
 
-  /** A road nobody has measured is charged no toll, and the file says so. */
-  it("writes an unmeasured road as null rather than as zero", () => {
-    const [entry] = toRouteConfigurationDocument(
-      [route({ kilometres: null })],
-      [],
-    ).routes;
+  /** The toll is an amount, written as the route carries it. */
+  it("writes the toll amount the route carries", () => {
+    const [entry] = toRouteConfigurationDocument([route({ toll: "18.40" })], []).routes;
 
-    expect((entry as { kilometres: unknown }).kilometres).toBeNull();
+    expect((entry as { toll: unknown }).toll).toBe(18.4);
+  });
+
+  /** Older files named a distance; this one never does. */
+  it("writes no distance", () => {
+    const [entry] = toRouteConfigurationDocument([route()], []).routes;
+
+    expect(entry).not.toHaveProperty("kilometres");
+  });
+
+  /** Over ST is configured on the screen; the importer builds from legs. */
+  it("writes no Over ST", () => {
+    const [entry] = toRouteConfigurationDocument([], [ANTWERP_KALLO]).routes;
+
+    expect(entry).not.toHaveProperty("overSt");
   });
 
   describe("what it leaves out", () => {
@@ -175,10 +189,11 @@ describe("the exported document", () => {
     });
 
     /** A route carries its distance; the Toll is the Engine's to work out. */
-    it("writes no toll amount", () => {
-      expect(
-        JSON.stringify(toRouteConfigurationDocument([route()], [])),
-      ).not.toContain("toll");
+    it("writes no review mark or toll flag", () => {
+      const text = JSON.stringify(toRouteConfigurationDocument([route()], []));
+
+      expect(text).not.toContain("reviewed");
+      expect(text).not.toContain("hasToll");
     });
 
     it("writes nothing but the routes", () => {
@@ -193,8 +208,8 @@ describe("the exported document", () => {
       expect(Object.keys(entry).sort()).toEqual([
         "departure",
         "destination",
-        "kilometres",
         "tarief",
+        "toll",
         "tunnel",
         "type",
       ]);
@@ -325,7 +340,7 @@ describe("the file", () => {
   it("is parseable with every kind of entry in it", () => {
     const text = toRouteConfigurationJson(
       toRouteConfigurationDocument(
-        [route(), route({ id: "r2", kilometres: null })],
+        [route(), route({ id: "r2", toll: "0.00" })],
         [ANTWERP_KALLO],
       ),
     );

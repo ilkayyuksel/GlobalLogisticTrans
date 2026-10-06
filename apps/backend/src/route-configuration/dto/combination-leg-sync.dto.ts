@@ -25,8 +25,8 @@ export class CombinationLegPricesDto {
   @ApiProperty({ example: "100.00" })
   tarief!: string;
 
-  @ApiProperty({ example: "25.00", nullable: true })
-  kilometres!: string | null;
+  @ApiProperty({ example: "25.00" })
+  toll!: string;
 
   @ApiProperty({ example: "10.00" })
   tunnel!: string;

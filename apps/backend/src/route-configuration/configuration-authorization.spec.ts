@@ -90,7 +90,8 @@ const CONFIGURATION = {
   departure: "Quay 869",
   destination: "Dourges",
   tarief: "520.00",
-  kilometres: "25.00",
+  toll: "25.00",
+  hasToll: true,
   tunnel: "0.00",
   hasTunnel: true,
   type: "NORMAL",
@@ -123,7 +124,7 @@ const SAVE_BODY = {
   departure: "Quay 869",
   destination: "Dourges",
   tarief: 550,
-  kilometres: 25,
+  toll: 25,
   tunnel: 5,
 };
 
@@ -142,7 +143,7 @@ const BULK_BODY = {
       departure: "Quay 869",
       destination: "Dourges",
       tarief: 550,
-      kilometres: 25,
+      toll: 25,
       tunnel: 5,
     },
   ],
@@ -151,7 +152,7 @@ const BULK_BODY = {
 const SAVE_COMBINATION_BODY = {
   legs: [
     SAVE_BODY,
-    { departure: "Dourges", destination: "Quay 869", tarief: 480, kilometres: 25, tunnel: 0 },
+    { departure: "Dourges", destination: "Quay 869", tarief: 480, toll: 25, tunnel: 0 },
   ],
 };
 
@@ -262,7 +263,7 @@ describe("pricing configuration is protected", () => {
       legPosition: 1,
       departure: "PSA Quay 869",
       destination: "GENT",
-      prices: { tarief: "100.00", kilometres: "25.00", tunnel: "10.00" },
+      prices: { tarief: "100.00", toll: "25.00", tunnel: "10.00" },
       targetCombinationGroupIds: [],
     };
     legSync = {
@@ -652,7 +653,7 @@ describe("pricing configuration is protected", () => {
       expect(response.body.data.value).toBe("20");
     });
 
-    it("changes a route's Tarief, KM and Tunnel", async () => {
+    it("changes a route's Tarief, Toll and Tunnel", async () => {
       const response = await request(application.getHttpServer())
         .put(`/api/v1/route-configuration/${ROUTE_ID}`)
         .set("Authorization", `Bearer ${await signToken()}`)
@@ -661,7 +662,7 @@ describe("pricing configuration is protected", () => {
 
       expect(routeConfiguration.update).toHaveBeenCalledWith(
         ROUTE_ID,
-        expect.objectContaining({ tarief: 550, kilometres: 25, tunnel: 5 }),
+        expect.objectContaining({ tarief: 550, toll: 25, tunnel: 5 }),
       );
       expect(response.body.data.id).toBe(ROUTE_ID);
     });

@@ -13,6 +13,7 @@ import { EffectivePricingService } from "../trip-pricing/effective-pricing.servi
 import { TripRepository } from "./trip.repository";
 import { VehicleAssignmentService } from "../vehicle-assignments/vehicle-assignment.service";
 import { VehicleService } from "../vehicles/vehicle.service";
+import { stubPricingRecalculation } from "../pricing-engine/pricing-recalculation.double";
 
 /**
  * MANY updates to one Trip, and what each of them left behind.
@@ -282,6 +283,7 @@ describe("many updates to one Trip", () => {
         applyToNewTrip: jest.fn(),
         synchronise: jest.fn(),
       } as unknown as AutomaticFlatPropertyService,
+      stubPricingRecalculation(),
       logger,
     );
   });

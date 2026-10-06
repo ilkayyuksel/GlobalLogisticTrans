@@ -106,14 +106,7 @@ export const FUEL_PERCENTAGE_SETTING = {
   key: "FUEL_PERCENTAGE",
 } as const;
 
-/**
- * The category and key the toll rate lives under.
- *
- * Named here for the same reason as the fuel percentage: the page edits one
- * known setting, and the pair that identifies it belongs beside the client that
- * saves it rather than spelled out in a component.
+/*
+ * There is no toll rate per kilometre any more: the Toll is an amount per route,
+ * configured on Routeprijzen. The setting is switched off in the database.
  */
-export const TOLL_RATE_PER_KM_SETTING = {
-  category: "PRICING",
-  key: "TOLL_RATE_PER_KM",
-} as const;

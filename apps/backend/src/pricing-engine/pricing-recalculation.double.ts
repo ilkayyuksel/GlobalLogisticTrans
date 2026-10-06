@@ -21,15 +21,22 @@ import {
  */
 export function stubPricingRecalculation(
   outcome: PricingRecalculationOutcome = { pricing: null, reasonCode: null },
-): PricingRecalculationService & { recalculate: jest.Mock } {
+): PricingRecalculationService & {
+  recalculate: jest.Mock;
+  tripsAffectedByPlanningDate: jest.Mock;
+} {
   return {
     recalculate: jest.fn().mockResolvedValue(outcome),
     // The real rule, not a canned answer: which Trips a regrouping affects is
     // the pricing domain's rule itself, and a double that guessed would let a
     // test pass for a group the Engine would price differently.
     tripsAffectedByRegrouping: jest.fn(tripsRepricedByRegrouping),
+    // An ordinary Trip: its planningDate moves no price. A spec about a
+    // Combination's date names the Leg 2 it expects.
+    tripsAffectedByPlanningDate: jest.fn().mockResolvedValue([]),
   } as unknown as PricingRecalculationService & {
     recalculate: jest.Mock;
     tripsAffectedByRegrouping: jest.Mock;
+    tripsAffectedByPlanningDate: jest.Mock;
   };
 }

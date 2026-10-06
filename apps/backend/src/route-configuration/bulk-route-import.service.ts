@@ -66,11 +66,12 @@ function describe(error: BulkRouteImportErrorDto): string {
  * is created by `RouteConfigurationService.create` and an imported COMBINATION by
  * `CombinationRouteConfigurationService.create` — the very methods the screen
  * calls — so the duplicate check, the canonical terminal matching, the money
- * precision, the exactly-two-legs rule and the tunnel cost are all the same code.
+ * precision, the exactly-two-legs rule and the toll and tunnel costs are all the
+ * same code.
  *
  * There is no pricing logic here at all. No amount is computed, converted or
- * defaulted: the Toll is derived by the Engine from the stored kilometres and the
- * configured rate, exactly as it is for a route configured by hand.
+ * defaulted: the Toll and the Tunnel are stored as the amounts given, exactly as
+ * they are for a route configured by hand.
  *
  * ── ALL OR NOTHING ──────────────────────────────────────────────────────────
  * Twenty valid routes and one broken one change nothing. The validator judges the
@@ -160,7 +161,7 @@ export class BulkRouteImportService {
 /**
  * A Combination entry, as the manual endpoint's own DTO.
  *
- * The legs are passed through untouched — each keeps its own Tarief, KM and
+ * The legs are passed through untouched — each keeps its own Tarief, Toll and
  * Tunnel, because the two directions of a real Combination cost different things
  * and nothing may copy one onto the other.
  */

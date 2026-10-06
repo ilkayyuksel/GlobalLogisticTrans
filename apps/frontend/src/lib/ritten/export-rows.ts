@@ -162,11 +162,13 @@ export function toPricingRow(
     others: lines.others,
     waitingTime: lines.waitingTime,
     /*
-     * One line however many confirmations a Trip received: the backend sums
-     * them as Decimal and stores the total, so EK is already what the Trip has
-     * been confirmed for in full. Nothing is added up here.
+     * EK is the backend's EFFECTIVE figure: the charged waiting time, or else
+     * the confirmations' sum — one source, decided by the backend, never added
+     * up or chosen here. A stored line of either kind says EK applies at all,
+     * so a Trip with a waiting time and no confirmation still shows its EK.
+     * The Wachttijd column beside it stays informational.
      */
-    ek: corrected(lines.ek, effective?.ek),
+    ek: corrected(lines.ek ?? lines.waitingTime, effective?.ek),
     remarks: labels.remarks,
   };
 }

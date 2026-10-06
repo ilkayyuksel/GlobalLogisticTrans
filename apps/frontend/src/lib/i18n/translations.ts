@@ -332,6 +332,7 @@ const nl = {
   "ritten.edit.clear": "Leegmaken",
   "ritten.edit.planningDate": "Planningsdatum",
   "ritten.edit.destination": "Bestemming (stad, land)",
+  "ritten.edit.terminal": "Terminal wijzigen",
   "ritten.edit.startTime": "Begin transport",
   "ritten.edit.endTime": "Einde transport",
   "ritten.edit.containerNumber": "Containernummer",
@@ -357,7 +358,6 @@ const nl = {
   "settings.pricing.fuel.historyNote":
     "Geldt voor toekomstige berekeningen. Reeds afgewerkte ritten behouden het percentage waarmee ze berekend zijn.",
   "settings.pricing.settings.title": "Prijsinstellingen",
-  "settings.pricing.toll.label": "Toll prijs per km",
   /*
    * Retitled: the panel above is now "Prijsinstellingen", and two identical
    * headings one inside the other would say nothing about the difference —
@@ -383,8 +383,15 @@ const nl = {
   "settings.pricing.routes.from": "Van",
   "settings.pricing.routes.to": "Naar",
   "settings.pricing.routes.tarief": "Tarief",
-  "settings.pricing.routes.kilometres": "KM",
+  "settings.pricing.routes.toll": "Toll",
   "settings.pricing.routes.tunnel": "Tunnel",
+  "settings.pricing.routes.overSt": "Over ST",
+  "settings.pricing.routes.sections.normal": "Normale ritten",
+  "settings.pricing.routes.sections.combinations": "Combi's",
+  "settings.pricing.routes.search.label": "Zoeken op Van of Naar",
+  "settings.pricing.routes.search.placeholder": "Zoek een route, bv. 869 of GENT",
+  "settings.pricing.routes.noResults": "Geen resultaten",
+  "settings.pricing.routes.combinations.add": "Combi toevoegen",
   "settings.pricing.routes.actions": "Acties",
   "settings.pricing.routes.edit": "Bewerken",
   "settings.pricing.routes.delete": "Verwijderen",
@@ -407,7 +414,7 @@ const nl = {
   "settings.pricing.routes.filter.reviewed": "Gecontroleerd",
   "settings.pricing.routes.bulk.title": "Routeprijzen bulk toevoegen",
   "settings.pricing.routes.bulk.description":
-    "Plak een JSON-document met alle routes. JSON is enkel het importformaat: elke route wordt opgeslagen zoals een route die je handmatig toevoegt, met dezelfde validatie. Geef geen Toll op — die wordt berekend uit KM en de globale Toll prijs per km.",
+    "Plak een JSON-document met alle routes. JSON is enkel het importformaat: elke route wordt opgeslagen zoals een route die je handmatig toevoegt, met dezelfde validatie. Toll en Tunnel zijn bedragen per route; een oud bestand met een KM-veld wordt geweigerd.",
   "settings.pricing.routes.bulk.documentLabel": "JSON",
   "settings.pricing.routes.bulk.check": "Controleren",
   "settings.pricing.routes.bulk.import": "Importeren",
@@ -420,15 +427,12 @@ const nl = {
   "settings.pricing.routes.bulk.total": "Totaal route-legs",
   "settings.pricing.routes.bulk.invalidJson": "Dit is geen geldige JSON.",
   "settings.pricing.routes.bulk.document": "Document",
-  "settings.pricing.routes.type.label": "Type",
-  "settings.pricing.routes.type.normal": "Normaal",
-  "settings.pricing.routes.type.combination": "Combination",
   "settings.pricing.routes.combinations.title": "Combination-routes",
   "settings.pricing.routes.combinations.label": "Combination",
   "settings.pricing.routes.combinations.leg": "Leg",
   "settings.pricing.routes.combinations.formTitle": "Combination-route",
   "settings.pricing.routes.combinations.note":
-    "Een Combination bestaat altijd uit precies twee legs, elk met eigen Tarief, KM en Tunnel. Beide legs worden samen opgeslagen.",
+    "Een Combination bestaat altijd uit precies twee legs, elk met eigen Tarief, Toll en Tunnel, plus Over ST voor de Combination zelf. Alles wordt samen opgeslagen.",
   "settings.pricing.routes.combinations.deleteTitle":
     "Combination-route verwijderen",
   "settings.pricing.routes.combinations.deleteDescription":
@@ -452,7 +456,7 @@ const nl = {
     "Prijzen van {leg} \"{route}\" synchroniseren",
   "settings.pricing.routes.sync.title": "Prijzen synchroniseren",
   "settings.pricing.routes.sync.description":
-    "Tarief, KM en Tunnel van deze leg worden exact overgenomen op dezelfde leg (zelfde Van, Naar en legpositie) van andere Combinations. Normale routes, de andere leg en de Toll prijs per km worden niet gewijzigd.",
+    "Tarief, Toll en Tunnel van deze leg worden exact overgenomen op dezelfde leg (zelfde Van, Naar en legpositie) van andere Combinations. Normale routes, de andere leg en Over ST worden niet gewijzigd.",
   "settings.pricing.routes.sync.question":
     "Prijzen van {leg} \"{route}\" synchroniseren naar {count} andere Combination-routes?",
   "settings.pricing.routes.sync.confirm": "Synchroniseren",
@@ -641,6 +645,7 @@ const nl = {
   "ritten.export.pricingSheet": "Prijsoverzicht",
   "ritten.export.basicSheet": "Ritten",
   "ritten.export.waitingWord": "Wachttijd",
+  "ritten.export.nextDayWord": "volgende dag",
   "ritten.export.running": "Exporteren…",
   "ritten.export.done": "Export gedownload",
   "ritten.export.failed": "Export mislukt",
@@ -890,6 +895,9 @@ const nl = {
   "ritten.waiting.endField": "Wachttijd eind",
   "ritten.waiting.remove": "Wachttijd verwijderen",
   "ritten.waiting.calculated": "Berekend",
+  "ritten.waiting.nextDay": "Volgende dag",
+  "ritten.waiting.nextDayImplied":
+    "De eindtijd ligt vóór de begintijd, dus het einde valt op de volgende dag.",
   "ritten.waiting.beginRequired": "Vul een begintijd in, bijvoorbeeld 10:00.",
   "ritten.waiting.endRequired": "Vul een eindtijd in, bijvoorbeeld 12:30.",
   "ritten.waiting.legacy":
@@ -1035,6 +1043,8 @@ const nl = {
     "Verplaatst de rit naar een andere dag. De ingelezen datum blijft apart bewaard.",
   "tripDetail.edit.containerHint":
     "Ingevuld zodra de chauffeur het doorgeeft. Leeg laten om te wissen.",
+  "tripDetail.edit.addressHint":
+    "Terminal en bestemming bepalen de routeprijs: een afgewerkte rit wordt opnieuw berekend. Een latere UPDATE-PDF zet het adres van het document terug.",
   "tripDetail.edit.waitingTimeHint":
     "Opgeslagen als totaal aantal minuten. De prijs komt van de backend. Laat beide leeg om te wissen.",
   "tripDetail.edit.distanceHint": "Twee decimalen. Leeg laten om te wissen.",
@@ -1421,6 +1431,7 @@ const tr: Translations = {
   "ritten.edit.clear": "Temizle",
   "ritten.edit.planningDate": "Planlama tarihi",
   "ritten.edit.destination": "Varış yeri (şehir, ülke)",
+  "ritten.edit.terminal": "Terminali düzenle",
   "ritten.edit.startTime": "Taşıma başlangıcı",
   "ritten.edit.endTime": "Taşıma bitişi",
   "ritten.edit.containerNumber": "Konteyner numarası",
@@ -1446,7 +1457,6 @@ const tr: Translations = {
   "settings.pricing.fuel.historyNote":
     "Gelecekteki hesaplamalar için geçerlidir. Tamamlanmış seferler hesaplandıkları yüzdeyi korur.",
   "settings.pricing.settings.title": "Fiyat ayarları",
-  "settings.pricing.toll.label": "Kilometre başına geçiş ücreti",
   "settings.pricing.configuration.title": "Tüm yapılandırma",
   "settings.pricing.configuration.intro":
     "Fiyat hesaplamasının ihtiyaç duyduğu tüm ayarlar. Eksik ayarlar buradan oluşturulabilir; mevcut değerlerin üzerine asla yazılmaz.",
@@ -1466,8 +1476,15 @@ const tr: Translations = {
   "settings.pricing.routes.from": "Nereden",
   "settings.pricing.routes.to": "Nereye",
   "settings.pricing.routes.tarief": "Tarife",
-  "settings.pricing.routes.kilometres": "KM",
+  "settings.pricing.routes.toll": "Geçiş ücreti",
   "settings.pricing.routes.tunnel": "Tünel",
+  "settings.pricing.routes.overSt": "Over ST",
+  "settings.pricing.routes.sections.normal": "Normal seferler",
+  "settings.pricing.routes.sections.combinations": "Kombiler",
+  "settings.pricing.routes.search.label": "Nereden veya Nereye ara",
+  "settings.pricing.routes.search.placeholder": "Bir rota arayın, örn. 869 veya GENT",
+  "settings.pricing.routes.noResults": "Sonuç yok",
+  "settings.pricing.routes.combinations.add": "Kombi ekle",
   "settings.pricing.routes.actions": "İşlemler",
   "settings.pricing.routes.edit": "Düzenle",
   "settings.pricing.routes.delete": "Sil",
@@ -1490,7 +1507,7 @@ const tr: Translations = {
   "settings.pricing.routes.filter.reviewed": "Kontrol edildi",
   "settings.pricing.routes.bulk.title": "Rota fiyatlarını toplu ekle",
   "settings.pricing.routes.bulk.description":
-    "Tüm rotaları içeren bir JSON belgesi yapıştırın. JSON yalnızca içe aktarma biçimidir: her rota, elle eklenen bir rota gibi aynı doğrulamayla kaydedilir. Geçiş ücreti girmeyin — o, KM ve global km başına geçiş ücretinden hesaplanır.",
+    "Tüm rotaları içeren bir JSON belgesi yapıştırın. JSON yalnızca içe aktarma biçimidir: her rota, elle eklenen bir rota gibi aynı doğrulamayla kaydedilir. Geçiş ücreti ve Tünel rota başına tutarlardır; KM alanı içeren eski bir dosya reddedilir.",
   "settings.pricing.routes.bulk.documentLabel": "JSON",
   "settings.pricing.routes.bulk.check": "Kontrol et",
   "settings.pricing.routes.bulk.import": "İçe aktar",
@@ -1503,15 +1520,12 @@ const tr: Translations = {
   "settings.pricing.routes.bulk.total": "Toplam rota bacağı",
   "settings.pricing.routes.bulk.invalidJson": "Bu geçerli bir JSON değil.",
   "settings.pricing.routes.bulk.document": "Belge",
-  "settings.pricing.routes.type.label": "Tür",
-  "settings.pricing.routes.type.normal": "Normal",
-  "settings.pricing.routes.type.combination": "Combination",
   "settings.pricing.routes.combinations.title": "Combination rotaları",
   "settings.pricing.routes.combinations.label": "Combination",
   "settings.pricing.routes.combinations.leg": "Bacak",
   "settings.pricing.routes.combinations.formTitle": "Combination rotası",
   "settings.pricing.routes.combinations.note":
-    "Bir Combination her zaman tam iki bacaktan oluşur; her bacağın kendi Tarifesi, KM'si ve Tüneli vardır. İki bacak birlikte kaydedilir.",
+    "Bir Combination her zaman tam iki bacaktan oluşur; her bacağın kendi Tarifesi, Geçiş ücreti ve Tüneli vardır, ayrıca Combination'ın kendisi için Over ST. Hepsi birlikte kaydedilir.",
   "settings.pricing.routes.combinations.deleteTitle":
     "Combination rotasını sil",
   "settings.pricing.routes.combinations.deleteDescription":
@@ -1535,7 +1549,7 @@ const tr: Translations = {
     "{leg} \"{route}\" fiyatlarını eşitle",
   "settings.pricing.routes.sync.title": "Fiyatları eşitle",
   "settings.pricing.routes.sync.description":
-    "Bu bacağın Tarife, KM ve Tünel değerleri, diğer Combination'ların aynı bacağına (aynı Nereden, Nereye ve bacak pozisyonu) aynen kopyalanır. Normal rotalar, diğer bacak ve km başına Toll fiyatı değişmez.",
+    "Bu bacağın Tarife, Geçiş ücreti ve Tünel değerleri, diğer Combination'ların aynı bacağına (aynı Nereden, Nereye ve bacak pozisyonu) aynen kopyalanır. Normal rotalar, diğer bacak ve Over ST değişmez.",
   "settings.pricing.routes.sync.question":
     "{leg} \"{route}\" fiyatları {count} diğer Combination rotasına eşitlensin mi?",
   "settings.pricing.routes.sync.confirm": "Eşitle",
@@ -1713,6 +1727,7 @@ const tr: Translations = {
   "ritten.export.pricingSheet": "Fiyat özeti",
   "ritten.export.basicSheet": "Seferler",
   "ritten.export.waitingWord": "Bekleme",
+  "ritten.export.nextDayWord": "ertesi gün",
   "ritten.export.running": "Dışa aktarılıyor…",
   "ritten.export.done": "Dosya indirildi",
   "ritten.export.failed": "Dışa aktarma başarısız",
@@ -1955,6 +1970,9 @@ const tr: Translations = {
   "ritten.waiting.endField": "Bekleme bitişi",
   "ritten.waiting.remove": "Bekleme süresini sil",
   "ritten.waiting.calculated": "Hesaplanan",
+  "ritten.waiting.nextDay": "Ertesi gün",
+  "ritten.waiting.nextDayImplied":
+    "Bitiş saati başlangıçtan önce, bu yüzden bitiş ertesi güne düşer.",
   "ritten.waiting.beginRequired": "Bir başlangıç saati girin, örneğin 10:00.",
   "ritten.waiting.endRequired": "Bir bitiş saati girin, örneğin 12:30.",
   "ritten.waiting.legacy":
@@ -2100,6 +2118,8 @@ const tr: Translations = {
     "Seferi başka bir güne taşır. Okunan tarih ayrıca saklanır.",
   "tripDetail.edit.containerHint":
     "Şoför bildirdiğinde girilir. Silmek için boş bırakın.",
+  "tripDetail.edit.addressHint":
+    "Terminal ve varış yeri rota fiyatını belirler: tamamlanmış sefer yeniden hesaplanır. Sonraki bir UPDATE-PDF belgedeki adresi geri yazar.",
   "tripDetail.edit.waitingTimeHint":
     "Toplam dakika olarak saklanır. Fiyatı backend hesaplar. Silmek için ikisini de boş bırakın.",
   "tripDetail.edit.distanceHint": "İki ondalık. Silmek için boş bırakın.",

@@ -5,7 +5,7 @@ import { RouteCostRepository } from "../route-costs/route-cost.repository";
 import { RouteCostService } from "../route-costs/route-cost.service";
 import { CombinationRouteConfigurationService } from "./combination-route-configuration.service";
 import { RouteConfigurationService } from "./route-configuration.service";
-import { RouteTunnelCostService } from "./route-tunnel-cost.service";
+import { RouteComponentCostService } from "./route-component-cost.service";
 
 const ROUTE_ID = "3f2504e0-4f89-41d3-9a0c-0305e82c3301";
 const GROUP_ID = "7d2b8c14-9f3a-4c5e-8b1d-2e3f4a5b6c7d";
@@ -118,7 +118,7 @@ describe("the review mark", () => {
 
     logger = { setContext: jest.fn(), log: jest.fn(), warn: jest.fn() };
 
-    const tunnelCosts = new RouteTunnelCostService(
+    const tunnelCosts = new RouteComponentCostService(
       routeCosts as unknown as RouteCostService,
       { findPricingComponentByCode: jest.fn() } as unknown as RouteCostRepository,
       logger as unknown as AppLoggerService,

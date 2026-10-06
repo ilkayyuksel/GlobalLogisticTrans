@@ -49,7 +49,6 @@ const MINIMUM_BY_SETTING: ReadonlyMap<string, number> = new Map([
   [settingIdentity("PRICING", "FUEL_PERCENTAGE"), 0],
   [settingIdentity("PRICING", "COMBINATION_SURCHARGE"), 0],
   [settingIdentity("PRICING", "DISTANCE_RATE_PER_KM"), 0],
-  [settingIdentity("PRICING", "TOLL_RATE_PER_KM"), 0],
   [settingIdentity("PRICING", "WAITING_TIME_BLOCK_PRICE"), 0],
   [settingIdentity("PRICING", "WAITING_TIME_FREE_MINUTES"), 0],
   [settingIdentity("PRICING", "WAITING_TIME_THRESHOLD_MINUTES"), 0],

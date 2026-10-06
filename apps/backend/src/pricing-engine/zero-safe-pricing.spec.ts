@@ -1,3 +1,4 @@
+import { CombinationRoutePricingService } from "../route-pricing/combination-route-pricing.service";
 import { Prisma, TripDirection, TripStatus } from "@prisma/client";
 
 import { AppLoggerService } from "../logger/app-logger.service";
@@ -85,7 +86,11 @@ const RULES = {
   waitingTimeBlockMinutes: 15,
   waitingTimeBlockPrice: "13.75",
   ruleVersion: "2026.1",
-  tollRatePerKm: null,
+};
+
+/** No pair is configured unless a test says so: the road match then applies. */
+const combinationPricing = {
+  findConfiguredCombination: jest.fn().mockResolvedValue(null),
 };
 
 describe("a CLOSED Trip on an unconfigured route", () => {
@@ -151,6 +156,7 @@ describe("a CLOSED Trip on an unconfigured route", () => {
       ruleResolver,
       new PricingComponentResolver(
         routePricing as unknown as RoutePricingService,
+        combinationPricing as unknown as CombinationRoutePricingService,
         assignments as unknown as TripCustomPropertyReadService,
         customProperties as unknown as CustomPropertyService,
         trips as unknown as TripReadService,
@@ -256,10 +262,12 @@ describe("a CLOSED Trip on an unconfigured route", () => {
     it("prices a waiting time", async () => {
       trips.findById.mockResolvedValue(buildTrip({ waitingTimeMinutes: 180 }));
 
-      // 180 - 120 = 60 billable minutes = 4 blocks at 13.75 = 55.00
+      // 180 - 120 = 60 billable minutes = 4 blocks at 13.75 = 55.00, which is
+      // EK; Others is the automatic TAR (20) alone.
       const pricing = await amounts();
 
-      expect(pricing.others).toBe("75.00");
+      expect(pricing.others).toBe("20.00");
+      expect(pricing.ek).toBe("55.00");
       expect(pricing.totaal).toBe("75.00");
     });
 
@@ -310,10 +318,46 @@ describe("a CLOSED Trip on an unconfigured route", () => {
 
       const pricing = await amounts();
 
-      // TAR 20 + Flat 80 + waiting 55
-      expect(pricing.others).toBe("155.00");
+      // Others: TAR 20 + Flat 80. EK: the charged waiting time 55, which
+      // supersedes the confirmed 165 — never 55 + 165.
+      expect(pricing.others).toBe("100.00");
+      expect(pricing.ek).toBe("55.00");
+      expect(pricing.totaal).toBe("155.00");
+    });
+
+    /**
+     * The STORED snapshot agrees: the superseded confirmation is written at
+     * €0, still naming its document, so the persisted total counts the
+     * waiting time once and Remarks keeps the CC reference.
+     */
+    it("stores the superseded confirmation at zero, still naming it", async () => {
+      trips.findById.mockResolvedValue(buildTrip({ waitingTimeMinutes: 180 }));
+      costConfirmations.findForTrip.mockResolvedValue({
+        ccNumbers: ["4139505"],
+        amount: "165.00",
+      });
+
+      const { lines, totalPrice } = await engine.calculate(TRIP_ID);
+      const confirmation = lines.find((line) => line.component === "COST_CONFIRMATION");
+
+      expect(confirmation?.amount.toFixed(2)).toBe("0.00");
+      expect(confirmation?.description).toBe("Cost confirmation 4139505");
+      // TAR 20 + waiting 55; the confirmed 165 is not added.
+      expect(totalPrice.toFixed(2)).toBe("75.00");
+    });
+
+    /** Below the threshold the waiting time is €0 and the confirmation counts. */
+    it("counts the confirmation in full when the waiting time is not charged", async () => {
+      trips.findById.mockResolvedValue(buildTrip({ waitingTimeMinutes: 60 }));
+      costConfirmations.findForTrip.mockResolvedValue({
+        ccNumbers: ["4139505"],
+        amount: "165.00",
+      });
+
+      const pricing = await amounts();
+
       expect(pricing.ek).toBe("165.00");
-      expect(pricing.totaal).toBe("320.00");
+      expect(pricing.totaal).toBe("185.00");
     });
   });
 
@@ -586,6 +630,7 @@ describe("the two legs of a Combination", () => {
       ruleResolver,
       new PricingComponentResolver(
         { findConfiguredRoute: jest.fn().mockResolvedValue(null) } as never,
+        combinationPricing as unknown as CombinationRoutePricingService,
         { findByTripId: jest.fn().mockResolvedValue(options.assignments ?? []) } as never,
         {
           findById: jest.fn().mockResolvedValue({

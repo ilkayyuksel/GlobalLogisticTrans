@@ -22,6 +22,7 @@ import {
   DISTANCE_KM_MAX,
   INTERNAL_NOTES_MAX_LENGTH,
   TAR_NUMMER_MAX_LENGTH,
+  TERMINAL_MAX_LENGTH,
   toRawNumber,
 } from "./create-trip.dto";
 
@@ -40,18 +41,16 @@ import {
  * Everything else is excluded on purpose:
  *   - `bookingNumber`, `originalPlanningDate` and `pdfDocumentId` are immutable.
  *   - `status` moves through the status, deletion and restoration endpoints.
- *   - `terminal` and `containerType` are parser-controlled.
+ *   - `containerType` is parser-controlled.
  *   - `parserMetadata` is never a manual field.
  *
- * THE DOCUMENT'S OWN FIELDS ARE THE EXCEPTION, AND ONLY ON A MANUAL TRIP.
- * The destination and the transport times are parser-controlled exactly when
- * there IS a parser. A Trip created by hand has no source document, so nothing
- * else can ever correct a city or a time typed wrongly at creation — both were
- * write-once, and a Trip planned to the wrong place, or at the wrong hour,
- * stayed that way for the rest of its life. The service refuses them on an
- * IMPORTED Trip, where the document remains the authority and a later UPDATE
- * would silently overwrite anything typed here; see
- * `DocumentControlledFieldException`.
+ * THE ADDRESS — TERMINAL AND DESTINATION — IS EDITABLE ON EVERY TRIP.
+ * The business decided that an operator must be able to correct where a Trip
+ * starts and where it goes, imported or not. On an imported Trip the document
+ * still revises these: a later UPDATE of the same order writes the address it
+ * states, replacing a manual correction — the ordinary revision behaviour,
+ * accepted knowingly. Both ends are pricing inputs, so changing either reprices
+ * the Trip through the existing recalculation; see `changesPricingInput`.
  *
  * (`startTime` and `endTime` were also excluded because changing them "would
  * re-open the Vehicle overlap question". That reason is stale: the
@@ -131,13 +130,24 @@ export class UpdateTripDto {
 
   @ApiPropertyOptional({
     description:
-      "When the waiting ended. An end before the start is the next morning; an end equal to the start is zero, never a day.",
+      "When the waiting ended. An end before the start is the next morning; an end equal to the start is zero unless waitingTimeEndsNextDay is true.",
     nullable: true,
     example: "10:15",
   })
   @IsOptional()
   @IsClockTimeString()
   waitingTimeEnd?: string | null;
+
+  @ApiPropertyOptional({
+    description:
+      "Whether waitingTimeEnd is on the day after waitingTimeStart. Part of the window: send it only together with both times. Omitted with the times means the same day.",
+    example: false,
+  })
+  // RAW for the same reason as isLooseTrip: a typo must not silently mean true.
+  @Transform(toOptionalBoolean)
+  @IsOptional()
+  @IsBoolean()
+  waitingTimeEndsNextDay?: boolean;
 
   @ApiPropertyOptional({
     description: "Distance in kilometres. Send null to clear.",
@@ -189,7 +199,20 @@ export class UpdateTripDto {
 
   @ApiPropertyOptional({
     description:
-      "Destination city. Accepted only on a Trip created by hand; on an imported Trip the document is the authority and this is refused. Send null to clear.",
+      "Where the Trip starts or ends at the quay — the departure in the Trip's route for a delivery. A pricing input: changing it reprices the Trip. On an imported Trip a later UPDATE document writes its own terminal again. Whitespace-only is stored as null, which clears it.",
+    maxLength: TERMINAL_MAX_LENGTH,
+    nullable: true,
+    example: "Antwerp Gateway",
+  })
+  @Transform(trimToNull)
+  @IsOptional()
+  @IsString()
+  @MaxLength(TERMINAL_MAX_LENGTH)
+  terminal?: string | null;
+
+  @ApiPropertyOptional({
+    description:
+      "Destination city. A pricing input: changing it reprices the Trip. On an imported Trip a later UPDATE document writes its own destination again. Send null to clear.",
     maxLength: DESTINATION_MAX_LENGTH,
     nullable: true,
     example: "Bousbecque",
@@ -202,7 +225,7 @@ export class UpdateTripDto {
 
   @ApiPropertyOptional({
     description:
-      "Destination country. Same rule as the city: manual Trips only. Send null to clear.",
+      "Destination country. Display data only — not a pricing input. Send null to clear.",
     maxLength: DESTINATION_MAX_LENGTH,
     nullable: true,
     example: "France",

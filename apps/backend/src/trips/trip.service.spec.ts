@@ -6,7 +6,6 @@ import { AppLoggerService } from "../logger/app-logger.service";
 import { VehicleService } from "../vehicles/vehicle.service";
 import { CreateTripDto } from "./dto/create-trip.dto";
 import {
-  DocumentControlledFieldException,
   IncompleteWaitingWindowException,
   DuplicateBookingNumberException,
   InactiveAssignmentException,
@@ -52,6 +51,7 @@ function buildTrip(overrides: Partial<Trip> = {}): Trip {
     executionDatetime: null,
     waitingTimeStart: null,
     waitingTimeEnd: null,
+    waitingTimeEndsNextDay: false,
     waitingTimeMinutes: null,
     distanceKm: null,
     tarNummer: null,
@@ -563,35 +563,23 @@ describe("TripService", () => {
     });
 
     /**
-     * ── WHO OWNS THE DESTINATION ────────────────────────────────────────────
-     * It was excluded from every update as "parser-controlled", which is only
-     * true where a parser exists. A Trip created by hand has no document, so
-     * nothing could ever correct a city typed wrongly: it was write-once, and a
-     * Trip planned to the wrong place stayed planned to the wrong place.
-     *
-     * The Trip decides, not the field. An imported Trip is still refused —
-     * a later UPDATE re-reads the destination from the document, so a manual
-     * change there would be silently overwritten.
+     * ── THE ADDRESS IS THE OPERATOR'S TO CORRECT ────────────────────────────
+     * Terminal and destination are accepted on EVERY Trip, imported or not, by
+     * decision of the business. On an imported Trip a later UPDATE document
+     * writes its own address again; that is the ordinary revision behaviour.
      * ────────────────────────────────────────────────────────────────────────
      */
-    describe("the destination", () => {
-      /** No PDF, so the operator is the only possible author. */
+    describe("the address", () => {
       const manualTrip = () =>
         repository.findById.mockResolvedValue(buildTrip({ pdfDocumentId: null }));
+      const importedTrip = () =>
+        repository.findById.mockResolvedValue(buildTrip({ pdfDocumentId: PDF_ID }));
 
-      it("is accepted on a Trip created by hand", async () => {
-        manualTrip();
-
-        await service.update(TRIP_ID, { destinationCity: "Rotterdam" });
-
-        expect(repository.update).toHaveBeenCalledWith(
-          TRIP_ID,
-          expect.objectContaining({ destinationCity: "Rotterdam" }),
-        );
-      });
-
-      it("accepts the country with it", async () => {
-        manualTrip();
+      it.each([
+        ["a Trip created by hand", manualTrip],
+        ["an imported Trip", importedTrip],
+      ])("accepts a new destination on %s", async (_, given) => {
+        given();
 
         await service.update(TRIP_ID, {
           destinationCity: "Venlo",
@@ -607,107 +595,51 @@ describe("TripService", () => {
         );
       });
 
-      it("can be cleared", async () => {
-        manualTrip();
+      it.each([
+        ["a Trip created by hand", manualTrip],
+        ["an imported Trip", importedTrip],
+      ])("accepts a new terminal on %s", async (_, given) => {
+        given();
 
-        await service.update(TRIP_ID, { destinationCity: null });
+        await service.update(TRIP_ID, { terminal: "DP World Antwerp Gateway" });
 
         expect(repository.update).toHaveBeenCalledWith(
           TRIP_ID,
-          expect.objectContaining({ destinationCity: null }),
+          expect.objectContaining({ terminal: "DP World Antwerp Gateway" }),
         );
       });
 
-      it("is refused on an imported Trip", async () => {
-        await expect(
-          service.update(TRIP_ID, { destinationCity: "Rotterdam" }),
-        ).rejects.toBeInstanceOf(DocumentControlledFieldException);
+      it("can be cleared", async () => {
+        manualTrip();
+
+        await service.update(TRIP_ID, { terminal: null, destinationCity: null });
+
+        expect(repository.update).toHaveBeenCalledWith(
+          TRIP_ID,
+          expect.objectContaining({ terminal: null, destinationCity: null }),
+        );
       });
 
-      it("is refused before anything is written", async () => {
-        await expect(
-          service.update(TRIP_ID, {
-            destinationCity: "Rotterdam",
-            internalNotes: "moved",
-          }),
-        ).rejects.toBeInstanceOf(DocumentControlledFieldException);
-
-        expect(repository.update).not.toHaveBeenCalled();
-      });
-
-      /** An update that says nothing about the destination is not one. */
-      it("leaves an imported Trip updatable in every other field", async () => {
+      /** An update that says nothing about the address leaves it alone. */
+      it("is not written when it was not sent", async () => {
         await service.update(TRIP_ID, { internalNotes: "call the customer" });
 
-        expect(repository.update).toHaveBeenCalled();
+        expect(repository.update).toHaveBeenCalledWith(
+          TRIP_ID,
+          expect.objectContaining({
+            terminal: undefined,
+            destinationCity: undefined,
+            destinationCountry: undefined,
+          }),
+        );
       });
 
-      /**
-       * ── A DOCUMENT OWNS WHAT IT SAYS, NOT WHAT IT NEVER SAID ─────────────
-       * Some orders state no destination at all, and the parser imports those
-       * with a null city rather than refusing a transport nobody can unblock.
-       * The operator is then the only possible author of the address, so the
-       * edit has to be accepted — refusing it on behalf of a document with no
-       * opinion would leave the Trip permanently address-less.
-       */
-      describe("a destination the document never stated", () => {
-        beforeEach(() => {
-          repository.findById.mockResolvedValue(
-            buildTrip({
-              pdfDocumentId: PDF_ID,
-              destinationCity: null,
-              destinationCountry: null,
-            }),
-          );
-        });
+      /** Only the edited Trip is written; no other Trip is touched. */
+      it("writes exactly one Trip", async () => {
+        await service.update(TRIP_ID, { terminal: "Quay 1742" });
 
-        it("may be filled in on an imported Trip", async () => {
-          await service.update(TRIP_ID, { destinationCity: "Tielt" });
-
-          expect(repository.update).toHaveBeenCalledWith(
-            TRIP_ID,
-            expect.objectContaining({ destinationCity: "Tielt" }),
-          );
-        });
-
-        it("may be filled in together with its country", async () => {
-          await service.update(TRIP_ID, {
-            destinationCity: "Tielt",
-            destinationCountry: "Belgium",
-          });
-
-          expect(repository.update).toHaveBeenCalled();
-        });
-
-        /** Per FIELD: a stated country stays the document's. */
-        it("still refuses a country the document did state", async () => {
-          repository.findById.mockResolvedValue(
-            buildTrip({
-              pdfDocumentId: PDF_ID,
-              destinationCity: null,
-              destinationCountry: "Belgium",
-            }),
-          );
-
-          await expect(
-            service.update(TRIP_ID, { destinationCountry: "Netherlands" }),
-          ).rejects.toBeInstanceOf(DocumentControlledFieldException);
-        });
-
-        /** And the city stays open in that same Trip. */
-        it("still allows the empty city there", async () => {
-          repository.findById.mockResolvedValue(
-            buildTrip({
-              pdfDocumentId: PDF_ID,
-              destinationCity: null,
-              destinationCountry: "Belgium",
-            }),
-          );
-
-          await service.update(TRIP_ID, { destinationCity: "Tielt" });
-
-          expect(repository.update).toHaveBeenCalled();
-        });
+        expect(repository.update).toHaveBeenCalledTimes(1);
+        expect(repository.update.mock.calls[0][0]).toBe(TRIP_ID);
       });
     });
 
@@ -932,15 +864,6 @@ describe("TripService", () => {
             startTime: new Date("1970-01-01T08:00:00.000Z"),
           }),
         );
-      });
-
-      /** The destination is still the document's on an imported Trip. */
-      it("does not make the destination editable with it", async () => {
-        repository.findById.mockResolvedValue(buildTrip({ pdfDocumentId: PDF_ID }));
-
-        await expect(
-          service.update(TRIP_ID, { destinationCity: "Rotterdam" }),
-        ).rejects.toBeInstanceOf(DocumentControlledFieldException);
       });
 
       /** An operator edit is not a revision: no history row is written. */

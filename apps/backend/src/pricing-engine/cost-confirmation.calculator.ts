@@ -44,11 +44,26 @@ import { toStorableAmount } from "./pricing-money";
  *
  * A Trip without any confirmation produces no line at all — not a zero, which
  * would claim a confirmed cost of nothing.
+ *
+ * ── A CHARGED WAITING TIME TAKES ITS PLACE ──────────────────────────────────
+ * EK is ONE source, by business rule: the operator's waiting time when it is
+ * charged (a WAITING_TIME line above €0), otherwise the confirmations. The two
+ * are never added — a confirmed €27.50 beside a waiting time of €137.50 is EK
+ * €137.50, not €165.00.
+ *
+ * So when a charged waiting time precedes this step, the line is still written
+ * — its description keeps naming the documents, which is how Remarks shows the
+ * CC references — but it contributes €0, and the stored total counts the
+ * waiting time once. The confirmations themselves are untouched: this decides
+ * only what they contribute to THIS calculation. A waiting time of €0 produces
+ * no line, so the confirmations count in full, as before.
  * ────────────────────────────────────────────────────────────────────────────
  */
 
-/** Last in the sequence: it depends on nothing and nothing depends on it. */
+/** Last in the sequence: it reads the waiting time, and nothing depends on it. */
 const CALCULATION_ORDER = 80;
+
+const ZERO = new Prisma.Decimal(0);
 
 @Injectable()
 export class CostConfirmationCalculator implements PricingCalculationStep {
@@ -56,7 +71,10 @@ export class CostConfirmationCalculator implements PricingCalculationStep {
     this.logger.setContext(CostConfirmationCalculator.name);
   }
 
-  calculate(context: PricingCalculationContext): PricingLine[] {
+  calculate(
+    context: PricingCalculationContext,
+    precedingLines: readonly PricingLine[] = [],
+  ): PricingLine[] {
     const confirmation = context.costConfirmation;
 
     if (!confirmation) {
@@ -67,11 +85,14 @@ export class CostConfirmationCalculator implements PricingCalculationStep {
       return [];
     }
 
+    const isSuperseded = isWaitingTimeCharged(precedingLines);
+
     this.logger.log("Cost confirmation priced", {
       tripId: context.tripId,
       // The references identify the documents; no amount is ever logged.
       ccNumbers: confirmation.ccNumbers,
       confirmationCount: confirmation.ccNumbers.length,
+      supersededByWaitingTime: isSuperseded,
     });
 
     return [
@@ -88,7 +109,9 @@ export class CostConfirmationCalculator implements PricingCalculationStep {
         // already summed the confirmations as Decimal and handed over a fixed-2
         // amount, so this rounds nothing in practice — it states the precision
         // rather than trusting the string.
-        amount: toStorableAmount(new Prisma.Decimal(confirmation.amount)),
+        amount: isSuperseded
+          ? ZERO
+          : toStorableAmount(new Prisma.Decimal(confirmation.amount)),
         calculationOrder: CALCULATION_ORDER,
         quantity: null,
         unitPrice: null,
@@ -109,4 +132,13 @@ function describe(ccNumbers: readonly string[]): string {
   return ccNumbers.length === 1
     ? `Cost confirmation ${ccNumbers[0]}`
     : `Cost confirmations ${ccNumbers.join(", ")}`;
+}
+
+/** Whether an earlier step charged a waiting time — the EK source then. */
+function isWaitingTimeCharged(precedingLines: readonly PricingLine[]): boolean {
+  return precedingLines.some(
+    (line) =>
+      line.component === PricingComponentCode.WAITING_TIME &&
+      line.amount.greaterThan(ZERO),
+  );
 }

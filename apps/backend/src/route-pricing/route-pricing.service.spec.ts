@@ -122,7 +122,7 @@ describe("RoutePricingService", () => {
         "departure",
         "destination",
         "id",
-        "kilometres",
+        // No "kilometres": the legacy distance is never presented.
         "notes",
         // Administrative progress, carried so a screen can show it.
         "reviewed",
@@ -167,19 +167,11 @@ describe("RoutePricingService", () => {
       );
     });
 
-    it("returns the route's configured length", async () => {
+    /** The legacy distance stays in the database and is no longer presented. */
+    it("does not present the legacy distance", async () => {
       repository.findById.mockResolvedValue(buildRoutePricing());
 
-      expect((await service.findById(ROUTE_ID)).kilometres).toBe("25.00");
-    });
-
-    /** Routes configured before distances existed have none, and say so. */
-    it("returns null for a route whose length nobody has stated", async () => {
-      repository.findById.mockResolvedValue(
-        buildRoutePricing({ kilometres: null }),
-      );
-
-      expect((await service.findById(ROUTE_ID)).kilometres).toBeNull();
+      expect(await service.findById(ROUTE_ID)).not.toHaveProperty("kilometres");
     });
   });
 
@@ -191,7 +183,7 @@ describe("RoutePricingService", () => {
       basePrice: 380,
     };
 
-    it("stores the record with null for an omitted distance and notes", async () => {
+    it("stores the record with null for omitted notes, and no distance", async () => {
       await service.create(dto);
 
       expect(repository.create).toHaveBeenCalledWith({
@@ -199,19 +191,8 @@ describe("RoutePricingService", () => {
         departure: "Antwerp",
         destination: "Rotterdam",
         basePrice: 380,
-        // Null, not zero: nobody has stated the distance, so no toll is
-        // charged — as against a road somebody measured as nought kilometres.
-        kilometres: null,
         notes: null,
       });
-    });
-
-    it("stores the distance it was given", async () => {
-      await service.create({ ...dto, kilometres: 25 });
-
-      expect(repository.create).toHaveBeenCalledWith(
-        expect.objectContaining({ kilometres: 25 }),
-      );
     });
 
     it("rejects a route already covered by an active record", async () => {

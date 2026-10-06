@@ -46,7 +46,6 @@ function leg(overrides: Partial<CreateRoutePricingDto> = {}): CreateRoutePricing
     departure: "Antwerp",
     destination: "Kallo",
     basePrice: 100,
-    kilometres: 25,
     ...overrides,
   };
 }
@@ -103,6 +102,9 @@ const GROUP = {
   id: GROUP_ID,
   notes: null,
   reviewed: false,
+  overStBasePrice: null,
+  overStToll: null,
+  overStTunnel: null,
   createdAt: new Date("2026-09-26T00:00:00Z"),
   updatedAt: new Date("2026-09-26T00:00:00Z"),
 };
@@ -299,27 +301,22 @@ describe("CombinationRoutePricingService", () => {
       expect(prices).toEqual([100, 80]);
     });
 
-    it("stores each leg's own distance", async () => {
-      await service.create([
-        leg({ kilometres: 25 }),
-        leg({ departure: "Kallo", destination: "Antwerp", kilometres: 31.5 }),
-      ]);
+    /** The legacy distance is never written: the toll is a route cost now. */
+    it("writes no distance onto either leg", async () => {
+      await service.create(bothLegs());
 
-      const distances = repository.create.mock.calls.map(
-        ([call]) => call.kilometres,
-      );
-
-      expect(distances).toEqual([25, 31.5]);
+      for (const [call] of repository.create.mock.calls) {
+        expect(call).not.toHaveProperty("kilometres");
+      }
     });
 
-    /** A leg whose distance nobody stated charges no toll, like any route. */
-    it("stores a blank distance as null rather than as zero", async () => {
-      await service.create([
-        leg({ kilometres: undefined }),
-        leg({ departure: "Kallo", destination: "Antwerp" }),
-      ]);
+    /** Over ST is written with the group, in the same transaction. */
+    it("writes Over ST onto the group it creates", async () => {
+      const overSt = { tarief: 50, toll: 5, tunnel: 0 };
 
-      expect(repository.create.mock.calls[0][0].kilometres).toBeNull();
+      await service.create(bothLegs(), overSt);
+
+      expect(repository.createGroup).toHaveBeenCalledWith(overSt);
     });
 
     /**

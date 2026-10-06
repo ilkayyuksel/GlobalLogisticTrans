@@ -123,26 +123,6 @@ export const PRICING_SETTING_CATALOG: readonly PricingSettingDefinition[] = [
     defaultValue: "2.75",
   },
   {
-    /**
-     * ── WHY THE DEFAULT IS ZERO AND NOT A RATE ────────────────────────────
-     * Every other default here was transcribed from a working database. There
-     * is nothing to transcribe for this one: toll has always been configured
-     * per route, no per-kilometre rate has ever been in use, and a plausible
-     * looking number would be exactly the invented default the rest of this
-     * file refuses to write.
-     *
-     * Zero is the honest starting point, and a meaningful one: the bounds file
-     * already treats zero as "configured, charges nothing". Nothing is priced
-     * from it yet either way — the row exists so an administrator can put the
-     * real rate in before the route-pricing change starts reading it.
-     */
-    key: "TOLL_RATE_PER_KM",
-    valueType: SettingValueType.DECIMAL,
-    description:
-      "Price of one kilometre of toll. Configured here and read by the route pricing that applies it; toll charged per route is unaffected until then.",
-    defaultValue: "0.00",
-  },
-  {
     key: "PRICING_RULE_VERSION",
     valueType: SettingValueType.STRING,
     description:

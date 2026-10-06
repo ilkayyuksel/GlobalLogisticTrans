@@ -21,18 +21,6 @@ export const BASE_PRICE_MAX = 9_999_999_999.99;
 export const BASE_PRICE_DECIMAL_PLACES = 2;
 
 /**
- * The bounds of a route's length.
- *
- * Two decimals and a ceiling that matches NUMERIC(8,2) — the same precision
- * `trip.distance_km` uses, because it is the same quantity measured on a
- * different thing. Ten thousand kilometres is far beyond any route this
- * business drives and well inside what the column can hold: it refuses the
- * impossible, not the unusual.
- */
-export const ROUTE_KILOMETRES_DECIMAL_PLACES = 2;
-export const ROUTE_KILOMETRES_MAX = 10_000;
-
-/**
  * Reads the raw request value so the pipe's implicit conversion cannot turn a
  * string or boolean into a number behind the validator's back — `"abc"` must be
  * rejected, not silently coerced.
@@ -88,21 +76,6 @@ export class CreateRoutePricingDto {
   @Min(0)
   @Max(BASE_PRICE_MAX)
   basePrice!: number;
-
-  @ApiPropertyOptional({
-    description:
-      "Length of the route in kilometres, to two decimals. The Toll is derived from it and the configured toll rate, so a route without it is charged no toll.",
-    minimum: 0,
-    maximum: ROUTE_KILOMETRES_MAX,
-    nullable: true,
-    example: 25,
-  })
-  @Transform(toRawNumber)
-  @IsOptional()
-  @IsNumber({ maxDecimalPlaces: ROUTE_KILOMETRES_DECIMAL_PLACES })
-  @Min(0)
-  @Max(ROUTE_KILOMETRES_MAX)
-  kilometres?: number | null;
 
   @ApiPropertyOptional({
     maxLength: ROUTE_NOTES_MAX_LENGTH,

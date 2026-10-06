@@ -14,10 +14,10 @@ const BULK_CHECK_PATH = `${BULK_PATH}/check`;
  * "Quay 869 to Dourges" means one route, and the composition is the backend's
  * job. Nothing on this side assembles or splits a route.
  *
- * ── AND THE TOLL IS NOT ONE OF ITS AMOUNTS ──────────────────────────────────
- * A route carries its LENGTH. What a Trip pays in toll is that length times the
- * rate configured once for the whole business, and the Pricing Engine works it
- * out — never this screen, which stores kilometres and shows what it stored.
+ * ── THREE AMOUNTS ───────────────────────────────────────────────────────────
+ * A route carries its Tarief, its Toll and its Tunnel, each an amount the
+ * operator states. The Pricing Engine charges them as they are; nothing on this
+ * screen derives one from another.
  *
  * Amounts are preformatted two-decimal STRINGS and are displayed exactly as
  * received. No arithmetic happens in the browser.
@@ -27,15 +27,10 @@ export interface RouteConfiguration {
   departure: string;
   destination: string;
   tarief: string;
-  /**
-   * The route's length in kilometres, or null when nobody has stated it.
-   *
-   * Null is not zero: a route of no stated length is charged no toll, while a
-   * route stated as nought kilometres is a decision somebody made. Routes
-   * configured before distances existed carry null until an operator fills
-   * them in.
-   */
-  kilometres: string | null;
+  /** The toll AMOUNT of this route, charged as it is. */
+  toll: string;
+  /** Whether a toll cost is configured at all, as opposed to absent. */
+  hasToll: boolean;
   tunnel: string;
   /**
    * Whether a tunnel cost is actually configured, as opposed to absent.
@@ -97,6 +92,27 @@ export interface CombinationRouteConfiguration {
   reviewed: boolean;
   /** Exactly two, the outbound first. */
   legs: RouteConfiguration[];
+  /**
+   * Over ST: the Combination's own Tarief, Toll and Tunnel, beside its legs.
+   *
+   * Part of the Combination and not a third leg — it has no Van or Naar. Each
+   * is null when nobody has stated it. Charged by the backend on Leg 2 when its
+   * planning date differs from Leg 1's; nothing here calculates it.
+   */
+  overSt: CombinationOverSt;
+}
+
+export interface CombinationOverSt {
+  tarief: string | null;
+  toll: string | null;
+  tunnel: string | null;
+}
+
+/** Over ST as it is saved: amounts as numbers, null for "not stated". */
+export interface CombinationOverStPayload {
+  tarief: number | null;
+  toll: number | null;
+  tunnel: number | null;
 }
 
 /** What a route is saved with. Amounts are numbers; the backend rounds. */
@@ -104,20 +120,19 @@ export interface RouteConfigurationPayload {
   departure: string;
   destination: string;
   tarief: number;
-  /**
-   * A distance, not an amount: the Engine turns it into the Toll.
-   *
-   * Null means nobody has stated how long the road is, which is not the same as
-   * a road of no length — the first is charged no toll, the second is charged
-   * nothing because somebody decided it costs nothing.
-   */
-  kilometres: number | null;
+  /** The toll AMOUNT, like the tunnel. */
+  toll: number;
   tunnel: number;
 }
 
 /** Both legs of a Combination, saved together or not at all. */
 export interface CombinationRouteConfigurationPayload {
   legs: RouteConfigurationPayload[];
+  /**
+   * Omitted leaves the stored Over ST as it is — which is how an inline edit of
+   * one leg, and the leg sync, keep it untouched.
+   */
+  overSt?: CombinationOverStPayload;
 }
 
 export function listRouteConfigurations(
@@ -382,7 +397,7 @@ export interface CombinationLegSync {
   destination: string;
   prices: {
     tarief: string;
-    kilometres: string | null;
+    toll: string;
     tunnel: string;
   };
   targetCombinationGroupIds: string[];

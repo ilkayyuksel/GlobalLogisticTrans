@@ -1,4 +1,10 @@
-import { render as renderBare, screen, waitFor } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render as renderBare,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { LanguageProvider } from "@/lib/i18n/language-provider";
 import userEvent from "@testing-library/user-event";
 
@@ -156,6 +162,7 @@ function buildTrip(overrides: Partial<Trip> = {}): Trip {
     executionDatetime: null,
     waitingTimeStart: null,
     waitingTimeEnd: null,
+    waitingTimeEndsNextDay: false,
     waitingTimeMinutes: 45,
     distanceKm: "198.00",
     tarNummer: null,
@@ -550,10 +557,7 @@ describe("Trip management", () => {
     it.each([
       "Booking number",
       "Status",
-      "Terminal",
       "Cntr type",
-      "Bestemming stad",
-      "Bestemming land",
       "Oorspronkelijke datum",
       "Start time",
       "End time",
@@ -626,18 +630,16 @@ describe("Trip management", () => {
 
       const [, payload] = updateTripMock.mock.calls[0];
 
-      // Exactly the fields UpdateTripDto accepts — no booking number, status
-      // or terminal, all of which the backend rejects. The waiting time is sent
-      // as the WINDOW it was read off; the backend derives the duration.
+      // Exactly the fields UpdateTripDto accepts — no booking number or status,
+      // which the backend rejects. An UNCHANGED address, waiting window or
+      // "Uitgevoerd op" is not sent at all: each would either reprice a
+      // CLOSED Trip for nothing or rewrite a value nobody touched.
       expect(Object.keys(payload).sort()).toEqual([
         "containerNumber",
         "distanceKm",
-        "executionDatetime",
         "internalNotes",
         "planningDate",
         "vehicleId",
-        "waitingTimeEnd",
-        "waitingTimeStart",
       ]);
     });
 
@@ -682,6 +684,293 @@ describe("Trip management", () => {
         expect(screen.queryByLabelText("Interne notities")).not.toBeInTheDocument();
       });
       expect(getTripMock.mock.calls.length).toBeGreaterThan(callsBefore);
+    });
+
+    /**
+     * ── THE ADDRESS ─────────────────────────────────────────────────────────
+     * Terminal and destination are editable here on every Trip. Only what the
+     * operator CHANGED is sent: both ends are pricing inputs, and an unchanged
+     * value must not reprice a CLOSED Trip.
+     */
+    describe("the address", () => {
+      it("opens on the stored terminal and destination", async () => {
+        await openEditor();
+
+        expect(screen.getByLabelText("Terminal")).toHaveValue("PSA Antwerp");
+        expect(screen.getByLabelText("Bestemming stad")).toHaveValue("Dourges");
+        expect(screen.getByLabelText("Bestemming land")).toHaveValue("France");
+      });
+
+      it("sends a changed terminal, and only that", async () => {
+        updateTripMock.mockResolvedValue(buildTrip({ terminal: "DP World Antwerp" }));
+
+        await openEditor();
+        await userEvent.clear(screen.getByLabelText("Terminal"));
+        await userEvent.type(screen.getByLabelText("Terminal"), "DP World Antwerp");
+        await userEvent.click(screen.getByRole("button", { name: "Opslaan" }));
+
+        await waitFor(() => expect(updateTripMock).toHaveBeenCalled());
+
+        const [, payload] = updateTripMock.mock.calls[0];
+
+        expect(payload).toMatchObject({ terminal: "DP World Antwerp" });
+        expect(payload).not.toHaveProperty("destinationCity");
+        expect(payload).not.toHaveProperty("destinationCountry");
+      });
+
+      it("sends a changed destination, trimmed", async () => {
+        updateTripMock.mockResolvedValue(buildTrip({ destinationCity: "Lille" }));
+
+        await openEditor();
+        await userEvent.clear(screen.getByLabelText("Bestemming stad"));
+        await userEvent.type(screen.getByLabelText("Bestemming stad"), "  Saint-Étienne-du-Rouvray  ");
+        await userEvent.click(screen.getByRole("button", { name: "Opslaan" }));
+
+        await waitFor(() => expect(updateTripMock).toHaveBeenCalled());
+
+        const [, payload] = updateTripMock.mock.calls[0];
+
+        expect(payload).toMatchObject({ destinationCity: "Saint-Étienne-du-Rouvray" });
+        expect(payload).not.toHaveProperty("terminal");
+      });
+
+      /** Blank is "clear it", which the backend spells null. */
+      it("sends null for an emptied field", async () => {
+        updateTripMock.mockResolvedValue(buildTrip({ destinationCountry: null }));
+
+        await openEditor();
+        await userEvent.clear(screen.getByLabelText("Bestemming land"));
+        await userEvent.click(screen.getByRole("button", { name: "Opslaan" }));
+
+        await waitFor(() => expect(updateTripMock).toHaveBeenCalled());
+
+        expect(updateTripMock.mock.calls[0][1]).toMatchObject({ destinationCountry: null });
+      });
+
+      it("caps the fields at the backend's own length", async () => {
+        await openEditor();
+
+        expect(screen.getByLabelText("Terminal")).toHaveAttribute("maxLength", "200");
+        expect(screen.getByLabelText("Bestemming stad")).toHaveAttribute("maxLength", "200");
+      });
+
+      it("keeps the old address on cancel", async () => {
+        await openEditor();
+        await userEvent.clear(screen.getByLabelText("Terminal"));
+        await userEvent.type(screen.getByLabelText("Terminal"), "Elsewhere");
+        await userEvent.click(screen.getByRole("button", { name: "Wijzigingen verwerpen" }));
+
+        expect(updateTripMock).not.toHaveBeenCalled();
+        expect(screen.getByText("PSA Antwerp")).toBeInTheDocument();
+        expect(screen.queryByText("Elsewhere")).not.toBeInTheDocument();
+      });
+    });
+
+    /**
+     * ── THE WAITING WINDOW TRAVELS ONLY WHEN IT CHANGED ─────────────────────
+     * Two nulls are the removal. Sent on every save, they erased a waiting time
+     * stored as minutes alone, and repriced a CLOSED Trip whose waiting time
+     * nobody had touched.
+     */
+    describe("the waiting time on an unrelated save", () => {
+      async function saveWith(trip: Partial<Trip>, edit: () => Promise<void>) {
+        getTripMock.mockResolvedValue(buildTrip(trip));
+        updateTripMock.mockResolvedValue(buildTrip(trip));
+
+        await openEditor();
+        await edit();
+        await userEvent.click(screen.getByRole("button", { name: "Opslaan" }));
+        await waitFor(() => expect(updateTripMock).toHaveBeenCalled());
+
+        return updateTripMock.mock.calls[0][1] as Record<string, unknown>;
+      }
+
+      const retype = (label: string, value: string) => async () => {
+        await userEvent.clear(screen.getByLabelText(label));
+        await userEvent.type(screen.getByLabelText(label), value);
+      };
+
+      /** The fixture stores 45 minutes and no times: its form opens blank. */
+      it("leaves stored minutes alone when only the terminal changes", async () => {
+        const payload = await saveWith({}, retype("Terminal", "DP World Antwerp"));
+
+        expect(payload).toMatchObject({ terminal: "DP World Antwerp" });
+        expect(payload).not.toHaveProperty("waitingTimeStart");
+        expect(payload).not.toHaveProperty("waitingTimeEnd");
+        expect(payload).not.toHaveProperty("waitingTimeEndsNextDay");
+      });
+
+      it("leaves a next-day window alone when only the destination changes", async () => {
+        const payload = await saveWith(
+          {
+            status: "CLOSED",
+            waitingTimeStart: "10:00:00",
+            waitingTimeEnd: "12:00:00",
+            waitingTimeEndsNextDay: true,
+            waitingTimeMinutes: 960,
+          },
+          retype("Bestemming stad", "Lille"),
+        );
+
+        expect(payload).toMatchObject({ destinationCity: "Lille" });
+        expect(payload).not.toHaveProperty("waitingTimeStart");
+        expect(payload).not.toHaveProperty("waitingTimeEnd");
+        expect(payload).not.toHaveProperty("waitingTimeEndsNextDay");
+      });
+
+      it("sends no waiting fields when only a note changes", async () => {
+        const payload = await saveWith(
+          { waitingTimeStart: "08:00:00", waitingTimeEnd: "10:15:00", waitingTimeMinutes: 135 },
+          retype("Interne notities", "Called the customer."),
+        );
+
+        expect(payload).not.toHaveProperty("waitingTimeStart");
+        expect(payload).not.toHaveProperty("waitingTimeEnd");
+      });
+
+      /** Emptying the two times is the deliberate removal: two explicit nulls. */
+      it("sends the removal when the operator empties the window", async () => {
+        const payload = await saveWith(
+          {
+            waitingTimeStart: "10:00:00",
+            waitingTimeEnd: "12:00:00",
+            waitingTimeEndsNextDay: true,
+            waitingTimeMinutes: 960,
+          },
+          async () => {
+            fireEvent.change(screen.getByLabelText("Begin"), { target: { value: "" } });
+            fireEvent.change(screen.getByLabelText("Eind"), { target: { value: "" } });
+          },
+        );
+
+        expect(payload).toMatchObject({ waitingTimeStart: null, waitingTimeEnd: null });
+        // The flag travels only with two times; the backend resets it on removal.
+        expect(payload).not.toHaveProperty("waitingTimeEndsNextDay");
+      });
+
+      it("sends the new window when the operator changes it", async () => {
+        const payload = await saveWith(
+          { waitingTimeStart: "08:00:00", waitingTimeEnd: "10:15:00", waitingTimeMinutes: 135 },
+          async () => {
+            fireEvent.change(screen.getByLabelText("Eind"), { target: { value: "11:30" } });
+          },
+        );
+
+        expect(payload).toMatchObject({
+          waitingTimeStart: "08:00",
+          waitingTimeEnd: "11:30",
+          waitingTimeEndsNextDay: false,
+        });
+      });
+
+      it("sends the window when only the next-day choice changes", async () => {
+        const payload = await saveWith(
+          { waitingTimeStart: "10:00:00", waitingTimeEnd: "12:00:00", waitingTimeMinutes: 120 },
+          async () => {
+            await userEvent.click(screen.getByLabelText("Volgende dag"));
+          },
+        );
+
+        expect(payload).toMatchObject({
+          waitingTimeStart: "10:00",
+          waitingTimeEnd: "12:00",
+          waitingTimeEndsNextDay: true,
+        });
+      });
+    });
+
+    /**
+     * ── "UITGEVOERD OP" KEEPS ITS INSTANT ───────────────────────────────────
+     * Stored as an instant, typed and shown as the LOCAL clock. The instants
+     * below are built from local clock values, so each expectation holds in
+     * whatever zone the tests run in.
+     */
+    describe("Uitgevoerd op", () => {
+      /** 00:00 local is the previous day in UTC east of Greenwich. */
+      const MIDNIGHT = new Date(2026, 9, 2, 0, 0).toISOString();
+      const AFTERNOON = new Date(2026, 9, 2, 14, 35).toISOString();
+
+      it.each([
+        ["at local midnight", MIDNIGHT, "2026-10-02T00:00"],
+        ["in the afternoon", AFTERNOON, "2026-10-02T14:35"],
+      ])("opens on the local clock %s", async (_, instant, local) => {
+        getTripMock.mockResolvedValue(buildTrip({ executionDatetime: instant }));
+
+        await openEditor();
+
+        expect(screen.getByLabelText("Uitgevoerd op")).toHaveValue(local);
+      });
+
+      it.each([MIDNIGHT, AFTERNOON])(
+        "is not sent, so cannot move, across three saves that did not touch it (%s)",
+        async (instant) => {
+          getTripMock.mockResolvedValue(buildTrip({ executionDatetime: instant }));
+          updateTripMock.mockResolvedValue(buildTrip({ executionDatetime: instant }));
+
+          for (let save = 1; save <= 3; save += 1) {
+            await openEditor();
+            expect(screen.getByLabelText("Uitgevoerd op")).toHaveValue(
+              instant === MIDNIGHT ? "2026-10-02T00:00" : "2026-10-02T14:35",
+            );
+            await userEvent.click(screen.getByRole("button", { name: "Opslaan" }));
+            await waitFor(() => expect(updateTripMock).toHaveBeenCalledTimes(save));
+            cleanup();
+          }
+
+          for (const [, payload] of updateTripMock.mock.calls) {
+            expect(payload).not.toHaveProperty("executionDatetime");
+          }
+        },
+      );
+
+      it("does not move when another field is saved", async () => {
+        getTripMock.mockResolvedValue(buildTrip({ executionDatetime: MIDNIGHT }));
+        updateTripMock.mockResolvedValue(buildTrip());
+
+        await openEditor();
+        await userEvent.clear(screen.getByLabelText("Container"));
+        await userEvent.click(screen.getByRole("button", { name: "Opslaan" }));
+
+        await waitFor(() => expect(updateTripMock).toHaveBeenCalled());
+        expect(updateTripMock.mock.calls[0][1]).not.toHaveProperty("executionDatetime");
+      });
+
+      it("sends the instant of the local time the operator chose", async () => {
+        getTripMock.mockResolvedValue(buildTrip({ executionDatetime: AFTERNOON }));
+        updateTripMock.mockResolvedValue(buildTrip());
+
+        await openEditor();
+        fireEvent.change(screen.getByLabelText("Uitgevoerd op"), {
+          target: { value: "2026-10-03T00:15" },
+        });
+        await userEvent.click(screen.getByRole("button", { name: "Opslaan" }));
+
+        await waitFor(() => expect(updateTripMock).toHaveBeenCalled());
+        expect(updateTripMock.mock.calls[0][1]).toMatchObject({
+          executionDatetime: new Date(2026, 9, 3, 0, 15).toISOString(),
+        });
+      });
+
+      it("sends null when the operator clears it", async () => {
+        getTripMock.mockResolvedValue(buildTrip({ executionDatetime: AFTERNOON }));
+        updateTripMock.mockResolvedValue(buildTrip());
+
+        await openEditor();
+        fireEvent.change(screen.getByLabelText("Uitgevoerd op"), { target: { value: "" } });
+        await userEvent.click(screen.getByRole("button", { name: "Opslaan" }));
+
+        await waitFor(() => expect(updateTripMock).toHaveBeenCalled());
+        expect(updateTripMock.mock.calls[0][1]).toMatchObject({ executionDatetime: null });
+      });
+
+      /** The page and the field read the same local clock. */
+      it("shows the same local time on the page", async () => {
+        getTripMock.mockResolvedValue(buildTrip({ executionDatetime: MIDNIGHT }));
+
+        render(<TripDetailPage />);
+
+        expect(await screen.findByText("2026-10-02 00:00")).toBeInTheDocument();
+      });
     });
 
     it("discards changes on cancel without calling the backend", async () => {

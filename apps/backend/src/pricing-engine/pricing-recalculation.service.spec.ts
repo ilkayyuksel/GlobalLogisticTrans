@@ -8,6 +8,8 @@ import {
   PricingEngineErrorCode,
   TripNotPriceableException,
 } from "./exceptions/pricing-engine.exceptions";
+import { TripReadService, TripReadView } from "../trips/trip-read.service";
+import { PricingComponentResolver } from "./pricing-component.resolver";
 import { PricingEngineService } from "./pricing-engine.service";
 import {
   PricingRecalculationService,
@@ -41,6 +43,8 @@ describe("PricingRecalculationService", () => {
     warn: jest.Mock;
     error: jest.Mock;
   };
+  let trips: { findById: jest.Mock };
+  let components: { legsPricedByPlanningDate: jest.Mock };
   let recalculation: PricingRecalculationService;
 
   /** A stored breakdown, as the shared effective read produces one. */
@@ -91,6 +95,8 @@ describe("PricingRecalculationService", () => {
         ]),
       ),
     };
+    trips = { findById: jest.fn() };
+    components = { legsPricedByPlanningDate: jest.fn().mockResolvedValue([]) };
     logger = {
       setContext: jest.fn(),
       log: jest.fn(),
@@ -101,6 +107,8 @@ describe("PricingRecalculationService", () => {
     recalculation = new PricingRecalculationService(
       engine as unknown as PricingEngineService,
       effectivePricing as unknown as EffectivePricingService,
+      trips as unknown as TripReadService,
+      components as unknown as PricingComponentResolver,
       logger as unknown as AppLoggerService,
     );
   });
@@ -135,9 +143,9 @@ describe("PricingRecalculationService", () => {
           backload: "0.00",
           tol: "18.00",
           tunnel: "0.00",
-          // Waiting Time plus every priced Custom Property.
-          others: "130.00",
-          ek: "0.00",
+          // Every priced Custom Property; the waiting time is EK.
+          others: "100.00",
+          ek: "30.00",
           totaal: "746.00",
         }),
       );
@@ -299,6 +307,54 @@ describe("PricingRecalculationService", () => {
         { tripId: TRIP_ID, reason: "database unavailable" },
       );
       expect(logger.warn).not.toHaveBeenCalled();
+    });
+  });
+
+  /*
+   * Which Trips a planningDate change reprices. The rule — Leg 2 of a genuine,
+   * configured Combination — is the resolver's; this asserts the service asks
+   * it with the Trip as stored now, and never throws after a committed write.
+   */
+  describe("the Trips a planningDate change affects", () => {
+    const STORED = { id: TRIP_ID } as TripReadView;
+
+    it("names the Combination's Leg 2 the resolver finds for the stored Trip", async () => {
+      trips.findById.mockResolvedValue(STORED);
+      components.legsPricedByPlanningDate.mockResolvedValue(["leg-2"]);
+
+      await expect(
+        recalculation.tripsAffectedByPlanningDate(TRIP_ID),
+      ).resolves.toEqual(["leg-2"]);
+      expect(components.legsPricedByPlanningDate).toHaveBeenCalledWith(STORED);
+    });
+
+    it("names nothing for an ordinary Trip", async () => {
+      trips.findById.mockResolvedValue(STORED);
+
+      await expect(
+        recalculation.tripsAffectedByPlanningDate(TRIP_ID),
+      ).resolves.toEqual([]);
+    });
+
+    it("names nothing for a Trip that no longer exists", async () => {
+      trips.findById.mockResolvedValue(null);
+
+      await expect(
+        recalculation.tripsAffectedByPlanningDate(TRIP_ID),
+      ).resolves.toEqual([]);
+      expect(components.legsPricedByPlanningDate).not.toHaveBeenCalled();
+    });
+
+    it("logs and names nothing when the lookup fails, rather than throwing", async () => {
+      trips.findById.mockRejectedValue(new Error("connection lost"));
+
+      await expect(
+        recalculation.tripsAffectedByPlanningDate(TRIP_ID),
+      ).resolves.toEqual([]);
+      expect(logger.error).toHaveBeenCalledWith(
+        expect.stringContaining("planningDate"),
+        expect.objectContaining({ tripId: TRIP_ID, reason: "connection lost" }),
+      );
     });
   });
 });

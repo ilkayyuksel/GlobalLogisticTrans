@@ -84,11 +84,7 @@ const FIELDS: readonly {
   { field: "departure", labelKey: "settings.pricing.routes.from", isAmount: false },
   { field: "destination", labelKey: "settings.pricing.routes.to", isAmount: false },
   { field: "tarief", labelKey: "settings.pricing.routes.tarief", isAmount: true },
-  {
-    field: "kilometres",
-    labelKey: "settings.pricing.routes.kilometres",
-    isAmount: true,
-  },
+  { field: "toll", labelKey: "settings.pricing.routes.toll", isAmount: true },
   { field: "tunnel", labelKey: "settings.pricing.routes.tunnel", isAmount: true },
 ];
 
@@ -107,7 +103,7 @@ const FIELDS: readonly {
  *
  * ── ONE ROW SHAPE FOR BOTH KINDS ────────────────────────────────────────────
  * An ordinary route and a leg of a Combination are the same thing on screen: a
- * road with a Tarief, a distance and a tunnel. They are drawn by the same cells
+ * road with a Tarief, a Toll and a Tunnel. They are drawn by the same cells
  * and edited the same way; only WHERE the change is sent differs, which is the
  * caller's business and arrives as `onSaveField`.
  */
@@ -131,14 +127,8 @@ export function RouteValueCells({
         >
           <InlineCell
             label={`${t(labelKey)}: ${road}`}
-            /*
-             * An em dash for a road nobody has measured: no toll is charged for
-             * it until somebody states a distance, and a 0 would claim that
-             * somebody had decided it is free. The EDIT box is empty, which is
-             * the same statement in a form an operator can fill in.
-             */
-            displayValue={displayValueOf(route, field)}
-            editValue={route[field] ?? ""}
+            displayValue={route[field]}
+            editValue={route[field]}
             kind={isAmount ? "number" : "text"}
             /*
              * No length or range limit stated here. The endpoint lengths, the
@@ -154,10 +144,6 @@ export function RouteValueCells({
       ))}
     </>
   );
-}
-
-function displayValueOf(route: RouteConfiguration, field: RouteField): string {
-  return route[field] ?? "—";
 }
 
 /** An ordinary route: its editable values, its review tick, and Verwijderen. */

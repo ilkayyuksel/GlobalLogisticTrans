@@ -51,7 +51,7 @@ const DOCUMENT = JSON.stringify({
       departure: "Antwerp",
       destination: "Kallo",
       tarief: 100,
-      kilometres: 25,
+      toll: 25,
       tunnel: 0,
     },
     {
@@ -61,14 +61,14 @@ const DOCUMENT = JSON.stringify({
           departure: "Gent",
           destination: "Lille",
           tarief: 240,
-          kilometres: 62.5,
+          toll: 62.5,
           tunnel: 4.5,
         },
         {
           departure: "Lille",
           destination: "Gent",
           tarief: 205.75,
-          kilometres: 64,
+          toll: 64,
           tunnel: 0,
         },
       ],
@@ -99,7 +99,7 @@ function refusedCheck() {
       totalRoutes: 2,
     },
     errors: [
-      { routeNumber: 4, legNumber: null, field: "kilometres", message: "kilometres is required" },
+      { routeNumber: 4, legNumber: null, field: "toll", message: "toll is required" },
       {
         routeNumber: 9,
         legNumber: null,
@@ -232,7 +232,7 @@ describe("opening the bulk import", () => {
       screen.getByRole("button", { name: "Bulk toevoegen" }),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: "Route toevoegen" }),
+      await screen.findByRole("button", { name: "Route toevoegen" }),
     ).toBeInTheDocument();
   });
 
@@ -256,18 +256,20 @@ describe("opening the bulk import", () => {
   });
 
   /** No toll in the format: a route carries KM, and the Engine derives the Toll. */
-  it("offers no toll field in the example", async () => {
+  /** The example states the Toll as an amount, and names no distance. */
+  it("shows a toll amount and no distance in the example", async () => {
     await openDialog();
 
-    expect(
-      screen.getByLabelText("JSON").getAttribute("placeholder"),
-    ).not.toContain("toll");
+    const example = screen.getByLabelText("JSON").getAttribute("placeholder");
+
+    expect(example).toContain('"toll"');
+    expect(example).not.toContain("kilometres");
   });
 
-  it("says that the Toll comes from KM and the configured rate", async () => {
+  it("says that an older file with KM is refused", async () => {
     await openDialog();
 
-    expect(screen.getByText(/Toll prijs per km/)).toBeInTheDocument();
+    expect(screen.getByText(/oud bestand met een KM-veld wordt geweigerd/)).toBeInTheDocument();
   });
 
   it("writes nothing just by being opened", async () => {
@@ -348,7 +350,7 @@ describe("checking a document", () => {
       await userEvent.click(screen.getByRole("button", { name: "Controleren" }));
 
       expect(
-        await screen.findByText("Route 4: kilometres is required"),
+        await screen.findByText("Route 4: toll is required"),
       ).toBeInTheDocument();
       expect(
         screen.getByText("Route 9: a Combination must have exactly 2 legs"),

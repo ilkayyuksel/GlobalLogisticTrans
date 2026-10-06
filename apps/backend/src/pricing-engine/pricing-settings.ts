@@ -46,21 +46,6 @@ export const PricingSettingKey = {
    */
   DISTANCE_RATE_PER_KM: "DISTANCE_RATE_PER_KM",
   /**
-   * What one kilometre of toll costs.
-   *
-   * ── CONFIGURED NOW, APPLIED LATER ─────────────────────────────────────────
-   * No calculator reads this yet: toll is still charged from the per-route
-   * amounts an operator configures on Settings → Prijzen, and changing that is
-   * the route-pricing work this does not do. The key lives here because it is
-   * the Engine's configuration vocabulary — the catalog and the bootstrap are
-   * bound to this list, so a value an administrator can set is a value the
-   * Engine will find when it comes to read it.
-   *
-   * Reading a setting is per-key, as DISTANCE_RATE_PER_KM shows: a key nothing
-   * currently asks for cannot make a calculation fail.
-   */
-  TOLL_RATE_PER_KM: "TOLL_RATE_PER_KM",
-  /**
    * The version of the RULESET a calculation ran against, stored on every
    * snapshot. An administrator bumps it when the pricing configuration changes,
    * which is why it lives with the rules it describes rather than in the code.

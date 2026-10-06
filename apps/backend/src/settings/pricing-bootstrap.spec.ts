@@ -103,13 +103,6 @@ describe("the pricing settings catalog", () => {
     ["WAITING_TIME_THRESHOLD_MINUTES", "150"],
     ["WAITING_TIME_BLOCK_MINUTES", "15"],
     ["WAITING_TIME_BLOCK_PRICE", "13.75"],
-    /*
-     * The one default that was not transcribed from a working database: toll
-     * has always been configured per route and no per-kilometre rate has ever
-     * been in use. Zero is "configured, charges nothing" — the state the bounds
-     * already define — rather than a rate nobody decided on.
-     */
-    ["TOLL_RATE_PER_KM", "0.00"],
     ["DISTANCE_RATE_PER_KM", "2.75"],
     ["PRICING_RULE_VERSION", "2026.1"],
   ])("proposes %s = %s", (key, value) => {
@@ -117,6 +110,16 @@ describe("the pricing settings catalog", () => {
       PRICING_SETTING_CATALOG.find((setting) => setting.key === key)
         ?.defaultValue,
     ).toBe(value);
+  });
+
+  /**
+   * The toll is an amount per route again, so the per-kilometre rate is no
+   * longer proposed. An existing row is switched off by migration, not deleted.
+   */
+  it("no longer proposes a toll rate per kilometre", () => {
+    expect(
+      PRICING_SETTING_CATALOG.find((setting) => setting.key === "TOLL_RATE_PER_KM"),
+    ).toBeUndefined();
   });
 });
 
@@ -351,8 +354,8 @@ describe("PricingBootstrapService", () => {
     await service.apply();
 
     expect(componentsFirstPass).toBe(1);
-    // TAR and the tunnel. Toll is no longer route-priced.
-    expect(propertiesFirstPass).toBe(2);
+    // TAR, Toll and Tunnel: the toll is route-priced again.
+    expect(propertiesFirstPass).toBe(3);
     expect(settingsFirstPass).toBe(PRICING_SETTING_CATALOG.length);
 
     expect(components.createMany).not.toHaveBeenCalled();
@@ -537,10 +540,10 @@ describe("PricingBootstrapService", () => {
      * route's length times a configured rate: there is no route cost to attach
      * it to, so there is no property for the bootstrap to provision.
      */
-    it("reports the tunnel as absent on a fresh database", async () => {
+    it("reports the toll and the tunnel as absent on a fresh database", async () => {
       const plan = await service.plan();
 
-      expect(plan.routePricedProperties.map((p) => p.name)).toEqual(["Tunnel"]);
+      expect(plan.routePricedProperties.map((p) => p.name)).toEqual(["Toll", "Tunnel"]);
       expect(plan.routePricedProperties.every((p) => !p.isPresent)).toBe(true);
     });
 
@@ -561,8 +564,22 @@ describe("PricingBootstrapService", () => {
       );
     });
 
-    /** And never a Toll property, which nothing would read. */
-    it("creates no Toll property", async () => {
+    /**
+     * And the Toll property again: a TOLL route cost is accepted only for a
+     * route-priced component, and the toll is a route cost once more.
+     */
+    it("creates the Toll property linked to its own component", async () => {
+      await service.apply();
+
+      expect(customProperties.create).toHaveBeenCalledWith(
+        expect.objectContaining({ name: "Toll", pricingComponentId: "component-TOLL" }),
+      );
+    });
+
+    /** One kept from before is reused, never duplicated. */
+    it("leaves an existing Toll property alone", async () => {
+      existingPropertyNames.add("Toll");
+
       await service.apply();
 
       const created = customProperties.create.mock.calls.map(

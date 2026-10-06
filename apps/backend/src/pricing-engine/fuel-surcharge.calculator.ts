@@ -49,11 +49,24 @@ export class FuelSurchargeCalculator implements PricingCalculationStep {
       tripId: context.tripId,
     });
 
-    // "Every Trip begins with exactly one Base Price" (pricing_rules.md), so
-    // the first match is the only match.
-    const basePriceLine = precedingLines.find(
+    /*
+     * The Tarief the fuel is charged on: every BASE_PRICE line. There is one,
+     * plus an "Over ST" Tarief line on Leg 2 of a Combination planned on another
+     * day than Leg 1 — and fuel follows the effective Tarief, Over ST included.
+     */
+    const basePriceLines = precedingLines.filter(
       (line) => line.component === PricingComponentCode.BASE_PRICE,
     );
+    const basePriceLine =
+      basePriceLines.length === 0
+        ? undefined
+        : {
+            ...basePriceLines[0],
+            amount: basePriceLines.reduce(
+              (sum, line) => sum.plus(line.amount),
+              new Prisma.Decimal(0),
+            ),
+          };
 
     if (!basePriceLine) {
       // Diagnostics, not validation: nothing is rejected and nothing is thrown.

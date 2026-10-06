@@ -64,7 +64,7 @@ export class RouteConfigurationController {
   @ApiOperation({
     summary: "List every ordinary configured route",
     description:
-      "One record per route, each carrying its Tarief, KM and Tunnel. Combination legs are NOT listed here — a leg exists only as half of a pair and is read through the combinations endpoint — and every record still states its own type. Deliberately not paginated: this is configuration read as a whole, and the set is bounded by the routes the business runs.",
+      "One record per route, each carrying its Tarief, Toll and Tunnel. Combination legs are NOT listed here — a leg exists only as half of a pair and is read through the combinations endpoint — and every record still states its own type. Deliberately not paginated: this is configuration read as a whole, and the set is bounded by the routes the business runs.",
   })
   @ApiOkResponse({ type: [RouteConfigurationDto] })
   findAll(): Promise<RouteConfigurationDto[]> {
@@ -85,7 +85,7 @@ export class RouteConfigurationController {
   @ApiOperation({
     summary: "List every Combination route configuration",
     description:
-      "One record per Combination, each with exactly two legs — the outbound first — and each leg carrying its own Tarief, KM and Tunnel.",
+      "One record per Combination, each with exactly two legs — the outbound first — and each leg carrying its own Tarief, Toll and Tunnel, and the Combination its Over ST.",
   })
   @ApiOkResponse({ type: [CombinationRouteConfigurationDto] })
   findAllCombinations(): Promise<CombinationRouteConfigurationDto[]> {
@@ -199,7 +199,7 @@ export class RouteConfigurationController {
    * JSON is the input format and nothing more: each entry becomes exactly the
    * same relational records a route configured by hand becomes, validated by
    * exactly the same rules. Nothing is stored as JSON and no pricing logic of its
-   * own exists — the Toll is derived by the Engine from the stored kilometres.
+   * own exists — the Toll and Tunnel are stored as the amounts given.
    *
    * Two endpoints because an operator pasting eighty routes needs to see what will
    * happen before it does: `bulk/check` answers that and writes nothing, `bulk`

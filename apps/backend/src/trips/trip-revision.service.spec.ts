@@ -1,6 +1,7 @@
 import { Prisma, Trip, TripStatus } from "@prisma/client";
 
 import { AppLoggerService } from "../logger/app-logger.service";
+import { stubPricingRecalculation } from "../pricing-engine/pricing-recalculation.double";
 import { ImportedTripData } from "./import-trips.command";
 import { AutomaticFlatPropertyService } from "./automatic-flat.service";
 import { stubTripWriteTransaction } from "./trip-write-transaction.double";
@@ -109,6 +110,7 @@ function buildDocument(
 describe("TripRevisionService", () => {
   let stored: Trip[];
   let history: unknown[];
+  let recalculation: ReturnType<typeof stubPricingRecalculation>;
   let repository: {
     findManyByBookingNumber: jest.Mock;
     findManyByBookingNumberAndOriginalDate: jest.Mock;
@@ -224,6 +226,7 @@ describe("TripRevisionService", () => {
     };
 
     repository.runTripWriteTransaction = stubTripWriteTransaction(repository);
+    recalculation = stubPricingRecalculation();
 
     service = new TripRevisionService(
       repository as unknown as TripRepository,
@@ -231,6 +234,7 @@ describe("TripRevisionService", () => {
         applyToNewTrip: jest.fn(),
         synchronise: jest.fn(),
       } as unknown as AutomaticFlatPropertyService,
+      recalculation,
       {
         setContext: jest.fn(),
         log: jest.fn(),
@@ -311,6 +315,66 @@ describe("TripRevisionService", () => {
 
       await expect(service.cancelByIdentity(identity())).rejects.toThrow();
       expect(stored[0].status).toBe(TripStatus.OPEN);
+    });
+  });
+
+  /*
+   * A document only rewrites an OPEN Trip, but its CLOSED Combination partner
+   * may be the Leg 2 whose Over ST reads this Trip's date. Which Trips that is
+   * belongs to the pricing domain; here: asked only when the day moved, after
+   * the transaction, and only CLOSED Trips repriced.
+   */
+  describe("a revision that moves the planning date", () => {
+    const PARTNER = "partner-leg-2";
+
+    /*
+     * A document matches on its own date, so it only moves a Trip that had no
+     * planning date yet — one with a date of its own keeps it (see
+     * `toRevisedFields`). That is the move these tests make.
+     */
+    const unscheduled = () => buildTrip({ planningDate: null });
+
+    beforeEach(() => {
+      (repository as unknown as { findById: jest.Mock }).findById = jest.fn(
+        (id: string) => Promise.resolve(stored.find((trip) => trip.id === id) ?? null),
+      );
+      recalculation.tripsAffectedByPlanningDate.mockResolvedValue([PARTNER]);
+    });
+
+    it("reprices the CLOSED partner leg when the document dates the Trip", async () => {
+      stored.push(unscheduled());
+      stored.push(buildTrip({ id: PARTNER, bookingNumber: "OTHER", status: TripStatus.CLOSED }));
+
+      await service.applyDocumentRevision(buildDocument());
+
+      expect(recalculation.tripsAffectedByPlanningDate).toHaveBeenCalledWith(stored[0].id);
+      expect(recalculation.recalculate).toHaveBeenCalledWith(PARTNER);
+    });
+
+    it("leaves an OPEN partner leg to be priced when it closes", async () => {
+      stored.push(unscheduled());
+      stored.push(buildTrip({ id: PARTNER, bookingNumber: "OTHER" }));
+
+      await service.applyDocumentRevision(buildDocument());
+
+      expect(recalculation.recalculate).not.toHaveBeenCalled();
+    });
+
+    it("asks nothing when the document keeps the day", async () => {
+      stored.push(buildTrip());
+
+      await service.applyDocumentRevision(buildDocument());
+
+      expect(recalculation.tripsAffectedByPlanningDate).not.toHaveBeenCalled();
+    });
+
+    it("reprices the CLOSED partner when a repeated NEW dates the Trip", async () => {
+      stored.push(unscheduled());
+      stored.push(buildTrip({ id: PARTNER, bookingNumber: "OTHER", status: TripStatus.CLOSED }));
+
+      await service.applyNewOrder(buildDocument());
+
+      expect(recalculation.recalculate).toHaveBeenCalledWith(PARTNER);
     });
   });
 

@@ -1,30 +1,28 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { BulkRouteImportDialog } from "@/components/pricing/bulk-route-import-dialog";
 import { CombinationLegSyncDialog } from "@/components/pricing/combination-leg-sync-dialog";
 import {
   BLANK_COMBINATION_DRAFT,
   CombinationDeleteDialog,
-  CombinationRouteForm,
-  CombinationRows,
   type CombinationDraft,
 } from "@/components/pricing/combination-routes";
-import { RouteForm } from "@/components/pricing/route-form";
+import { CombinationsTable } from "@/components/pricing/combinations-table";
+import { NormalRoutesTable } from "@/components/pricing/normal-routes-table";
 import {
   matchesFilter,
   RouteReviewProgress,
   type ReviewFilter,
 } from "@/components/pricing/route-review-progress";
-import { RouteRow } from "@/components/pricing/route-row";
-import { RouteTableHead } from "@/components/pricing/route-table-head";
 import {
   BulkDeleteDialog,
   RouteSelectionToolbar,
 } from "@/components/pricing/route-selection-toolbar";
 import { useRouteSelection } from "@/components/pricing/use-route-selection";
 import { ConfirmDialog } from "@/components/ritten/confirm-dialog";
+import { CollapsibleSection } from "@/components/ui/collapsible-section";
 import { EmptyState, ErrorState, LoadingState } from "@/components/ui/states";
 import type { useAsync } from "@/hooks/use-async";
 import {
@@ -51,23 +49,30 @@ import type { TranslationKey } from "@/lib/i18n/translations";
 import { downloadBlob } from "@/lib/download";
 import {
   BLANK_ROUTE_DRAFT,
+  toOverStPayload,
   toRoutePayload,
   toRouteValues,
+  toUpdatedOverStPayload,
   toUpdatedRoutePayload,
+  type OverStField,
   type RouteDraft,
   type RouteField,
 } from "@/lib/pricing/route-draft";
+import {
+  routeConfigurationFileName,
+  toRouteConfigurationBlob,
+  toRouteConfigurationDocument,
+} from "@/lib/pricing/route-export";
+import {
+  matchesCombinationSearch,
+  matchesRouteSearch,
+} from "@/lib/pricing/route-search";
 import {
   NO_OVERLAY,
   overlayFor,
   withSaved,
   type SavedOverlay,
 } from "@/lib/pricing/saved-overlay";
-import {
-  routeConfigurationFileName,
-  toRouteConfigurationBlob,
-  toRouteConfigurationDocument,
-} from "@/lib/pricing/route-export";
 
 type RoutesState = ReturnType<
   typeof useAsync<Awaited<ReturnType<typeof listRouteConfigurations>>>
@@ -78,39 +83,24 @@ type CombinationsState = ReturnType<
   >
 >;
 
-/** The two kinds of route an operator can configure. */
-const ROUTE_TYPES = ["NORMAL", "COMBINATION"] as const;
-
-type RouteType = (typeof ROUTE_TYPES)[number];
-
-/** The selection tick, Van, Naar, Tarief, KM, Tunnel, the review tick, Acties. */
-const ROUTE_COLUMN_COUNT = 8;
-
-const TYPE_LABELS: Record<RouteType, TranslationKey> = {
-  NORMAL: "settings.pricing.routes.type.normal",
-  COMBINATION: "settings.pricing.routes.type.combination",
-};
-
 /**
  * Routeprijzen — what each route costs.
  *
- * ── TWO KINDS, SHOWN AS TWO KINDS ───────────────────────────────────────────
- * An ordinary route is one row with its Tarief, KM and Tunnel. A Combination is
- * ONE record with two legs, each with its own Tarief, KM and Tunnel, because a
- * Combination's outbound and return are their own transports and cost different
- * amounts. The list says plainly which is which, and a Combination's two legs
- * are shown together under the group that owns them.
+ * ── TWO SECTIONS, EACH ITS OWN ──────────────────────────────────────────────
+ * "Normale ritten" and "Combi's" are separate sections that open and close on
+ * their own. An ordinary route is one row with its Tarief, Toll and Tunnel. A
+ * Combination is ONE record with two legs — each with its own Tarief, Toll and
+ * Tunnel — and Over ST, the Combination's own amounts. The same road may appear
+ * in both sections: the backend reads them in different pricing contexts.
  *
- * The same road may appear in both. That is not a duplicate: the backend reads
- * them in different pricing contexts and neither overwrites the other.
- *
- * ── NOT A TRIP GROUP ────────────────────────────────────────────────────────
- * A Combination here is route CONFIGURATION. It has nothing to do with grouping
- * Trips in the Rittenlijst, which is what decides the Backload.
+ * ── ONE SEARCH ACROSS BOTH ──────────────────────────────────────────────────
+ * The search filters both sections by Van and Naar (a Combination by either
+ * leg, shown whole), together with the review filter. A section with results
+ * opens when a search starts, so a match is never hidden behind a closed one.
  *
  * ── AND NOTHING HERE CALCULATES ─────────────────────────────────────────────
- * No amount is derived, summed or converted in the browser. The Toll is the
- * Engine's business: this screen stores kilometres and shows what it stored.
+ * No amount is derived, summed or converted in the browser. Every value is the
+ * one an operator stated, shown as the backend stored it.
  */
 export function RoutePricesSection({
   routes,
@@ -123,41 +113,41 @@ export function RoutePricesSection({
   combinations: CombinationsState;
   /** Something changed the SET of records: the lists are refetched. */
   onSaved: (messageKey?: TranslationKey) => void;
-  /**
-   * One record changed in place and the backend already said what it now is.
-   *
-   * Reported without a refetch: an inline edit changes one route, and asking the
-   * server to repeat what it has just answered would be a round trip for nothing.
-   */
+  /** One record changed in place and the backend already said what it now is. */
   onReported: (messageKey?: TranslationKey) => void;
   onFailed: (error: unknown, messageKey?: TranslationKey) => void;
 }) {
   const t = useTranslation();
-  const [type, setType] = useState<RouteType>("NORMAL");
   const [draft, setDraft] = useState<RouteDraft | null>(null);
   const [combinationDraft, setCombinationDraft] =
     useState<CombinationDraft | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
-  /** The record a deletion is being confirmed for. */
   const [deleting, setDeleting] = useState<RouteConfiguration | null>(null);
   const [deletingCombination, setDeletingCombination] =
     useState<CombinationRouteConfiguration | null>(null);
   const [isImporting, setIsImporting] = useState(false);
   const [isDeletingSelection, setIsDeletingSelection] = useState(false);
-  /** The backend's preview of a leg-price sync being confirmed. */
   const [pendingSync, setPendingSync] = useState<CombinationLegSync | null>(
     null,
   );
   const [filter, setFilter] = useState<ReviewFilter>("ALL");
+  const [search, setSearch] = useState("");
+  const [isNormalOpen, setIsNormalOpen] = useState(true);
+  const [isCombinationsOpen, setIsCombinationsOpen] = useState(true);
+  /*
+   * ── A NEW COMBINATION IS SHOWN FIRST — FOR NOW ────────────────────────────
+   * The stored order is oldest first, and stays the order. A Combination added
+   * in this visit is shown at the top so the operator sees what they just
+   * created; the next visit lists it in its stored place again.
+   */
+  const [recentCombinationIds, setRecentCombinationIds] = useState<
+    readonly string[]
+  >([]);
   /*
    * ── WHAT AN INLINE EDIT LEAVES BEHIND ─────────────────────────────────────
-   * The record the backend answered with, laid over the one the list delivered.
-   * A field saved in place changes one route, so refetching both lists to learn
-   * what this browser was just told would be a round trip for nothing — the same
-   * reason the Ritten list keeps each row's own later answer beside the page it
-   * loaded.
-   *
-   * Dropped as soon as a refetch delivers a new list — see `SavedOverlay`.
+   * The record the backend answered with, laid over the one the list delivered,
+   * so an edit of one value needs no refetch. Dropped as soon as a refetch
+   * delivers a new list — see `SavedOverlay`.
    */
   const [savedRoutes, setSavedRoutes] =
     useState<SavedOverlay<RouteConfiguration>>(NO_OVERLAY);
@@ -166,13 +156,9 @@ export function RoutePricesSection({
 
   /*
    * ── FIRST LOAD, NOT EVERY LOAD ────────────────────────────────────────────
-   * `useAsync` reports loading during a refetch too, while keeping the list it
-   * already has. Swapping the table for the loading line on every refetch —
-   * after a tick, a delete, a sync — took the whole table out of the page: the
-   * document became a few hundred pixels tall, the browser clamped the scroll
-   * position to the top, and the list came back there. The loading line is for
-   * when there is nothing to show yet; during a refetch the table stays, and
-   * with it the operator's place in the list.
+   * During a refetch the tables stay on screen, and with them the operator's
+   * place in the list: swapping them for a loading line would shrink the page
+   * and clamp the scroll position to the top.
    */
   const isFirstLoad =
     (routes.isLoading && routes.data === null) ||
@@ -189,12 +175,49 @@ export function RoutePricesSection({
     (combination) => combinationOverlay.get(combination.id) ?? combination,
   );
 
+  const shownRoutes = configured.filter(
+    (route) =>
+      matchesFilter(route.reviewed, filter) && matchesRouteSearch(route, search),
+  );
+  const shownCombinations = withRecentFirst(
+    configuredCombinations.filter(
+      (combination) =>
+        matchesFilter(combination.reviewed, filter) &&
+        matchesCombinationSearch(combination, search),
+    ),
+    recentCombinationIds,
+  );
+  const hasSearch = search.trim() !== "";
+
+  /*
+   * A section that holds matches opens when the search changes, so a result is
+   * never hidden behind a closed section. Closing it again is still the
+   * operator's choice.
+   */
+  useEffect(() => {
+    if (search.trim() === "") {
+      return;
+    }
+
+    if (shownRoutes.length > 0) {
+      setIsNormalOpen(true);
+    }
+
+    if (shownCombinations.length > 0) {
+      setIsCombinationsOpen(true);
+    }
+    // Only a change of the search opens a section; a refetch must not.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [search]);
+
+  const selection = useRouteSelection({
+    shownRouteIds: shownRoutes.map((route) => route.id),
+    shownCombinationIds: shownCombinations.map((combination) => combination.id),
+  });
+
   /**
-   * Runs one change and reports how it went.
-   *
-   * `failureKey` names the ACTION rather than the error: saving and removing
-   * fail differently and an operator reading "Opslaan mislukt" after pressing
-   * Verwijderen is being told about something they did not do.
+   * Runs one change and reports how it went. `words` name the ACTION rather
+   * than the error, so a failure says what the operator did.
    */
   async function run(
     id: string | null,
@@ -218,7 +241,7 @@ export function RoutePricesSection({
     }
   }
 
-  function save(): void {
+  function saveRoute(): void {
     if (!draft) {
       return;
     }
@@ -232,37 +255,23 @@ export function RoutePricesSection({
     );
   }
 
-  /**
-   * Both legs in one request.
-   *
-   * The backend writes them in one transaction, so a Combination with a single
-   * leg cannot come into being — and this side never has to keep two requests in
-   * step or undo the first when the second fails.
-   */
+  /** Both legs and Over ST in one request; the backend writes them together. */
   function saveCombination(): void {
     if (!combinationDraft) {
       return;
     }
 
-    // Only ever a new one: a stored Combination is changed in its own rows, and
-    // the update those changes go through is `saveLegField`.
-    void run(null, () =>
-      createCombinationRouteConfiguration({
+    void run(null, async () => {
+      const created = await createCombinationRouteConfiguration({
         legs: combinationDraft.legs.map((leg) => toRoutePayload(leg)),
-      }),
-    );
+        overSt: toOverStPayload(combinationDraft.overSt),
+      });
+
+      setRecentCombinationIds((current) => [created.id, ...current]);
+    });
   }
 
-  /**
-   * Writes the whole configuration to a file the importer can read back.
-   *
-   * ── BUILT FROM WHAT THE SCREEN SHOWS ──────────────────────────────────────
-   * Not from a second endpoint. These two lists ARE the configuration — both are
-   * complete, because neither is paginated — so the file says exactly what the
-   * table says, and there is no second representation of the same data to keep in
-   * step with the first. The format is the bulk import's, so the file goes
-   * straight back in.
-   */
+  /** The file the importer reads back, built from the lists the screen shows. */
   function exportJson(): void {
     downloadBlob(
       toRouteConfigurationBlob(
@@ -273,17 +282,8 @@ export function RoutePricesSection({
   }
 
   /**
-   * Saves one field of an ordinary route, through the update the form uses.
-   *
-   * ── THE WHOLE ROUTE GOES, ONE FIELD DIFFERS ───────────────────────────────
-   * The endpoint takes a complete configuration — there is no per-field endpoint
-   * and this deliberately does not add one — so the other four values are sent
-   * exactly as they stand. See `toUpdatedRoutePayload`, which also keeps an
-   * unmeasured distance null instead of quietly calling it zero.
-   *
-   * It does NOT catch: the cell keeps the failure, shows the backend's own words
-   * and stays open with what was typed, which is what makes a refusal something
-   * an operator can act on rather than something that wiped their work.
+   * One field of an ordinary route, through the update the form uses: the
+   * whole route goes, one field differs. Rejects so the cell keeps the failure.
    */
   async function saveRouteField(
     route: RouteConfiguration,
@@ -300,27 +300,18 @@ export function RoutePricesSection({
   }
 
   /**
-   * Saves one field of one LEG, through the Combination's own update.
-   *
-   * ── THE OTHER LEG IS PASSED THROUGH, NOT REBUILT ──────────────────────────
-   * That endpoint replaces both legs in one transaction, which is what keeps a
-   * Combination from ever having one. So the untouched leg is sent exactly as it
-   * stands — read from the record on screen, field for field — and comes out of
-   * the transaction with the values it went in with. Editing Leg 1 cannot move
-   * Leg 2.
+   * Writes a Combination through its own update and lays the answer over the
+   * list. The other leg is passed through as it stands; Over ST travels only
+   * when `overSt` is given, so a leg edit never touches it.
    */
-  async function saveLegField(
+  async function saveCombinationEdit(
     combination: CombinationRouteConfiguration,
-    legIndex: number,
-    field: RouteField,
-    value: string,
+    legs: ReturnType<typeof toRouteValues>[],
+    overSt?: ReturnType<typeof toUpdatedOverStPayload>,
   ): Promise<void> {
     const saved = await updateCombinationRouteConfiguration(combination.id, {
-      legs: combination.legs.map((leg, index) =>
-        index === legIndex
-          ? toUpdatedRoutePayload(leg, field, value)
-          : toRouteValues(leg),
-      ),
+      legs,
+      ...(overSt ? { overSt } : {}),
     });
 
     setSavedCombinations((current) =>
@@ -329,14 +320,35 @@ export function RoutePricesSection({
     onReported();
   }
 
-  /**
-   * Deletes the selection in ONE request, which the backend runs as one
-   * transaction: all of it, or — when any record is refused — none of it.
-   *
-   * Not through `run`: a refusal must reach the confirmation, which stays open
-   * with the backend's reason, rather than become a message at the top of a page
-   * the operator has scrolled away from.
-   */
+  function saveLegField(
+    combination: CombinationRouteConfiguration,
+    legIndex: number,
+    field: RouteField,
+    value: string,
+  ): Promise<void> {
+    return saveCombinationEdit(
+      combination,
+      combination.legs.map((leg, index) =>
+        index === legIndex
+          ? toUpdatedRoutePayload(leg, field, value)
+          : toRouteValues(leg),
+      ),
+    );
+  }
+
+  function saveOverStField(
+    combination: CombinationRouteConfiguration,
+    field: OverStField,
+    value: string,
+  ): Promise<void> {
+    return saveCombinationEdit(
+      combination,
+      combination.legs.map(toRouteValues),
+      toUpdatedOverStPayload(combination.overSt, field, value),
+    );
+  }
+
+  /** The selection in ONE request: all of it, or none of it. */
   async function deleteSelection(): Promise<void> {
     await bulkDeleteRouteConfigurations({
       routeIds: selection.routeIds,
@@ -346,10 +358,7 @@ export function RoutePricesSection({
     onSaved("settings.pricing.routes.selection.deleted");
   }
 
-  /**
-   * Asks the backend which Combinations a sync of this leg would reach, then
-   * asks the operator. The preview writes nothing.
-   */
+  /** Asks the backend which Combinations a sync would reach. Writes nothing. */
   async function startLegSync(
     combination: CombinationRouteConfiguration,
     legIndex: number,
@@ -370,61 +379,35 @@ export function RoutePricesSection({
     }
   }
 
-  /**
-   * Performs the sync the operator confirmed, then refetches — the table stays
-   * on screen meanwhile, so the scroll position, the filter, the selection and
-   * every review mark stay as they were. Rejects on refusal, so the
-   * confirmation stays open with the backend's reason.
-   */
   async function confirmLegSync(sync: CombinationLegSync): Promise<void> {
     await syncCombinationLeg(sync.combinationGroupId, sync.legPosition);
     onSaved("settings.pricing.routes.sync.done");
   }
 
-  /** Opens the form the selected type calls for, and closes the other. */
-  function add(): void {
-    if (type === "COMBINATION") {
-      setDraft(null);
-      setCombinationDraft({
-        ...BLANK_COMBINATION_DRAFT,
-        legs: [{ ...BLANK_ROUTE_DRAFT }, { ...BLANK_ROUTE_DRAFT }],
-      });
-
-      return;
-    }
-
-    setCombinationDraft(null);
+  function addRoute(): void {
+    setIsNormalOpen(true);
     setDraft({ ...BLANK_ROUTE_DRAFT });
   }
 
-  /** Nothing configured at all — as against nothing configured YET being typed. */
+  function addCombination(): void {
+    setIsCombinationsOpen(true);
+    setCombinationDraft({
+      ...BLANK_COMBINATION_DRAFT,
+      legs: [{ ...BLANK_ROUTE_DRAFT }, { ...BLANK_ROUTE_DRAFT }],
+      overSt: { ...BLANK_COMBINATION_DRAFT.overSt },
+    });
+  }
+
   const isEmptyConfiguration =
     configured.length === 0 && configuredCombinations.length === 0;
-
-  /*
-   * ── WHAT THE COUNTER COUNTS ───────────────────────────────────────────────
-   * CONFIGURATIONS, not rows: a Combination is one record an administrator
-   * checks once, however many legs it draws. Counted from the live lists, so the
-   * number cannot drift from what the table shows.
-   */
   const configurationCount = configured.length + configuredCombinations.length;
   const reviewedCount =
     configured.filter((route) => route.reviewed).length +
     configuredCombinations.filter((combination) => combination.reviewed).length;
-
-  const shownRoutes = configured.filter((route) =>
-    matchesFilter(route.reviewed, filter),
-  );
-  const shownCombinations = configuredCombinations.filter((combination) =>
-    matchesFilter(combination.reviewed, filter),
-  );
-
-  const isEmpty = isEmptyConfiguration && !draft && !combinationDraft;
-
-  const selection = useRouteSelection({
-    shownRouteIds: shownRoutes.map((route) => route.id),
-    shownCombinationIds: shownCombinations.map((combination) => combination.id),
-  });
+  const numberOf = (combination: CombinationRouteConfiguration) =>
+    configuredCombinations.findIndex((each) => each.id === combination.id);
+  const actionClass =
+    "rounded-md border border-border px-3 py-1.5 text-sm font-medium text-foreground hover:bg-hover disabled:opacity-50";
 
   return (
     <section className="rounded-md border border-border bg-card p-4">
@@ -434,84 +417,37 @@ export function RoutePricesSection({
         </h2>
 
         <div className="flex flex-wrap items-center gap-3">
-          {/*
-            The kind is chosen BEFORE the form appears, because the two forms ask
-            for different things: one route, or a pair of legs. A single form with
-            an optional second half would let a Combination be saved with one leg.
-          */}
-          <fieldset className="flex items-center gap-3">
-            <legend className="sr-only">
-              {t("settings.pricing.routes.type.label")}
-            </legend>
-            <span aria-hidden="true" className="text-xs text-muted">
-              {`${t("settings.pricing.routes.type.label")}:`}
-            </span>
-            {ROUTE_TYPES.map((candidate) => (
-              <label
-                key={candidate}
-                className="flex items-center gap-1.5 text-xs text-foreground"
-              >
-                <input
-                  type="radio"
-                  name="route-type"
-                  value={candidate}
-                  checked={type === candidate}
-                  onChange={() => setType(candidate)}
-                />
-                {t(TYPE_LABELS[candidate])}
-              </label>
-            ))}
-          </fieldset>
-
-          <button
-            type="button"
-            onClick={add}
-            className="rounded-md border border-border px-3 py-1.5 text-sm font-medium text-foreground hover:bg-hover"
-          >
-            {t("settings.pricing.routes.add")}
-          </button>
-
-          {/*
-            Beside the single-route action rather than hidden away: pasting a
-            price list is how a route table is first filled, and typing forty
-            routes one at a time is the thing this replaces.
-          */}
-          <button
-            type="button"
-            onClick={() => setIsImporting(true)}
-            className="rounded-md border border-border px-3 py-1.5 text-sm font-medium text-foreground hover:bg-hover"
-          >
+          <button type="button" onClick={() => setIsImporting(true)} className={actionClass}>
             {t("settings.pricing.routes.bulk.add")}
           </button>
-
-          {/*
-            Disabled while there is nothing to export: an empty file is not a
-            backup, and offering one invites the question of what went wrong.
-          */}
+          {/* An empty file is not a backup, so there is nothing to export yet. */}
           <button
             type="button"
             disabled={isEmptyConfiguration}
             onClick={exportJson}
-            className="rounded-md border border-border px-3 py-1.5 text-sm font-medium text-foreground hover:bg-hover disabled:opacity-50"
+            className={actionClass}
           >
             {t("settings.pricing.routes.export")}
           </button>
         </div>
       </div>
-      {/*
-        Direction is part of the identity, and an operator cannot see that from
-        a table of rows. Saying it once here is cheaper than a support call
-        about a route that "already exists".
-      */}
       <p className="mt-1 text-[11px] text-muted">
         {t("settings.pricing.routes.directionNote")}
       </p>
 
-      {/*
-        The progress line and the filter that goes with it. Shown only once there
-        is something to be in progress ON: an empty configuration has nothing to
-        count and nothing to filter.
-      */}
+      <label className="mt-3 block">
+        <span className="mb-1 block text-xs font-medium text-muted">
+          {t("settings.pricing.routes.search.label")}
+        </span>
+        <input
+          type="search"
+          value={search}
+          onChange={(event) => setSearch(event.target.value)}
+          placeholder={t("settings.pricing.routes.search.placeholder")}
+          className="w-full max-w-md rounded-md border border-border bg-card px-3 py-1.5 text-sm text-foreground"
+        />
+      </label>
+
       {!isEmptyConfiguration ? (
         <RouteReviewProgress
           reviewedCount={reviewedCount}
@@ -521,9 +457,7 @@ export function RoutePricesSection({
         />
       ) : null}
 
-      {isFirstLoad ? (
-        <LoadingState label={t("settings.pricing.loading")} />
-      ) : null}
+      {isFirstLoad ? <LoadingState label={t("settings.pricing.loading")} /> : null}
 
       {!isFirstLoad && error ? (
         <ErrorState
@@ -545,109 +479,84 @@ export function RoutePricesSection({
             />
           ) : null}
 
-          <div className="mt-3 overflow-x-auto" aria-busy={isRefreshing}>
-            <table className="w-full min-w-[760px] text-left text-sm">
-              <caption className="sr-only">
-                {t("settings.pricing.routes.title")}
-              </caption>
-              <RouteTableHead />
-              <tbody>
-                {draft && draft.id === null ? (
-                  <RouteForm
-                    draft={draft}
-                    isBusy={busyId === "new"}
-                    onChange={setDraft}
-                    onSave={save}
-                    onCancel={() => setDraft(null)}
-                  />
-                ) : null}
+          <CollapsibleSection
+            title={t("settings.pricing.routes.sections.normal")}
+            count={shownRoutes.length}
+            isOpen={isNormalOpen}
+            onToggle={() => setIsNormalOpen((open) => !open)}
+            actions={
+              <button type="button" onClick={addRoute} className={actionClass}>
+                {t("settings.pricing.routes.add")}
+              </button>
+            }
+          >
+            <NormalRoutesTable
+              routes={shownRoutes}
+              draft={draft}
+              busyId={busyId}
+              isRefreshing={isRefreshing}
+              hasSearch={hasSearch}
+              isRouteSelected={selection.isRouteSelected}
+              onToggleSelected={selection.toggleRoute}
+              onDraftChange={setDraft}
+              onSave={saveRoute}
+              onCancel={() => setDraft(null)}
+              onDelete={setDeleting}
+              onSaveField={saveRouteField}
+              onReview={(route, reviewed) =>
+                void run(
+                  route.id,
+                  () => markRouteConfigurationReviewed(route.id, reviewed),
+                  { done: "settings.pricing.routes.reviewSaved" },
+                )
+              }
+            />
+          </CollapsibleSection>
 
-                {shownRoutes.map((route) =>
-                  draft && draft.id === route.id ? (
-                    <RouteForm
-                      key={route.id}
-                      draft={draft}
-                      isBusy={busyId === route.id}
-                      onChange={setDraft}
-                      onSave={save}
-                      onCancel={() => setDraft(null)}
-                    />
-                  ) : (
-                    <RouteRow
-                      key={route.id}
-                      route={route}
-                      isBusy={busyId === route.id}
-                      isSelected={selection.isRouteSelected(route.id)}
-                      onToggleSelected={() => selection.toggleRoute(route.id)}
-                      onDelete={() => setDeleting(route)}
-                      onSaveField={(field, value) =>
-                        saveRouteField(route, field, value)
-                      }
-                      onReview={(reviewed) =>
-                        void run(
-                          route.id,
-                          () =>
-                            markRouteConfigurationReviewed(route.id, reviewed),
-                          { done: "settings.pricing.routes.reviewSaved" },
-                        )
-                      }
-                    />
-                  ),
-                )}
-              </tbody>
-
-              {/*
-                Each Combination is one `<tbody>` of its own: the same rows, the
-                same borders and the same type as an ordinary route, with a quiet
-                header row saying the two belong together. None is ever left out:
-                a Combination is edited in place, so no form ever stands in for a
-                row.
-              */}
-              {shownCombinations.map((combination, index) => (
-                <CombinationRows
-                  key={combination.id}
-                  combination={combination}
-                  index={index}
-                  isBusy={busyId === combination.id}
-                  isSelected={selection.isCombinationSelected(combination.id)}
-                  columnCount={ROUTE_COLUMN_COUNT}
-                  onToggleSelected={() =>
-                    selection.toggleCombination(combination.id)
-                  }
-                  onDelete={() => setDeletingCombination(combination)}
-                  onSyncLeg={(legIndex) =>
-                    void startLegSync(combination, legIndex)
-                  }
-                  onSaveLegField={(legIndex, field, value) =>
-                    saveLegField(combination, legIndex, field, value)
-                  }
-                  onReview={(reviewed) =>
-                    void run(
-                      combination.id,
-                      () =>
-                        markCombinationRouteConfigurationReviewed(
-                          combination.id,
-                          reviewed,
-                        ),
-                      { done: "settings.pricing.routes.reviewSaved" },
-                    )
-                  }
-                />
-              ))}
-            </table>
-          </div>
-
-          {combinationDraft ? (
-            <CombinationRouteForm
+          <CollapsibleSection
+            title={t("settings.pricing.routes.sections.combinations")}
+            count={shownCombinations.length}
+            isOpen={isCombinationsOpen}
+            onToggle={() => setIsCombinationsOpen((open) => !open)}
+            actions={
+              <button type="button" onClick={addCombination} className={actionClass}>
+                {t("settings.pricing.routes.combinations.add")}
+              </button>
+            }
+          >
+            <CombinationsTable
+              combinations={shownCombinations}
+              numberOf={numberOf}
               draft={combinationDraft}
-              isBusy={busyId === "new"}
-              onChange={setCombinationDraft}
+              busyId={busyId}
+              isRefreshing={isRefreshing}
+              hasSearch={hasSearch}
+              isCombinationSelected={selection.isCombinationSelected}
+              onToggleSelected={selection.toggleCombination}
+              onDraftChange={setCombinationDraft}
               onSave={saveCombination}
               onCancel={() => setCombinationDraft(null)}
+              onDelete={setDeletingCombination}
+              onSyncLeg={(combination, legIndex) =>
+                void startLegSync(combination, legIndex)
+              }
+              onSaveLegField={saveLegField}
+              onSaveOverStField={saveOverStField}
+              onReview={(combination, reviewed) =>
+                void run(
+                  combination.id,
+                  () =>
+                    markCombinationRouteConfigurationReviewed(
+                      combination.id,
+                      reviewed,
+                    ),
+                  { done: "settings.pricing.routes.reviewSaved" },
+                )
+              }
             />
-          ) : null}
+          </CollapsibleSection>
 
-          {isEmpty ? (
+          {isEmptyConfiguration && !draft && !combinationDraft ? (
             <EmptyState
               title={t("settings.pricing.routes.empty")}
               description={t("settings.pricing.routes.emptyDescription")}
@@ -656,11 +565,6 @@ export function RoutePricesSection({
         </>
       ) : null}
 
-      {/*
-        The application's own confirmation, as the Custom values page uses for
-        the same kind of action: it can name the route that is about to go, mark
-        the confirming button destructive, and say what deleting does NOT touch.
-      */}
       {deleting ? (
         <ConfirmDialog
           titleKey="settings.pricing.routes.deleteTitle"
@@ -669,14 +573,10 @@ export function RoutePricesSection({
           confirmKey="settings.pricing.routes.delete"
           tone="danger"
           onConfirm={async () => {
-            await run(
-              deleting.id,
-              () => deleteRouteConfiguration(deleting.id),
-              {
-                done: "settings.pricing.routes.deleted",
-                failed: "settings.pricing.routes.deleteFailed",
-              },
-            );
+            await run(deleting.id, () => deleteRouteConfiguration(deleting.id), {
+              done: "settings.pricing.routes.deleted",
+              failed: "settings.pricing.routes.deleteFailed",
+            });
             setDeleting(null);
           }}
           onClose={() => setDeleting(null)}
@@ -699,7 +599,7 @@ export function RoutePricesSection({
             .map((combination) =>
               combinationName(
                 t("settings.pricing.routes.combinations.label"),
-                configuredCombinations.indexOf(combination),
+                numberOf(combination),
                 combination,
               ),
             )}
@@ -729,7 +629,7 @@ export function RoutePricesSection({
       {deletingCombination ? (
         <CombinationDeleteDialog
           combination={deletingCombination}
-          index={configuredCombinations.indexOf(deletingCombination)}
+          index={numberOf(deletingCombination)}
           onConfirm={async () => {
             await run(
               deletingCombination.id,
@@ -746,6 +646,23 @@ export function RoutePricesSection({
       ) : null}
     </section>
   );
+}
+
+/** The Combinations added in this visit first (newest first), then the rest in stored order. */
+function withRecentFirst(
+  combinations: readonly CombinationRouteConfiguration[],
+  recentIds: readonly string[],
+): CombinationRouteConfiguration[] {
+  const recent = recentIds
+    .map((id) => combinations.find((combination) => combination.id === id))
+    .filter((combination): combination is CombinationRouteConfiguration =>
+      Boolean(combination),
+    );
+
+  return [
+    ...recent,
+    ...combinations.filter((combination) => !recentIds.includes(combination.id)),
+  ];
 }
 
 /** "Combination #2: Antwerp → Kallo / Kallo → Antwerp", as the list names it. */

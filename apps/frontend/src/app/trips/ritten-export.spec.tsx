@@ -273,6 +273,7 @@ describe("Ritten export", () => {
       expect((asked[0][1] as { query: Record<string, string> }).query).toEqual({
         tripIds: "trip-export-1",
         waitingWord: "Wachttijd",
+        nextDayWord: "volgende dag",
       });
     },
   );

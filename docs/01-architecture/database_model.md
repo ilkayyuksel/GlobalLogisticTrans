@@ -831,28 +831,43 @@ Both Trips simply share a common group.
 
 ---
 
-# Document-Controlled Fields On A Manual Trip
+# Document-Stated Fields An Operator May Correct
 
-Some fields are parser-controlled exactly where a parser exists:
+A transport order states these fields, and the operator may correct each of
+them on ANY Trip, imported or created by hand:
+
+terminal
 
 destination city and country
 
 transport start and end time
 
-On an IMPORTED Trip the document is the authority. A later UPDATE re-reads all
-of them from it, so a manually entered value would be silently overwritten. The
-backend refuses one.
+## The address: terminal and destination
 
-On a Trip created BY HAND there is no document, and therefore no other possible
-author. These fields are manual and remain editable for the life of the Trip.
+The address was once refused on an imported Trip, because the document is the
+authority for it. The business decided otherwise: an operator must be able to
+correct where a Trip starts and where it goes, whatever its source.
 
-Without this, a city or an hour typed wrongly at creation could never be
-corrected: the transport stayed planned to the wrong place, or at the wrong
-time, permanently.
+The consequence is accepted knowingly. A later UPDATE document of the same
+order is a revision, and a revision writes the address the document states —
+replacing a manual correction made in the meantime. The edit UI says so.
 
-The rule keys on the ABSENCE OF A SOURCE DOCUMENT, not on LOSRIT. LOSRIT is
-informational and must not decide what may be edited; a manual Trip that is not
-a LOSRIT has exactly the same problem and gets exactly the same answer.
+The terminal and the destination CITY are pricing inputs: RoutePricing and the
+route costs (toll, tunnel) are matched on them. Changing either goes through
+the ordinary update recalculation (`changesPricingInput`), exactly like a
+waiting-time or TAR-nummer edit:
+
+- a CLOSED Trip is repriced and its current snapshot replaced; operator
+  overrides live apart and survive;
+- an OPEN Trip is not priced; its price is produced when it closes.
+
+The destination COUNTRY is read by nothing in pricing and reprices nothing.
+
+The Trip's canonical route is derived from the terminal and the city on every
+read, so the Ritten list, the detail page and the Excel exports show the
+corrected address at once. Nothing else is copied or rewritten.
+
+An address edit is an operator edit and writes NO revision history.
 
 ## Who may edit the transport times
 
@@ -866,8 +881,7 @@ and until one does, the operator's value stands.
 An operator's edit writes NO revision history. Only a document's revision does
 that, through TripRevisionService.
 
-The DESTINATION is not like this. It stays the document's on an imported Trip;
-see above.
+The address works the same way; see above.
 
 ## The transport times have no ordering rule
 
@@ -1066,11 +1080,13 @@ label.
 
 # Waiting Time
 
-A waiting time is THREE columns describing one fact:
+A waiting time is FOUR columns describing one fact:
 
 waiting_time_start
 
 waiting_time_end
+
+waiting_time_ends_next_day
 
 waiting_time_minutes
 
@@ -1083,7 +1099,7 @@ waitingTimeMinutes is not accepted on an update at all, so the money and the
 evidence for it cannot disagree.
 
 A window is BOTH times or NEITHER. Both null removes the entry, clearing all
-three columns. A start with no end is refused: it is an incomplete entry, and
+the columns. A start with no end is refused: it is an incomplete entry, and
 guessing would bill something nobody measured.
 
 Historical Trips keep their duration and have NO times. Nothing is backfilled
@@ -1091,18 +1107,52 @@ and no begin/end is ever reconstructed from a stored duration — 135 minutes ha
 unlimited begin/end pairs, and inventing one would put hours on screen that
 nobody ever read off a clock.
 
-The calculation:
+## Which day the end is on
 
-- end after begin: the same day
-- end before begin: the end is on the next day
-- end equal to begin: ZERO, never twenty-four hours
+Both times are a time of day, so `waiting_time_ends_next_day` (BOOLEAN, NOT
+NULL, default false) states whether the end is on the day after the begin. The
+operator sets it with "Volgende dag".
 
-Because both fields hold a time of day, the represented duration is always less
-than 24 hours. A genuine 24-hour waiting period cannot be expressed and would
-need its own decision.
+- next-day flag set: the end is on the following calendar day
+- end before begin: also the following day — a same-day window cannot run
+  backwards — and it is STORED as next day, so the flag always states the
+  effective day
+- otherwise the same day; end equal to begin is ZERO, never twenty-four hours
+
+The flag is part of the window: it is accepted only together with both times.
+Sent on its own it is refused, like a half window.
+
+## Only 06:00 → 20:00 counts
+
+`waiting_time_minutes` holds the COUNTED minutes: only the part of the window
+inside the fixed daily window 06:00 → 20:00, on each day the window touches.
+The night is not waiting time. The window is fixed; it is not a Setting.
+
+| Window | Counted |
+|---|---:|
+| 10:00 → 12:00, same day | 2 h |
+| 05:00 → 07:00, same day | 1 h |
+| 06:00 → 20:00, same day | 14 h |
+| 10:00 → 08:00, next day | 12 h (10–20, then 06–08) |
+| 10:00 → 12:00, next day | 16 h (10–20, then 06–12) |
+| 22:00 → 02:00, next day | 0 |
+
+The rule is applied in ONE place, where the Backend derives the minutes
+(`apps/backend/src/trips/waiting-window.ts`). The browser mirrors it only to
+preview a duration while typing.
 
 Pricing is unchanged. It continues to receive waitingTimeMinutes and applies the
 configured free allowance, threshold and billing blocks to it.
+
+## Existing Trips
+
+The counting rule applies to every window written from the moment it was
+introduced. Stored `waiting_time_minutes` are historical data and are NOT
+recalculated: a Trip keeps its figure until its window is edited, which then
+derives the minutes again and reprices it through the ordinary waiting-time
+recalculation — a CLOSED Trip included. The migration only set the next-day
+flag on windows whose end lay before their begin, which is how those windows
+were already read; it changed no minutes.
 
 ---
 
@@ -4476,8 +4526,11 @@ A RoutePricing should contain:
 - Departure
 - Destination
 - Base Price
-- Kilometres — the length of the road, from which the Toll is derived. Optional:
-  a route nobody has measured is charged no toll.
+- Toll and Tunnel — amounts per route, stored as RouteCosts (owned by the leg for
+  a Combination). The former `kilometres` column is kept unused; see
+  pricing_rules.md, "History".
+- For a Combination: Over ST — its own Tarief, Toll and Tunnel on the group
+  (charged on Leg 2 when its planningDate differs from Leg 1's).
 - Combination Group and Leg Position — the discriminator described below.
   Both are absent for an ordinary route.
 - Notes (optional)

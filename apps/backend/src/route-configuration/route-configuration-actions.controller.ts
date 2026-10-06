@@ -70,7 +70,7 @@ export class RouteConfigurationActionsController {
   @ApiOperation({
     summary: "Copy this leg's prices to every matching leg of other Combinations",
     description:
-      "Tarief, KM and Tunnel exactly as this leg stores them, to every other Combination's leg in the same position with the same From and To — in one transaction, through the same update an inline edit uses. Never an ordinary route, never the other position, never the global toll rate.",
+      "Tarief, Toll and Tunnel exactly as this leg stores them, to every other Combination's leg in the same position with the same From and To — in one transaction, through the same update an inline edit uses. Never an ordinary route, never the other position, never Over ST.",
   })
   @ApiOkResponse({ type: CombinationLegSyncDto })
   @ApiNotFoundResponse({ description: "No Combination with that id." })

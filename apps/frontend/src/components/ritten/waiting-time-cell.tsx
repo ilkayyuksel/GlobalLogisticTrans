@@ -13,6 +13,8 @@ import {
   type WaitingWindowError,
 } from "@/lib/waiting-time";
 
+import { nextDayPayload, WaitingNextDayField } from "./waiting-next-day-field";
+
 /**
  * Waiting time: the two clock times it was read off, and the duration between.
  *
@@ -32,8 +34,9 @@ import {
  * times. It shows the duration alone: 135 minutes has unlimited begin/end
  * pairs, and inventing one would put hours on screen nobody ever read.
  *
- * A window that crosses midnight is ordinary and is handled: 22:00 → 02:00 is
- * four hours. Equal times are zero, never a full day — see `waiting-time.ts`.
+ * A window may end the next day — "Volgende dag" — and only 06:00 → 20:00 of
+ * each day counts: 10:00 → 12:00 the next day is 16 hours. Equal times without
+ * the tick are zero, never a full day — see `waiting-time.ts`.
  * ────────────────────────────────────────────────────────────────────────────
  */
 
@@ -51,6 +54,7 @@ export function WaitingTimeCell({
     bookingNumber: string | null;
     waitingTimeStart: string | null;
     waitingTimeEnd: string | null;
+    waitingTimeEndsNextDay: boolean;
     waitingTimeMinutes: number | null;
   };
   isDisabled?: boolean;
@@ -65,6 +69,7 @@ export function WaitingTimeCell({
   const [isEditing, setIsEditing] = useState(false);
   const [begin, setBegin] = useState(storedBegin);
   const [end, setEnd] = useState(storedEnd);
+  const [endsNextDay, setEndsNextDay] = useState(trip.waitingTimeEndsNextDay);
   const [isSaving, setIsSaving] = useState(false);
   const [localError, setLocalError] = useState<WaitingWindowError | null>(null);
   const [saveError, setSaveError] = useState<unknown>(null);
@@ -81,13 +86,14 @@ export function WaitingTimeCell({
    * stored before storing it. The stored value is always the backend's own
    * calculation of the same window; this is a preview, not the source.
    */
-  const preview = waitingWindowMinutes(begin, end);
+  const preview = waitingWindowMinutes(begin, end, endsNextDay);
 
   function open(): void {
     // On what was actually entered, which is now recoverable. A Trip with only
     // a legacy duration opens empty, because there is nothing to reconstruct.
     setBegin(storedBegin);
     setEnd(storedEnd);
+    setEndsNextDay(trip.waitingTimeEndsNextDay);
     setLocalError(null);
     setSaveError(null);
     setIsEditing(true);
@@ -109,7 +115,7 @@ export function WaitingTimeCell({
   }
 
   async function save(): Promise<void> {
-    const result = waitingWindowMinutes(begin, end);
+    const result = waitingWindowMinutes(begin, end, endsNextDay);
 
     if (result.error) {
       setLocalError(result.error);
@@ -124,6 +130,7 @@ export function WaitingTimeCell({
     await send({
       waitingTimeStart: begin.trim() === "" ? null : begin.trim(),
       waitingTimeEnd: end.trim() === "" ? null : end.trim(),
+      ...nextDayPayload(begin, end, endsNextDay),
     });
   }
 
@@ -166,6 +173,17 @@ export function WaitingTimeCell({
           onChange={setEnd}
           onEnter={() => void save()}
           onEscape={() => setIsEditing(false)}
+          isDisabled={isSaving}
+        />
+      </div>
+
+      <div className="mt-1">
+        <WaitingNextDayField
+          id="waiting-next-day"
+          begin={begin}
+          end={end}
+          checked={endsNextDay}
+          onChange={setEndsNextDay}
           isDisabled={isSaving}
         />
       </div>
@@ -242,6 +260,7 @@ function WaitingTimeValue({
   trip: {
     waitingTimeStart: string | null;
     waitingTimeEnd: string | null;
+    waitingTimeEndsNextDay: boolean;
     waitingTimeMinutes: number | null;
   };
 }) {
@@ -264,8 +283,9 @@ function WaitingTimeValue({
       <span className="block whitespace-nowrap tabular-nums text-foreground">
         {begin} – {end}
       </span>
-      <span className="block text-[11px] tabular-nums text-muted">
+      <span className="block whitespace-nowrap text-[11px] tabular-nums text-muted">
         {duration}
+        {trip.waitingTimeEndsNextDay ? ` · ${t("ritten.waiting.nextDay")}` : null}
       </span>
     </span>
   );

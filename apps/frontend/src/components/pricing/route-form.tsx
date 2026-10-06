@@ -27,7 +27,7 @@ export function RouteForm({
   const t = useTranslation();
 
   const amountInput = (
-    field: "tarief" | "kilometres" | "tunnel",
+    field: "tarief" | "toll" | "tunnel",
     labelKey: TranslationKey,
   ) => (
     <td className="px-3 py-2">
@@ -73,7 +73,7 @@ export function RouteForm({
         />
       </td>
       {amountInput("tarief", "settings.pricing.routes.tarief")}
-      {amountInput("kilometres", "settings.pricing.routes.kilometres")}
+      {amountInput("toll", "settings.pricing.routes.toll")}
       {amountInput("tunnel", "settings.pricing.routes.tunnel")}
       {/* The Acties column: the form's own two buttons stand in its place. */}
       <td className="px-3 py-2">

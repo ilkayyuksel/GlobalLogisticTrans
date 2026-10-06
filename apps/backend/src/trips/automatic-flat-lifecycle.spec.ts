@@ -3,6 +3,7 @@ import { Trip, TripStatus } from "@prisma/client";
 import { CustomPropertyService } from "../custom-properties/custom-property.service";
 import { AppLoggerService } from "../logger/app-logger.service";
 import { TripCustomPropertyRepository } from "../trip-custom-properties/trip-custom-property.repository";
+import { stubPricingRecalculation } from "../pricing-engine/pricing-recalculation.double";
 import { AutomaticFlatPropertyService } from "./automatic-flat.service";
 import { FLAT_CUSTOM_PROPERTY_NAME } from "./flat-container-rule";
 import { ImportedTripData } from "./import-trips.command";
@@ -139,6 +140,7 @@ describe("Flat through a Trip's revisions", () => {
         } as unknown as CustomPropertyService,
         logger,
       ),
+      stubPricingRecalculation(),
       logger,
     );
   });

@@ -40,6 +40,7 @@ function buildTrip(direction: TripDirection | null) {
     executionDatetime: null,
     waitingTimeStart: null,
     waitingTimeEnd: null,
+    waitingTimeEndsNextDay: false,
     waitingTimeMinutes: null,
     distanceKm: null,
     tarNummer: null,

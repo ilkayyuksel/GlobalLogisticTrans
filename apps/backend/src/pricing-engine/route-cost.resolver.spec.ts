@@ -187,14 +187,14 @@ describe("RouteCostResolver", () => {
     const COMBINATION_MATCH = {
       routePricingId: "5a1f0c1e-2b3d-4e5f-8a9b-0c1d2e3f4a5b",
       basePrice: "100.00",
-      kilometres: "25.00",
+      overSt: null,
       kind: "COMBINATION" as const,
     };
 
     const NORMAL_MATCH = {
       routePricingId: "9c858901-8a57-4791-81fe-4c455b099bc9",
       basePrice: "380.00",
-      kilometres: "25.00",
+      overSt: null,
       kind: "NORMAL" as const,
     };
 

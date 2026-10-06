@@ -49,16 +49,6 @@ export interface PricingRuleConfiguration {
    * Settings change, so it travels with the rules it describes.
    */
   readonly ruleVersion: string;
-
-  /**
-   * What one kilometre of toll costs, or null when nobody has configured it.
-   *
-   * Null rather than a number, and deliberately not a default written in code:
-   * a rate invented here would charge every tolled route in the business an
-   * amount nobody decided. A Trip priced while it is missing is charged no
-   * toll, which is the same answer an unconfigured route has always given.
-   */
-  readonly tollRatePerKm: string | null;
 }
 
 /**
@@ -80,23 +70,6 @@ export interface PricingRouteIdentity {
   readonly departure: string | null;
   readonly destination: string;
 }
-
-/**
- * How long the Trip's route is, as its configuration states it.
- *
- * ── WHY A DISTANCE AND NOT A TOLL AMOUNT ────────────────────────────────────
- * The Toll used to be an amount stored per route. It is now that route's length
- * times one rate configured for the whole business, so the road contributes the
- * kilometres and the Settings contribute the price of one.
- *
- * Null covers both silences: no configuration for this route at all, and a
- * configuration whose distance nobody has stated yet. Neither charges a toll —
- * an invented distance would charge a Trip for a road nobody measured.
- *
- * It sits beside the route costs rather than inside `PricingBaseSource`,
- * because a Trip priced by DISTANCE still drives the same tolled road.
- */
-export type PricingRouteKilometres = string | null;
 
 /**
  * Where the base price comes from, discriminated by the active strategy.
@@ -228,15 +201,17 @@ export interface PricingCalculationContext {
    * Empty when the route has none configured, and empty when the Trip has no
    * terminal to match on. Emptiness is not an error at this stage.
    */
-  /**
-   * The configured length of this Trip's route, or null when none is known.
-   *
-   * Read once here so the Toll calculator stays pure — see
-   * `PricingRouteKilometres`.
-   */
-  readonly routeKilometres: PricingRouteKilometres;
-
   readonly routeCosts: readonly PricingRouteCostInput[];
+
+  /**
+   * The Over ST this Trip owes, or null when it owes none.
+   *
+   * Set only for Leg 2 of a Combination matched by its PAIR of roads, and only
+   * when Leg 2's planningDate differs from Leg 1's — see `combination-over-st.ts`.
+   * The Base Price, Toll and Tunnel steps each add their own amount as a line of
+   * their own component, so the columns read Leg 2's effective amounts.
+   */
+  readonly overSt: PricingOverStInput | null;
 
   /**
    * The Cost Confirmation of this Trip, or null when it has none.
@@ -249,4 +224,11 @@ export interface PricingCalculationContext {
 
   readonly existingSnapshot: ExistingPricingSnapshot | null;
   readonly preparedAt: Date;
+}
+
+/** Over ST's three amounts as fixed-2 strings; an unstated one is "0.00". */
+export interface PricingOverStInput {
+  readonly tarief: string;
+  readonly toll: string;
+  readonly tunnel: string;
 }

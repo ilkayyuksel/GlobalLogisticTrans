@@ -2,10 +2,9 @@ import { ApiProperty, ApiPropertyOptional } from "@nestjs/swagger";
 import { RoutePricing } from "@prisma/client";
 
 import { PaginationMetaDto } from "../../common/dto/pagination-meta.dto";
-import {
-  BASE_PRICE_DECIMAL_PLACES,
-  ROUTE_KILOMETRES_DECIMAL_PLACES,
-} from "./create-route-pricing.dto";
+import { CombinationRouteGroup } from "@prisma/client";
+
+import { BASE_PRICE_DECIMAL_PLACES } from "./create-route-pricing.dto";
 
 /**
  * Public shape of a RoutePricing.
@@ -34,15 +33,6 @@ export class RoutePricingResponseDto {
     example: "380.00",
   })
   basePrice!: string;
-
-  @ApiPropertyOptional({
-    description:
-      "Length of the route in kilometres, always with two decimals. Null when nobody has stated it, in which case no toll is charged.",
-    type: String,
-    nullable: true,
-    example: "25.00",
-  })
-  kilometres!: string | null;
 
   @ApiPropertyOptional({
     description:
@@ -78,6 +68,37 @@ export class RoutePricingResponseDto {
 }
 
 /**
+ * Over ST: the Combination's own Tarief, Toll and Tunnel.
+ *
+ * Fixed-2 strings like every amount here, or null when nobody has stated one.
+ * Configuration only: the Pricing Engine does not read these yet.
+ */
+export class CombinationOverStDto {
+  @ApiProperty({ type: String, nullable: true, example: "50.00" })
+  tarief!: string | null;
+
+  @ApiProperty({ type: String, nullable: true, example: "5.00" })
+  toll!: string | null;
+
+  @ApiProperty({ type: String, nullable: true, example: "0.00" })
+  tunnel!: string | null;
+}
+
+/** The Over ST amounts of a stored group, as the API carries them. */
+export function toCombinationOverSt(
+  group: Pick<CombinationRouteGroup, "overStBasePrice" | "overStToll" | "overStTunnel">,
+): CombinationOverStDto {
+  const money = (value: CombinationRouteGroup["overStToll"]) =>
+    value === null ? null : value.toFixed(BASE_PRICE_DECIMAL_PLACES);
+
+  return {
+    tarief: money(group.overStBasePrice),
+    toll: money(group.overStToll),
+    tunnel: money(group.overStTunnel),
+  };
+}
+
+/**
  * One Combination route configuration: a group and its two legs.
  *
  * The legs come back in configured order — the outbound first — and there are
@@ -99,6 +120,9 @@ export class CombinationRoutePricingDto {
     description: "Exactly two legs, outbound first.",
   })
   legs!: RoutePricingResponseDto[];
+
+  @ApiProperty({ type: CombinationOverStDto })
+  overSt!: CombinationOverStDto;
 
   @ApiProperty({ format: "date-time" })
   createdAt!: Date;
@@ -125,14 +149,6 @@ export function toRoutePricingResponse(
     departure: routePricing.departure,
     destination: routePricing.destination,
     basePrice: routePricing.basePrice.toFixed(BASE_PRICE_DECIMAL_PLACES),
-    /*
-     * Exact decimal text, like every other number that leaves this API: a
-     * distance multiplied by a rate is money, and money is never a float.
-     */
-    kilometres:
-      routePricing.kilometres === null
-        ? null
-        : routePricing.kilometres.toFixed(ROUTE_KILOMETRES_DECIMAL_PLACES),
     combinationGroupId: routePricing.combinationGroupId,
     combinationLegPosition: routePricing.combinationLegPosition,
     reviewed: routePricing.reviewed,

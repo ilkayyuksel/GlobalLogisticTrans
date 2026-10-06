@@ -397,7 +397,10 @@ The central entity. Represents one physical transport movement.
 | `start_time` | `TIME` | YES | `NULL` | Planned start; not guaranteed by the parser |
 | `end_time` | `TIME` | YES | `NULL` | Planned end; equals `start_time` when the PDF has one time |
 | `execution_datetime` | `TIMESTAMPTZ` | YES | `NULL` | Actual execution/completion moment |
-| `waiting_time_minutes` | `INTEGER` | YES | `NULL` | Manually entered |
+| `waiting_time_start` | `TIME` | YES | `NULL` | When the waiting began, as read off a clock |
+| `waiting_time_end` | `TIME` | YES | `NULL` | When it ended |
+| `waiting_time_ends_next_day` | `BOOLEAN` | NO | `false` | The end is on the day after the begin; set for every end before its begin |
+| `waiting_time_minutes` | `INTEGER` | YES | `NULL` | Derived from the window: only 06:00–20:00 of each day counts. Manually entered only on Trips without a window |
 | `distance_km` | `NUMERIC(8,2)` | YES | `NULL` | Manually entered; used by Distance-Based Pricing |
 | `internal_notes` | `TEXT` | YES | `NULL` | Administrator notes |
 | `parser_metadata` | `JSONB` | YES | `NULL` | Raw extracted values for this Trip — see §1 JSONB Usage |
@@ -1045,7 +1048,7 @@ COSTS. Neither reads the other.
 | `departure` | `TEXT` | NO | — | |
 | `destination` | `TEXT` | NO | — | |
 | `base_price` | `NUMERIC(12,2)` | NO | — | |
-| `kilometres` | `NUMERIC(8,2)` | YES | `NULL` | The length of the route. The Toll is this times `PRICING.TOLL_RATE_PER_KM`; `NULL` means nobody has stated it, and no toll is charged. Per LEG for a Combination, so each leg is charged for its own road. |
+| `kilometres` | `NUMERIC(8,2)` | YES | `NULL` | **Legacy, unused.** Once the basis of the Toll (× `PRICING.TOLL_RATE_PER_KM`); the Toll is a TOLL `route_cost` amount again. Kept so entered distances are not lost; neither read nor written by the application. |
 | `combination_group_id` | `UUID` | YES | `NULL` | The discriminator. `NULL` is an ordinary route; set makes the row one leg of that Combination configuration. |
 | `combination_leg_position` | `SMALLINT` | YES | `NULL` | `1` the outbound, `2` the return. `NULL` exactly when `combination_group_id` is. Not decoration: both legs are written in one transaction and share `created_at`, which therefore cannot order them. |
 | `notes` | `TEXT` | YES | `NULL` | |
@@ -1124,6 +1127,9 @@ written or deleted here.
 |---|---|---|---|---|
 | `id` | `UUID` | NO | `gen_random_uuid()` | Primary key |
 | `notes` | `TEXT` | YES | `NULL` | |
+| `over_st_base_price` | `NUMERIC(12,2)` | YES | `NULL` | Over ST Tarief. Added to Leg 2 when its `planning_date` differs from Leg 1's. `NULL` = not stated. |
+| `over_st_toll` | `NUMERIC(12,2)` | YES | `NULL` | Over ST Toll. As above. |
+| `over_st_tunnel` | `NUMERIC(12,2)` | YES | `NULL` | Over ST Tunnel. As above. A CHECK keeps all three ≥ 0. |
 | `created_at` | `TIMESTAMPTZ` | NO | `now()` | |
 | `updated_at` | `TIMESTAMPTZ` | NO | `now()` | |
 

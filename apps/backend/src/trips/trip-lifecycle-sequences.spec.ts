@@ -1,6 +1,7 @@
 import { Trip, TripStatus } from "@prisma/client";
 
 import { AppLoggerService } from "../logger/app-logger.service";
+import { stubPricingRecalculation } from "../pricing-engine/pricing-recalculation.double";
 import { ImportedTripData } from "./import-trips.command";
 import { AutomaticFlatPropertyService } from "./automatic-flat.service";
 import { stubTripWriteTransaction } from "./trip-write-transaction.double";
@@ -219,6 +220,7 @@ describe("sequences of transport documents", () => {
         applyToNewTrip: jest.fn(),
         synchronise: jest.fn(),
       } as unknown as AutomaticFlatPropertyService,
+      stubPricingRecalculation(),
       {
         setContext: jest.fn(),
         log: jest.fn(),

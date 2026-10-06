@@ -19,7 +19,7 @@ const EXAMPLE_DOCUMENT = `{
       "departure": "Antwerp",
       "destination": "Kallo",
       "tarief": 100,
-      "kilometres": 25,
+      "toll": 25,
       "tunnel": 0
     },
     {
@@ -29,14 +29,14 @@ const EXAMPLE_DOCUMENT = `{
           "departure": "Antwerp",
           "destination": "Kallo",
           "tarief": 100,
-          "kilometres": 25,
+          "toll": 25,
           "tunnel": 0
         },
         {
           "departure": "Kallo",
           "destination": "Antwerp",
           "tarief": 80,
-          "kilometres": 30,
+          "toll": 30,
           "tunnel": 15
         }
       ]

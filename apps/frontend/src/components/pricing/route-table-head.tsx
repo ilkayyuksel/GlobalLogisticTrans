@@ -27,7 +27,7 @@ export function RouteTableHead() {
           {t("settings.pricing.routes.tarief")}
         </th>
         <th scope="col" className="px-3 py-2 text-right font-medium">
-          {t("settings.pricing.routes.kilometres")}
+          {t("settings.pricing.routes.toll")}
         </th>
         <th scope="col" className="px-3 py-2 text-right font-medium">
           {t("settings.pricing.routes.tunnel")}

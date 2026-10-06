@@ -158,6 +158,96 @@ describe("the waiting-time window in the Ritten list", () => {
     });
   });
 
+  /**
+   * ── A WINDOW THAT ENDS THE NEXT DAY ─────────────────────────────────────
+   * Two times of day cannot say the truck left at noon the NEXT day, so the
+   * editor asks. Only 06:00 → 20:00 counts: 10:00 → 12:00 the next day is 16
+   * hours. The flag is stored, so the editor reopens on it and the column says
+   * so.
+   */
+  describe("volgende dag", () => {
+    const NEXT_DAY = "Volgende dag";
+
+    it("previews the counted hours for the next day", async () => {
+      await show({ waitingTimeMinutes: null });
+      await openEditor();
+
+      setClock(BEGIN, "10:00");
+      setClock(END, "12:00");
+      expect(await screen.findByText("2 u")).toBeInTheDocument();
+
+      await userEvent.click(screen.getByLabelText(NEXT_DAY));
+      expect(await screen.findByText("16 u")).toBeInTheDocument();
+    });
+
+    it("sends the window with the next day", async () => {
+      await show({ waitingTimeMinutes: null });
+      await openEditor();
+
+      setClock(BEGIN, "10:00");
+      setClock(END, "12:00");
+      await userEvent.click(screen.getByLabelText(NEXT_DAY));
+      await save();
+
+      await waitFor(() =>
+        expect(patchBody()).toEqual({
+          waitingTimeStart: "10:00",
+          waitingTimeEnd: "12:00",
+          waitingTimeEndsNextDay: true,
+        }),
+      );
+    });
+
+    it("sends the same day again once it is switched off", async () => {
+      await show({
+        waitingTimeStart: "10:00:00",
+        waitingTimeEnd: "12:00:00",
+        waitingTimeEndsNextDay: true,
+        waitingTimeMinutes: 960,
+      });
+      await openEditor();
+
+      expect(screen.getByLabelText(NEXT_DAY)).toBeChecked();
+
+      await userEvent.click(screen.getByLabelText(NEXT_DAY));
+      expect(await screen.findByText("2 u")).toBeInTheDocument();
+      await save();
+
+      await waitFor(() =>
+        expect(patchBody()).toEqual({
+          waitingTimeStart: "10:00",
+          waitingTimeEnd: "12:00",
+          waitingTimeEndsNextDay: false,
+        }),
+      );
+    });
+
+    /** An end before its begin can only be the next day: ticked and fixed. */
+    it("ticks and fixes it when the end lies before the begin", async () => {
+      await show({ waitingTimeMinutes: null });
+      await openEditor();
+
+      setClock(BEGIN, "10:00");
+      setClock(END, "08:00");
+
+      expect(screen.getByLabelText(NEXT_DAY)).toBeChecked();
+      expect(screen.getByLabelText(NEXT_DAY)).toBeDisabled();
+      expect(await screen.findByText("12 u")).toBeInTheDocument();
+    });
+
+    it("says so in the column", async () => {
+      await show({
+        waitingTimeStart: "10:00:00",
+        waitingTimeEnd: "12:00:00",
+        waitingTimeEndsNextDay: true,
+        waitingTimeMinutes: 960,
+      });
+
+      expect(screen.getByText("10:00 – 12:00")).toBeInTheDocument();
+      expect(screen.getByText("16 u · Volgende dag")).toBeInTheDocument();
+    });
+  });
+
   describe("what it sends", () => {
     it("sends the window, never the duration", async () => {
       await show({ waitingTimeMinutes: null });
@@ -171,6 +261,7 @@ describe("the waiting-time window in the Ritten list", () => {
         expect(patchBody()).toEqual({
           waitingTimeStart: "10:00",
           waitingTimeEnd: "12:15",
+          waitingTimeEndsNextDay: false,
         });
       });
       expect(patchBody()).not.toHaveProperty("waitingTimeMinutes");
@@ -187,6 +278,7 @@ describe("the waiting-time window in the Ritten list", () => {
         expect(patchBody()).toEqual({
           waitingTimeStart: "09:00",
           waitingTimeEnd: "10:15",
+          waitingTimeEndsNextDay: false,
         });
       });
     });
@@ -202,6 +294,7 @@ describe("the waiting-time window in the Ritten list", () => {
         expect(patchBody()).toEqual({
           waitingTimeStart: "08:00",
           waitingTimeEnd: "11:30",
+          waitingTimeEndsNextDay: false,
         });
       });
     });
@@ -218,6 +311,7 @@ describe("the waiting-time window in the Ritten list", () => {
         expect(patchBody()).toEqual({
           waitingTimeStart: "22:00",
           waitingTimeEnd: "02:00",
+          waitingTimeEndsNextDay: true,
         });
       });
     });

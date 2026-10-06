@@ -45,8 +45,9 @@ function route(overrides: Record<string, unknown> = {}) {
     departure: "Quay 869",
     destination: "Dourges",
     tarief: "520.00",
-    kilometres: "310.00",
+    toll: "310.00",
     tunnel: "12.50",
+    hasToll: true,
     hasTunnel: true,
     type: "NORMAL",
     combinationGroupId: null,
@@ -61,13 +62,14 @@ function combination() {
   return {
     id: COMBINATION_ID,
     reviewed: false,
+    overSt: { tarief: null, toll: null, tunnel: null },
     legs: [
       route({
         id: "leg-1",
         departure: "Antwerp",
         destination: "Kallo",
         tarief: "100.00",
-        kilometres: "25.00",
+        toll: "25.00",
         tunnel: "0.00",
         type: "COMBINATION",
         combinationGroupId: COMBINATION_ID,
@@ -77,7 +79,7 @@ function combination() {
         departure: "Kallo",
         destination: "Antwerp",
         tarief: "80.00",
-        kilometres: "30.00",
+        toll: "30.00",
         tunnel: "15.00",
         type: "COMBINATION",
         combinationGroupId: COMBINATION_ID,
@@ -186,7 +188,7 @@ describe("editing an ordinary route", () => {
     ["Van", "Van: Quay 869 Dourges", "Zeebrugge", { departure: "Zeebrugge" }],
     ["Naar", "Naar: Quay 869 Dourges", "Brugge", { destination: "Brugge" }],
     ["Tarief", "Tarief: Quay 869 Dourges", "545.25", { tarief: 545.25 }],
-    ["KM", "KM: Quay 869 Dourges", "180", { kilometres: 180 }],
+    ["Toll", "Toll: Quay 869 Dourges", "180", { toll: 180 }],
     ["Tunnel", "Tunnel: Quay 869 Dourges", "3.75", { tunnel: 3.75 }],
   ])("saves %s on Enter", async (_name, label, typed, expected) => {
     renderPage();
@@ -217,33 +219,36 @@ describe("editing an ordinary route", () => {
       departure: "Quay 869",
       destination: "Dourges",
       tarief: 545.25,
-      kilometres: 310,
+      toll: 310,
       tunnel: 12.5,
     });
   });
 
-  /** An unmeasured road stays unmeasured when another field is edited. */
-  it("keeps a null distance null", async () => {
-    respondWith({ routes: [route({ kilometres: null })] });
+  /** The toll travels unchanged when another field is edited. */
+  it("keeps the toll as it is when another field is edited", async () => {
+    respondWith({ routes: [route({ toll: "18.40" })] });
     renderPage();
 
     await typeAndEnter(await openCell("Tarief: Quay 869 Dourges"), "545.25");
 
     await waitFor(() => expect(writes()).toHaveLength(1));
-    expect((writes()[0].body as { kilometres: unknown }).kilometres).toBeNull();
+    expect((writes()[0].body as { toll: unknown }).toll).toBe(18.4);
   });
 
-  /** And clearing the distance says so, rather than measuring it at zero. */
-  it("sends an emptied distance as null", async () => {
+  /**
+   * An emptied amount is not quietly turned into zero: it goes out as typed and
+   * the backend refuses it in its own words.
+   */
+  it("sends an emptied toll as typed, never as zero", async () => {
     renderPage();
 
-    const input = await openCell("KM: Quay 869 Dourges");
+    const input = await openCell("Toll: Quay 869 Dourges");
 
     await userEvent.clear(input);
     await userEvent.type(input, "{Enter}");
 
     await waitFor(() => expect(writes()).toHaveLength(1));
-    expect((writes()[0].body as { kilometres: unknown }).kilometres).toBeNull();
+    expect((writes()[0].body as { toll: unknown }).toll).toBe("");
   });
 
   it("shows the saved value and closes the cell", async () => {
@@ -409,20 +414,21 @@ describe("editing a Combination leg", () => {
     await typeAndEnter(await openCell("Tarief: Antwerp Kallo"), "110");
 
     await waitFor(() => expect(writes()).toHaveLength(1));
+    // No Over ST: a leg edit leaves it exactly as stored.
     expect(writes()[0].body).toEqual({
       legs: [
         {
           departure: "Antwerp",
           destination: "Kallo",
           tarief: 110,
-          kilometres: 25,
+          toll: 25,
           tunnel: 0,
         },
         {
           departure: "Kallo",
           destination: "Antwerp",
           tarief: 80,
-          kilometres: 30,
+          toll: 30,
           tunnel: 15,
         },
       ],
@@ -432,16 +438,16 @@ describe("editing a Combination leg", () => {
   it("edits the second leg without moving the first", async () => {
     renderPage();
 
-    await typeAndEnter(await openCell("KM: Kallo Antwerp"), "31.5");
+    await typeAndEnter(await openCell("Toll: Kallo Antwerp"), "31.5");
 
     await waitFor(() => expect(writes()).toHaveLength(1));
 
     const { legs } = writes()[0].body as {
-      legs: { tarief: number; kilometres: number }[];
+      legs: { tarief: number; toll: number }[];
     };
 
-    expect(legs[0]).toMatchObject({ tarief: 100, kilometres: 25 });
-    expect(legs[1]).toMatchObject({ tarief: 80, kilometres: 31.5 });
+    expect(legs[0]).toMatchObject({ tarief: 100, toll: 25 });
+    expect(legs[1]).toMatchObject({ tarief: 80, toll: 31.5 });
   });
 
   it("offers every value of both legs", async () => {
@@ -453,7 +459,7 @@ describe("editing a Combination leg", () => {
       "Van: Antwerp Kallo",
       "Naar: Antwerp Kallo",
       "Tarief: Antwerp Kallo",
-      "KM: Antwerp Kallo",
+      "Toll: Antwerp Kallo",
       "Tunnel: Antwerp Kallo",
       "Van: Kallo Antwerp",
       "Tunnel: Kallo Antwerp",
@@ -520,7 +526,7 @@ describe("what inline editing leaves alone", () => {
 
     await waitFor(() => expect(requestMock).toHaveBeenCalled());
     await userEvent.click(
-      screen.getByRole("button", { name: "Route toevoegen" }),
+      await screen.findByRole("button", { name: "Route toevoegen" }),
     );
 
     expect(screen.getByRole("textbox", { name: "Van" })).toBeInTheDocument();

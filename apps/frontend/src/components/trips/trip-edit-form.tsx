@@ -16,13 +16,27 @@ import {
   formatWaitingTime,
   waitingWindowMinutes,
 } from "@/lib/waiting-time";
+import {
+  fromLocalDateTimeInput,
+  toLocalDateTimeInput,
+} from "@/lib/calendar/local-date-time";
+import {
+  toAddressFormValues,
+  toChangedAddressPayload,
+  type AddressFormValues,
+} from "@/lib/trips/address-payload";
+
+import {
+  nextDayPayload,
+  WaitingNextDayField,
+} from "../ritten/waiting-next-day-field";
 
 /**
  * Editing the manual fields of a Trip.
  *
  * The form contains only fields `UpdateTripDto` accepts. Booking number,
- * terminal, container type, destination, times, status and the original
- * planning date are absent because the backend refuses them — its validation
+ * container type, times, status and the original planning date are absent
+ * because the backend refuses them or they are edited in the list — its validation
  * runs with `forbidNonWhitelisted`, so sending one is a 400 rather than a
  * silent no-op. They are shown read-only elsewhere on the page instead.
  *
@@ -39,19 +53,22 @@ import {
 
 /** From the backend's create-trip.dto.ts. */
 const CONTAINER_NUMBER_MAX_LENGTH = 100;
+const TERMINAL_MAX_LENGTH = 200;
+const DESTINATION_MAX_LENGTH = 200;
 const INTERNAL_NOTES_MAX_LENGTH = 2000;
 const DISTANCE_KM_MAX = 999_999.99;
 
 /** The option value standing for "no vehicle". */
 const NONE = "";
 
-interface FormValues {
+interface FormValues extends AddressFormValues {
   containerNumber: string;
   planningDate: string;
   vehicleId: string;
   /* Two clock times on screen; one integer in the database. */
   waitingBegin: string;
   waitingEnd: string;
+  waitingEndsNextDay: boolean;
   distanceKm: string;
   executionDatetime: string;
   internalNotes: string;
@@ -66,6 +83,7 @@ interface FormValues {
 function toFormValues(trip: Trip): FormValues {
   return {
     containerNumber: trip.containerNumber ?? "",
+    ...toAddressFormValues(trip),
     planningDate: trip.planningDate ?? "",
     vehicleId: trip.vehicleId ?? NONE,
     /*
@@ -76,11 +94,10 @@ function toFormValues(trip: Trip): FormValues {
      */
     waitingBegin: toClockLabel(trip.waitingTimeStart) ?? "",
     waitingEnd: toClockLabel(trip.waitingTimeEnd) ?? "",
+    waitingEndsNextDay: trip.waitingTimeEndsNextDay,
     distanceKm: trip.distanceKm ?? "",
-    // The input needs `YYYY-MM-DDTHH:mm`; the backend sends a full ISO string.
-    executionDatetime: trip.executionDatetime
-      ? trip.executionDatetime.slice(0, 16)
-      : "",
+    // The input holds a LOCAL `YYYY-MM-DDTHH:mm`; the backend sends an instant.
+    executionDatetime: toLocalDateTimeInput(trip.executionDatetime),
     internalNotes: trip.internalNotes ?? "",
   };
 }
@@ -165,7 +182,10 @@ export function TripEditForm({
     setError(null);
 
     try {
-      await onSave(toPayload(values));
+      await onSave({
+        ...toPayload(values, toFormValues(trip)),
+        ...toChangedAddressPayload(values, trip),
+      });
     } catch (caught: unknown) {
       setError(caught);
     } finally {
@@ -203,6 +223,30 @@ export function TripEditForm({
               hint={t("tripDetail.edit.containerHint")}
             />
 
+            {/* Where the Trip starts, and where it goes. */}
+            <TextField
+              id="terminal"
+              label={t("ritten.column.terminal")}
+              value={values.terminal}
+              onChange={(value) => update({ terminal: value })}
+              maxLength={TERMINAL_MAX_LENGTH}
+              hint={t("tripDetail.edit.addressHint")}
+            />
+            <TextField
+              id="destinationCity"
+              label={t("tripDetail.field.city")}
+              value={values.destinationCity}
+              onChange={(value) => update({ destinationCity: value })}
+              maxLength={DESTINATION_MAX_LENGTH}
+            />
+            <TextField
+              id="destinationCountry"
+              label={t("tripDetail.field.country")}
+              value={values.destinationCountry}
+              onChange={(value) => update({ destinationCountry: value })}
+              maxLength={DESTINATION_MAX_LENGTH}
+            />
+
             <div>
               <span className="mb-1 block text-xs font-medium uppercase tracking-wide text-muted">
                 {t("ritten.column.waitingTime")}
@@ -224,9 +268,20 @@ export function TripEditForm({
                 />
               </div>
 
+              <div className="mt-1">
+                <WaitingNextDayField
+                  id="waitingEndsNextDay"
+                  begin={values.waitingBegin}
+                  end={values.waitingEnd}
+                  checked={values.waitingEndsNextDay}
+                  onChange={(checked) => update({ waitingEndsNextDay: checked })}
+                />
+              </div>
+
               <WaitingTimeSummary
                 begin={values.waitingBegin}
                 end={values.waitingEnd}
+                endsNextDay={values.waitingEndsNextDay}
                 storedMinutes={trip.waitingTimeMinutes}
               />
 
@@ -319,8 +374,12 @@ export function TripEditForm({
  * value" — not an empty string, and not omission, which would mean "leave it
  * alone". `planningDate` is the exception: it is not nullable, so an empty date
  * is simply not sent.
+ *
+ * The waiting window and "Uitgevoerd op" are sent only when they differ from
+ * what the form OPENED with (`opened`) — see `toChangedWaitingPayload` and
+ * `toChangedExecutionPayload` for why each must not travel along unchanged.
  */
-function toPayload(values: FormValues): UpdateTripPayload {
+function toPayload(values: FormValues, opened: FormValues): UpdateTripPayload {
   return {
     containerNumber: emptyToNull(values.containerNumber),
     planningDate: values.planningDate || undefined,
@@ -329,20 +388,70 @@ function toPayload(values: FormValues): UpdateTripPayload {
     // Trip that still carries an old override keeps it rather than having it
     // silently cleared by an unrelated edit.
     vehicleId: values.vehicleId === NONE ? null : values.vehicleId,
-    /*
-     * The WINDOW is what is sent; the backend derives the duration from it, so
-     * the money and the evidence for it cannot disagree. Blank on both sides
-     * means "not entered here" and the Trip keeps what it had — see
-     * `toUpdatePayload`, which leaves the fields out entirely then.
-     */
-    waitingTimeStart: emptyToNull(values.waitingBegin),
-    waitingTimeEnd: emptyToNull(values.waitingEnd),
+    ...toChangedWaitingPayload(values, opened),
     distanceKm: emptyToNullNumber(values.distanceKm),
-    executionDatetime: values.executionDatetime
-      ? new Date(values.executionDatetime).toISOString()
-      : null,
+    ...toChangedExecutionPayload(values, opened),
     internalNotes: emptyToNull(values.internalNotes),
   };
+}
+
+/**
+ * The waiting window, only when the operator CHANGED it.
+ *
+ * ── THREE CASES, AND WHY "UNCHANGED" MUST SEND NOTHING ──────────────────────
+ *   unchanged       → nothing is sent; the backend leaves all four columns
+ *                     alone and does not reprice for waiting time
+ *   emptied         → both times as null: the explicit removal, which clears
+ *                     the minutes and the next-day flag and reprices
+ *   filled/changed  → both times and the day flag; the backend derives the
+ *                     counted minutes and reprices
+ *
+ * Sending two nulls on EVERY save used to be the removal itself: a Trip with
+ * only stored minutes — its form opens blank, there being no times to show —
+ * lost its waiting time whenever anything else on it was saved, and a CLOSED
+ * Trip was repriced for a waiting time nobody touched.
+ * ────────────────────────────────────────────────────────────────────────────
+ */
+function toChangedWaitingPayload(
+  values: FormValues,
+  opened: FormValues,
+): UpdateTripPayload {
+  const isUnchanged =
+    values.waitingBegin === opened.waitingBegin &&
+    values.waitingEnd === opened.waitingEnd &&
+    values.waitingEndsNextDay === opened.waitingEndsNextDay;
+
+  if (isUnchanged) {
+    return {};
+  }
+
+  return {
+    waitingTimeStart: emptyToNull(values.waitingBegin),
+    waitingTimeEnd: emptyToNull(values.waitingEnd),
+    ...nextDayPayload(
+      values.waitingBegin,
+      values.waitingEnd,
+      values.waitingEndsNextDay,
+    ),
+  };
+}
+
+/**
+ * "Uitgevoerd op", only when the operator CHANGED it.
+ *
+ * The input works in whole local minutes, so even a correct round trip would
+ * drop the stored seconds; an untouched value is therefore not sent at all and
+ * keeps its exact instant. A changed one is the local time that was chosen.
+ */
+function toChangedExecutionPayload(
+  values: FormValues,
+  opened: FormValues,
+): UpdateTripPayload {
+  if (values.executionDatetime === opened.executionDatetime) {
+    return {};
+  }
+
+  return { executionDatetime: fromLocalDateTimeInput(values.executionDatetime) };
 }
 
 /**
@@ -359,14 +468,16 @@ function toPayload(values: FormValues): UpdateTripPayload {
 function WaitingTimeSummary({
   begin,
   end,
+  endsNextDay,
   storedMinutes,
 }: {
   begin: string;
   end: string;
+  endsNextDay: boolean;
   storedMinutes: number | null;
 }) {
   const t = useTranslation();
-  const window = waitingWindowMinutes(begin, end);
+  const window = waitingWindowMinutes(begin, end, endsNextDay);
   const entered = !window.error && window.totalMinutes !== null;
 
   return (

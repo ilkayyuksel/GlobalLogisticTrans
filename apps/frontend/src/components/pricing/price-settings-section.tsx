@@ -7,7 +7,6 @@ import { ErrorState, LoadingState } from "@/components/ui/states";
 import type { useAsync } from "@/hooks/use-async";
 import {
   FUEL_PERCENTAGE_SETTING,
-  TOLL_RATE_PER_KM_SETTING,
   listSettings,
   saveSetting,
 } from "@/lib/api/settings";
@@ -99,16 +98,6 @@ export function PriceSettingsSection({
               <p className="text-[11px] text-muted">
                 {t("settings.pricing.fuel.historyNote")}
               </p>
-
-              <AmountField
-                settings={settings}
-                setting={TOLL_RATE_PER_KM_SETTING}
-                inputId="toll-rate-per-km"
-                labelKey="settings.pricing.toll.label"
-                unit="€ / km"
-                onSaved={onSaved}
-                onFailed={onFailed}
-              />
             </>
           ) : null}
 
@@ -122,7 +111,7 @@ export function PriceSettingsSection({
 /**
  * One configured amount: a number, and a button that saves it.
  *
- * The same control for the fuel percentage and the toll rate, because they are
+ * One control for every configured amount, because they are
  * the same thing — a stored decimal an administrator types. What differs is the
  * label, the unit beside the box and the ceiling, so those are given; the input
  * is a number field with the minimum of zero the backend enforces anyway, so a

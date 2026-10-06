@@ -41,11 +41,10 @@ function buildContext(
       waitingTimeBlockMinutes: 30,
     waitingTimeBlockPrice: "25.00",
     ruleVersion: "2026.1",
-    tollRatePerKm: null,
     },
     assignedCustomProperties: [],
-    routeKilometres: null,
     routeCosts: [],
+    overSt: null,
     costConfirmation: null,
     existingSnapshot: null,
     preparedAt: new Date("2026-08-17T09:00:00.000Z"),
@@ -307,6 +306,7 @@ describe("BasePriceCalculator", () => {
           tripId: TRIP_ID,
           strategy: PricingStrategy.ROUTE_BASED,
           calculationOrder: BASE_PRICE_CALCULATION_ORDER,
+          hasOverSt: false,
         },
       );
     });

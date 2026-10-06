@@ -11,6 +11,7 @@ import { TripStatusBadge } from "./trip-status-badge";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import type { Trip, Vehicle } from "@/lib/api/types";
 import { useTranslation } from "@/lib/i18n/language-provider";
+import { formatLocalDateTime } from "@/lib/calendar/local-date-time";
 import { formatWaitingTime } from "@/lib/waiting-time";
 import { formatCalendarDate } from "@/lib/calendar/calendar-dates";
 
@@ -97,7 +98,7 @@ export function TripSummary({
           />
           <Field
             label={t("tripDetail.field.carriedOutAt")}
-            value={formatDateTime(trip.executionDatetime)}
+            value={formatLocalDateTime(trip.executionDatetime)}
           />
           <Field
             label={t("ritten.filter.vehicle")}
@@ -239,7 +240,3 @@ function formatTimeRange(trip: Trip): string | null {
   return `${trip.startTime} – ${trip.endTime}`;
 }
 
-/** Locale-independent, so a server and a browser render the same string. */
-function formatDateTime(value: string | null): string | null {
-  return value ? value.replace("T", " ").slice(0, 16) : null;
-}

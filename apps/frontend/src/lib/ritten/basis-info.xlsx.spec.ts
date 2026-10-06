@@ -371,6 +371,79 @@ describe("the EK column in a real pricing workbook", () => {
 });
 
 /**
+ * ── EK IS THE BACKEND'S EFFECTIVE CHOICE ────────────────────────────────────
+ * A charged waiting time is the EK source and supersedes the confirmations;
+ * the backend decides, and this sheet prints `trip.pricing.ek`. The Wachttijd
+ * column stays informational beside it.
+ */
+describe("EK when a waiting time is charged", () => {
+  function item(code: string, amount: string, description = code) {
+    return {
+      id: `item-${code}`,
+      tripPricingId: "snapshot-1",
+      pricingComponentId: `component-${code}`,
+      pricingComponentCode: code,
+      customPropertyId: null,
+      description,
+      amount,
+      currency: "EUR",
+      calculationOrder: 1,
+      quantity: null,
+      unitPrice: null,
+    };
+  }
+
+  function snapshotOf(...items: ReturnType<typeof item>[]): PricingSnapshot {
+    return { pricing: { tripId: "trip-1" }, items } as unknown as PricingSnapshot;
+  }
+
+  /** What the backend answers: EK is the waiting time, not 137.50 + 27.50. */
+  const EFFECTIVE = {
+    tarief: "0.00",
+    brandstof: "0.00",
+    backload: "0.00",
+    tol: "0.00",
+    tunnel: "0.00",
+    others: "0.00",
+    ek: "137.50",
+    totaal: "137.50",
+    components: [],
+  } as unknown as Trip["pricing"];
+
+  it("prints the waiting time as EK beside a superseded confirmation", () => {
+    const row = toPricingRow(
+      buildTrip({ pricing: EFFECTIVE }),
+      snapshotOf(
+        item("WAITING_TIME", "137.50"),
+        item("COST_CONFIRMATION", "0.00", "Cost confirmation 4139505"),
+      ),
+    );
+
+    expect(row.ek).toBe(137.5);
+    expect(row.waitingTime).toBe(137.5);
+  });
+
+  /** No confirmation at all: EK still applies, because the waiting time does. */
+  it("prints EK for a waiting time without any confirmation", () => {
+    const row = toPricingRow(
+      buildTrip({ pricing: EFFECTIVE }),
+      snapshotOf(item("WAITING_TIME", "137.50")),
+    );
+
+    expect(row.ek).toBe(137.5);
+  });
+
+  it("leaves EK empty when neither a waiting time nor a confirmation exists", () => {
+    const row = toPricingRow(
+      buildTrip({ pricing: { ...EFFECTIVE, ek: "0.00" } as Trip["pricing"] }),
+      snapshotOf(item("BASE_PRICE", "250.00")),
+    );
+
+    expect(row.ek).toBeNull();
+  });
+});
+
+/**
  * A whole BASIS sheet, written to disk and read back cell by cell.
  *
  * One workbook covering every case the sheet has to get right at once: a

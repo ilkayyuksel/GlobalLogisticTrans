@@ -122,6 +122,8 @@ describe("LOSRIT", () => {
      */
     it("changes nothing else about the Trip", async () => {
       const dialog = await openCreateForm();
+      // The day the list shows is pre-filled; LOSRIT must leave it as it was.
+      const shownDay = (within(dialog).getByLabelText("Datum") as HTMLInputElement).value;
 
       await userEvent.click(within(dialog).getByLabelText("Losrit"));
       await userEvent.click(
@@ -135,7 +137,7 @@ describe("LOSRIT", () => {
       const body = mutationBody("/api/v1/trips") as Record<string, unknown>;
 
       expect(body).not.toHaveProperty("status");
-      expect(body.planningDate).toBeNull();
+      expect(body.planningDate).toBe(shownDay);
       expect(body.vehicleId).toBeNull();
     });
   });
@@ -352,13 +354,14 @@ describe("LOSRIT", () => {
    * without a word — and the backend refuses it outright. The cell is therefore
    * read-only exactly where a save could not succeed.
    */
+  /** Editable on every Trip, imported or not, by decision of the business. */
   describe("the destination of an imported Trip", () => {
-    it("is not editable", async () => {
+    it("is editable", async () => {
       await showTrip({ pdfDocumentId: "pdf-1" });
 
       expect(
-        screen.queryByRole("button", { name: "Bestemming (stad, land)" }),
-      ).toBeNull();
+        screen.getByRole("button", { name: "Bestemming (stad, land)" }),
+      ).toBeInTheDocument();
     });
 
     it("is still shown", async () => {

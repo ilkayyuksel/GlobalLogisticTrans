@@ -40,7 +40,7 @@ one is.
       "departure": "Antwerp",
       "destination": "Kallo",
       "tarief": 100,
-      "kilometres": 25,
+      "toll": 25,
       "tunnel": 0
     },
     {
@@ -50,14 +50,14 @@ one is.
           "departure": "Antwerp",
           "destination": "Kallo",
           "tarief": 100,
-          "kilometres": 25,
+          "toll": 25,
           "tunnel": 0
         },
         {
           "departure": "Kallo",
           "destination": "Antwerp",
           "tarief": 80,
-          "kilometres": 30,
+          "toll": 30,
           "tunnel": 15
         }
       ]
@@ -67,26 +67,29 @@ one is.
 ```
 
 The field names are the API's own — `departure`, `destination`, `tarief`,
-`kilometres`, `tunnel` — the same names the single-route endpoints take and the
+`toll`, `tunnel` — the same names the single-route endpoints take and the
 same ones the OpenAPI schema lists. One vocabulary rather than two spellings of
 each field.
 
 | Entry | Contains |
 |---|---|
-| `NORMAL` | one route: `departure`, `destination`, `tarief`, `kilometres`, `tunnel` |
+| `NORMAL` | one route: `departure`, `destination`, `tarief`, `toll`, `tunnel` |
 | `COMBINATION` | `legs`: exactly two, each a full route price with its own five fields |
 
 At most 500 entries per document. The bound exists because the whole import runs
 in one transaction, and its size decides how long that transaction holds its
 locks.
 
-## No toll, and no active flag
+## Toll is an amount; no distance, and no active flag
 
-A route carries its **distance**. What a Trip pays in toll is that distance times
-`PRICING.TOLL_RATE_PER_KM`, worked out by the Pricing Engine — so no toll amount
-is stored per route and none may be given. An entry naming `toll` is **refused**
-rather than ignored, because ignoring it would let an operator believe a toll had
-been stored. The same goes for `active`, which route prices no longer have.
+A route carries its **Toll** as an amount, like its Tunnel, stored as a route
+cost. An older entry still naming `kilometres` is **refused** rather than
+ignored or converted, because either would let an operator believe the distance
+had been used. The same goes for `active`, which route prices no longer have.
+
+Over ST is not part of the import document: Combinations are created from their
+legs, and Over ST is filled in on the screen (or sent as `overSt` on the
+Combination endpoints).
 
 ## A Combination is exactly two legs
 
@@ -141,7 +144,7 @@ counts and every reason the document would be refused:
     "totalRoutes": 20
   },
   "errors": [
-    { "routeNumber": 4, "legNumber": null, "field": "kilometres", "message": "kilometres is required" },
+    { "routeNumber": 4, "legNumber": null, "field": "toll", "message": "toll is required" },
     { "routeNumber": 9, "legNumber": null, "field": "legs", "message": "a Combination must have exactly 2 legs" },
     { "routeNumber": 11, "legNumber": 2, "field": "tarief", "message": "tarief must not be less than 0" }
   ]
@@ -159,7 +162,7 @@ a screen can say "Route 4" in the operator's own language.
 
 Both endpoints take the document **raw** rather than through a validated DTO. The
 global ValidationPipe strips properties that carry no validation metadata, which
-emptied every entry on its way in, and its field paths (`routes.3.kilometres`)
+emptied every entry on its way in, and its field paths (`routes.3.toll`)
 cannot name the entry at fault. Each entry is therefore validated
 programmatically against the same DTO classes the manual endpoints use, with the
 same options the pipe applies.
@@ -196,8 +199,8 @@ application's one road identity, `isSameRoad` (`route-pricing/route-identity.ts`
 — the rule RoutePricing and RouteCost are matched by. The departure is compared
 as a terminal through `isSameTerminal`, so `PSA Quay 869` and `Quay 869` are one
 place (case and whitespace ignored); the destination is compared exactly. Never an
-ordinary route, never the other leg position, never the global toll rate, From,
-To, the review mark or the group itself.
+ordinary route, never the other leg position, never Over ST, From, To, the review
+mark or the group itself. The values copied are Tarief, Toll and Tunnel.
 
 The GET is the preview the confirmation shows and writes nothing. The POST
 reads the source and the targets inside one transaction and saves each target

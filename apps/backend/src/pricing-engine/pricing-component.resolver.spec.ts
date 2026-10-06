@@ -1,3 +1,4 @@
+import { CombinationRoutePricingService } from "../route-pricing/combination-route-pricing.service";
 import { TripDirection, TripStatus } from "@prisma/client";
 
 import { AppLoggerService } from "../logger/app-logger.service";
@@ -68,7 +69,6 @@ function buildRules(
     waitingTimeBlockMinutes: 30,
     waitingTimeBlockPrice: "25.00",
     ruleVersion: "2026.1",
-    tollRatePerKm: null,
     ...overrides,
   };
 }
@@ -107,6 +107,11 @@ function assignment(
   return { customPropertyId: id, name, pricingComponentId, defaultPrice };
 }
 
+/** No pair is configured unless a test says so: the road match then applies. */
+const combinationPricing = {
+  findConfiguredCombination: jest.fn().mockResolvedValue(null),
+};
+
 describe("PricingComponentResolver", () => {
   let routePricingService: { findConfiguredRoute: jest.Mock };
   let tripCustomProperties: { findByTripId: jest.Mock };
@@ -144,6 +149,7 @@ describe("PricingComponentResolver", () => {
 
     resolver = new PricingComponentResolver(
       routePricingService as unknown as RoutePricingService,
+      combinationPricing as unknown as CombinationRoutePricingService,
       tripCustomProperties as unknown as TripCustomPropertyReadService,
       customPropertyService as unknown as CustomPropertyService,
       trips as unknown as TripReadService,
@@ -324,8 +330,8 @@ describe("PricingComponentResolver", () => {
       expect(matched).toEqual({
         routePricingId: ROUTE_ID,
         basePrice: "380.00",
-        kilometres: "25.00",
         kind: RouteConfigurationKind.NORMAL,
+        overSt: null,
       });
     });
 
@@ -338,8 +344,8 @@ describe("PricingComponentResolver", () => {
       expect(matched).toEqual({
         routePricingId: LEG_ID,
         basePrice: "100.00",
-        kilometres: "25.00",
         kind: RouteConfigurationKind.COMBINATION,
+        overSt: null,
       });
     });
 
@@ -436,15 +442,6 @@ describe("PricingComponentResolver", () => {
       await resolver.resolveConfiguredRoute(buildTrip());
 
       expect(trips.findByGroupId).not.toHaveBeenCalled();
-    });
-
-    /** The distance comes from the row that produced the Tarief, never elsewhere. */
-    it("carries the matched row's distance, blank included", async () => {
-      configure(null, { ...ROUTE_PRICING, kilometres: null });
-
-      expect(
-        (await resolver.resolveConfiguredRoute(buildTrip()))?.kilometres,
-      ).toBeNull();
     });
   });
 
@@ -798,6 +795,8 @@ describe("PricingComponentResolver", () => {
 
       expect(collaborators).toEqual([
         "routePricingService",
+        // Read-only: the Combination configured for a pair of roads.
+        "combinationPricing",
         "tripCustomProperties",
         "customPropertyService",
         "trips",

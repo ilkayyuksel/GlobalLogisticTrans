@@ -65,25 +65,35 @@ export function formatWaitingTime(totalMinutes: number | null): string | null {
 /**
  * ── FROM TWO CLOCK TIMES TO A DURATION ──────────────────────────────────────
  * An operator does not read a duration off anything — they read a clock twice.
- * So the editor asks for the two moments and this works out the minutes, which
- * is what the column stores and what pricing bills from.
+ * So the editor asks for the two moments and this PREVIEWS the minutes the
+ * backend will store and pricing will bill from. The stored value is always
+ * the backend's (`waiting-window.ts`); the same examples are asserted on both
+ * sides so the two cannot drift.
  *
- * The fields hold a TIME OF DAY and nothing else, so the window they describe
- * is always less than 24 hours:
+ * Only the time inside 06:00 → 20:00 counts, on each day the window touches:
  *
- *   end after begin   → the same day.       10:00 → 12:30 is 2 u 30 min
- *   end before begin  → the next day.       22:00 → 02:00 is 4 u
- *   end equal begin   → ZERO, never a day.  10:00 → 10:00 is 0 min
+ *   10:00 → 12:00            same day   → 2 u
+ *   05:00 → 07:00            same day   → 1 u
+ *   10:00 → 08:00 next day              → 12 u
+ *   10:00 → 12:00 next day              → 16 u
+ *   22:00 → 02:00 next day              → 0 min
  *
- * The last one is a decision, not an oversight. "The truck waited exactly
- * twenty-four hours" and "it did not wait" look identical in two time fields,
- * and reading it as a day would bill a full day for a mistyped repeat. Zero is
- * the safe reading; a genuine 24-hour wait needs a way to say so that these
- * fields do not have.
+ * The fields hold a TIME OF DAY, so the day of the end is a separate choice:
+ * "volgende dag". An end before its begin is the next day whether or not it
+ * is ticked — a same-day window cannot run backwards. Equal times without it
+ * are ZERO, never a day: a mistyped repeat must not bill one.
  * ────────────────────────────────────────────────────────────────────────────
  */
 
 const MINUTES_PER_DAY = 24 * MINUTES_PER_HOUR;
+
+/** Waiting counts from 06:00 … */
+const COUNTED_FROM_MINUTE_OF_DAY = 6 * MINUTES_PER_HOUR;
+/** … until 20:00, on every day the window touches. */
+const COUNTED_UNTIL_MINUTE_OF_DAY = 20 * MINUTES_PER_HOUR;
+
+/** A window spans at most the begin day and the day after it. */
+const DAYS_A_WINDOW_CAN_TOUCH = [0, 1] as const;
 
 /** `HH:mm`, as an `<input type="time">` produces it. */
 const CLOCK_TIME = /^([01]\d|2[0-3]):([0-5]\d)$/;
@@ -117,6 +127,7 @@ function toMinutesOfDay(value: string): number | null {
 export function waitingWindowMinutes(
   begin: string,
   end: string,
+  endsNextDay = false,
 ): WaitingWindowResult {
   const trimmedBegin = begin.trim();
   const trimmedEnd = end.trim();
@@ -137,11 +148,37 @@ export function waitingWindowMinutes(
     return { totalMinutes: null, error: "endInvalid" };
   }
 
-  // Past midnight the end is on the next day; equal times are zero, never a day.
+  const isNextDay = endsNextDay || endMinutes < beginMinutes;
+
   return {
-    totalMinutes:
-      endMinutes >= beginMinutes
-        ? endMinutes - beginMinutes
-        : endMinutes + MINUTES_PER_DAY - beginMinutes,
+    totalMinutes: countedMinutesBetween(
+      beginMinutes,
+      endMinutes + (isNextDay ? MINUTES_PER_DAY : 0),
+    ),
   };
+}
+
+/**
+ * Whether the end can only be on the next day: it lies before the begin.
+ *
+ * The editor shows "volgende dag" ticked and fixed then, because unticking it
+ * could not make the window a same-day one.
+ */
+export function isNextDayImplied(begin: string, end: string): boolean {
+  const beginMinutes = toMinutesOfDay(begin);
+  const endMinutes = toMinutesOfDay(end);
+
+  return beginMinutes !== null && endMinutes !== null && endMinutes < beginMinutes;
+}
+
+/** The part of `[from, until)` inside 06:00 → 20:00 on the begin day or the next. */
+function countedMinutesBetween(from: number, until: number): number {
+  return DAYS_A_WINDOW_CAN_TOUCH.reduce<number>((counted, day) => {
+    const dayStart = day * MINUTES_PER_DAY;
+    const overlap =
+      Math.min(until, dayStart + COUNTED_UNTIL_MINUTE_OF_DAY) -
+      Math.max(from, dayStart + COUNTED_FROM_MINUTE_OF_DAY);
+
+    return counted + Math.max(0, overlap);
+  }, 0);
 }

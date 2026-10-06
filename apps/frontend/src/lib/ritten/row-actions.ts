@@ -141,48 +141,6 @@ export const STATUS_CONFIRM_KEYS: Partial<
   CANCELLED: "ritten.confirm.cancel",
 };
 
-/**
- * Whether the fields a transport order STATES may be typed on this Trip.
- *
- * Those are the destination and the transport times. A Trip created by hand has
- * no source document, so the operator is the only possible author of either —
- * and until the backend accepted them, a city or an hour entered wrongly at
- * creation could never be corrected. An IMPORTED Trip still belongs to its
- * document: a later UPDATE re-reads both from the PDF, so anything typed here
- * would be silently overwritten, and the backend refuses it.
- *
- * The same condition the backend applies, so these cells are read-only exactly
- * where a save would be refused rather than offering an edit that cannot work.
- */
-export function canEditDocumentFields(trip: Trip): boolean {
-  return canEdit(trip) && trip.pdfDocumentId === null;
-}
-
-/**
- * Whether the operator may type this Trip's DESTINATION.
- *
- * ── WHY THE DESTINATION IS NOT LIKE THE OTHER DOCUMENT FIELDS ───────────────
- * A document owns what it SAYS, not what it never said. Some real orders state
- * no destination at all — the address block holds a postcode, a company and a
- * street, and nothing more — and the parser imports those with an empty city
- * rather than refusing a transport nobody could unblock. The operator is then
- * the only possible author of the address, so the row has to let them write it.
- *
- * Where the document DID name a destination the field stays closed, exactly as
- * before: a later UPDATE re-reads it and would overwrite anything typed over
- * it, so the backend refuses the edit and the row must not offer it.
- *
- * Mirrors `assertDocumentFieldsEditable` on the backend, which enforces the
- * same rule per FIELD. As with every mirror in this file, the backend decides
- * and this only chooses what to put on screen.
- */
-export function canEditDestination(trip: Trip): boolean {
-  return (
-    canEdit(trip) &&
-    (canEditDocumentFields(trip) || trip.destinationCity === null)
-  );
-}
-
 /** A DELETED Trip is read-only until it is restored. */
 export function canEdit(trip: Trip): boolean {
   return trip.status !== "DELETED";

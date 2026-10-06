@@ -36,11 +36,19 @@ describe("Manual Trip creation", () => {
     window.localStorage.clear();
   });
 
-  async function openForm(): Promise<HTMLElement> {
+  /**
+   * Opens the dialog from the Ritten page, in the view named. The page opens on
+   * the DAY view of today (13 August here), which pre-dates a new Trip.
+   */
+  async function openForm(view?: "Week" | "Maand"): Promise<HTMLElement> {
     respondWith(requestMock, { trips: buildPage([buildTrip()]) });
 
     renderRitten();
     await screen.findByRole("table");
+
+    if (view) {
+      await userEvent.click(screen.getByRole("radio", { name: view }));
+    }
 
     await userEvent.click(
       screen.getByRole("button", { name: "+ Nieuwe rit" }),
@@ -67,9 +75,10 @@ describe("Manual Trip creation", () => {
     ).toBeInTheDocument();
   });
 
+  /** In a week no day is pre-filled, so an untouched form is truly empty. */
   describe("an entirely empty Trip", () => {
     it("can be submitted", async () => {
-      const dialog = await openForm();
+      const dialog = await openForm("Week");
 
       await userEvent.click(
         within(dialog).getByRole("button", { name: "Rit aanmaken" }),
@@ -79,7 +88,7 @@ describe("Manual Trip creation", () => {
     });
 
     it("sends null for every field, and no placeholder", async () => {
-      const dialog = await openForm();
+      const dialog = await openForm("Week");
 
       await userEvent.click(
         within(dialog).getByRole("button", { name: "Rit aanmaken" }),
@@ -100,7 +109,8 @@ describe("Manual Trip creation", () => {
         terminal: null,
         destinationCity: null,
         destinationCountry: null,
-        waitingTimeMinutes: null,
+        waitingTimeStart: null,
+        waitingTimeEnd: null,
         distanceKm: null,
         internalNotes: null,
         // The one field that is not "unknown": the operator did not tick it,
@@ -113,7 +123,7 @@ describe("Manual Trip creation", () => {
     });
 
     it("closes and reports success", async () => {
-      const dialog = await openForm();
+      const dialog = await openForm("Week");
 
       await userEvent.click(
         within(dialog).getByRole("button", { name: "Rit aanmaken" }),
@@ -130,7 +140,7 @@ describe("Manual Trip creation", () => {
      * the backend stored, in the position its ordering puts it.
      */
     it("refetches the list instead of inventing a row", async () => {
-      const dialog = await openForm();
+      const dialog = await openForm("Week");
       const listCallsBefore = requestMock.mock.calls.length;
 
       await userEvent.click(
@@ -142,6 +152,88 @@ describe("Manual Trip creation", () => {
           listCallsBefore + 1,
         ),
       );
+    });
+  });
+
+  /**
+   * ── THE DATE IT OPENS WITH ──────────────────────────────────────────────
+   * The day the list shows, when it shows exactly one. A week or a month names
+   * no single day, so the field starts empty there — never the Monday, the
+   * first or today.
+   */
+  describe("the date it opens with", () => {
+    const dateField = (dialog: HTMLElement) => within(dialog).getByLabelText("Datum");
+
+    function goToDay(day: string): void {
+      fireEvent.change(document.getElementById("ritten-period-picker") as HTMLElement, {
+        target: { value: day },
+      });
+    }
+
+    it("is the day the list shows", async () => {
+      const dialog = await openForm();
+
+      expect(dateField(dialog)).toHaveValue("2026-08-13");
+    });
+
+    it("is the day navigated to, not today", async () => {
+      respondWith(requestMock, { trips: buildPage([buildTrip()]) });
+      renderRitten();
+      await screen.findByRole("table");
+
+      goToDay("2026-10-04");
+      await userEvent.click(screen.getByRole("button", { name: "+ Nieuwe rit" }));
+
+      expect(dateField(await screen.findByRole("dialog"))).toHaveValue("2026-10-04");
+    });
+
+    it("follows the day when it changes during the session", async () => {
+      respondWith(requestMock, { trips: buildPage([buildTrip()]) });
+      renderRitten();
+      await screen.findByRole("table");
+
+      await userEvent.click(screen.getByRole("button", { name: "+ Nieuwe rit" }));
+      let dialog = await screen.findByRole("dialog");
+      expect(dateField(dialog)).toHaveValue("2026-08-13");
+      await userEvent.click(within(dialog).getByRole("button", { name: "Annuleren" }));
+
+      await userEvent.click(screen.getByRole("button", { name: "Volgende" }));
+      await userEvent.click(screen.getByRole("button", { name: "+ Nieuwe rit" }));
+      dialog = await screen.findByRole("dialog");
+
+      expect(dateField(dialog)).toHaveValue("2026-08-14");
+    });
+
+    it.each(["Week", "Maand"] as const)("is empty in the %s view", async (view) => {
+      const dialog = await openForm(view);
+
+      expect(dateField(dialog)).toHaveValue("");
+    });
+
+    it("is only a default: the operator may pick another day", async () => {
+      const dialog = await openForm();
+
+      fireEvent.change(dateField(dialog), { target: { value: "2026-08-15" } });
+      await userEvent.click(within(dialog).getByRole("button", { name: "Rit aanmaken" }));
+
+      await waitFor(() => expect(createCall()).toBeDefined());
+
+      const [, options] = createCall() as [string, { body?: never }];
+
+      expect(options.body).toMatchObject({ planningDate: "2026-08-15" });
+    });
+
+    it("can be cleared, which sends no date", async () => {
+      const dialog = await openForm();
+
+      fireEvent.change(dateField(dialog), { target: { value: "" } });
+      await userEvent.click(within(dialog).getByRole("button", { name: "Rit aanmaken" }));
+
+      await waitFor(() => expect(createCall()).toBeDefined());
+
+      const [, options] = createCall() as [string, { body?: never }];
+
+      expect(options.body).toMatchObject({ planningDate: null });
     });
   });
 
@@ -165,7 +257,8 @@ describe("Manual Trip creation", () => {
       expect(options.body).toMatchObject({
         bookingNumber: "BK-2026-9001",
         terminal: "Quay 869",
-        planningDate: null,
+        // The day the list was showing: a default, sent like any entry.
+        planningDate: "2026-08-13",
         vehicleId: null,
       });
     });
@@ -180,7 +273,8 @@ describe("Manual Trip creation", () => {
       ).toBeInTheDocument();
     });
 
-    it("turns two clock times into total minutes", async () => {
+    /** The window is sent; the backend derives the counted minutes. */
+    it("sends the two clock times as the window", async () => {
       const dialog = await openForm();
 
       fireEvent.change(within(dialog).getByLabelText("Wachttijd begin"), {
@@ -197,11 +291,16 @@ describe("Manual Trip creation", () => {
 
       const [, options] = createCall() as [string, { body?: never }];
 
-      expect(options.body).toMatchObject({ waitingTimeMinutes: 150 });
+      expect(options.body).toMatchObject({
+        waitingTimeStart: "10:00",
+        waitingTimeEnd: "12:30",
+        waitingTimeEndsNextDay: false,
+      });
+      expect(options.body).not.toHaveProperty("waitingTimeMinutes");
     });
 
-    /** A window across midnight is four hours, never minus twenty. */
-    it("turns a window across midnight into total minutes", async () => {
+    /** An end before its begin can only be the next day. */
+    it("sends a window across midnight as ending the next day", async () => {
       const dialog = await openForm();
 
       fireEvent.change(within(dialog).getByLabelText("Wachttijd begin"), {
@@ -218,7 +317,40 @@ describe("Manual Trip creation", () => {
 
       const [, options] = createCall() as [string, { body?: never }];
 
-      expect(options.body).toMatchObject({ waitingTimeMinutes: 240 });
+      expect(options.body).toMatchObject({
+        waitingTimeStart: "22:00",
+        waitingTimeEnd: "02:00",
+        waitingTimeEndsNextDay: true,
+      });
+    });
+
+    it("sends the next-day choice and previews the counted hours", async () => {
+      const dialog = await openForm();
+
+      fireEvent.change(within(dialog).getByLabelText("Wachttijd begin"), {
+        target: { value: "10:00" },
+      });
+      fireEvent.change(within(dialog).getByLabelText("Wachttijd eind"), {
+        target: { value: "12:00" },
+      });
+      expect(await within(dialog).findByText("2 u")).toBeInTheDocument();
+
+      await userEvent.click(within(dialog).getByLabelText("Volgende dag"));
+      expect(await within(dialog).findByText("16 u")).toBeInTheDocument();
+
+      await userEvent.click(
+        within(dialog).getByRole("button", { name: "Rit aanmaken" }),
+      );
+
+      await waitFor(() => expect(createCall()).toBeDefined());
+
+      const [, options] = createCall() as [string, { body?: never }];
+
+      expect(options.body).toMatchObject({
+        waitingTimeStart: "10:00",
+        waitingTimeEnd: "12:00",
+        waitingTimeEndsNextDay: true,
+      });
     });
 
     it("shows the duration the two times describe", async () => {

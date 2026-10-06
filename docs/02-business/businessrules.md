@@ -226,13 +226,38 @@ confirmation is stored with its PDF, and:
 A confirmation for a booking nobody holds is refused and nothing is written.
 The email stays unread, so the next scan offers it again once the Trip exists.
 
-### It is not the waiting time
+### It is not the waiting time — and EK is one of the two, never both
 
 Waiting time is minutes an operator enters, and the Pricing Engine prices them
 through the configured rule. A Cost Confirmation is the money Eucon confirms for
-those minutes. Both belong to the same Trip and neither replaces the other. The
-confirmed amount is shown separately and is NOT merged into the WAITING_TIME
-pricing line.
+those minutes. Both belong to the same Trip and are stored separately; the
+confirmed amount is never merged into the WAITING_TIME pricing line.
+
+A Trip's EK is ONE source, in this order:
+
+1. the operator's waiting time, when its price is above €0;
+2. otherwise the Cost Confirmations, summed;
+3. otherwise €0.
+
+The two are never added: a confirmed €27.50 beside a waiting time of €137.50 is
+EK €137.50, not €165.00. A waiting time priced at €0 — below the threshold, or
+entirely outside 06:00–20:00 — does not displace a confirmation. Removing the
+waiting time makes the confirmations the EK again.
+
+Because the waiting time is an EK source, it is NOT part of Others; Others is the
+priced Custom Properties alone. The waiting time therefore counts once in Totaal.
+
+Where it is decided:
+
+- the Pricing Engine writes the Cost Confirmation line at €0 when a charged
+  waiting time precedes it, still naming the documents (so Remarks keeps the CC
+  references), and the stored total counts the waiting time once;
+- the effective read (`effective-pricing.ts`) chooses EK by the same rule, so
+  a snapshot written before the rule reads correctly too.
+
+The confirmation records themselves are never changed or deleted by this: they
+stay stored and auditable. The Prijsoverzicht export keeps its informational
+Wachttijd column beside EK.
 
 ### It cannot be edited
 

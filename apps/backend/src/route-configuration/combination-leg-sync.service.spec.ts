@@ -23,7 +23,7 @@ import { RouteConfigurationUnitOfWork } from "./route-configuration.unit-of-work
 function leg(
   departure: string,
   destination: string,
-  prices: { tarief: string; kilometres: string | null; tunnel: string },
+  prices: { tarief: string; toll: string; tunnel: string },
   combinationGroupId: string,
   position: 1 | 2,
 ): RouteConfigurationDto {
@@ -32,7 +32,8 @@ function leg(
     departure,
     destination,
     tarief: prices.tarief,
-    kilometres: prices.kilometres,
+    toll: prices.toll,
+    hasToll: true,
     tunnel: prices.tunnel,
     hasTunnel: prices.tunnel !== "0.00",
     type: "COMBINATION",
@@ -43,8 +44,8 @@ function leg(
 
 function combination(
   id: string,
-  first: [string, string, { tarief: string; kilometres: string | null; tunnel: string }],
-  second: [string, string, { tarief: string; kilometres: string | null; tunnel: string }],
+  first: [string, string, { tarief: string; toll: string; tunnel: string }],
+  second: [string, string, { tarief: string; toll: string; tunnel: string }],
   reviewed = false,
 ): CombinationRouteConfigurationDto {
   return {
@@ -54,13 +55,15 @@ function combination(
       leg(first[0], first[1], first[2], id, 1),
       leg(second[0], second[1], second[2], id, 2),
     ],
+    // Every Combination carries its own Over ST, which a sync must never touch.
+    overSt: { tarief: `${id}-st`, toll: "5.00", tunnel: null },
   };
 }
 
 const QUAY = "PSA Quay 869";
-const prices = (tarief: string, kilometres: string | null, tunnel: string) => ({
+const prices = (tarief: string, toll: string, tunnel: string) => ({
   tarief,
-  kilometres,
+  toll,
   tunnel,
 });
 
@@ -71,7 +74,7 @@ function theExample(): CombinationRouteConfigurationDto[] {
     combination("B", [QUAY, "GENT", prices("120.00", "25.00", "15.00")], ["GENT", "BRUSSELS", prices("90.00", "40.00", "0.00")], true),
     combination("C", ["ANTWERP", "GENT", prices("70.00", "20.00", "0.00")], ["GENT", "LESSINES", prices("60.00", "30.00", "0.00")]),
     combination("D", ["GENT", "ZEMST", prices("55.00", "15.00", "0.00")], [QUAY, "GENT", prices("99.00", "99.00", "9.00")]),
-    combination("E", [QUAY, "GENT", prices("140.00", null, "0.00")], ["GENT", "AALST", prices("75.00", "28.00", "0.00")]),
+    combination("E", [QUAY, "GENT", prices("140.00", "0.00", "0.00")], ["GENT", "AALST", prices("75.00", "28.00", "0.00")]),
   ];
 }
 
@@ -108,13 +111,20 @@ function harness(initial: CombinationRouteConfigurationDto[], failOnUpdateOf?: s
           ? each
           : {
               ...each,
+              // Over ST is written only when the update sends it.
+              overSt: dto.overSt
+                ? {
+                    tarief: dto.overSt.tarief?.toFixed(2) ?? null,
+                    toll: dto.overSt.toll?.toFixed(2) ?? null,
+                    tunnel: dto.overSt.tunnel?.toFixed(2) ?? null,
+                  }
+                : each.overSt,
               legs: each.legs.map((stored, index) => ({
                 ...stored,
                 departure: dto.legs[index].departure,
                 destination: dto.legs[index].destination,
                 tarief: dto.legs[index].tarief.toFixed(2),
-                kilometres:
-                  dto.legs[index].kilometres === null ? null : dto.legs[index].kilometres!.toFixed(2),
+                toll: dto.legs[index].toll.toFixed(2),
                 tunnel: dto.legs[index].tunnel.toFixed(2),
               })),
             },
@@ -156,7 +166,7 @@ function harness(initial: CombinationRouteConfigurationDto[], failOnUpdateOf?: s
 
 const pricesOf = (route: RouteConfigurationDto) => ({
   tarief: route.tarief,
-  kilometres: route.kilometres,
+  toll: route.toll,
   tunnel: route.tunnel,
 });
 
@@ -202,7 +212,7 @@ describe("which legs are the same road, by the shared route identity", () => {
     [departure, destination, prices("1.00", "1.00", "0.00")] as [
       string,
       string,
-      { tarief: string; kilometres: string | null; tunnel: string },
+      { tarief: string; toll: string; tunnel: string },
     ];
   const other = (id: string) => leg(`OTHER-${id}`, `ELSEWHERE-${id}`);
   const source = combination("S", leg(QUAY), other("S"));
@@ -256,7 +266,7 @@ describe("which legs are the same road, by the shared route identity", () => {
     const { service, get } = harness(
       all.map((each, index) =>
         index === 0
-          ? { ...each, legs: [{ ...each.legs[0], tarief: "150.00", kilometres: "33.00", tunnel: "12.00" }, each.legs[1]] }
+          ? { ...each, legs: [{ ...each.legs[0], tarief: "150.00", toll: "33.00", tunnel: "12.00" }, each.legs[1]] }
           : each,
       ),
     );
@@ -380,14 +390,38 @@ describe("synchronising a leg's prices", () => {
     expect(get("E").reviewed).toBe(false);
   });
 
-  /** An unmeasured distance stays unmeasured on the way through. */
-  it("carries an unmeasured source distance across as unmeasured", async () => {
+  /** A toll of zero is a value like any other, and is copied as one. */
+  it("copies a zero source toll as zero", async () => {
     const { service, get } = harness(theExample());
 
     await service.sync("E", 1);
 
-    expect(get("A").legs[0].kilometres).toBeNull();
-    expect(get("B").legs[0].kilometres).toBeNull();
+    expect(get("A").legs[0].toll).toBe("0.00");
+    expect(get("B").legs[0].toll).toBe("0.00");
+  });
+
+  /** Over ST belongs to each Combination: a sync never sends or changes it. */
+  it("leaves every Combination's Over ST exactly as it was", async () => {
+    const { service, get, combinations } = harness(theExample());
+
+    await service.sync("A", 1);
+
+    for (const [, dto] of combinations.update.mock.calls) {
+      expect(dto).not.toHaveProperty("overSt");
+    }
+    expect(get("B").overSt).toEqual({ tarief: "B-st", toll: "5.00", tunnel: null });
+    expect(get("E").overSt).toEqual({ tarief: "E-st", toll: "5.00", tunnel: null });
+  });
+
+  /** Leg 2 syncs only other Leg 2s; a Leg 1 on the same road is not reached. */
+  it("reaches only Leg 2 targets for a Leg 2 sync", async () => {
+    const { service, get } = harness(theExample());
+
+    // D's Leg 2 is PSA Quay 869 → GENT, the road A, B and E run as Leg 1.
+    await service.sync("D", 2);
+
+    expect(pricesOf(get("A").legs[0])).toEqual(prices("100.00", "25.00", "10.00"));
+    expect(pricesOf(get("B").legs[0])).toEqual(prices("120.00", "25.00", "15.00"));
   });
 
   /** N — one target refused: none is written. */
@@ -411,7 +445,7 @@ describe("synchronising a leg's prices", () => {
   /** O — the source's values are whatever it stores NOW, e.g. right after an inline edit. */
   it("uses the source leg's current stored values", async () => {
     const changed = theExample();
-    changed[0].legs[0] = { ...changed[0].legs[0], tarief: "125.00", kilometres: "32.00", tunnel: "8.00" };
+    changed[0].legs[0] = { ...changed[0].legs[0], tarief: "125.00", toll: "32.00", tunnel: "8.00" };
     const { service, get } = harness(changed);
 
     await service.sync("A", 1);
@@ -431,7 +465,7 @@ describe("synchronising a leg's prices", () => {
     for (const [, dto] of combinations.update.mock.calls) {
       expect(Object.keys(dto)).toEqual(["legs"]);
       for (const payload of (dto as SaveCombinationRouteConfigurationDto).legs) {
-        expect(Object.keys(payload).sort()).toEqual(["departure", "destination", "kilometres", "tarief", "tunnel"]);
+        expect(Object.keys(payload).sort()).toEqual(["departure", "destination", "tarief", "toll", "tunnel"]);
       }
     }
   });
@@ -446,7 +480,7 @@ describe("synchronising a leg's prices", () => {
       legPosition: 1,
       departure: QUAY,
       destination: "GENT",
-      prices: { tarief: "100.00", kilometres: "25.00", tunnel: "10.00" },
+      prices: { tarief: "100.00", toll: "25.00", tunnel: "10.00" },
       targetCombinationGroupIds: ["B", "E"],
     });
     expect(combinations.update).not.toHaveBeenCalled();

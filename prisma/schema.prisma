@@ -414,14 +414,19 @@ model Trip {
   /// 135 minutes has unlimited begin/end pairs and inventing one would put
   /// times on screen that nobody ever read off a clock.
   ///
-  /// These are TIME, not timestamps, and the window they describe is always
-  /// less than a day: an end before a begin is the next morning, and equal
-  /// times are zero rather than twenty-four hours.
+  /// These are TIME, not timestamps, so the day the end falls on is stated by
+  /// `waitingTimeEndsNextDay`: true when the end is on the day after the
+  /// begin. An end before its begin is always stored as next day; equal times
+  /// without the flag are zero rather than twenty-four hours.
+  ///
+  /// The minutes count only the time inside 06:00 → 20:00 on each day the
+  /// window touches — see `waiting-window.ts`.
   ///
   /// NOT start_time/end_time, which are the transport's own planned window.
-  waitingTimeStart   DateTime? @map("waiting_time_start") @db.Time(6)
-  waitingTimeEnd     DateTime? @map("waiting_time_end") @db.Time(6)
-  waitingTimeMinutes Int?      @map("waiting_time_minutes")
+  waitingTimeStart       DateTime? @map("waiting_time_start") @db.Time(6)
+  waitingTimeEnd         DateTime? @map("waiting_time_end") @db.Time(6)
+  waitingTimeEndsNextDay Boolean   @default(false) @map("waiting_time_ends_next_day")
+  waitingTimeMinutes     Int?      @map("waiting_time_minutes")
   /// Manually entered. Used only by the Distance-Based pricing strategy.
   distanceKm         Decimal?  @map("distance_km") @db.Decimal(8, 2)
 
@@ -984,17 +989,13 @@ model RoutePricing {
 
   basePrice Decimal @map("base_price") @db.Decimal(12, 2)
 
-  /// The length of the route, in kilometres.
+  /// LEGACY — no longer read or written by the application.
   ///
-  /// The Toll is derived from it — kilometres times the configured toll rate —
-  /// so a route carries its DISTANCE rather than a toll amount of its own.
-  /// Decimal(8,2) to match `trip.distance_km`, which is the same quantity
-  /// measured on a different thing.
-  ///
-  /// Nullable because it cannot be derived for routes configured before this
-  /// existed: a stored toll amount does not say how long a road is. A route
-  /// without it is charged no toll until somebody states the distance, which is
-  /// the same silence an unconfigured route has always produced.
+  /// For a while the Toll was derived as these kilometres times one global rate.
+  /// The Toll is a stored AMOUNT per route again (a TOLL row in `route_cost`,
+  /// like the Tunnel), so nothing uses the distance any more. The column is kept
+  /// so the distances operators entered in that period are not lost; a Trip
+  /// priced then carries the distance and the rate on its own toll line.
   kilometres Decimal? @db.Decimal(8, 2)
 
   notes String? @db.Text
@@ -1115,6 +1116,22 @@ model CombinationRouteGroup {
   ///
   /// Bookkeeping only. Nothing about pricing reads it.
   reviewed Boolean @default(false)
+
+  /// Over ST: the Combination's own Tarief, Toll and Tunnel, beside its legs.
+  ///
+  /// ── PART OF THE COMBINATION, NOT A THIRD LEG ──────────────────────────────
+  /// It has no departure or destination, so it is not a route and is not a
+  /// row of `route_pricing`; it belongs to exactly one Combination, so it lives
+  /// on the group itself and goes when the group goes.
+  ///
+  /// Charged on LEG 2 only, when Leg 2's planningDate differs from Leg 1's — see
+  /// `pricing-engine/combination-over-st.ts` and pricing_rules.md, "Over ST".
+  ///
+  /// NULL means nobody has stated the amount, which is not an explicit zero.
+  /// Money as everywhere else: Decimal(12,2), a CHECK keeps each >= 0.
+  overStBasePrice Decimal? @map("over_st_base_price") @db.Decimal(12, 2)
+  overStToll      Decimal? @map("over_st_toll") @db.Decimal(12, 2)
+  overStTunnel    Decimal? @map("over_st_tunnel") @db.Decimal(12, 2)
 
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)

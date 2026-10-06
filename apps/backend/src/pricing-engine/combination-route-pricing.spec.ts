@@ -1,3 +1,4 @@
+import { CombinationRoutePricingService } from "../route-pricing/combination-route-pricing.service";
 import { TripDirection, TripStatus } from "@prisma/client";
 
 import { CostConfirmationReadService } from "../cost-confirmations/cost-confirmation-read.service";
@@ -29,7 +30,6 @@ const DOCUMENT_ID = "pdf-combination-1";
 const NORMAL_ROUTE_ID = "9c858901-8a57-4791-81fe-4c455b099bc9";
 const COMBINATION_LEG_ID = "5a1f0c1e-2b3d-4e5f-8a9b-0c1d2e3f4a5b";
 
-const TUNNEL_COMPONENT_ID = "2c9d6bcd-bbfd-4b2d-9b5d-ab8dfbbd4bed";
 
 /**
  * ONE ROAD, TWO CONFIGURATIONS — and a Trip is priced against the right one.
@@ -92,7 +92,6 @@ const RULES = {
   waitingTimeBlockMinutes: 15,
   waitingTimeBlockPrice: "13.75",
   ruleVersion: "2026.1",
-  tollRatePerKm: "0.39",
 };
 
 /** The ordinary configuration of Antwerp to Kallo. */
@@ -121,15 +120,29 @@ const COMBINATION_LEG = {
 };
 
 function tunnelCost(id: string, amount: string, routePricingId: string | null) {
+  return routeCost(id, "TUNNEL", amount, routePricingId);
+}
+
+/** The toll is a route cost again, owned by the road or by the leg. */
+function tollCost(id: string, amount: string, routePricingId: string | null) {
+  return routeCost(id, "TOLL", amount, routePricingId);
+}
+
+function routeCost(
+  id: string,
+  code: "TOLL" | "TUNNEL",
+  amount: string,
+  routePricingId: string | null,
+) {
   return {
     id,
     departure: "Antwerp",
     destination: "Kallo",
-    pricingComponentId: TUNNEL_COMPONENT_ID,
+    pricingComponentId: `component-${code}`,
     pricingComponent: {
-      id: TUNNEL_COMPONENT_ID,
-      code: "TUNNEL",
-      name: "Tunnel",
+      id: `component-${code}`,
+      code,
+      name: code,
     },
     amount,
     routePricingId,
@@ -176,6 +189,11 @@ function manualGroup() {
   ];
 }
 
+/** No pair is configured unless a test says so: the road match then applies. */
+const combinationPricing = {
+  findConfiguredCombination: jest.fn().mockResolvedValue(null),
+};
+
 describe("one road configured as an ordinary route and as a Combination leg", () => {
   let trips: { findById: jest.Mock; findByGroupId: jest.Mock };
   let routePricing: { findConfiguredRoute: jest.Mock };
@@ -217,11 +235,15 @@ describe("one road configured as an ordinary route and as a Combination leg", ()
       // The road's tunnel: what every ordinary Trip on it pays.
       findActiveForRoute: jest
         .fn()
-        .mockResolvedValue([tunnelCost("cost-road", "12.50", null)]),
+        .mockResolvedValue([
+          tollCost("cost-road-toll", "15.60", null),
+          tunnelCost("cost-road", "12.50", null),
+        ]),
       // The leg's own tunnel, owned by the leg and reached only through it.
       findActiveForRoutePricing: jest
         .fn()
         .mockResolvedValue([
+          tollCost("cost-leg-toll", "9.75", COMBINATION_LEG_ID),
           tunnelCost("cost-leg", "3.75", COMBINATION_LEG_ID),
         ]),
     };
@@ -241,6 +263,7 @@ describe("one road configured as an ordinary route and as a Combination leg", ()
       ruleResolver,
       new PricingComponentResolver(
         routePricing as unknown as RoutePricingService,
+        combinationPricing as unknown as CombinationRoutePricingService,
         { findByTripId: jest.fn().mockResolvedValue([]) } as unknown as
           TripCustomPropertyReadService,
         {
@@ -281,7 +304,7 @@ describe("one road configured as an ordinary route and as a Combination leg", ()
     it("is priced against the ordinary configuration, not the Combination", async () => {
       expect(await amountsOf()).toMatchObject({
         BASE_PRICE: "380.00",
-        // 40 km at 0.39 — the ordinary route's distance, not the leg's 25.
+        // The ordinary route's own toll, not the leg's.
         TOLL: "15.60",
         TUNNEL: "12.50",
       });
@@ -312,7 +335,7 @@ describe("one road configured as an ordinary route and as a Combination leg", ()
     it("is priced against the Combination configuration of its road", async () => {
       expect(await amountsOf()).toMatchObject({
         BASE_PRICE: "100.00",
-        // 25 km at 0.39 — the LEG's distance.
+        // The LEG's own toll, not the road's 15.60.
         TOLL: "9.75",
         // The leg's own tunnel, not the road's 12.50.
         TUNNEL: "3.75",

@@ -4,6 +4,7 @@ import { Prisma, Trip, TripStatus } from "@prisma/client";
 import { toUtcDate } from "../common/dates";
 import { toUtcTime } from "../common/time-of-day";
 import { AppLoggerService } from "../logger/app-logger.service";
+import { PricingRecalculationService } from "../pricing-engine/pricing-recalculation.service";
 import { ImportedTripData } from "./import-trips.command";
 import {
   resolveTripForDocument,
@@ -20,6 +21,10 @@ import {
   revisedContainerNumber,
 } from "./trip-history";
 import { AutomaticFlatPropertyService } from "./automatic-flat.service";
+import {
+  movesPlanningDate,
+  repriceAfterPlanningDateChange,
+} from "./planning-date-change";
 import { TripIdentity, TripRepository } from "./trip.repository";
 
 /**
@@ -155,6 +160,7 @@ export class TripRevisionService {
   constructor(
     private readonly repository: TripRepository,
     private readonly automaticFlat: AutomaticFlatPropertyService,
+    private readonly recalculation: PricingRecalculationService,
     private readonly logger: AppLoggerService,
   ) {
     this.logger.setContext(TripRevisionService.name);
@@ -290,14 +296,16 @@ export class TripRevisionService {
    *   CANCELLED  → refused. A revision does not resurrect cancelled work.
    *   no Trip    → refused. A revision of nothing is not a new order.
    *
-   * Nothing is priced here, and no pricing is invalidated: the Trip stays OPEN,
-   * and an OPEN Trip has no pricing to invalidate. Pricing happens when a Trip
-   * is closed, exactly as before.
+   * The revised Trip itself is not priced: it stays OPEN, and an OPEN Trip has
+   * no pricing to invalidate. Pricing happens when it is closed, exactly as
+   * before. The one exception is its CLOSED Combination partner when the
+   * document moved this Trip's date — see `repriceIfMovedDay`.
    */
   async applyDocumentRevision(
     document: ImportedTripData,
     source?: DocumentReference,
   ): Promise<RevisionResult> {
+    let movedDay = false;
     const result = await this.repository.runTripWriteTransaction(
       async ({
         trips: repository,
@@ -385,10 +393,9 @@ export class TripRevisionService {
          */
         const changes = detectFieldChanges(trip, document);
 
-        const updated = await repository.update(
-          trip.id,
-          this.toRevisedFields(trip, document),
-        );
+        const revised = this.toRevisedFields(trip, document);
+        movedDay = movesPlanningDate(trip, revised);
+        const updated = await repository.update(trip.id, revised);
 
         /*
          * The container type may just have changed, and the Flat property has
@@ -419,6 +426,8 @@ export class TripRevisionService {
       tripId: result.trip?.id ?? null,
       changedFields: result.changedFields,
     });
+
+    await this.repriceIfMovedDay(movedDay, result);
 
     return result;
   }
@@ -455,6 +464,7 @@ export class TripRevisionService {
     document: ImportedTripData,
     source?: DocumentReference,
   ): Promise<RevisionResult> {
+    let movedDay = false;
     const result = await this.repository.runTripWriteTransaction(
       async ({
         trips: repository,
@@ -492,10 +502,9 @@ export class TripRevisionService {
           });
         }
 
-        const updated = await repository.update(
-          trip.id,
-          this.toRevisedFields(trip, document),
-        );
+        const revised = this.toRevisedFields(trip, document);
+        movedDay = movesPlanningDate(trip, revised);
+        const updated = await repository.update(trip.id, revised);
 
         // The container type may have moved with the rest; Flat follows it.
         await this.automaticFlat.synchronise(
@@ -529,7 +538,34 @@ export class TripRevisionService {
       tripId: result.trip?.id ?? null,
     });
 
+    await this.repriceIfMovedDay(movedDay, result);
+
     return result;
+  }
+
+  /**
+   * Reprices the CLOSED Combination leg a document moved to another day.
+   *
+   * A document only ever rewrites an OPEN Trip, which has no price — but its
+   * partner may be CLOSED, and when the partner is Leg 2 its Over ST depends on
+   * this Trip's date. Which Trips that reaches is the pricing domain's answer;
+   * see `repriceAfterPlanningDateChange`. After the transaction has committed,
+   * so the Engine reads the new date. Never throws: the revision stands.
+   */
+  private async repriceIfMovedDay(
+    movedDay: boolean,
+    result: RevisionResult,
+  ): Promise<void> {
+    if (!movedDay || !result.trip) {
+      return;
+    }
+
+    await repriceAfterPlanningDateChange(
+      result.trip.id,
+      this.recalculation,
+      (tripId) => this.repository.findById(tripId),
+      this.logger,
+    );
   }
 
   /**

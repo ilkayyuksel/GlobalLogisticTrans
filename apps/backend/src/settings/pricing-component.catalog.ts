@@ -149,16 +149,18 @@ export interface RoutePricedPropertyDefinition {
 export const ROUTE_PRICED_PROPERTY_CATALOG: readonly RoutePricedPropertyDefinition[] =
   [
     /*
-     * ── TOLL IS NO LONGER ONE OF THEM ─────────────────────────────────────
-     * A route-priced property exists so a route cost can be attached to a
-     * component. Toll no longer has a route cost: it is the route's length
-     * times the rate configured for the whole business, and the Engine works
-     * it out without any property being assigned.
-     *
-     * Nothing is removed from a database that already has one. The bootstrap
-     * only ever creates what is missing, so an existing Toll property and its
-     * old route costs stay where they are — unread.
+     * Toll is one of them again. For a while it was the route's kilometres
+     * times one global rate and needed no route cost; it is an AMOUNT per route
+     * once more, stored as a TOLL route cost, so the component must be
+     * route-priced for that cost to be accepted. The bootstrap only creates
+     * what is missing, so a Toll property kept from before is reused as it is.
      */
+    {
+      name: "Toll",
+      componentCode: "TOLL",
+      description:
+        "Marks a Trip as owing the toll configured for its route. The amount comes from the route configuration, never from this property.",
+    },
     {
       name: "Tunnel",
       componentCode: "TUNNEL",

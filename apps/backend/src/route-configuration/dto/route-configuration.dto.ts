@@ -5,6 +5,7 @@ import {
   ArrayMinSize,
   IsArray,
   IsNumber,
+  IsOptional,
   IsString,
   Max,
   Min,
@@ -15,13 +16,12 @@ import {
 
 import { MONEY_DECIMAL_PLACES, MONEY_MAX_VALUE } from "../../common/dto/money";
 import { rawValueOf, trim } from "../../common/dto/transforms";
-import { RouteCostResponseDto } from "../../route-costs/dto/route-cost-response.dto";
 import {
-  ROUTE_KILOMETRES_DECIMAL_PLACES,
-  ROUTE_KILOMETRES_MAX,
-} from "../../route-pricing/dto/create-route-pricing.dto";
-import { RoutePricingResponseDto } from "../../route-pricing/dto/route-pricing-response.dto";
+  CombinationOverStDto,
+  RoutePricingResponseDto,
+} from "../../route-pricing/dto/route-pricing-response.dto";
 import { LEGS_PER_COMBINATION_ROUTE } from "../../route-pricing/exceptions/route-pricing.exceptions";
+import type { RouteComponentCosts } from "../route-component-cost.service";
 
 /**
  * Which kind of route configuration a record is.
@@ -29,7 +29,7 @@ import { LEGS_PER_COMBINATION_ROUTE } from "../../route-pricing/exceptions/route
  * ── THE DISCRIMINATOR, SPELLED OUT IN THE API ───────────────────────────────
  * NORMAL is an ordinary route standing on its own. COMBINATION is one LEG of a
  * route group that always has exactly two — an outbound and a return, each with
- * its own Tarief, KM and Tunnel, because the two legitimately cost different
+ * its own Tarief, Toll and Tunnel, because the two legitimately cost different
  * amounts.
  *
  * Both kinds may describe the same departure and destination. That is not a
@@ -103,12 +103,17 @@ export class RouteConfigurationDto {
 
   @ApiProperty({
     type: String,
-    nullable: true,
     example: "25.00",
     description:
-      "The length of the route in kilometres, as a fixed-2 decimal string, or null when nobody has stated it. The Toll a Trip pays is this distance times the configured toll rate, so a route without it is charged no toll.",
+      "The toll AMOUNT of this route, as a fixed-2 decimal string — what a Trip on it is charged in toll. Stored as a route cost, like the Tunnel.",
   })
-  kilometres!: string | null;
+  toll!: string;
+
+  @ApiProperty({
+    description:
+      "Whether a toll was stated for this route at all. False reads as no toll configured, which charges none; an explicit zero is a statement.",
+  })
+  hasToll!: boolean;
 
   @ApiProperty({ type: String, example: "0.00" })
   tunnel!: string;
@@ -148,7 +153,7 @@ export class RouteConfigurationDto {
  */
 export function composeRouteConfiguration(
   route: RoutePricingResponseDto,
-  tunnel: RouteCostResponseDto | null,
+  costs: RouteComponentCosts,
   /**
    * Whose review mark applies: the route's own for an ordinary route, and the
    * GROUP's for a leg — a leg is never reviewed by itself, because it is never
@@ -161,11 +166,10 @@ export function composeRouteConfiguration(
     departure: route.departure,
     destination: route.destination,
     tarief: route.basePrice,
-    // Null travels as null: "nobody has stated the distance" is not the same as
-    // a route of no length, and only the first one charges no toll.
-    kilometres: route.kilometres,
-    tunnel: tunnel?.amount ?? ZERO_AMOUNT,
-    hasTunnel: tunnel !== null,
+    toll: costs.TOLL?.amount ?? ZERO_AMOUNT,
+    hasToll: costs.TOLL !== null,
+    tunnel: costs.TUNNEL?.amount ?? ZERO_AMOUNT,
+    hasTunnel: costs.TUNNEL !== null,
     /*
      * Truthiness rather than a null check: an absent discriminator must read as
      * an ordinary route. Marking one as a Combination is the more damaging
@@ -199,9 +203,8 @@ export function routeNameOf(route: {
  *
  * All of them are required on create: a route configured through this screen is
  * complete by construction, which is the whole reason the abstraction exists.
- * Zero is legitimate for each — a route genuinely without a tunnel, or one that
- * is nought kilometres of tolled road — and is stored as an explicit zero
- * rather than as an absence.
+ * Zero is legitimate for each — a route genuinely without a tunnel or a toll —
+ * and is stored as an explicit zero rather than as an absence.
  */
 export class SaveRouteConfigurationDto {
   @ApiProperty({
@@ -228,37 +231,18 @@ export class SaveRouteConfigurationDto {
   @Max(MONEY_MAX_VALUE)
   tarief!: number;
 
-  /*
-   * A DISTANCE, not an amount: the Toll is derived from it and the configured
-   * rate per kilometre. Two decimals, as `trip.distance_km` has always had.
-   *
-   * ── NULL IS A VALUE HERE ──────────────────────────────────────────────────
-   * It means nobody has stated how long the road is, which is not the same as a
-   * road of no length: the first is charged no toll, the second is charged
-   * nothing because somebody decided it costs nothing. The column is nullable for
-   * exactly that reason, routes configured before distances existed carry it, and
-   * an export that could not express it would quietly turn "unmeasured" into
-   * "free" on the way back in.
-   *
-   * A MISSING field is still refused. `@ValidateIf` only spares an explicit null,
-   * so `undefined` runs into the validators below and is reported as required.
-   */
   @ApiProperty({
     example: 25,
     minimum: 0,
-    maximum: ROUTE_KILOMETRES_MAX,
-    nullable: true,
+    maximum: MONEY_MAX_VALUE,
     description:
-      "Length of the route in kilometres, or null when nobody has stated it. The Toll is this times the configured toll rate per kilometre; no toll amount is stored per route.",
+      "The toll AMOUNT for this route — charged as it is, like the Tunnel. No distance and no rate are involved.",
   })
-  @ValidateIf(
-    (route: SaveRouteConfigurationDto) => route.kilometres !== null,
-  )
   @Transform(rawValueOf)
-  @IsNumber({ maxDecimalPlaces: ROUTE_KILOMETRES_DECIMAL_PLACES })
+  @IsNumber({ maxDecimalPlaces: MONEY_DECIMAL_PLACES })
   @Min(0)
-  @Max(ROUTE_KILOMETRES_MAX)
-  kilometres!: number | null;
+  @Max(MONEY_MAX_VALUE)
+  toll!: number;
 
   @ApiProperty({ example: 0, minimum: 0, maximum: MONEY_MAX_VALUE })
   @Transform(rawValueOf)
@@ -292,6 +276,45 @@ export class CombinationRouteConfigurationDto {
     description: `Exactly ${LEGS_PER_COMBINATION_ROUTE} legs, the outbound first.`,
   })
   legs!: RouteConfigurationDto[];
+
+  @ApiProperty({
+    type: CombinationOverStDto,
+    description:
+      "Over ST: the Combination's own Tarief, Toll and Tunnel, beside its two legs. Added to Leg 2's amounts when Leg 2's planningDate differs from Leg 1's.",
+  })
+  overSt!: CombinationOverStDto;
+}
+
+/**
+ * The Over ST amounts of a Combination, as an operator types them.
+ *
+ * Each is optional and nullable: null means nobody has stated it, which is not
+ * the same as an explicit zero. Money follows every other amount here.
+ */
+export class SaveCombinationOverStDto {
+  @ApiProperty({ example: 50, minimum: 0, maximum: MONEY_MAX_VALUE, nullable: true })
+  @ValidateIf((overSt: SaveCombinationOverStDto) => overSt.tarief !== null)
+  @Transform(rawValueOf)
+  @IsNumber({ maxDecimalPlaces: MONEY_DECIMAL_PLACES })
+  @Min(0)
+  @Max(MONEY_MAX_VALUE)
+  tarief!: number | null;
+
+  @ApiProperty({ example: 5, minimum: 0, maximum: MONEY_MAX_VALUE, nullable: true })
+  @ValidateIf((overSt: SaveCombinationOverStDto) => overSt.toll !== null)
+  @Transform(rawValueOf)
+  @IsNumber({ maxDecimalPlaces: MONEY_DECIMAL_PLACES })
+  @Min(0)
+  @Max(MONEY_MAX_VALUE)
+  toll!: number | null;
+
+  @ApiProperty({ example: 0, minimum: 0, maximum: MONEY_MAX_VALUE, nullable: true })
+  @ValidateIf((overSt: SaveCombinationOverStDto) => overSt.tunnel !== null)
+  @Transform(rawValueOf)
+  @IsNumber({ maxDecimalPlaces: MONEY_DECIMAL_PLACES })
+  @Min(0)
+  @Max(MONEY_MAX_VALUE)
+  tunnel!: number | null;
 }
 
 /**
@@ -308,7 +331,7 @@ export class SaveCombinationRouteConfigurationDto {
     type: [SaveRouteConfigurationDto],
     minItems: LEGS_PER_COMBINATION_ROUTE,
     maxItems: LEGS_PER_COMBINATION_ROUTE,
-    description: `Exactly ${LEGS_PER_COMBINATION_ROUTE} legs — the outbound first, then the return. Each carries its own Van, Naar, Tarief, KM and Tunnel: the two directions legitimately cost different amounts.`,
+    description: `Exactly ${LEGS_PER_COMBINATION_ROUTE} legs — the outbound first, then the return. Each carries its own Van, Naar, Tarief, Toll and Tunnel: the two directions legitimately cost different amounts.`,
   })
   @IsArray()
   @ArrayMinSize(LEGS_PER_COMBINATION_ROUTE)
@@ -316,4 +339,21 @@ export class SaveCombinationRouteConfigurationDto {
   @ValidateNested({ each: true })
   @Type(() => SaveRouteConfigurationDto)
   legs!: SaveRouteConfigurationDto[];
+
+  /*
+   * ── OMITTED MEANS "LEAVE IT" ────────────────────────────────────────────
+   * The leg sync rewrites the legs of other Combinations through this same
+   * update, and must never touch their Over ST. Leaving the field out keeps
+   * whatever is stored; sending it writes all three values.
+   */
+  @ApiProperty({
+    type: SaveCombinationOverStDto,
+    required: false,
+    description:
+      "Over ST: Tarief, Toll and Tunnel of the Combination itself. Omit to leave the stored values unchanged.",
+  })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => SaveCombinationOverStDto)
+  overSt?: SaveCombinationOverStDto;
 }

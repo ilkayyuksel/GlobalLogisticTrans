@@ -1,3 +1,4 @@
+import { CombinationRoutePricingService } from "../route-pricing/combination-route-pricing.service";
 import { AppLoggerService } from "../logger/app-logger.service";
 import { CustomPropertyService } from "../custom-properties/custom-property.service";
 import { RoutePricingService } from "../route-pricing/route-pricing.service";
@@ -64,7 +65,11 @@ const RULES = {
   waitingTimeBlockMinutes: 15,
   waitingTimeBlockPrice: "13.75",
   ruleVersion: "2026.1",
-  tollRatePerKm: null,
+};
+
+/** No pair is configured unless a test says so: the road match then applies. */
+const combinationPricing = {
+  findConfiguredCombination: jest.fn().mockResolvedValue(null),
 };
 
 describe("TAR is charged once per day per number", () => {
@@ -78,6 +83,7 @@ describe("TAR is charged once per day per number", () => {
 
     resolver = new PricingComponentResolver(
       { findConfiguredRoute: jest.fn().mockResolvedValue(null) } as unknown as RoutePricingService,
+      combinationPricing as unknown as CombinationRoutePricingService,
       { findByTripId: jest.fn().mockResolvedValue([]) } as unknown as TripCustomPropertyReadService,
       {
         findById: jest.fn().mockResolvedValue({

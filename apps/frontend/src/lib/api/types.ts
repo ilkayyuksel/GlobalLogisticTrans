@@ -290,6 +290,8 @@ export interface Trip {
    */
   waitingTimeStart: string | null;
   waitingTimeEnd: string | null;
+  /** Whether `waitingTimeEnd` is on the day after `waitingTimeStart`. */
+  waitingTimeEndsNextDay: boolean;
   waitingTimeMinutes: number | null;
   /** Kilometres, two decimals, as a string. */
   distanceKm: string | null;

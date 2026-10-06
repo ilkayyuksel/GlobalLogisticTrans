@@ -41,8 +41,8 @@ export const MAX_IMPORT_ROUTES = 500;
  * `BulkRouteImportValidator`, which checks the envelope and every entry itself.
  * Two reasons, and the second was found by running it:
  *
- *   The REPORT. The global pipe would say `routes.3.kilometres must be a number`,
- *   and an operator who pasted eighty routes needs "route 4: kilometres must be a
+ *   The REPORT. The global pipe would say `routes.3.toll must be a number`,
+ *   and an operator who pasted eighty routes needs "route 4: toll must be a
  *   number" — the entry NUMBER, in a list they can work through.
  *
  *   The pipe would also EMPTY the entries. `whitelist` strips every property that
@@ -66,7 +66,7 @@ export class BulkImportRouteConfigurationDto {
         departure: "Antwerp",
         destination: "Kallo",
         tarief: 100,
-        kilometres: 25,
+        toll: 25,
         tunnel: 0,
       },
       {
@@ -76,14 +76,14 @@ export class BulkImportRouteConfigurationDto {
             departure: "Antwerp",
             destination: "Kallo",
             tarief: 100,
-            kilometres: 25,
+            toll: 25,
             tunnel: 0,
           },
           {
             departure: "Kallo",
             destination: "Antwerp",
             tarief: 80,
-            kilometres: 30,
+            toll: 30,
             tunnel: 15,
           },
         ],
@@ -101,10 +101,9 @@ export class BulkImportRouteConfigurationDto {
  * negative amount — applies here unchanged and in one definition. The only
  * addition is the discriminator.
  *
- * There is no `toll` and no `active`: a route carries its DISTANCE, and the Toll
- * a Trip pays is that distance times the configured rate per kilometre. An entry
- * naming a toll amount is refused rather than ignored, because ignoring it would
- * let an operator believe a toll had been stored.
+ * There is no `kilometres` and no `active`: a route carries its Toll as an
+ * AMOUNT, like the Tunnel. An older entry naming a distance is refused rather
+ * than ignored, because ignoring it would let an operator believe it was used.
  */
 export class BulkNormalRouteImportDto extends SaveRouteConfigurationDto {
   @ApiProperty({ enum: [RouteConfigurationType.NORMAL] })
@@ -118,7 +117,7 @@ const EXACTLY_TWO_LEGS = `a Combination must have exactly ${LEGS_PER_COMBINATION
 /**
  * One Combination route in an import: exactly two legs.
  *
- * Each leg is a full route price with its own Van, Naar, Tarief, KM and Tunnel,
+ * Each leg is a full route price with its own Van, Naar, Tarief, Toll and Tunnel,
  * validated by the same DTO as any other route — the two legs of a real
  * Combination cost different amounts, and nothing here copies one onto the other
  * or fills a missing one in.
@@ -182,11 +181,11 @@ export class BulkRouteImportErrorDto {
       "The field at fault, or null when the problem is the shape of the entry.",
     type: String,
     nullable: true,
-    example: "kilometres",
+    example: "toll",
   })
   field!: string | null;
 
-  @ApiProperty({ example: "kilometres must be a number" })
+  @ApiProperty({ example: "toll must be a number" })
   message!: string;
 }
 

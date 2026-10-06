@@ -262,6 +262,18 @@ export class CreateTripDto {
 
   @ApiPropertyOptional({
     description:
+      "Whether waitingTimeEnd is on the day after waitingTimeStart. Only meaningful with both times. An end before the start is always the next day. Defaults to false.",
+    default: false,
+    example: false,
+  })
+  // RAW for the same reason as isLooseTrip: a typo must not silently mean true.
+  @Transform(toOptionalBoolean)
+  @IsOptional()
+  @IsBoolean()
+  waitingTimeEndsNextDay?: boolean;
+
+  @ApiPropertyOptional({
+    description:
       "Distance in kilometres. Used by Distance-Based Pricing. Stored as NUMERIC(8,2); at most two decimals.",
     minimum: 0,
     maximum: DISTANCE_KM_MAX,

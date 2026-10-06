@@ -218,8 +218,10 @@ describe("TripPricingOverrideController (integration)", () => {
       // is untouched at 130.00.
       expect(response.body.data.tarief).toBe("120.00");
       expect(response.body.data.brandstof).toBe("18.00");
-      expect(response.body.data.others).toBe("130.00");
-      expect(response.body.data.totaal).toBe("448.00");
+      expect(response.body.data.others).toBe("100.00");
+      // The waiting time (30) is EK and supersedes the confirmation (165).
+      expect(response.body.data.ek).toBe("30.00");
+      expect(response.body.data.totaal).toBe("283.00");
     });
 
     it("overrides the Toll without disturbing anything but the Total", async () => {
@@ -232,7 +234,7 @@ describe("TripPricingOverrideController (integration)", () => {
       expect(response.body.data.tarief).toBe("100.00");
       expect(response.body.data.brandstof).toBe("15.00");
       // 425.00 with a 10.00 toll, so 20.00 more.
-      expect(response.body.data.totaal).toBe("445.00");
+      expect(response.body.data.totaal).toBe("280.00");
     });
 
     it("overrides the Tunnel without disturbing anything but the Total", async () => {
@@ -243,7 +245,7 @@ describe("TripPricingOverrideController (integration)", () => {
 
       expect(response.body.data.tunnel).toBe("25.00");
       expect(response.body.data.brandstof).toBe("15.00");
-      expect(response.body.data.totaal).toBe("445.00");
+      expect(response.body.data.totaal).toBe("280.00");
     });
 
     /** Changing a price twice is one opinion revised, not two rows. */
@@ -417,7 +419,7 @@ describe("TripPricingOverrideController (integration)", () => {
 
       expect(response.body.data.tarief).toBe("100.00");
       expect(response.body.data.brandstof).toBe("15.00");
-      expect(response.body.data.totaal).toBe("425.00");
+      expect(response.body.data.totaal).toBe("260.00");
       expect(overrides.rows.size).toBe(0);
     });
 
@@ -450,7 +452,7 @@ describe("TripPricingOverrideController (integration)", () => {
         .expect(200);
 
       expect(response.body.data.tol).toBe("10.00");
-      expect(response.body.data.totaal).toBe("425.00");
+      expect(response.body.data.totaal).toBe("260.00");
     });
 
     it("withdraws a Tunnel correction", async () => {
@@ -464,7 +466,7 @@ describe("TripPricingOverrideController (integration)", () => {
         .expect(200);
 
       expect(response.body.data.tunnel).toBe("5.00");
-      expect(response.body.data.totaal).toBe("425.00");
+      expect(response.body.data.totaal).toBe("260.00");
     });
 
     it("withdraws only the named component", async () => {

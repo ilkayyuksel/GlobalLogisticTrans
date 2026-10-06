@@ -513,7 +513,12 @@ export function buildHarness(storageDirectory: string) {
   return {
     importer: new PdfTripImporter(
       tripService,
-      new TripRevisionService(tripRepository, automaticFlat, logger),
+      new TripRevisionService(
+        tripRepository,
+        automaticFlat,
+        stubPricingRecalculation(),
+        logger,
+      ),
       pdfDocumentService,
       costConfirmationService,
       // The REAL matcher: which Trip a confirmation belongs to is business

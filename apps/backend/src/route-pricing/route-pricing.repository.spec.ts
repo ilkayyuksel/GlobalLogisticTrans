@@ -464,11 +464,24 @@ describe("RoutePricingRepository", () => {
       expect(found).toMatchObject({ id: "group-1" });
     });
 
-    it("creates a group with no notes by default", async () => {
+    it("creates a group with no notes and no Over ST by default", async () => {
       await repository.createGroup();
 
       expect(prisma.combinationRouteGroup.create).toHaveBeenCalledWith({
-        data: { notes: null },
+        data: {
+          notes: null,
+          overStBasePrice: null,
+          overStToll: null,
+          overStTunnel: null,
+        },
+      });
+    });
+
+    it("writes the Over ST it is given onto the group", async () => {
+      await repository.createGroup({ tarief: 50, toll: 5, tunnel: 0 });
+
+      expect(prisma.combinationRouteGroup.create).toHaveBeenCalledWith({
+        data: { notes: null, overStBasePrice: 50, overStToll: 5, overStTunnel: 0 },
       });
     });
 

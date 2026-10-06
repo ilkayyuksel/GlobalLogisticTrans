@@ -35,6 +35,26 @@ export type CombinationRouteGroupWithLegs = CombinationRouteGroup & {
   legs: RoutePricing[];
 };
 
+/**
+ * The Over ST amounts of a Combination as they are written. Null clears one back
+ * to "nobody has stated it".
+ */
+export interface CombinationOverStData {
+  readonly tarief: number | null;
+  readonly toll: number | null;
+  readonly tunnel: number | null;
+}
+
+const NO_OVER_ST: CombinationOverStData = { tarief: null, toll: null, tunnel: null };
+
+function toOverStColumns(overSt: CombinationOverStData) {
+  return {
+    overStBasePrice: overSt.tarief,
+    overStToll: overSt.toll,
+    overStTunnel: overSt.tunnel,
+  };
+}
+
 export interface FindRouteOptions {
   readonly kind: RouteConfigurationKind;
   /** Lets an update ignore the row being edited, so it never conflicts with itself. */
@@ -256,8 +276,24 @@ export class RoutePricingRepository {
     });
   }
 
-  createGroup(notes: string | null = null): Promise<CombinationRouteGroup> {
-    return this.prisma.combinationRouteGroup.create({ data: { notes } });
+  createGroup(
+    overSt: CombinationOverStData = NO_OVER_ST,
+    notes: string | null = null,
+  ): Promise<CombinationRouteGroup> {
+    return this.prisma.combinationRouteGroup.create({
+      data: { notes, ...toOverStColumns(overSt) },
+    });
+  }
+
+  /** Writes the Combination's Over ST — all three amounts together. */
+  setGroupOverSt(
+    id: string,
+    overSt: CombinationOverStData,
+  ): Promise<CombinationRouteGroup> {
+    return this.prisma.combinationRouteGroup.update({
+      where: { id },
+      data: toOverStColumns(overSt),
+    });
   }
 
   /** Records that somebody has been through this Combination's prices. */

@@ -11,6 +11,7 @@ import {
   PricingComponentCode,
   PricingLine,
 } from "./pricing-line";
+import { overStLine } from "./combination-over-st";
 import { toStorableAmount } from "./pricing-money";
 
 /** pricing_rules.md numbers the Tunnel sixth in the sequence. */
@@ -54,7 +55,15 @@ export class TunnelCalculator implements PricingCalculationStep {
     this.logger.log("Tunnel calculation started", { tripId: context.tripId });
 
     const tunnelCost = this.findTunnelCost(context);
-    const lines = tunnelCost ? [this.tunnelLine(tunnelCost)] : [];
+    const lines = [
+      ...(tunnelCost ? [this.tunnelLine(tunnelCost)] : []),
+      // Leg 2 of a Combination on another day than Leg 1 adds Over ST's Tunnel.
+      ...overStLine(
+        PricingComponentCode.TUNNEL,
+        context.overSt?.tunnel,
+        TUNNEL_CALCULATION_ORDER,
+      ),
+    ];
 
     this.logger.log("Tunnel calculation completed", {
       tripId: context.tripId,

@@ -1,5 +1,6 @@
 import {
   formatWaitingTime,
+  isNextDayImplied,
   toWaitingTimeParts,
   waitingWindowMinutes,
 } from "./waiting-time";
@@ -59,13 +60,13 @@ describe("Waiting time", () => {
 
   /**
    * ── THE WINDOW, AND THE DAY IT MUST NOT INVENT ────────────────────────────
-   * An operator reads a clock twice, so these are the two times they read. The
-   * fields carry a time of day and nothing else, which is why every window is
-   * shorter than a day — and why equal times are ZERO rather than 24 hours.
+   * An operator reads a clock twice, so these are the two times they read.
+   * Only 06:00 → 20:00 counts, on each day the window touches. The same cases
+   * are asserted in the backend's `waiting-window.spec.ts`, which computes the
+   * value that is actually stored.
    *
-   * That last one is the expensive mistake: "the truck waited exactly a day"
-   * and "it did not wait" look identical in two time fields, and reading it as
-   * a day would bill twenty-four hours for a mistyped repeat.
+   * Equal times without "volgende dag" are ZERO rather than 24 hours: reading
+   * a mistyped repeat as a day would bill one.
    * ──────────────────────────────────────────────────────────────────────────
    */
   describe("the waiting window", () => {
@@ -73,18 +74,42 @@ describe("Waiting time", () => {
       ["10:00", "12:30", 150],
       ["11:00", "13:30", 150],
       ["08:15", "08:45", 30],
-      ["00:00", "23:59", 1439],
-    ])("reads %s to %s as %i minutes", (begin, end, totalMinutes) => {
+      ["10:00", "12:00", 120],
+      ["05:00", "07:00", 60],
+      ["06:00", "20:00", 840],
+      ["00:00", "23:59", 840],
+    ])("reads %s to %s on the same day as %i minutes", (begin, end, totalMinutes) => {
       expect(waitingWindowMinutes(begin, end)).toEqual({ totalMinutes });
     });
 
-    /** Past midnight the end is on the next day. */
     it.each([
-      ["22:00", "02:00", 240],
-      ["23:30", "00:30", 60],
-      ["23:59", "00:00", 1],
-    ])("crosses midnight: %s to %s is %i minutes", (begin, end, totalMinutes) => {
+      ["10:00", "08:00", 720],
+      ["10:00", "12:00", 960],
+      ["22:00", "02:00", 0],
+      ["06:00", "06:00", 840],
+      ["20:00", "06:00", 0],
+      ["10:00", "10:00", 840],
+    ])("reads %s to %s the next day as %i minutes", (begin, end, totalMinutes) => {
+      expect(waitingWindowMinutes(begin, end, true)).toEqual({ totalMinutes });
+    });
+
+    /** An end before its begin can only be the next day, ticked or not. */
+    it.each([
+      ["10:00", "08:00", 720],
+      ["22:00", "02:00", 0],
+      ["23:59", "00:00", 0],
+    ])("reads %s to %s as the next day even unticked", (begin, end, totalMinutes) => {
       expect(waitingWindowMinutes(begin, end)).toEqual({ totalMinutes });
+      expect(isNextDayImplied(begin, end)).toBe(true);
+    });
+
+    it.each([
+      ["10:00", "12:00"],
+      ["10:00", "10:00"],
+      ["", "10:00"],
+      ["10:00", ""],
+    ])("does not imply the next day for %p to %p", (begin, end) => {
+      expect(isNextDayImplied(begin, end)).toBe(false);
     });
 
     it.each(["00:00", "10:00", "23:59"])(
@@ -93,24 +118,6 @@ describe("Waiting time", () => {
         expect(waitingWindowMinutes(time, time)).toEqual({ totalMinutes: 0 });
       },
     );
-
-    it("never produces a negative duration", () => {
-      // The bug this rule exists for: 22:00 → 02:00 as a plain subtraction is
-      // minus twenty hours.
-      expect(waitingWindowMinutes("22:00", "02:00").totalMinutes).toBe(240);
-    });
-
-    it("never reaches a full day", () => {
-      for (const [begin, end] of [
-        ["00:00", "23:59"],
-        ["12:00", "11:59"],
-        ["23:59", "23:58"],
-      ]) {
-        expect(waitingWindowMinutes(begin, end).totalMinutes).toBeLessThan(
-          24 * 60,
-        );
-      }
-    });
 
     it("treats two blank fields as no waiting time recorded", () => {
       expect(waitingWindowMinutes("", "")).toEqual({ totalMinutes: null });
@@ -147,7 +154,8 @@ describe("Waiting time", () => {
     it.each([
       ["10:00", "12:30", "2 u 30 min"],
       ["10:00", "10:00", "0 min"],
-      ["22:00", "02:00", "4 u"],
+      ["22:00", "02:00", "0 min"],
+      ["19:00", "07:30", "2 u 30 min"],
       ["10:00", "11:15", "1 u 15 min"],
     ])("shows %s to %s as %p", (begin, end, formatted) => {
       const { totalMinutes } = waitingWindowMinutes(begin, end);

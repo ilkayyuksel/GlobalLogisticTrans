@@ -48,8 +48,9 @@ function route(overrides: Record<string, unknown> = {}) {
     departure: "Quay 869",
     destination: "Dourges",
     tarief: "520.00",
-    kilometres: "310.00",
+    toll: "310.00",
     tunnel: "0.00",
+    hasToll: true,
     hasTunnel: true,
     type: "NORMAL",
     combinationGroupId: null,
@@ -62,13 +63,14 @@ const COMBINATION_ID = "combination-1";
 function combination() {
   return {
     id: COMBINATION_ID,
+    overSt: { tarief: null, toll: null, tunnel: null },
     legs: [
       route({
         id: "leg-1",
         departure: "Antwerp",
         destination: "Kallo",
         tarief: "100.00",
-        kilometres: "25.00",
+        toll: "25.00",
         type: "COMBINATION",
         combinationGroupId: COMBINATION_ID,
       }),
@@ -77,7 +79,7 @@ function combination() {
         departure: "Kallo",
         destination: "Antwerp",
         tarief: "80.00",
-        kilometres: "30.00",
+        toll: "30.00",
         tunnel: "15.00",
         type: "COMBINATION",
         combinationGroupId: COMBINATION_ID,
@@ -193,12 +195,12 @@ describe("saving a route", () => {
     await waitFor(() => expect(requestMock).toHaveBeenCalled());
 
     await userEvent.click(
-      screen.getByRole("button", { name: "Route toevoegen" }),
+      await screen.findByRole("button", { name: "Route toevoegen" }),
     );
     await userEvent.type(field("Van"), "Gent");
     await userEvent.type(field("Naar"), "Lille");
     await userEvent.type(field("Tarief"), "120");
-    await userEvent.type(field("KM"), "55");
+    await userEvent.type(field("Toll"), "55");
     await userEvent.type(field("Tunnel"), "0");
     await userEvent.click(
       within(section()).getByRole("button", { name: "Opslaan" }),
@@ -216,12 +218,12 @@ describe("saving a route", () => {
     const before = listFetches();
 
     await userEvent.click(
-      screen.getByRole("button", { name: "Route toevoegen" }),
+      await screen.findByRole("button", { name: "Route toevoegen" }),
     );
     await userEvent.type(field("Van"), "Gent");
     await userEvent.type(field("Naar"), "Lille");
     await userEvent.type(field("Tarief"), "120");
-    await userEvent.type(field("KM"), "55");
+    await userEvent.type(field("Toll"), "55");
     await userEvent.type(field("Tunnel"), "0");
     await userEvent.click(
       within(section()).getByRole("button", { name: "Opslaan" }),

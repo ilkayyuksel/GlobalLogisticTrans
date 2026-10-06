@@ -116,8 +116,9 @@ function route(overrides: Record<string, unknown> = {}) {
     departure: "Quay 869",
     destination: "Dourges",
     tarief: "520.00",
-    kilometres: "25.00",
+    toll: "25.00",
     tunnel: "0.00",
+    hasToll: true,
     hasTunnel: true,
     // Self-describing: every record says which kind of configuration it is.
     type: "NORMAL",
@@ -354,13 +355,12 @@ describe("the price settings panel", () => {
     ).toHaveAttribute("aria-expanded", "false");
   });
 
-  it("opens on a click and shows both amounts", async () => {
+  it("opens on a click and shows the fuel percentage", async () => {
     respondWith({ settings: [FUEL_SETTING, TOLL_SETTING] });
     renderPage();
     await openPriceSettings();
 
     expect(await screen.findByLabelText("Brandstofpercentage")).toHaveValue(15);
-    expect(screen.getByLabelText("Toll prijs per km")).toHaveValue(0.35);
     expect(
       screen.getByRole("button", { name: "Prijsinstellingen" }),
     ).toHaveAttribute("aria-expanded", "true");
@@ -392,158 +392,20 @@ describe("the price settings panel", () => {
  * Pricing Engine does not read it yet — the route pricing that applies it is a
  * separate change — but the value it will read is configured here.
  */
+/**
+ * ── NO TOLL RATE PER KILOMETRE ──────────────────────────────────────────────
+ * The Toll is an amount per route again, configured on Routeprijzen, so the
+ * global rate is no longer offered — even when an old setting row still exists.
+ */
 describe("the toll rate per kilometre", () => {
-  it("shows the configured value", async () => {
+  it("is no longer offered", async () => {
     respondWith({ settings: [FUEL_SETTING, TOLL_SETTING] });
     renderPage();
     await openPriceSettings();
 
-    expect(await screen.findByLabelText("Toll prijs per km")).toHaveValue(0.35);
-  });
+    await screen.findByLabelText("Brandstofpercentage");
 
-  it("is labelled as an amount per kilometre", async () => {
-    respondWith({ settings: [FUEL_SETTING, TOLL_SETTING] });
-    renderPage();
-    await openPriceSettings();
-
-    await screen.findByLabelText("Toll prijs per km");
-
-    expect(screen.getByText("€ / km")).toBeInTheDocument();
-  });
-
-  it("saves the raw value to the settings endpoint", async () => {
-    respondWith({ settings: [FUEL_SETTING, TOLL_SETTING] });
-    renderPage();
-    await openPriceSettings();
-
-    const input = await screen.findByLabelText("Toll prijs per km");
-
-    await userEvent.clear(input);
-    await userEvent.type(input, "0.42");
-    await userEvent.click(
-      screen.getByRole("button", { name: "Toll prijs per km: Opslaan" }),
-    );
-
-    await waitFor(() => expect(writes()).toHaveLength(1));
-
-    const [path, options] = writes()[0];
-
-    expect(path).toBe("/api/v1/settings/PRICING/TOLL_RATE_PER_KM");
-    // PUT, as the fuel percentage is: the same call has to work whether or not
-    // the row has ever existed.
-    expect(options?.method).toBe("PUT");
-    expect(options?.body).toEqual({ value: "0.42" });
-  });
-
-  /** The state a deployment is in before anybody has set a rate. */
-  it("saves a value that was never configured before", async () => {
-    respondWith({ settings: [FUEL_SETTING], plan: freshPlan() });
-    renderPage();
-    await openPriceSettings();
-
-    const input = await screen.findByLabelText("Toll prijs per km");
-
-    expect(input).toHaveValue(null);
-
-    await userEvent.type(input, "0.35");
-    await userEvent.click(
-      screen.getByRole("button", { name: "Toll prijs per km: Opslaan" }),
-    );
-
-    await waitFor(() => expect(writes()).toHaveLength(1));
-
-    expect(writes()[0][1]?.body).toEqual({ value: "0.35" });
-  });
-
-  /**
-   * Reopening the page reads the stored value back. The draft lives only as
-   * long as the control does, so what an operator sees on a fresh visit is what
-   * the database holds — not what they last typed.
-   */
-  it("still shows the stored value when the page is opened again", async () => {
-    respondWith({
-      settings: [FUEL_SETTING, { ...TOLL_SETTING, value: "0.42" }],
-    });
-
-    const first = renderPage();
-    await openPriceSettings();
-
-    expect(await screen.findByLabelText("Toll prijs per km")).toHaveValue(0.42);
-
-    first.unmount();
-    renderPage();
-    await openPriceSettings();
-
-    expect(await screen.findByLabelText("Toll prijs per km")).toHaveValue(0.42);
-  });
-
-  /** A price is never negative; the control refuses to offer one. */
-  it("offers no negative amount", async () => {
-    respondWith({ settings: [FUEL_SETTING, TOLL_SETTING] });
-    renderPage();
-    await openPriceSettings();
-
-    const input = await screen.findByLabelText("Toll prijs per km");
-
-    expect(input).toHaveAttribute("min", "0");
-    expect(input).toHaveAttribute("step", "0.01");
-  });
-
-  /** Nothing is saved with an empty box: there is no value to store. */
-  it("cannot be saved empty", async () => {
-    respondWith({ settings: [FUEL_SETTING], plan: freshPlan() });
-    renderPage();
-    await openPriceSettings();
-
-    await screen.findByLabelText("Toll prijs per km");
-
-    expect(
-      screen.getByRole("button", { name: "Toll prijs per km: Opslaan" }),
-    ).toBeDisabled();
-    expect(writes()).toHaveLength(0);
-  });
-
-  /**
-   * Validation is the backend's — it holds the rule that a pricing amount is
-   * never negative — and so is the wording of its refusal.
-   */
-  it("shows the backend's own refusal", async () => {
-    respondWith({
-      settings: [FUEL_SETTING, TOLL_SETTING],
-      failWith: new Error("nope"),
-    });
-    renderPage();
-    await openPriceSettings();
-
-    const input = await screen.findByLabelText("Toll prijs per km");
-
-    await userEvent.clear(input);
-    await userEvent.type(input, "-1");
-    await userEvent.click(
-      screen.getByRole("button", { name: "Toll prijs per km: Opslaan" }),
-    );
-
-    expect(await screen.findByText(/Opslaan mislukt/)).toBeInTheDocument();
-  });
-
-  /** The fuel percentage is untouched by any of this. */
-  it("leaves the fuel percentage working beside it", async () => {
-    respondWith({ settings: [FUEL_SETTING, TOLL_SETTING] });
-    renderPage();
-    await openPriceSettings();
-
-    const fuel = await screen.findByLabelText("Brandstofpercentage");
-
-    await userEvent.clear(fuel);
-    await userEvent.type(fuel, "23");
-    await userEvent.click(
-      screen.getByRole("button", { name: "Brandstofpercentage: Opslaan" }),
-    );
-
-    await waitFor(() => expect(writes()).toHaveLength(1));
-
-    expect(writes()[0][0]).toBe("/api/v1/settings/PRICING/FUEL_PERCENTAGE");
-    expect(writes()[0][1]?.body).toEqual({ value: "23" });
+    expect(screen.queryByLabelText(/per km/i)).toBeNull();
   });
 });
 
@@ -567,15 +429,15 @@ describe("the route prices", () => {
    * nobody has stated this road's length, and until somebody does it is charged
    * no toll — which is a different fact from a road measured as free.
    */
-  it("shows a dash for a route with no stated distance", async () => {
-    respondWith({ routes: [route({ kilometres: null })] });
+  it("shows the route's toll amount", async () => {
+    respondWith({ routes: [route({ toll: "18.40" })] });
     renderPage();
 
     const row = (await screen.findByText("Dourges")).closest(
       "tr",
     ) as HTMLElement;
 
-    expect(within(row).getByText("—")).toBeInTheDocument();
+    expect(within(row).getByText("18.40")).toBeInTheDocument();
   });
 
   /** One route, one row — never a price row and two cost rows. */
@@ -584,7 +446,9 @@ describe("the route prices", () => {
     renderPage();
     await screen.findByText("Dourges");
 
-    const headings = within(sectionOf("Routeprijzen"))
+    // The ordinary routes' table; the Combinations' has the same columns.
+    const [normalTable] = within(sectionOf("Routeprijzen")).getAllByRole("table");
+    const headings = within(normalTable)
       .getAllByRole("columnheader")
       .map((header) => header.textContent);
 
@@ -594,7 +458,7 @@ describe("the route prices", () => {
       "Van",
       "Naar",
       "Tarief",
-      "KM",
+      "Toll",
       "Tunnel",
       // The review tick: administrative progress, and the narrowest column
       // there is. Its heading is a mark, with the word only for a screen reader.
@@ -639,7 +503,7 @@ describe("the route prices", () => {
     await userEvent.type(screen.getByLabelText("Van"), "Quay 869");
     await userEvent.type(screen.getByLabelText("Naar"), "Ghlin");
     await userEvent.type(screen.getByLabelText("Tarief"), "480");
-    await userEvent.type(screen.getByLabelText("KM"), "25");
+    await userEvent.type(screen.getByLabelText("Toll"), "25");
     await userEvent.type(screen.getByLabelText("Tunnel"), "0");
 
     await userEvent.click(
@@ -658,7 +522,7 @@ describe("the route prices", () => {
       departure: "Quay 869",
       destination: "Ghlin",
       tarief: 480,
-      kilometres: 25,
+      toll: 25,
       tunnel: 0,
     });
   });
@@ -675,7 +539,7 @@ describe("the route prices", () => {
     await userEvent.type(screen.getByLabelText("Van"), "Quay 869");
     await userEvent.type(screen.getByLabelText("Naar"), "Ghlin");
     await userEvent.type(screen.getByLabelText("Tarief"), "0");
-    await userEvent.type(screen.getByLabelText("KM"), "0");
+    await userEvent.type(screen.getByLabelText("Toll"), "0");
     await userEvent.type(screen.getByLabelText("Tunnel"), "0");
 
     await userEvent.click(
@@ -688,7 +552,7 @@ describe("the route prices", () => {
 
     expect(writes()[0][1]?.body).toMatchObject({
       tarief: 0,
-      kilometres: 0,
+      toll: 0,
       tunnel: 0,
     });
   });
@@ -823,7 +687,7 @@ describe("the route prices", () => {
     await userEvent.type(screen.getByLabelText("Van"), "PSA Quay 869");
     await userEvent.type(screen.getByLabelText("Naar"), "Dourges");
     await userEvent.type(screen.getByLabelText("Tarief"), "1");
-    await userEvent.type(screen.getByLabelText("KM"), "0");
+    await userEvent.type(screen.getByLabelText("Toll"), "0");
     await userEvent.type(screen.getByLabelText("Tunnel"), "0");
 
     await userEvent.click(
@@ -1056,8 +920,8 @@ describe("the page in the other language and theme", () => {
     ).toBeInTheDocument();
     expect(screen.getByLabelText("Yakıt yüzdesi")).toBeInTheDocument();
     expect(
-      screen.getByRole("columnheader", { name: "Nereden" }),
-    ).toBeInTheDocument();
+      screen.getAllByRole("columnheader", { name: "Nereden" }).length,
+    ).toBeGreaterThan(0);
   });
 
   /*

@@ -325,6 +325,13 @@ export class TripResponseDto {
   })
   waitingTimeEnd!: string | null;
 
+  @ApiProperty({
+    example: false,
+    description:
+      "Whether waitingTimeEnd is on the day after waitingTimeStart. False when no window was recorded.",
+  })
+  waitingTimeEndsNextDay!: boolean;
+
   @ApiPropertyOptional({
     nullable: true,
     example: 135,
@@ -458,6 +465,7 @@ export function toTripResponse(
       trip.waitingTimeStart === null ? null : toClockTime(trip.waitingTimeStart),
     waitingTimeEnd:
       trip.waitingTimeEnd === null ? null : toClockTime(trip.waitingTimeEnd),
+    waitingTimeEndsNextDay: trip.waitingTimeEndsNextDay,
     waitingTimeMinutes: trip.waitingTimeMinutes,
     // Explicit null check, not truthiness: a distance of exactly 0 is a value,
     // not an absent one.

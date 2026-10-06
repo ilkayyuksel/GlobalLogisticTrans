@@ -58,6 +58,7 @@ function buildTrip(overrides: Partial<Trip> = {}): Trip {
     executionDatetime: null,
     waitingTimeStart: null,
     waitingTimeEnd: null,
+    waitingTimeEndsNextDay: false,
     waitingTimeMinutes: null,
     distanceKm: null,
     tarNummer: null,
@@ -215,6 +216,113 @@ describe("a waiting-time change reprices the Trip", () => {
     });
   });
 
+  /**
+   * ── A WINDOW THAT ENDS THE NEXT DAY ─────────────────────────────────────
+   * Only 06:00 → 20:00 counts, so 10:00 → 12:00 the next day is 16 hours, not
+   * 26 and not 2. The flag travels with the two times through the same write
+   * and the same recalculation as any other window edit — this Trip is CLOSED,
+   * and nothing about its lifecycle is touched.
+   */
+  describe("the next-day flag", () => {
+    it.each([
+      ["10:00", "12:00", true, 960],
+      ["10:00", "08:00", true, 720],
+      ["22:00", "02:00", true, 0],
+      ["10:00", "12:00", false, 120],
+      ["05:00", "07:00", false, 60],
+    ])(
+      "stores %s → %s, next day %s, as %i counted minutes",
+      async (begin, end, nextDay, minutes) => {
+        await service.update(TRIP_ID, {
+          waitingTimeStart: begin,
+          waitingTimeEnd: end,
+          waitingTimeEndsNextDay: nextDay,
+        });
+
+        expect(repository.update).toHaveBeenCalledWith(
+          TRIP_ID,
+          expect.objectContaining({ waitingTimeMinutes: minutes }),
+        );
+      },
+    );
+
+    it("persists the flag beside the times", async () => {
+      await service.update(TRIP_ID, {
+        waitingTimeStart: "10:00",
+        waitingTimeEnd: "12:00",
+        waitingTimeEndsNextDay: true,
+      });
+
+      expect(repository.update).toHaveBeenCalledWith(
+        TRIP_ID,
+        expect.objectContaining({
+          waitingTimeStart: new Date("1970-01-01T10:00:00.000Z"),
+          waitingTimeEnd: new Date("1970-01-01T12:00:00.000Z"),
+          waitingTimeEndsNextDay: true,
+        }),
+      );
+    });
+
+    /** Turning it off again is a same-day window, and is priced as one. */
+    it("stores the same day when the flag is switched off again", async () => {
+      await service.update(TRIP_ID, {
+        waitingTimeStart: "10:00",
+        waitingTimeEnd: "12:00",
+        waitingTimeEndsNextDay: false,
+      });
+
+      expect(repository.update).toHaveBeenCalledWith(
+        TRIP_ID,
+        expect.objectContaining({
+          waitingTimeEndsNextDay: false,
+          waitingTimeMinutes: 120,
+        }),
+      );
+    });
+
+    it("reprices the CLOSED Trip through the existing recalculation, once", async () => {
+      const trip = await service.update(TRIP_ID, {
+        waitingTimeStart: "10:00",
+        waitingTimeEnd: "12:00",
+        waitingTimeEndsNextDay: true,
+      });
+
+      expect(recalculation.recalculate).toHaveBeenCalledTimes(1);
+      expect(recalculation.recalculate).toHaveBeenCalledWith(TRIP_ID);
+      expect(trip.status).toBe(TripStatus.CLOSED);
+    });
+
+    it("answers with the stored flag", async () => {
+      repository.update.mockResolvedValue(
+        buildTrip({
+          waitingTimeStart: new Date("1970-01-01T10:00:00Z"),
+          waitingTimeEnd: new Date("1970-01-01T12:00:00Z"),
+          waitingTimeEndsNextDay: true,
+          waitingTimeMinutes: 960,
+        }),
+      );
+
+      const trip = await service.update(TRIP_ID, {
+        waitingTimeStart: "10:00",
+        waitingTimeEnd: "12:00",
+        waitingTimeEndsNextDay: true,
+      });
+
+      expect(trip.waitingTimeEndsNextDay).toBe(true);
+      expect(trip.waitingTimeMinutes).toBe(960);
+    });
+
+    /** "Ends next day" on its own says nothing about how long anyone waited. */
+    it("refuses the flag without the times and reprices nothing", async () => {
+      await expect(
+        service.update(TRIP_ID, { waitingTimeEndsNextDay: true }),
+      ).rejects.toBeInstanceOf(IncompleteWaitingWindowException);
+
+      expect(repository.update).not.toHaveBeenCalled();
+      expect(recalculation.recalculate).not.toHaveBeenCalled();
+    });
+  });
+
   describe("the recalculation", () => {
     it("runs exactly once, for exactly this Trip", async () => {
       await service.update(TRIP_ID, {
@@ -261,7 +369,7 @@ describe("a waiting-time change reprices the Trip", () => {
       });
 
       expect(hasFinished).toBe(true);
-      expect(trip.pricing?.others).toBe("60.00");
+      expect(trip.pricing?.ek).toBe("60.00");
     });
   });
 
@@ -273,7 +381,7 @@ describe("a waiting-time change reprices the Trip", () => {
       });
 
       expect(trip.waitingTimeMinutes).toBe(135);
-      expect(trip.pricing?.others).toBe("60.00");
+      expect(trip.pricing?.ek).toBe("60.00");
       expect(trip.pricing?.totaal).toBe("580.00");
       expect(trip.reasonCode).toBeNull();
     });

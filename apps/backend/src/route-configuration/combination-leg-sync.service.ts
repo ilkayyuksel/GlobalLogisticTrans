@@ -33,11 +33,11 @@ import { RouteConfigurationUnitOfWork } from "./route-configuration.unit-of-work
  * Combination, however many there are.
  *
  * ── WHAT IS COPIED ──────────────────────────────────────────────────────────
- * Tarief, KM and Tunnel, exactly as the source leg stores them now — the values
- * its own inline edit last saved. Nothing is recalculated. The Toll is not a
- * route field: the Engine derives it from the KM and the global rate per
- * kilometre, which this never touches. From, To, the review mark and the
- * Combination itself are left exactly as they are.
+ * Tarief, Toll and Tunnel, exactly as the source leg stores them now — the
+ * values its own inline edit last saved. Nothing is recalculated. From, To, the
+ * review mark, the Combination's Over ST and the Combination itself are left
+ * exactly as they are: the update below sends no Over ST, which leaves it as
+ * stored.
  *
  * ── THROUGH THE SAME DOOR AS AN EDIT ────────────────────────────────────────
  * Each target Combination is saved through `CombinationRouteConfigurationService
@@ -136,10 +136,10 @@ function indexOf(legPosition: CombinationLegPosition): number {
 /** The three values a sync copies, as a save takes them. */
 function pricesOf(
   leg: RouteConfigurationDto,
-): Pick<SaveRouteConfigurationDto, "tarief" | "kilometres" | "tunnel"> {
-  const { tarief, kilometres, tunnel } = toSaveValues(leg);
+): Pick<SaveRouteConfigurationDto, "tarief" | "toll" | "tunnel"> {
+  const { tarief, toll, tunnel } = toSaveValues(leg);
 
-  return { tarief, kilometres, tunnel };
+  return { tarief, toll, tunnel };
 }
 
 /**
@@ -152,7 +152,7 @@ function toSaveValues(leg: RouteConfigurationDto): SaveRouteConfigurationDto {
     departure: leg.departure,
     destination: leg.destination,
     tarief: Number(leg.tarief),
-    kilometres: leg.kilometres === null ? null : Number(leg.kilometres),
+    toll: Number(leg.toll),
     tunnel: Number(leg.tunnel),
   };
 }
@@ -169,7 +169,7 @@ function toSyncAnswer(
     legPosition,
     departure: leg.departure,
     destination: leg.destination,
-    prices: { tarief: leg.tarief, kilometres: leg.kilometres, tunnel: leg.tunnel },
+    prices: { tarief: leg.tarief, toll: leg.toll, tunnel: leg.tunnel },
     targetCombinationGroupIds: targets.map((target) => target.id),
   };
 }

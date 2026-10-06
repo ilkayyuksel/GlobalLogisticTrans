@@ -151,6 +151,8 @@ export interface CreateTripPayload {
   /** The window the duration comes from; the backend derives the minutes. */
   waitingTimeStart?: string | null;
   waitingTimeEnd?: string | null;
+  /** The end is on the day after the begin. Only with both times. */
+  waitingTimeEndsNextDay?: boolean;
   distanceKm?: number | null;
   /** Free text, optional, not unique. Whitespace-only is stored as null. */
   tarNummer?: string | null;
@@ -196,6 +198,11 @@ export interface UpdateTripPayload {
    */
   waitingTimeStart?: string | null;
   waitingTimeEnd?: string | null;
+  /**
+   * Part of the window: sent only beside both times, never on its own — the
+   * backend refuses a flag with nothing to apply it to.
+   */
+  waitingTimeEndsNextDay?: boolean;
   distanceKm?: number | null;
   executionDatetime?: string | null;
   /**
@@ -205,18 +212,21 @@ export interface UpdateTripPayload {
   tarNummer?: string | null;
   internalNotes?: string | null;
   /**
-   * Accepted only on a Trip created by hand. On an imported Trip the document
-   * is the authority for these and the backend refuses them with a 409 — see
-   * `canEditDocumentFields`, which is why they are not offered there.
-   *
+   * The address, accepted on every Trip. On an imported Trip a later UPDATE
+   * document writes its own address again. The terminal and the destination
+   * city are pricing inputs: the backend reprices a CLOSED Trip after either
+   * changes and answers with the new amounts. The country is display data.
+   */
+  terminal?: string | null;
+  destinationCity?: string | null;
+  destinationCountry?: string | null;
+  /**
    * The times are the TRANSPORT window, not the waiting time: that is entered
    * as two clock times and stored as `waitingTimeMinutes`, which this never
    * touches. There is no rule that the end must follow the start — a transport
    * running past midnight is ordinary, and a single-time order carries the same
-   * value in both.
+   * value in both. Accepted on every Trip.
    */
-  destinationCity?: string | null;
-  destinationCountry?: string | null;
   startTime?: string | null;
   endTime?: string | null;
   /** The operator's own classification; no document ever writes it. */

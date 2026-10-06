@@ -10,6 +10,7 @@ import { SettingsService } from "../settings/settings.service";
 import { TripPricingService } from "../trip-pricing/trip-pricing.service";
 import { TripService } from "../trips/trip.service";
 import {
+  DEFAULT_NEXT_DAY_WORD,
   DEFAULT_WAITING_WORD,
   toTripExportLabels,
   type TripExportLabels,
@@ -39,6 +40,7 @@ export class TripExportLabelsService {
   async findForTrips(
     tripIds: readonly string[],
     waitingWord: string = DEFAULT_WAITING_WORD,
+    nextDayWord: string = DEFAULT_NEXT_DAY_WORD,
   ): Promise<Map<string, TripExportLabels>> {
     if (tripIds.length === 0) {
       return new Map();
@@ -62,6 +64,7 @@ export class TripExportLabelsService {
           snapshotByTrip.get(trip.id) ?? null,
           automaticPropertyId,
           waitingWord,
+          nextDayWord,
         ),
       ]),
     );

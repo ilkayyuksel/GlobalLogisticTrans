@@ -12,7 +12,7 @@ import { RouteConfigurationBulkRemovalService } from "./route-configuration-bulk
 import { RouteConfigurationUnitOfWork } from "./route-configuration.unit-of-work";
 import { RouteConfigurationController } from "./route-configuration.controller";
 import { RouteConfigurationService } from "./route-configuration.service";
-import { RouteTunnelCostService } from "./route-tunnel-cost.service";
+import { RouteComponentCostService } from "./route-component-cost.service";
 
 /**
  * The operator's view of route pricing.
@@ -43,7 +43,7 @@ import { RouteTunnelCostService } from "./route-tunnel-cost.service";
      * exactly the same kind of record — an ordinary route and each leg of a
      * Combination — and two copies of that would drift.
      */
-    RouteTunnelCostService,
+    RouteComponentCostService,
     RouteCostRepository,
     /*
      * The bulk import. It owns no table and no rule: the validator runs the

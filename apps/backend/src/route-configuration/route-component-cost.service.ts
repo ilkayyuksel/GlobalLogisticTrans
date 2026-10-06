@@ -9,20 +9,25 @@ import { RouteCostService } from "../route-costs/route-cost.service";
 import { UnknownPricingComponentException } from "./exceptions/route-configuration.exceptions";
 
 /**
- * The catalog code of the one route-dependent cost this screen configures.
+ * The catalog codes of the route-dependent costs this screen configures.
  *
- * ── TOLL IS NO LONGER ONE OF THEM ───────────────────────────────────────────
- * A route used to carry a stored toll AMOUNT beside its tunnel. It now carries a
- * DISTANCE, and the toll a Trip pays is that distance times the rate configured
- * once for the whole business (PRICING.TOLL_RATE_PER_KM). So there is nothing
- * per route for the Engine to read as a toll cost, and nothing to write as one.
- *
- * Tunnel is untouched: it is a fixed amount for the road, not a rate.
+ * Both are a fixed AMOUNT for the route, stored as a RouteCost and read by the
+ * Engine verbatim. The Toll was briefly derived from kilometres times one
+ * global rate instead; it is an amount per route and per Combination leg again,
+ * exactly like the Tunnel beside it.
  */
 export const TUNNEL_CODE = "TUNNEL";
+export const TOLL_CODE = "TOLL";
+
+export type RouteComponentCode = typeof TUNNEL_CODE | typeof TOLL_CODE;
+
+/** The amounts a configured route carries, by component. Null: none stated. */
+export type RouteComponentCosts = Readonly<
+  Record<RouteComponentCode, RouteCostResponseDto | null>
+>;
 
 /**
- * Whose tunnel a cost is.
+ * Whose cost a cost is.
  *
  * ── WHY A COST NEEDS AN OWNER AT ALL ────────────────────────────────────────
  * A route cost has always been matched by departure and destination, which
@@ -37,7 +42,7 @@ export const TUNNEL_CODE = "TUNNEL";
  * route's. The departure and destination travel with both, because the columns
  * that record the road are NOT NULL either way.
  */
-export type TunnelCostOwner =
+export type RouteCostOwner =
   | { readonly kind: "ROAD"; readonly departure: string; readonly destination: string }
   | {
       readonly kind: "ROUTE";
@@ -47,7 +52,7 @@ export type TunnelCostOwner =
     };
 
 /** The road a cost is recorded against, whichever kind of owner it has. */
-export function roadOf(owner: TunnelCostOwner): {
+export function roadOf(owner: RouteCostOwner): {
   departure: string;
   destination: string;
 } {
@@ -55,56 +60,73 @@ export function roadOf(owner: TunnelCostOwner): {
 }
 
 /**
- * The tunnel amount a configured route carries, read and written in one place.
+ * The Tunnel and Toll amounts a configured route carries, read and written in
+ * one place.
  *
  * ── WHY THIS IS ITS OWN SERVICE ─────────────────────────────────────────────
  * Two screens configure a route now — the ordinary one and the Combination, each
  * of whose legs is a route in its own right — and both need exactly the same
  * three operations on exactly the same kind of record. Repeating them would have
- * meant two places that decide when a tunnel cost is created, corrected or
+ * meant two places that decide when such a cost is created, corrected or
  * stopped, and they would drift.
  *
  * It owns no table and adds no rule: every write goes through RouteCostService,
  * so the component validation, the duplicate check and the canonical terminal
  * matching all keep working exactly as they already did.
+ *
+ * Toll and Tunnel are the same kind of record — a fixed amount for a road or a
+ * leg — so one service handles both, told which by its catalog code.
  */
 @Injectable()
-export class RouteTunnelCostService {
+export class RouteComponentCostService {
   constructor(
     private readonly routeCosts: RouteCostService,
     /*
      * The repository for ONE read the service layer does not expose: turning a
-     * component CODE into its id. The screen speaks in Tunnel and never in
+     * component CODE into its id. The screen speaks in Tunnel and Toll, never in
      * identifiers, so the translation has to happen somewhere; doing it here
      * keeps a raw UUID out of the API and out of the browser.
      */
     private readonly routeCostRepository: RouteCostRepository,
     private readonly logger: AppLoggerService,
   ) {
-    this.logger.setContext(RouteTunnelCostService.name);
+    this.logger.setContext(RouteComponentCostService.name);
   }
 
   /**
-   * The owner's tunnel cost, active or not.
+   * The owner's cost for one component, active or not.
    *
    * An INACTIVE cost is found too, because reactivating a route must correct the
    * row already there rather than create a second one beside it.
    */
-  async find(owner: TunnelCostOwner): Promise<RouteCostResponseDto | null> {
-    const active = await this.activeCostsOf(owner);
-    const activeMatch = active.find(
-      (cost) => cost.pricingComponent.code === TUNNEL_CODE,
-    );
-
-    if (activeMatch) {
-      return activeMatch;
-    }
-
-    return this.findInactive(owner);
+  async find(
+    owner: RouteCostOwner,
+    code: RouteComponentCode,
+  ): Promise<RouteCostResponseDto | null> {
+    return (await this.findAll(owner))[code];
   }
 
   /**
-   * Writes the owner's tunnel, creating or correcting whichever row exists.
+   * The owner's Tunnel and Toll, from ONE active lookup.
+   *
+   * A screen shows both on every row, and two lookups per row would double the
+   * queries of a page that already reads one per row. The inactive list is read
+   * only for a component that has no active cost, as `find` always did.
+   */
+  async findAll(owner: RouteCostOwner): Promise<RouteComponentCosts> {
+    const active = await this.activeCostsOf(owner);
+    const activeOf = (code: RouteComponentCode) =>
+      active.find((cost) => cost.pricingComponent.code === code) ?? null;
+
+    return {
+      [TUNNEL_CODE]: activeOf(TUNNEL_CODE) ?? (await this.findInactive(owner, TUNNEL_CODE)),
+      [TOLL_CODE]: activeOf(TOLL_CODE) ?? (await this.findInactive(owner, TOLL_CODE)),
+    };
+  }
+
+  /**
+   * Writes the owner's cost for one component, creating or correcting whichever
+   * row exists.
    *
    * An amount of ZERO is stored as a real row rather than as no row. The two
    * price a Trip identically but say different things: an explicit zero is "this
@@ -112,9 +134,13 @@ export class RouteTunnelCostService {
    * reported as a configuration gap, and an operator who typed 0 should not be
    * nagged about it.
    */
-  async save(owner: TunnelCostOwner, amount: number): Promise<void> {
-    const component = await this.requireTunnelComponent();
-    const existing = await this.find(owner);
+  async save(
+    owner: RouteCostOwner,
+    code: RouteComponentCode,
+    amount: number,
+  ): Promise<void> {
+    const component = await this.requireComponent(code);
+    const existing = await this.find(owner, code);
 
     if (existing) {
       /*
@@ -140,22 +166,22 @@ export class RouteTunnelCostService {
   }
 
   /**
-   * Stops the owner's tunnel from being charged.
+   * Stops the owner's costs — Tunnel and Toll — from being charged.
    *
    * Used when a route MOVES or goes: a cost of the ROAD is matched by departure
    * and destination, so the one left at the old pair would go on charging Trips
    * that still drive it. The row stays; only the Engine stops reading it.
    */
-  async deactivate(owner: TunnelCostOwner): Promise<void> {
-    const cost = await this.find(owner);
-
-    if (cost?.isActive) {
-      await this.routeCosts.deactivate(cost.id);
+  async deactivate(owner: RouteCostOwner): Promise<void> {
+    for (const cost of Object.values(await this.findAll(owner))) {
+      if (cost?.isActive) {
+        await this.routeCosts.deactivate(cost.id);
+      }
     }
   }
 
   private activeCostsOf(
-    owner: TunnelCostOwner,
+    owner: RouteCostOwner,
   ): Promise<RouteCostResponseDto[]> {
     return owner.kind === "ROUTE"
       ? this.routeCosts.findActiveForRoutePricing(owner.routePricingId)
@@ -163,14 +189,15 @@ export class RouteTunnelCostService {
   }
 
   /**
-   * The owner's deactivated tunnel cost, if it has one.
+   * The owner's deactivated cost for one component, if it has one.
    *
    * The active lookups above cannot see it, so the paginated list of inactive
    * costs is searched — a road is matched with the canonical terminal rule, a
    * route by its identity.
    */
   private async findInactive(
-    owner: TunnelCostOwner,
+    owner: RouteCostOwner,
+    code: RouteComponentCode,
   ): Promise<RouteCostResponseDto | null> {
     const { items } = await this.routeCosts.findAll({
       page: 1,
@@ -181,7 +208,7 @@ export class RouteTunnelCostService {
     return (
       items.find(
         (cost) =>
-          cost.pricingComponent.code === TUNNEL_CODE &&
+          cost.pricingComponent.code === code &&
           (owner.kind === "ROUTE"
             ? cost.routePricingId === owner.routePricingId
             : /*
@@ -196,12 +223,12 @@ export class RouteTunnelCostService {
     );
   }
 
-  private async requireTunnelComponent() {
+  private async requireComponent(code: RouteComponentCode) {
     const component =
-      await this.routeCostRepository.findPricingComponentByCode(TUNNEL_CODE);
+      await this.routeCostRepository.findPricingComponentByCode(code);
 
     if (!component) {
-      throw new UnknownPricingComponentException(TUNNEL_CODE);
+      throw new UnknownPricingComponentException(code);
     }
 
     return component;

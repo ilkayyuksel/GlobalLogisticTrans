@@ -82,13 +82,13 @@ export function ExportButton({
        * What each Trip's cells SAY — Remarks, the waiting window, whether TAR
        * was charged — composed by the backend, which owns that vocabulary. The
        * same words the invoice check writes into the customer's workbook, so
-       * the two can never disagree. Only the word for waiting time is ours: it
-       * is the operator's language.
+       * the two can never disagree. Only the words for waiting time are ours:
+       * they are the operator's language.
        */
-      const labels = await fetchTripExportLabels(
-        tripIds,
-        t("ritten.export.waitingWord"),
-      );
+      const labels = await fetchTripExportLabels(tripIds, {
+        waitingWord: t("ritten.export.waitingWord"),
+        nextDayWord: t("ritten.export.nextDayWord"),
+      });
 
       /*
        * ── THE SHEET'S GROUP COLOURS ARE THE LIST'S ────────────────────────────

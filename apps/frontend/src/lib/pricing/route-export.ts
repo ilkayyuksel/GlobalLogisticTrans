@@ -10,7 +10,7 @@ import type {
  * Field for field, name for name. Export a configuration, paste the file into
  * Bulk toevoegen, and the same routes come back — which is what makes this a
  * backup rather than a report. The names are the API's own (`departure`,
- * `destination`, `tarief`, `kilometres`, `tunnel`), because a second vocabulary
+ * `destination`, `tarief`, `toll`, `tunnel`), because a second vocabulary
  * would be a second thing to keep in step.
  *
  * ── CONFIGURATION ONLY ──────────────────────────────────────────────────────
@@ -19,10 +19,12 @@ import type {
  * a backup carrying database ids would be a backup that only fits the database it
  * came from.
  *
- * ── AND NO TOLL ─────────────────────────────────────────────────────────────
- * A route carries its DISTANCE. What a Trip pays in toll is that distance times
- * the rate configured once for the whole business, worked out by the Pricing
- * Engine — so there is no toll amount to export, and the importer refuses one.
+ * ── TOLL IS AN AMOUNT, AND THERE IS NO DISTANCE ─────────────────────────────
+ * A route carries its Toll as an amount, like its Tunnel, and the file says so.
+ * The importer refuses an older file that still names a distance.
+ *
+ * Over ST is not part of this document: the importer creates Combinations
+ * from their legs, and Over ST is filled in on the screen.
  */
 
 /** One road, priced. The shape of both an ordinary route and a leg. */
@@ -30,8 +32,7 @@ export interface ExportedRoute {
   readonly departure: string;
   readonly destination: string;
   readonly tarief: number;
-  /** Null when nobody has stated the distance; such a route is charged no toll. */
-  readonly kilometres: number | null;
+  readonly toll: number;
   readonly tunnel: number;
 }
 
@@ -91,7 +92,7 @@ function toExportedRoute(route: RouteConfiguration): ExportedRoute {
     departure: route.departure,
     destination: route.destination,
     tarief: Number(route.tarief),
-    kilometres: route.kilometres === null ? null : Number(route.kilometres),
+    toll: Number(route.toll),
     tunnel: Number(route.tunnel),
   };
 }

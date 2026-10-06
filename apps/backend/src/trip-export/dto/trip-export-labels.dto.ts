@@ -52,6 +52,16 @@ export class TripExportLabelsQueryDto {
   @IsString()
   @Length(1, MAX_WAITING_WORD_LENGTH)
   waitingWord?: string;
+
+  @ApiPropertyOptional({
+    example: "volgende dag",
+    description:
+      "The words for a waiting window that ends the day after it began, in the operator's own language. Placed in brackets after the window. Defaults to the documents' own: volgende dag.",
+  })
+  @IsOptional()
+  @IsString()
+  @Length(1, MAX_WAITING_WORD_LENGTH)
+  nextDayWord?: string;
 }
 
 /** What an export prints about one Trip, beside its amounts. */
@@ -69,7 +79,8 @@ export class TripExportLabelsDto {
   @ApiProperty({
     nullable: true,
     example: "Wachttijd 08:30-14:00",
-    description: "The waiting window, or its duration, or null when none was recorded.",
+    description:
+      "The waiting window — followed by the next-day words in brackets when it ends the following day — or its duration, or null when none was recorded.",
   })
   waitingLabel!: string | null;
 

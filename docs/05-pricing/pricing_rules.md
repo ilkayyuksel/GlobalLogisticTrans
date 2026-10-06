@@ -253,6 +253,26 @@ what remains is billable.
 
 Billable waiting time is charged in configurable time blocks.
 
+## Which minutes are waiting time
+
+The waiting time the rules below apply to is the COUNTED time of the window the
+operator entered: only the part inside 06:00 → 20:00 on each day the window
+touches. A window may end the next day ("Volgende dag").
+
+| Window | Counted |
+|---|---:|
+| 10:00 → 12:00, same day | 120 min |
+| 05:00 → 07:00, same day | 60 min |
+| 10:00 → 08:00, next day | 720 min |
+| 10:00 → 12:00, next day | 960 min |
+| 22:00 → 02:00, next day | 0 min |
+
+The 06:00 → 20:00 window is fixed and is not a Setting. It decides how long the
+truck waited, never what that costs: the counted minutes are stored as
+`waiting_time_minutes` when the Trip is written, and the Pricing Engine prices
+that value with the threshold, allowance and blocks below, exactly as before.
+See `database_model.md`, "Waiting Time".
+
 ## Settings
 
 Four Settings govern the calculation. All four live in the PRICING category.
@@ -420,29 +440,23 @@ Concretely, from the matched row:
 | Amount | Source |
 |---|---|
 | Tarief | `route_pricing.base_price` of the matched row |
-| Toll | `route_pricing.kilometres` of the matched row × `PRICING.TOLL_RATE_PER_KM` |
+| Toll | the TOLL `route_cost` of the matched row's owner — the LEG for a Combination leg, the ROAD otherwise |
 | Tunnel | the TUNNEL `route_cost` of the matched row's owner — the LEG for a Combination leg, the ROAD otherwise |
 
 A Combination leg **owns** its route costs (`route_cost.route_pricing_id`), which
-is what stops the two configurations of one road sharing a tunnel amount: editing
-the Combination's tunnel can no longer change what every ordinary Trip on that
-road pays.
+is what stops the two configurations of one road sharing a toll or tunnel
+amount: editing the Combination's can no longer change what every ordinary Trip
+on that road pays.
 
 ---
 
 # Toll and Tunnel Costs
 
 Toll and Tunnel are both **route-dependent**, and the route decides both whether
-they apply and how much they cost. They no longer share one rule, because they
-are configured differently.
+they apply and how much they cost. Both are configured the same way: an
+**amount** per route, stored as a RouteCost.
 
-## Toll: the road's length times one rate
-
-A route carries its **distance in kilometres**. What a Trip pays is that
-distance times the toll rate configured once for the whole business
-(`PRICING.TOLL_RATE_PER_KM`):
-
-    Toll = route kilometres × toll rate per kilometre
+## Toll and Tunnel: an amount for the road
 
 Trip
 
@@ -452,59 +466,101 @@ Route (Terminal → Destination City)
 
 ↓
 
-RoutePricing.kilometres — the length of that road
-
-× PRICING.TOLL_RATE_PER_KM — what one kilometre costs
+RouteCost — the configured amount for the TOLL, and for the TUNNEL, component
 
 ↓
 
 TripPricingItem
 
-A toll amount is therefore **not** stored per route any more. The road
-contributes a fact that changes only when the road does, and one number is
-changed when tolls rise instead of an amount on every route.
+The amount is charged as configured: no rate, no quantity, no rounding. A route
+with no TOLL (or TUNNEL) cost produces no line, as against a line of zero; a
+route configured **as** zero is a decision and produces a line of zero.
 
-The distance is per **leg** for a Combination: each leg states its own, and each
-Trip is charged the toll of the leg it prices against. The two legs of one
-Combination may therefore carry different distances and different tolls.
+Each leg of a Combination carries its **own** toll and tunnel, stored as
+RouteCosts owned by that leg rather than by the road. A leg's costs are read only
+through the leg, and the road's only through the road, so the ordinary route and
+the Combination leg on the same road have independent amounts.
 
-The line records what it charged for: `quantity` holds the distance and
-`unit_price` the rate. So a breakdown says why the toll is what it is, and a Trip
-closed today keeps the rate that applied today — moving the setting tomorrow
-cannot restate it.
+## History: the toll was briefly kilometres × a rate
 
-**Either half missing produces no line**, as against a line of zero. No line
-says nobody has stated what this road costs; that covers a route with no
-configuration, a route configured before distances existed, and a rate nobody
-has set. A route stated **as** nought kilometres is a decision somebody made and
-does produce a line, of zero.
+For a period the toll was derived as `route_pricing.kilometres` ×
+`PRICING.TOLL_RATE_PER_KM`. The business returned to a toll amount per route:
 
-## Tunnel: an amount for the road
+- the Engine reads the TOLL route costs again — the ones stored before that
+  period were never deleted and are used again as they are;
+- `route_pricing.kilometres` is kept in the database, unused, so no entered
+  distance is lost; it is not converted into any amount;
+- `PRICING.TOLL_RATE_PER_KM` is switched off (not deleted) and no longer read or
+  offered;
+- a Trip priced in that period keeps its stored toll line, which records the
+  distance (`quantity`) and the rate (`unit_price`) it was charged with. No
+  snapshot is changed.
 
-Tunnel is unchanged. It is a fixed amount configured per route and stored as a
-RouteCost:
+## Over ST: Leg 2, on another day than Leg 1
 
-Trip
+A Combination carries **Over ST** — its own Tarief, Toll and Tunnel — beside its
+two legs, stored on `combination_route_group`. It is charged:
 
-↓
+- on **Leg 2** only — never on Leg 1;
+- only when Leg 2's `planningDate` **differs** from Leg 1's. The original
+  planning date, a document date or a creation date play no part; a leg with no
+  planning date owes no Over ST;
+- **component by component**: Leg 2's Tarief + Over ST Tarief, Toll + Over ST
+  Toll, Tunnel + Over ST Tunnel. An unstated or zero component adds nothing.
 
-Route (Terminal → Destination City)
+| Leg 1 date | Leg 2 date | Leg 2 (80 / 15 / 5) with Over ST 50 / 10 / 3 |
+|---|---|---|
+| 2026-10-06 | 2026-10-06 | 80 / 15 / 5 |
+| 2026-10-06 | 2026-10-07 | 130 / 25 / 8 |
 
-↓
+The additions are written as lines of their own — BASE_PRICE, TOLL and TUNNEL,
+described "Over ST" — so the Tarief, Tol and Tunnel columns, the exports and the
+invoice check read Leg 2's effective amounts from the snapshot, and nothing
+recalculates them. **Fuel** is charged on the effective Tarief (Over ST
+included), as decided by the business. The €50 Backload, the waiting time, the
+Cost Confirmations and the EK rule are unaffected.
 
-RouteCost — the configured amount for the TUNNEL component
+### Which Combination
 
-↓
+A road may be a leg of many Combinations, so a Combination Trip is matched by
+the **pair** of roads its two Trips drive (the same identity, `isSameCombination`,
+that keeps a pair from being configured twice). Tarief, Toll, Tunnel and Over
+ST all come from that one configuration. When the pair is not configured, the
+leg falls back to the match by its own road, as before, and owes no Over ST.
 
-TripPricingItem
+Over ST reaches a Trip only when it is priced (closed or repriced); stored
+snapshots do not change until then.
 
-It is **not** part of the kilometres. A route's distance prices its toll; its
-tunnel is charged beside it.
+### A date change reprices Leg 2 automatically
 
-Each leg of a Combination carries its **own** tunnel, stored as a RouteCost owned
-by that leg rather than by the road. A leg's tunnel is read only through the leg,
-and the road's only through the road, so the ordinary route's tunnel and the
-Combination leg's tunnel on the same road are two independent amounts.
+Because Over ST reads both legs' `planningDate`, moving **either** leg to
+another day can switch it on or off — always on Leg 2. So a `planningDate`
+change reprices Leg 2 by itself, without "Prijs opnieuw berekenen":
+
+| Change | Repriced |
+|---|---|
+| Leg 1's date | Leg 2 (its Over ST may appear or disappear) |
+| Leg 2's date | Leg 2 |
+| An ordinary Trip's date | nothing — its pricing does not read the date |
+
+- **Who decides which Trips:** the pricing domain —
+  `PricingRecalculationService.tripsAffectedByPlanningDate`, answered by the
+  resolver's own pair lookup (`legsPricedByPlanningDate`), so the Trips named
+  are exactly the ones whose price would move. Same pattern as
+  `tripsAffectedByRegrouping`.
+- **When:** after the write has committed, only on a real change of the stored
+  date (re-saving the same Datum asks nothing), through the same `recalculate`
+  as every other repricing — so it never throws, and a Trip that cannot be
+  priced answers with a reason code.
+- **Which status:** CLOSED Trips only. An OPEN Trip has no snapshot; it is
+  priced when it closes, with the dates it has then.
+- **Write paths:** the Trip edit (`TripService.update`), and a revised or
+  repeated NEW document (`TripRevisionService`) — a document rewrites only OPEN
+  Trips, but may date one whose CLOSED partner is Leg 2. Shared helper:
+  `trips/planning-date-change.ts`.
+- `originalPlanningDate` triggers nothing: Over ST does not read it.
+- Not in `changesPricingInput`: that list names a Trip's OWN inputs, while a
+  date change may reprice the partner and must leave an ordinary Trip alone.
 
 ## Applicability
 

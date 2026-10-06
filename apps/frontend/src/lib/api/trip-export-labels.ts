@@ -33,12 +33,18 @@ const MAX_LABEL_TRIP_IDS = 100;
  * The export words of many Trips, in batches of a hundred — the same batching
  * the snapshots read beside it uses, for the same reason.
  *
- * `waitingWord` is the operator's own word for waiting time: translation is
- * the browser's, and the server only places the word it is given.
+ * The words are the operator's own — for waiting time, and for a window that
+ * ends the next day: translation is the browser's, and the server only places
+ * the words it is given.
  */
+export interface TripExportLabelWords {
+  readonly waitingWord: string;
+  readonly nextDayWord: string;
+}
+
 export async function fetchTripExportLabels(
   tripIds: readonly string[],
-  waitingWord: string,
+  { waitingWord, nextDayWord }: TripExportLabelWords,
   signal?: AbortSignal,
 ): Promise<Map<string, TripExportLabels>> {
   const byTripId = new Map<string, TripExportLabels>();
@@ -48,7 +54,10 @@ export async function fetchTripExportLabels(
 
     const labels = await request<(TripExportLabels & { tripId: string })[]>(
       LABELS_PATH,
-      { query: { tripIds: batch.join(","), waitingWord }, signal },
+      {
+        query: { tripIds: batch.join(","), waitingWord, nextDayWord },
+        signal,
+      },
     );
 
     for (const { tripId, ...label } of labels) {

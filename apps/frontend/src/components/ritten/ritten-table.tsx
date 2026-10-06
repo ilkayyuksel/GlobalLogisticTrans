@@ -30,10 +30,10 @@ import {
 } from "@/lib/trips/latest-update";
 import {
   canEdit,
-  canEditDestination,
   canViewPdf,
   type RittenActions,
 } from "@/lib/ritten/row-actions";
+import { DestinationCell, TerminalCell } from "./address-cells";
 import { InlineCell, type InlineOption } from "./inline-cell";
 import { WaitingTimeCell } from "./waiting-time-cell";
 import type { WhatsAppStatus } from "@/lib/api/whatsapp";
@@ -63,8 +63,6 @@ import { RowLifecycleActions } from "./row-lifecycle-actions";
 const CONTAINER_NUMBER_MAX_LENGTH = 100;
 /** Likewise TAR_NUMMER_MAX_LENGTH there. A ceiling, never a format. */
 const TAR_NUMMER_MAX_LENGTH = 100;
-/** City and country are 200 each there; this field carries both with a comma. */
-const DESTINATION_FIELD_MAX_LENGTH = 401;
 
 const COLUMN_KEYS = [
   "ritten.select.row",
@@ -589,7 +587,7 @@ function RittenRow({
 
       <td className="px-1.5 py-2 text-secondary">
         <UpdatedValue trip={trip} field="terminal">
-          {trip.terminal ?? empty}
+          <TerminalCell trip={trip} isBusy={isBusy} onSave={save} />
         </UpdatedValue>
       </td>
       <td className="px-1.5 py-2 text-secondary">
@@ -669,59 +667,6 @@ function RittenRow({
 }
 
 /**
- * Where this Trip is going.
- *
- * ── EDITABLE ONLY ON A TRIP CREATED BY HAND ─────────────────────────────────
- * The destination used to be read-only everywhere, described as
- * parser-controlled — which is only true where a parser exists. A Trip entered
- * by hand has no document, so a city typed wrongly at creation could never be
- * corrected: the transport stayed planned to the wrong place for the rest of
- * its life.
- *
- * An imported Trip still belongs to its document. A later UPDATE re-reads the
- * destination from the PDF, so anything typed here would be silently
- * overwritten — and the backend refuses it outright. The cell is therefore
- * read-only exactly where a save could not succeed, rather than offering an
- * edit that ends in a 409.
- * ────────────────────────────────────────────────────────────────────────────
- *
- * City and country are one address and are edited as one field: moving a Trip
- * from Bousbecque to Venlo without its country would leave the two disagreeing.
- * "City, Country" is the same text the column already showed.
- */
-function DestinationCell({
-  trip,
-  isBusy,
-  onSave,
-}: {
-  trip: Trip;
-  isBusy: boolean;
-  onSave: (payload: UpdateTripPayload) => Promise<void>;
-}) {
-  const t = useTranslation();
-  const empty = t("ritten.value.empty");
-  const parts = [trip.destinationCity, trip.destinationCountry].filter(
-    (part): part is string => Boolean(part),
-  );
-  const display = parts.length > 0 ? parts.join(", ") : empty;
-
-  if (!canEditDestination(trip)) {
-    return <>{display}</>;
-  }
-
-  return (
-    <InlineCell
-      label={t("ritten.edit.destination")}
-      displayValue={display}
-      editValue={parts.join(", ")}
-      maxLength={DESTINATION_FIELD_MAX_LENGTH}
-      isDisabled={isBusy}
-      onSave={(value) => onSave(toDestination(value))}
-    />
-  );
-}
-
-/**
  * One end of the TRANSPORT window.
  *
  * ── NOT THE WAITING TIME ────────────────────────────────────────────────────
@@ -784,36 +729,6 @@ function TransportTimeCell({
       }
     />
   );
-}
-
-/**
- * Splits "Venlo, Netherlands" into the two columns the backend stores.
- *
- * Only the FIRST comma separates them: a city may contain one — "Saint Laurent
- * Blangy, Pas-de-Calais, France" is a city and a country, not three fields —
- * so everything after the first comma is the country. Text with no comma is a
- * city alone, and the country is cleared rather than left behind pointing at a
- * place the Trip no longer goes to.
- */
-export function toDestination(value: string): UpdateTripPayload {
-  const separator = value.indexOf(",");
-
-  if (separator === -1) {
-    const city = value.trim();
-
-    return {
-      destinationCity: city === "" ? null : city,
-      destinationCountry: null,
-    };
-  }
-
-  const city = value.slice(0, separator).trim();
-  const country = value.slice(separator + 1).trim();
-
-  return {
-    destinationCity: city === "" ? null : city,
-    destinationCountry: country === "" ? null : country,
-  };
 }
 
 /**

@@ -22,6 +22,8 @@ export interface LabelledTrip {
   /** `HH:MM:SS`, as the Trip DTO carries it. */
   readonly waitingTimeStart: string | null;
   readonly waitingTimeEnd: string | null;
+  /** Whether the end is on the day after the begin. */
+  readonly waitingTimeEndsNextDay: boolean;
   readonly waitingTimeMinutes: number | null;
   /** The LATEST confirmation, as the Ritten list shows it. */
   readonly costConfirmation: { readonly ccNumber: string } | null;
@@ -48,6 +50,9 @@ export interface TripExportLabels {
 
 /** The word for waiting time when the caller names none: the documents' own. */
 export const DEFAULT_WAITING_WORD = "Wachttijd";
+
+/** The words for a window ending the day after it began: the documents' own. */
+export const DEFAULT_NEXT_DAY_WORD = "volgende dag";
 
 /** The component code of the stored EK line, as the backend spells it. */
 const COST_CONFIRMATION_CODE = "COST_CONFIRMATION";
@@ -76,10 +81,17 @@ export function toTripExportLabels(
   snapshot: LabelledSnapshot | null,
   automaticPropertyId: string | null,
   waitingWord: string = DEFAULT_WAITING_WORD,
+  nextDayWord: string = DEFAULT_NEXT_DAY_WORD,
 ): TripExportLabels {
   return {
-    remarks: toPricingRemarks(trip, snapshot, automaticPropertyId, waitingWord),
-    waitingLabel: toWaitingLabel(trip, waitingWord),
+    remarks: toPricingRemarks(
+      trip,
+      snapshot,
+      automaticPropertyId,
+      waitingWord,
+      nextDayWord,
+    ),
+    waitingLabel: toWaitingLabel(trip, waitingWord, nextDayWord),
     tarCharged: wasTarChargedIn(snapshot, automaticPropertyId),
   };
 }
@@ -112,6 +124,7 @@ export function toPricingRemarks(
   snapshot: LabelledSnapshot | null,
   automaticPropertyId: string | null,
   waitingWord: string = DEFAULT_WAITING_WORD,
+  nextDayWord: string = DEFAULT_NEXT_DAY_WORD,
 ): string {
   const names = trip.customProperties.map((property) => property.name);
   const parts = [...names];
@@ -122,7 +135,7 @@ export function toPricingRemarks(
     parts.push(TAR_MARK);
   }
 
-  const waiting = toWaitingLabel(trip, waitingWord);
+  const waiting = toWaitingLabel(trip, waitingWord, nextDayWord);
 
   if (waiting !== null) {
     parts.push(waiting);
@@ -189,7 +202,9 @@ function referencesOnSnapshot(snapshot: LabelledSnapshot | null): string[] {
 }
 
 /**
- * The waiting time as the printed sheet says it: `Wachttijd 07:00-10:00`.
+ * The waiting time as the printed sheet says it: `Wachttijd 07:00-10:00`, or
+ * `Wachttijd 10:00-12:00 (volgende dag)` when the end is on the next day —
+ * without that, a sheet would show a two-hour window billed as sixteen.
  *
  * ── THE WINDOW, NOT A NEW CALCULATION ───────────────────────────────────────
  * These are the two clock times an operator actually read and the system
@@ -204,12 +219,15 @@ function referencesOnSnapshot(snapshot: LabelledSnapshot | null): string[] {
 export function toWaitingLabel(
   trip: LabelledTrip,
   waitingWord: string = DEFAULT_WAITING_WORD,
+  nextDayWord: string = DEFAULT_NEXT_DAY_WORD,
 ): string | null {
   const begin = toClockLabel(trip.waitingTimeStart);
   const end = toClockLabel(trip.waitingTimeEnd);
 
   if (begin && end) {
-    return `${waitingWord} ${begin}-${end}`;
+    const window = `${waitingWord} ${begin}-${end}`;
+
+    return trip.waitingTimeEndsNextDay ? `${window} (${nextDayWord})` : window;
   }
 
   const duration = formatWaitingTime(trip.waitingTimeMinutes);

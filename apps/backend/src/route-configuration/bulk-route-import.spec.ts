@@ -17,8 +17,8 @@ import type { RouteConfigurationUnitOfWork } from "./route-configuration.unit-of
  * relational records a route configured by hand becomes — a route price row, a
  * Combination group with two legs, a tunnel cost — through exactly the same
  * services. Nothing is stored as JSON, no route carries a second route in a blob,
- * and there is no pricing logic of its own: the Toll is derived by the Engine from
- * the stored kilometres and the configured rate, as it is for any route.
+ * and there is no pricing logic of its own: the Toll and the Tunnel are stored
+ * as the amounts given, as they are for any route.
  *
  * ── THE PROMISE THESE TESTS GUARD ───────────────────────────────────────────
  * Twenty valid routes and one broken one change NOTHING. That is checked twice
@@ -39,7 +39,7 @@ function normalRoute(overrides: Record<string, unknown> = {}) {
     departure: "Antwerp",
     destination: "Kallo",
     tarief: 100,
-    kilometres: 25,
+    toll: 25,
     tunnel: 0,
     ...overrides,
   };
@@ -51,7 +51,7 @@ function leg(overrides: Record<string, unknown> = {}) {
     departure: "Antwerp",
     destination: "Kallo",
     tarief: 100,
-    kilometres: 25,
+    toll: 25,
     tunnel: 0,
     ...overrides,
   };
@@ -72,7 +72,7 @@ function combinationRoute(overrides: Record<string, unknown> = {}) {
         departure: "Kallo",
         destination: "Antwerp",
         tarief: 80,
-        kilometres: 30,
+        toll: 30,
         tunnel: 15,
       }),
     ],
@@ -200,7 +200,7 @@ describe("bulk route import", () => {
           departure: "Antwerp",
           destination: "Kallo",
           tarief: 100,
-          kilometres: 25,
+          toll: 25,
           tunnel: 0,
         }),
       );
@@ -223,13 +223,13 @@ describe("bulk route import", () => {
     /** Amounts travel as typed; rounding and storage belong to the backend. */
     it("passes the amounts through untouched", async () => {
       await importRoutes([
-        normalRoute({ tarief: 520.55, kilometres: 31.5, tunnel: 12.75 }),
+        normalRoute({ tarief: 520.55, toll: 31.5, tunnel: 12.75 }),
       ]);
 
       expect(configurationServices.routes.create).toHaveBeenCalledWith(
         expect.objectContaining({
           tarief: 520.55,
-          kilometres: 31.5,
+          toll: 31.5,
           tunnel: 12.75,
         }),
       );
@@ -295,13 +295,13 @@ describe("bulk route import", () => {
       ]);
     });
 
-    it("keeps each leg's own KM", async () => {
+    it("keeps each leg's own Toll", async () => {
       await importRoutes([combinationRoute()]);
 
       const [dto] = configurationServices.combinations.create.mock.calls[0];
 
       expect(
-        dto.legs.map((each: { kilometres: number }) => each.kilometres),
+        dto.legs.map((each: { toll: number }) => each.toll),
       ).toEqual([25, 30]);
     });
 
@@ -361,7 +361,7 @@ describe("bulk route import", () => {
 
     it("refuses an entry with no type", async () => {
       const [message] = await refusalOf([
-        { departure: "Antwerp", destination: "Kallo", tarief: 1, kilometres: 1, tunnel: 0 },
+        { departure: "Antwerp", destination: "Kallo", tarief: 1, toll: 1, tunnel: 0 },
       ]);
 
       expect(message).toBe("route 1: type must be NORMAL or COMBINATION");
@@ -377,7 +377,7 @@ describe("bulk route import", () => {
       ["departure", "departure"],
       ["destination", "destination"],
       ["tarief", "tarief"],
-      ["kilometres", "kilometres"],
+      ["toll", "toll"],
       ["tunnel", "tunnel"],
     ])("refuses an ordinary route with no %s", async (_name, field) => {
       const entry = normalRoute();
@@ -393,7 +393,7 @@ describe("bulk route import", () => {
 
     it.each([
       ["tarief", { tarief: -1 }],
-      ["kilometres", { kilometres: -1 }],
+      ["toll", { toll: -1 }],
       ["tunnel", { tunnel: -0.01 }],
     ])("refuses a negative %s", async (field, overrides) => {
       const messages = await refusalOf([normalRoute(overrides)]);
@@ -419,15 +419,15 @@ describe("bulk route import", () => {
     });
 
     /*
-     * ── NO TOLL IN THE DOCUMENT ───────────────────────────────────────────
-     * A route carries its DISTANCE; the Toll is the Engine's, derived from that
-     * distance and the configured rate per kilometre. Accepting and dropping a
-     * toll amount would let an operator believe one had been stored.
+     * ── NO DISTANCE IN THE DOCUMENT ───────────────────────────────────────
+     * A route carries its Toll as an AMOUNT now. An older file still naming a
+     * distance is refused rather than silently converted or dropped, so an
+     * operator never believes a distance was used.
      */
-    it("refuses an entry that names a toll amount", async () => {
-      const messages = await refusalOf([normalRoute({ toll: 18 })]);
+    it("refuses an older entry that names a distance", async () => {
+      const messages = await refusalOf([normalRoute({ kilometres: 18 })]);
 
-      expect(messages.join(" ")).toContain("toll");
+      expect(messages.join(" ")).toContain("kilometres");
     });
 
     /** Nor an active flag, which route prices no longer have at all. */
@@ -514,19 +514,19 @@ describe("bulk route import", () => {
      */
     it("says a missing field is required, once", async () => {
       const entry = normalRoute();
-      delete (entry as Record<string, unknown>).kilometres;
+      delete (entry as Record<string, unknown>).toll;
 
       expect(await refusalOf([entry])).toEqual([
-        "route 1: kilometres is required",
+        "route 1: toll is required",
       ]);
     });
 
     /** A value that is present but wrong still reports each rule it broke. */
     it("reports every rule a present value breaks", async () => {
-      const messages = await refusalOf([normalRoute({ kilometres: -1 })]);
+      const messages = await refusalOf([normalRoute({ toll: -1 })]);
 
       expect(messages.length).toBeGreaterThan(0);
-      expect(messages.every((message) => message.includes("kilometres"))).toBe(
+      expect(messages.every((message) => message.includes("toll"))).toBe(
         true,
       );
       expect(messages.join(" ")).not.toContain("is required");
@@ -543,7 +543,7 @@ describe("bulk route import", () => {
     it("reports every broken entry rather than the first", async () => {
       const messages = await refusalOf([
         normalRoute({ tarief: -1 }),
-        normalRoute({ departure: "Gent", destination: "Lille", kilometres: -2 }),
+        normalRoute({ departure: "Gent", destination: "Lille", toll: -2 }),
         combinationRoute({ legs: [leg()] }),
       ]);
 
@@ -1099,7 +1099,7 @@ describe("bulk route import", () => {
         combinationRoute({
           legs: [
             leg(),
-            leg({ departure: "Kallo", destination: "Antwerp", kilometres: -1 }),
+            leg({ departure: "Kallo", destination: "Antwerp", toll: -1 }),
           ],
         }),
       ]);
@@ -1107,7 +1107,7 @@ describe("bulk route import", () => {
       expect(errors[0]).toMatchObject({
         routeNumber: 1,
         legNumber: 2,
-        field: "kilometres",
+        field: "toll",
       });
     });
 
@@ -1169,7 +1169,7 @@ describe("bulk route import", () => {
           departure: "Quay 869",
           destination: "Dourges",
           tarief: 520.5,
-          kilometres: 310.25,
+          toll: 310.25,
           tunnel: 0,
         },
         {
@@ -1177,7 +1177,7 @@ describe("bulk route import", () => {
           departure: "Gent",
           destination: "Lille",
           tarief: 120,
-          kilometres: 55,
+          toll: 55,
           tunnel: 12.5,
         },
         {
@@ -1187,14 +1187,14 @@ describe("bulk route import", () => {
               departure: "Antwerp",
               destination: "Kallo",
               tarief: 100,
-              kilometres: 25,
+              toll: 25,
               tunnel: 0,
             },
             {
               departure: "Kallo",
               destination: "Antwerp",
               tarief: 80,
-              kilometres: 30,
+              toll: 30,
               tunnel: 15,
             },
           ],
@@ -1229,7 +1229,7 @@ describe("bulk route import", () => {
           departure: "Quay 869",
           destination: "Dourges",
           tarief: 520.5,
-          kilometres: 310.25,
+          toll: 310.25,
           tunnel: 0,
         }),
       );
@@ -1242,25 +1242,24 @@ describe("bulk route import", () => {
           departure: "Antwerp",
           destination: "Kallo",
           tarief: 100,
-          kilometres: 25,
+          toll: 25,
           tunnel: 0,
         },
         {
           departure: "Kallo",
           destination: "Antwerp",
           tarief: 80,
-          kilometres: 30,
+          toll: 30,
           tunnel: 15,
         },
       ]);
     });
 
     /**
-     * A road nobody has measured exports as null, and comes back as null. Zero
-     * would be a different statement: charged nothing because somebody decided
-     * it costs nothing, rather than because nobody has said how long it is.
+     * The toll is an AMOUNT and is required like the tunnel: zero states "no
+     * toll", and null is not a value this document can carry.
      */
-    it("accepts an unmeasured road as null", async () => {
+    it("refuses a null toll", async () => {
       const { isValid } = await service.check({
         routes: [
           {
@@ -1268,16 +1267,16 @@ describe("bulk route import", () => {
             departure: "Aalst",
             destination: "Ninove",
             tarief: 50,
-            kilometres: null,
+            toll: null,
             tunnel: 0,
           },
         ],
       });
 
-      expect(isValid).toBe(true);
+      expect(isValid).toBe(false);
     });
 
-    it("still refuses a route with no kilometres field at all", async () => {
+    it("still refuses a route with no toll field at all", async () => {
       const entry = {
         type: "NORMAL",
         departure: "Aalst",
@@ -1287,7 +1286,7 @@ describe("bulk route import", () => {
       };
 
       expect(await refusalOf([entry])).toEqual([
-        "route 1: kilometres is required",
+        "route 1: toll is required",
       ]);
     });
 

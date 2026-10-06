@@ -375,6 +375,7 @@ describe("Ritten editing", () => {
         expect(patchCalls()[0][1]?.body).toEqual({
           waitingTimeStart: "10:00",
           waitingTimeEnd: "12:30",
+          waitingTimeEndsNextDay: false,
         });
       });
     });
@@ -396,6 +397,7 @@ describe("Ritten editing", () => {
         expect(patchCalls()[0][1]?.body).toEqual({
           waitingTimeStart: "22:00",
           waitingTimeEnd: "02:00",
+          waitingTimeEndsNextDay: true,
         });
       });
     });
@@ -417,6 +419,7 @@ describe("Ritten editing", () => {
         expect(patchCalls()[0][1]?.body).toEqual({
           waitingTimeStart: "10:00",
           waitingTimeEnd: "10:00",
+          waitingTimeEndsNextDay: false,
         });
       });
     });

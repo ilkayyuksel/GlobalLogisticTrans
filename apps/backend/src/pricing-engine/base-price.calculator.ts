@@ -12,6 +12,7 @@ import {
   PricingComponentCode,
   PricingLine,
 } from "./pricing-line";
+import { overStLine } from "./combination-over-st";
 import { PricingStrategy } from "./pricing-settings";
 
 /** pricing_rules.md numbers the Base Route Price first in the sequence. */
@@ -64,13 +65,21 @@ export class BasePriceCalculator implements PricingCalculationStep {
         ? this.fromConfiguredRoute(context.baseSource, context.route)
         : this.fromDistance(context.baseSource);
 
+    // Leg 2 of a Combination on another day than Leg 1 adds Over ST's Tarief.
+    const overSt = overStLine(
+      PricingComponentCode.BASE_PRICE,
+      context.overSt?.tarief,
+      line.calculationOrder,
+    );
+
     this.logger.log("Base price calculation completed", {
       tripId: context.tripId,
       strategy: context.baseSource.strategy,
       calculationOrder: line.calculationOrder,
+      hasOverSt: overSt.length > 0,
     });
 
-    return [line];
+    return [line, ...overSt];
   }
 
   /**

@@ -30,12 +30,13 @@ export const COMBINATIONS_PATH = `${ROUTES_PATH}/combinations`;
 export const BULK_DELETE_PATH = `${ROUTES_PATH}/bulk-delete`;
 const BOOTSTRAP_PATH = "/api/v1/settings/pricing/bootstrap";
 
-type Prices = { tarief: string; kilometres: string | null; tunnel: string };
+type Prices = { tarief: string; toll: string; tunnel: string };
 
 export interface ServedRoute extends Prices {
   id: string;
   departure: string;
   destination: string;
+  hasToll: boolean;
   hasTunnel: boolean;
   type: "NORMAL" | "COMBINATION";
   combinationGroupId: string | null;
@@ -46,6 +47,7 @@ export interface ServedCombination {
   id: string;
   reviewed: boolean;
   legs: ServedRoute[];
+  overSt: { tarief: string | null; toll: string | null; tunnel: string | null };
 }
 
 /** A deep copy of plain data. jsdom has no `structuredClone`. */
@@ -59,7 +61,8 @@ export function route(overrides: Partial<ServedRoute> = {}): ServedRoute {
     departure: "Quay 869",
     destination: "Dourges",
     tarief: "520.00",
-    kilometres: "310.00",
+    toll: "15.00",
+    hasToll: true,
     tunnel: "0.00",
     hasTunnel: true,
     type: "NORMAL",
@@ -89,14 +92,19 @@ export function combination(
       reviewed,
     });
 
-  return { id, reviewed, legs: [leg(first, 1), leg(second, 2)] };
+  return {
+    id,
+    reviewed,
+    legs: [leg(first, 1), leg(second, 2)],
+    overSt: { tarief: null, toll: null, tunnel: null },
+  };
 }
 
 export const prices = (
   tarief: string,
-  kilometres: string | null,
+  toll: string,
   tunnel: string,
-): Prices => ({ tarief, kilometres, tunnel });
+): Prices => ({ tarief, toll, tunnel });
 
 export interface Call {
   path: string;
@@ -161,7 +169,7 @@ function syncAnswer(groupId: string, position: number) {
     legPosition: position,
     departure: leg.departure,
     destination: leg.destination,
-    prices: { tarief: leg.tarief, kilometres: leg.kilometres, tunnel: leg.tunnel },
+    prices: { tarief: leg.tarief, toll: leg.toll, tunnel: leg.tunnel },
     targetCombinationGroupIds: syncTargets(groupId, position).map(
       (each) => each.id,
     ),

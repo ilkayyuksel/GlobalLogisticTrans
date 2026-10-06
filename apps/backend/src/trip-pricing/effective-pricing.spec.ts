@@ -82,20 +82,22 @@ describe("resolving the effective pricing of a Trip", () => {
   });
 
   describe("Others", () => {
-    /** The rule, in one test: Others is waiting time plus custom properties. */
-    it("is Waiting Time plus Custom Properties", () => {
+    /** The rule, in one test: Others is the priced Custom Properties alone. */
+    it("is the Custom Properties, without the waiting time", () => {
       const pricing = resolveEffectivePricing(FULL_TRIP, []);
 
-      expect(pricing.others.toFixed(2)).toBe("121.25");
+      expect(pricing.others.toFixed(2)).toBe("80.00");
     });
 
-    it("is only the waiting time when no property is priced", () => {
+    /** The waiting time is an EK source now; in Others too it would count twice. */
+    it("is zero when only a waiting time is priced", () => {
       const pricing = resolveEffectivePricing(
         [engine(EffectiveComponent.WAITING_TIME, "41.25")],
         [],
       );
 
-      expect(pricing.others.toFixed(2)).toBe("41.25");
+      expect(pricing.others.toFixed(2)).toBe("0.00");
+      expect(pricing.ek.toFixed(2)).toBe("41.25");
     });
 
     /** Several priced properties are one Others, not several. */
@@ -111,7 +113,7 @@ describe("resolving the effective pricing of a Trip", () => {
       expect(pricing.others.toFixed(2)).toBe("115.00");
     });
 
-    it("is zero when the Trip has neither", () => {
+    it("is zero when the Trip has no priced property", () => {
       const pricing = resolveEffectivePricing(
         [engine(EffectiveComponent.BASE_PRICE, "500.00")],
         [],
@@ -141,41 +143,138 @@ describe("resolving the effective pricing of a Trip", () => {
         [],
       );
 
-      expect(pricing.others.toFixed(2)).toBe("130.00");
+      expect(pricing.others.toFixed(2)).toBe("100.00");
       expect(pricing.tarief.toFixed(2)).toBe("0.00");
-    });
-
-    it("follows the waiting-time override rather than the engine figure", () => {
-      const pricing = resolveEffectivePricing(FULL_TRIP, [
-        override(EffectiveComponent.WAITING_TIME, "55.00"),
-      ]);
-
-      // 55.00 + 80.00 — the corrected wait, the calculated property.
-      expect(pricing.others.toFixed(2)).toBe("135.00");
     });
   });
 
+  /**
+   * ── EK: ONE SOURCE, NEVER TWO ADDED ─────────────────────────────────────
+   *   waiting time charged (> €0) → EK is the waiting time
+   *   otherwise                   → EK is the confirmations, summed; else €0
+   * The confirmations stay in the breakdown either way — evidence, not erased.
+   */
   describe("EK", () => {
-    it("is the Cost Confirmation amount", () => {
-      const pricing = resolveEffectivePricing(FULL_TRIP, []);
+    const BASE = engine(EffectiveComponent.BASE_PRICE, "500.00");
+    const ekOf = (...lines: EngineAmount[]) =>
+      resolveEffectivePricing([BASE, ...lines], []).ek.toFixed(2);
 
-      expect(pricing.ek.toFixed(2)).toBe("27.50");
+    it("A. is zero with neither a confirmation nor a waiting time", () => {
+      expect(ekOf()).toBe("0.00");
     });
 
-    it("is zero when the Trip has no confirmation", () => {
+    it("B. is the confirmation without a waiting time", () => {
+      expect(ekOf(engine(EffectiveComponent.COST_CONFIRMATION, "27.50"))).toBe("27.50");
+    });
+
+    /** €137.50, not €165.00: the two are never added. */
+    it("C. is the waiting time when one is charged, not the sum", () => {
+      expect(
+        ekOf(
+          engine(EffectiveComponent.WAITING_TIME, "137.50"),
+          engine(EffectiveComponent.COST_CONFIRMATION, "27.50"),
+        ),
+      ).toBe("137.50");
+    });
+
+    /** A new snapshot: the Engine wrote the superseded confirmation at €0. */
+    it("C. reads a superseded confirmation line the same way", () => {
+      expect(
+        ekOf(
+          engine(EffectiveComponent.WAITING_TIME, "137.50"),
+          engine(EffectiveComponent.COST_CONFIRMATION, "0.00"),
+        ),
+      ).toBe("137.50");
+    });
+
+    /** Only a real charge displaces a confirmation. */
+    it("D. falls back to the confirmation when the waiting time is €0", () => {
+      expect(
+        ekOf(
+          engine(EffectiveComponent.WAITING_TIME, "0.00"),
+          engine(EffectiveComponent.COST_CONFIRMATION, "27.50"),
+        ),
+      ).toBe("27.50");
+    });
+
+    it("E. is the waiting time without any confirmation", () => {
+      expect(ekOf(engine(EffectiveComponent.WAITING_TIME, "137.50"))).toBe("137.50");
+    });
+
+    it("F. is zero with a €0 waiting time and no confirmation", () => {
+      expect(ekOf(engine(EffectiveComponent.WAITING_TIME, "0.00"))).toBe("0.00");
+    });
+
+    /** The Engine sums several confirmations into one line: 25 + 40 + 12.50. */
+    it("G. ignores several confirmations when a waiting time is charged", () => {
+      expect(
+        ekOf(
+          engine(EffectiveComponent.WAITING_TIME, "137.50"),
+          engine(EffectiveComponent.COST_CONFIRMATION, "77.50"),
+        ),
+      ).toBe("137.50");
+    });
+
+    it("H. is the confirmations' sum when the waiting time is €0", () => {
+      expect(
+        ekOf(
+          engine(EffectiveComponent.WAITING_TIME, "0.00"),
+          engine(EffectiveComponent.COST_CONFIRMATION, "77.50"),
+        ),
+      ).toBe("77.50");
+    });
+
+    /** Defensive: two confirmation lines are still one EK, summed. */
+    it("O. adds every confirmation line when they are the source", () => {
+      expect(
+        ekOf(
+          engine(EffectiveComponent.COST_CONFIRMATION, "25.00"),
+          engine(EffectiveComponent.COST_CONFIRMATION, "40.00"),
+          engine(EffectiveComponent.COST_CONFIRMATION, "12.50"),
+        ),
+      ).toBe("77.50");
+    });
+
+    /** A snapshot written before the rule: full CC beside a waiting time. */
+    it("applies the rule to an older snapshot too", () => {
+      const pricing = resolveEffectivePricing(FULL_TRIP, []);
+
+      expect(pricing.ek.toFixed(2)).toBe("41.25");
+    });
+
+    /** The confirmation stays readable in the breakdown — auditable. */
+    it("keeps the confirmation in the components while the waiting time is EK", () => {
+      const pricing = resolveEffectivePricing(FULL_TRIP, []);
+
+      const confirmation = pricing.components.find(
+        (component) =>
+          component.componentCode === EffectiveComponent.COST_CONFIRMATION,
+      );
+
+      expect(confirmation?.engineAmount?.toFixed(2)).toBe("27.50");
+    });
+
+    /** No double counting: the waiting time is in the Total exactly once. */
+    it("counts the waiting time once and the superseded confirmation not at all", () => {
       const pricing = resolveEffectivePricing(
-        [engine(EffectiveComponent.BASE_PRICE, "500.00")],
+        [
+          BASE,
+          engine(EffectiveComponent.WAITING_TIME, "137.50"),
+          engine(EffectiveComponent.COST_CONFIRMATION, "27.50"),
+        ],
         [],
       );
 
-      expect(pricing.ek.toFixed(2)).toBe("0.00");
+      expect(pricing.others.toFixed(2)).toBe("0.00");
+      expect(pricing.totaal.toFixed(2)).toBe("637.50");
     });
 
-    /** The approved rule: an EK override is authoritative over the CC. */
+    /** A legacy EK override, where one exists, still replaces the confirmation. */
     it("follows an override over the confirmation", () => {
-      const pricing = resolveEffectivePricing(FULL_TRIP, [
-        override(EffectiveComponent.COST_CONFIRMATION, "150.00"),
-      ]);
+      const pricing = resolveEffectivePricing(
+        [BASE, engine(EffectiveComponent.COST_CONFIRMATION, "27.50")],
+        [override(EffectiveComponent.COST_CONFIRMATION, "150.00")],
+      );
 
       expect(pricing.ek.toFixed(2)).toBe("150.00");
     });
@@ -199,8 +298,7 @@ describe("resolving the effective pricing of a Trip", () => {
     it("never puts the confirmation into Others", () => {
       const pricing = resolveEffectivePricing(FULL_TRIP, []);
 
-      expect(pricing.others.toFixed(2)).toBe("121.25");
-      expect(pricing.others.toFixed(2)).not.toBe("148.75");
+      expect(pricing.others.toFixed(2)).toBe("80.00");
     });
   });
 
@@ -306,8 +404,9 @@ describe("resolving the effective pricing of a Trip", () => {
     it("is the sum of the seven columns", () => {
       const pricing = resolveEffectivePricing(FULL_TRIP, []);
 
-      // 500 + 100 + 25 + 40 + 15 + 121.25 + 27.50
-      expect(pricing.totaal.toFixed(2)).toBe("828.75");
+      // 500 + 100 + 25 + 40 + 15 + Others 80 + EK 41.25 (the waiting time; the
+      // confirmation it supersedes is not added).
+      expect(pricing.totaal.toFixed(2)).toBe("801.25");
     });
 
     it("moves when a dynamic component moves", () => {
@@ -321,8 +420,8 @@ describe("resolving the effective pricing of a Trip", () => {
         [],
       );
 
-      expect(before.totaal.toFixed(2)).toBe("828.75");
-      expect(after.totaal.toFixed(2)).toBe("867.50");
+      expect(before.totaal.toFixed(2)).toBe("801.25");
+      expect(after.totaal.toFixed(2)).toBe("840.00");
     });
 
     /**
@@ -336,15 +435,20 @@ describe("resolving the effective pricing of a Trip", () => {
       ]);
 
       expect(pricing.brandstof.toFixed(2)).toBe("105.00");
-      expect(pricing.totaal.toFixed(2)).toBe("858.75");
+      expect(pricing.totaal.toFixed(2)).toBe("831.25");
     });
 
+    /** Without a charged waiting time, the confirmation is EK and is summed. */
     it("moves when EK is overridden", () => {
-      const pricing = resolveEffectivePricing(FULL_TRIP, [
+      const withoutWaiting = FULL_TRIP.filter(
+        (line) => line.componentCode !== EffectiveComponent.WAITING_TIME,
+      );
+      const pricing = resolveEffectivePricing(withoutWaiting, [
         override(EffectiveComponent.COST_CONFIRMATION, "150.00"),
       ]);
 
-      expect(pricing.totaal.toFixed(2)).toBe("951.25");
+      // 500 + 100 + 25 + 40 + 15 + 80 + 150
+      expect(pricing.totaal.toFixed(2)).toBe("910.00");
     });
 
     /** Decimal throughout: a float would make this 828.7500000000001. */
@@ -376,7 +480,9 @@ describe("resolving the effective pricing of a Trip", () => {
       expect(pricing.tarief.toFixed(2)).toBe("525.00");
       // 100 of fuel on 500 of Tarief is 20%, so 525 carries 105.
       expect(pricing.brandstof.toFixed(2)).toBe("105.00");
-      expect(pricing.others.toFixed(2)).toBe("80.00");
+      // The waiting time is EK now, not Others; the Total is the same.
+      expect(pricing.others.toFixed(2)).toBe("0.00");
+      expect(pricing.ek.toFixed(2)).toBe("80.00");
       expect(pricing.totaal.toFixed(2)).toBe("710.00");
     });
 
@@ -429,7 +535,7 @@ describe("resolving the effective pricing of a Trip", () => {
           (component) => component.source === PricingAmountSource.ENGINE,
         ),
       ).toBe(true);
-      expect(pricing.totaal.toFixed(2)).toBe("828.75");
+      expect(pricing.totaal.toFixed(2)).toBe("801.25");
     });
 
     /**

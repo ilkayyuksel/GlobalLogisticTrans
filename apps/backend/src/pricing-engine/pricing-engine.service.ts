@@ -265,8 +265,8 @@ export class PricingEngineService {
 
     /*
      * The configured route, matched ONCE for this Trip and then read by three
-     * components: the Tarief, the road's length for the Toll, and the road's
-     * tunnel. A road may be configured twice — as an ordinary route and as a leg
+     * components: the Tarief, the toll and the tunnel — and, for Leg 2 of a
+     * Combination planned on another day than Leg 1, the Over ST on top. A road may be configured twice — as an ordinary route and as a leg
      * of a Combination — so three separate lookups could match three different
      * rows and price a Trip with a mixture of them.
      */
@@ -286,14 +286,6 @@ export class PricingEngineService {
       route,
       matchedRoute,
     );
-    /*
-     * The road's length, for the Toll — taken from the row that produced the
-     * Tarief, so a Combination leg is charged for its own distance and never for
-     * the ordinary route's. Null when nobody has stated it, which charges no
-     * toll; the Toll calculator stays a pure function of the context.
-     */
-    const routeKilometres = matchedRoute?.kilometres ?? null;
-
     // Both halves of every route-priced component are now known, so a gap
     // between them can be reported before any step runs.
     this.reportUnpricedRouteComponents(
@@ -331,8 +323,8 @@ export class PricingEngineService {
       baseSource,
       rules,
       assignedCustomProperties,
-      routeKilometres,
       routeCosts,
+      overSt: matchedRoute?.overSt ?? null,
       costConfirmation,
       existingSnapshot,
       preparedAt,

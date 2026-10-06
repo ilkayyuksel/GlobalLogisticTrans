@@ -167,26 +167,6 @@ export class MissingRequiredCustomPropertyException extends UnprocessableEntityE
 }
 
 /**
- * A field the DOCUMENT owns cannot be edited by hand on an imported Trip.
- *
- * These fields are parser-controlled exactly where a parser exists. On a Trip
- * that came from a transport order the document is the authority: a later
- * UPDATE re-reads them from it, so a manual change would be silently
- * overwritten and the two sources would disagree in the meantime.
- *
- * A Trip created by hand has no document and therefore no other way to correct
- * one, so it accepts them. This exception is the refusal for the other case,
- * and it names both the field and the document so the reason is actionable.
- */
-export class DocumentControlledFieldException extends ConflictException {
-  constructor(tripId: string, pdfDocumentId: string, field: string) {
-    super(
-      `Trip "${tripId}" was imported from PDF document "${pdfDocumentId}", which is the authority for its ${field}. Only a Trip created by hand accepts a manually entered ${field}.`,
-    );
-  }
-}
-
-/**
  * A Trip in a TripGroup cannot be classified LOSRIT by the bulk action.
  *
  * NOTE ON WHERE THIS RULE LIVES. The data model does not forbid the
@@ -208,6 +188,9 @@ export class GroupedTripCannotBeLooseException extends ConflictException {
 /**
  * A waiting time was sent as half a window.
  *
+ * Or as a day flag with no times to apply it to: "ends next day" on its own
+ * says nothing about how long anyone waited.
+ *
  * An end with no beginning is not a duration of zero and not a duration from
  * midnight — it is an incomplete entry, and guessing which it meant would bill
  * something nobody measured. Both times, or both null to remove the entry.
@@ -218,7 +201,7 @@ export class GroupedTripCannotBeLooseException extends ConflictException {
 export class IncompleteWaitingWindowException extends BadRequestException {
   constructor() {
     super(
-      "waitingTimeStart and waitingTimeEnd must be sent together: both as times, or both as null to remove the waiting time.",
+      "waitingTimeStart and waitingTimeEnd must be sent together: both as times, or both as null to remove the waiting time. waitingTimeEndsNextDay is part of the window and cannot be sent on its own.",
     );
   }
 }

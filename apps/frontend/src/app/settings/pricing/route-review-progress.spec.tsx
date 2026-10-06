@@ -43,8 +43,9 @@ function route(overrides: Record<string, unknown> = {}) {
     departure: "Quay 869",
     destination: "Dourges",
     tarief: "520.00",
-    kilometres: "310.00",
+    toll: "310.00",
     tunnel: "0.00",
+    hasToll: true,
     hasTunnel: true,
     type: "NORMAL",
     combinationGroupId: null,
@@ -59,6 +60,7 @@ function combination(overrides: Record<string, unknown> = {}) {
   return {
     id: COMBINATION_ID,
     reviewed: false,
+    overSt: { tarief: null, toll: null, tunnel: null },
     legs: [
       route({
         id: "leg-1",

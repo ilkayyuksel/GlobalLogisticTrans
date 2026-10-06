@@ -11,7 +11,11 @@ import { changesWaitingTimeWindow } from "./waiting-window";
  *   the waiting-time window  — billed by the Waiting Time calculator;
  *   the TAR-nummer           — the automatic TAR follows from a stated number,
  *                              subject to the Combination allocation and the
- *                              same-day rule.
+ *                              same-day rule;
+ *   the terminal and the     — the two ends RoutePricing and route costs (toll,
+ *   destination city           tunnel) are matched on. The destination COUNTRY
+ *                              is not: nothing in pricing reads it, so editing
+ *                              it alone reprices nothing.
  *
  * The TAR-nummer was missing from this list, and that was a real bug. Adding a
  * number to a CLOSED Trip changed what it owed, but nothing repriced it: only a
@@ -33,8 +37,17 @@ import { changesWaitingTimeWindow } from "./waiting-window";
 export function changesPricingInput(
   update: Pick<
     UpdateTripDto,
-    "waitingTimeStart" | "waitingTimeEnd" | "tarNummer"
+    | "waitingTimeStart"
+    | "waitingTimeEnd"
+    | "tarNummer"
+    | "terminal"
+    | "destinationCity"
   >,
 ): boolean {
-  return changesWaitingTimeWindow(update) || update.tarNummer !== undefined;
+  return (
+    changesWaitingTimeWindow(update) ||
+    update.tarNummer !== undefined ||
+    update.terminal !== undefined ||
+    update.destinationCity !== undefined
+  );
 }

@@ -33,12 +33,16 @@ export class TripExportController {
   })
   @ApiOkResponse({ type: [TripExportLabelsDto] })
   @ApiBadRequestResponse({
-    description: `An id is not a valid UUID, the list is empty, it holds more than ${MAX_LABEL_TRIP_IDS} ids, or the waiting word is unusable.`,
+    description: `An id is not a valid UUID, the list is empty, it holds more than ${MAX_LABEL_TRIP_IDS} ids, or a display word is unusable.`,
   })
   async findForTrips(
     @Query() query: TripExportLabelsQueryDto,
   ): Promise<TripExportLabelsDto[]> {
-    const labels = await this.labels.findForTrips(query.tripIds, query.waitingWord);
+    const labels = await this.labels.findForTrips(
+      query.tripIds,
+      query.waitingWord,
+      query.nextDayWord,
+    );
 
     return [...labels.entries()].map(([tripId, label]) => ({ tripId, ...label }));
   }

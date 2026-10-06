@@ -11,6 +11,8 @@ import {
   waitingWindowMinutes,
   type WaitingWindowError,
 } from "@/lib/waiting-time";
+
+import { nextDayPayload, WaitingNextDayField } from "./waiting-next-day-field";
 import { RittenDialog } from "./ritten-dialog";
 
 /**
@@ -64,6 +66,7 @@ interface FormValues {
   /* Two clock times on screen; one integer in the database. */
   waitingBegin: string;
   waitingEnd: string;
+  waitingEndsNextDay: boolean;
   distanceKm: string;
   internalNotes: string;
   /** LOSRIT: the operator's classification, not a status. */
@@ -83,6 +86,7 @@ const EMPTY_FORM: FormValues = {
   destinationCountry: "",
   waitingBegin: "",
   waitingEnd: "",
+  waitingEndsNextDay: false,
   distanceKm: "",
   internalNotes: "",
   isLooseTrip: false,
@@ -107,10 +111,18 @@ export function toCreatePayload(values: FormValues): CreateTripPayload {
     terminal: emptyToNull(values.terminal),
     destinationCity: emptyToNull(values.destinationCity),
     destinationCountry: emptyToNull(values.destinationCountry),
-    waitingTimeMinutes: waitingWindowMinutes(
+    /*
+     * The WINDOW, not a duration: the backend derives the counted minutes from
+     * it — only 06:00 → 20:00 counts — exactly as it does for every edit, so
+     * a Trip created here is billed by the same rule as one edited later.
+     */
+    waitingTimeStart: emptyToNull(values.waitingBegin),
+    waitingTimeEnd: emptyToNull(values.waitingEnd),
+    ...nextDayPayload(
       values.waitingBegin,
       values.waitingEnd,
-    ).totalMinutes,
+      values.waitingEndsNextDay,
+    ),
     distanceKm: distance === "" ? null : Number(distance),
     internalNotes: emptyToNull(values.internalNotes),
     isLooseTrip: values.isLooseTrip,
@@ -119,17 +131,28 @@ export function toCreatePayload(values: FormValues): CreateTripPayload {
 
 export function NewTripDialog({
   vehicles,
+  defaultPlanningDate,
   onCreate,
   onClose,
 }: {
   /** Active vehicles, already fetched by the page. */
   vehicles: readonly Vehicle[];
+  /**
+   * The day the list is showing, when it shows exactly one — a default the
+   * operator may still change. Null in a week or month, where the field starts
+   * empty as before.
+   */
+  defaultPlanningDate: string | null;
   /** Resolves once the backend accepted it AND the list was refetched. */
   onCreate: (payload: CreateTripPayload) => Promise<void>;
   onClose: () => void;
 }) {
   const t = useTranslation();
-  const [values, setValues] = useState<FormValues>(EMPTY_FORM);
+  // Read once, when the dialog opens: the default never overrides typing.
+  const [values, setValues] = useState<FormValues>(() => ({
+    ...EMPTY_FORM,
+    planningDate: defaultPlanningDate ?? "",
+  }));
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<unknown>(null);
 
@@ -142,7 +165,11 @@ export function NewTripDialog({
    * it to 1h30 — what someone typed is what they meant, and quietly changing it
    * is worse than saying it is wrong.
    */
-  const waiting = waitingWindowMinutes(values.waitingBegin, values.waitingEnd);
+  const waiting = waitingWindowMinutes(
+    values.waitingBegin,
+    values.waitingEnd,
+    values.waitingEndsNextDay,
+  );
 
   async function submit(event: React.FormEvent): Promise<void> {
     event.preventDefault();
@@ -359,6 +386,16 @@ export function NewTripDialog({
                   className={INPUT_CLASS}
                 />
               </Field>
+            </div>
+
+            <div className="mt-1">
+              <WaitingNextDayField
+                id="new-waiting-next-day"
+                begin={values.waitingBegin}
+                end={values.waitingEnd}
+                checked={values.waitingEndsNextDay}
+                onChange={(checked) => update({ waitingEndsNextDay: checked })}
+              />
             </div>
 
             <p className="mt-1 text-xs text-muted">

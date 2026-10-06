@@ -77,7 +77,6 @@ const RULES: PricingRuleConfiguration = {
   waitingTimeBlockMinutes: 30,
     waitingTimeBlockPrice: "25.00",
     ruleVersion: "2026.1",
-    tollRatePerKm: null,
 };
 
 const BASE_SOURCE = {
@@ -367,7 +366,6 @@ describe("PricingEngineService", () => {
         baseSource: BASE_SOURCE,
         rules: RULES,
         assignedCustomProperties: properties,
-        routeKilometres: null,
         routeCosts: ROUTE_COSTS,
         existingSnapshot: null,
       });
@@ -1016,6 +1014,9 @@ describe("PricingEngineService", () => {
         amount: "12.50",
       };
 
+      /** The costs the route resolves to, so `tolledRoad` can add the toll. */
+      let resolvedCosts: PricingRouteCostInput[] = [];
+
       function assign(
         properties: PricingCustomPropertyInput[],
         costs: PricingRouteCostInput[],
@@ -1023,32 +1024,21 @@ describe("PricingEngineService", () => {
         componentResolver.resolveAssignedCustomProperties.mockResolvedValue(
           properties,
         );
+        resolvedCosts = costs;
         routeCostResolver.resolve.mockResolvedValue(costs);
       }
 
       /**
-       * A tolled road: a distance on the route and a rate in the Settings.
+       * A tolled road: the route carries a TOLL amount, like its tunnel.
        *
-       * The toll is no longer a cost stored per route, so arranging one means
-       * stating how long the road is and what a kilometre costs — which is
-       * exactly what an operator now configures.
+       * Added to whatever the route already resolved to, because the toll is
+       * one of the route's costs and nothing else about the road changes.
        */
-      function tolledRoad(kilometres = "25.00", ratePerKm = "0.39") {
-        /*
-         * The distance travels on the MATCH, so a Trip is charged for the road
-         * the row that priced it describes. The kind matters too: an ordinary
-         * route reads the road's costs, a Combination leg its own.
-         */
-        componentResolver.resolveConfiguredRoute.mockResolvedValue({
-          routePricingId: ROUTE_ID,
-          basePrice: "380.00",
-          kilometres,
-          kind: "NORMAL",
-        });
-        ruleResolver.resolve.mockResolvedValue({
-          ...RULES,
-          tollRatePerKm: ratePerKm,
-        });
+      function tolledRoad() {
+        routeCostResolver.resolve.mockResolvedValue([
+          ...resolvedCosts,
+          TOLL_ROUTE_COST,
+        ]);
       }
 
       /*
@@ -1396,18 +1386,21 @@ describe("PricingEngineService", () => {
             amount: "12.50",
           },
         ]);
-        // The same 9.75 of toll, reached the way the business reaches it:
-        // 25 kilometres of road at 0.39 each.
-        componentResolver.resolveConfiguredRoute.mockResolvedValue({
-          routePricingId: ROUTE_ID,
-          basePrice: "380.00",
-          kilometres: "25.00",
-          kind: "NORMAL",
-        });
-        ruleResolver.resolve.mockResolvedValue({
-          ...RULES,
-          tollRatePerKm: "0.39",
-        });
+        // The same 9.75 of toll, as the route's own TOLL cost.
+        routeCostResolver.resolve.mockResolvedValue([
+          {
+            routeCostId: "cost-tunnel",
+            pricingComponentId: "component-tunnel",
+            componentCode: "TUNNEL",
+            amount: "12.50",
+          },
+          {
+            routeCostId: "cost-toll",
+            pricingComponentId: "component-toll",
+            componentCode: "TOLL",
+            amount: "9.75",
+          },
+        ]);
 
         const { totalPrice } = await engine.calculate(TRIP_ID);
 
@@ -1531,7 +1524,6 @@ describe("PricingEngineService", () => {
       ruleResolver.resolve.mockResolvedValue({
         ...RULES,
         ruleVersion: "2027.4",
-        tollRatePerKm: null,
       });
 
       expect((await engine.calculate(TRIP_ID)).pricingRuleVersion).toBe(
@@ -1795,7 +1787,6 @@ describe("PricingEngineService", () => {
       ruleResolver.resolve.mockResolvedValue({
         ...RULES,
         ruleVersion: "2027.9",
-        tollRatePerKm: null,
       });
 
       const result = await engine.reprocess(TRIP_ID);

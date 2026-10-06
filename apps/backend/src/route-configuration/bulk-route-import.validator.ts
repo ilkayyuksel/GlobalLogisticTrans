@@ -24,9 +24,10 @@ import { RouteConfigurationType } from "./dto/route-configuration.dto";
 /**
  * The same options the application's global ValidationPipe uses.
  *
- * `forbidNonWhitelisted` is what refuses a `toll` field: a route carries its
- * DISTANCE, and silently dropping a toll amount would let an operator believe one
- * had been stored. The same goes for `active`, which no longer exists.
+ * `forbidNonWhitelisted` is what refuses a `kilometres` field: a route carries a
+ * toll AMOUNT, and silently dropping a distance from an older file would let an
+ * operator believe it had been used. The same goes for `active`, which no
+ * longer exists.
  */
 const VALIDATION_OPTIONS = {
   whitelist: true,
@@ -523,9 +524,9 @@ function alreadyConfigured(
 /**
  * A class-validator failure tree, flattened to one line per broken rule.
  *
- * A nested leg arrives as `legs` → `1` → `kilometres`; the index becomes the leg
+ * A nested leg arrives as `legs` → `1` → `toll`; the index becomes the leg
  * NUMBER and the innermost property the field, so the report reads "route 4,
- * leg 2: kilometres must be a number" rather than repeating a path.
+ * leg 2: toll must be a number" rather than repeating a path.
  */
 function flatten(
   failures: readonly ValidationError[],
@@ -538,9 +539,9 @@ function flatten(
 
     /*
      * ── ONE LINE FOR A MISSING FIELD ────────────────────────────────────────
-     * A field that is absent fails every rule it has, so `kilometres` missing
-     * produced three lines: not a number, not at least zero, not at most ten
-     * thousand. All three say the same thing, and an operator reading eighty
+     * A field that is absent fails every rule it has, so `toll` missing
+     * produced three lines: not a number, not at least zero, not at most the
+     * money ceiling. All three say the same thing, and an operator reading eighty
      * routes has to read past two of them. A present value that is wrong still
      * reports each rule it broke, because those are different facts.
      */

@@ -8,8 +8,9 @@ import { Prisma } from "@prisma/client";
  * panel, the Prijsoverzicht export and the Basis export — and they must all get
  * the same answer. So the grouping and the arithmetic live here, once, and the
  * consumers select from the result rather than recomputing it. A second copy of
- * "Others is waiting time plus custom properties" would eventually disagree
- * with this one, and disagreeing about money is the expensive kind.
+ * "EK is the waiting time when charged, else the confirmations" would
+ * eventually disagree with this one, and disagreeing about money is the
+ * expensive kind.
  *
  * ── ENGINE VALUE AND OPERATOR VALUE ARE BOTH KEPT ───────────────────────────
  * An override does not erase what the rules produced; it sits beside it. Both
@@ -51,15 +52,12 @@ export type EffectiveComponent =
   (typeof EffectiveComponent)[keyof typeof EffectiveComponent];
 
 /**
- * The two components that make up Others.
+ * What makes up Others: the priced Custom Properties.
  *
- * Named here rather than spelled out at each use, because "Others is waiting
- * time plus custom properties" is a business rule and it should appear once.
+ * The waiting time used to be here too. It is now an EK source (see
+ * `resolveEk`), and counting it in Others as well would bill it twice.
  */
-const OTHERS_COMPONENTS: readonly string[] = [
-  EffectiveComponent.WAITING_TIME,
-  EffectiveComponent.CUSTOM_PROPERTY,
-];
+const OTHERS_COMPONENTS: readonly string[] = [EffectiveComponent.CUSTOM_PROPERTY];
 
 /** One engine line, as this layer needs it. */
 export interface EngineAmount {
@@ -102,8 +100,9 @@ export interface EffectiveAmount {
 /**
  * The whole breakdown, grouped the way the screens read it.
  *
- * Others and EK are DERIVED here and are not overridable: Others is a sum of
- * two calculated components, and correcting it means correcting one of them.
+ * Others and EK are DERIVED here and are not overridable: Others is the sum of
+ * the priced properties, EK is chosen between the waiting time and the
+ * confirmations, and correcting either means correcting what it came from.
  * Totaal is likewise always a sum — there is no figure an operator could type
  * that would not immediately be contradicted by its own parts.
  */
@@ -116,9 +115,9 @@ export interface EffectivePricing {
   readonly backload: Prisma.Decimal;
   readonly tol: Prisma.Decimal;
   readonly tunnel: Prisma.Decimal;
-  /** Waiting Time + Custom Properties. Calculated, never overridable. */
+  /** The priced Custom Properties. Calculated, never overridable. */
   readonly others: Prisma.Decimal;
-  /** The Cost Confirmation, or its override. */
+  /** The waiting time when charged (> €0), otherwise the Cost Confirmations. */
   readonly ek: Prisma.Decimal;
   /** The sum of the seven above. Never stored as an independent figure. */
   readonly totaal: Prisma.Decimal;
@@ -282,7 +281,10 @@ export function resolveEffectivePricing(
   const backload = effective(EffectiveComponent.COMBINATION);
   const tol = effective(EffectiveComponent.TOLL);
   const tunnel = effective(EffectiveComponent.TUNNEL);
-  const ek = effective(EffectiveComponent.COST_CONFIRMATION);
+  const ek = resolveEk(
+    effective(EffectiveComponent.WAITING_TIME),
+    effective(EffectiveComponent.COST_CONFIRMATION),
+  );
 
   return {
     components,
@@ -306,6 +308,31 @@ export function resolveEffectivePricing(
 }
 
 /**
+ * EK: ONE source, never two added together.
+ *
+ *   waiting time charged (> €0)  → the waiting time; the confirmations are
+ *                                  not added, however many there are
+ *   otherwise                    → the confirmations, summed; €0 without any
+ *
+ * A waiting time priced at €0 — below the threshold, or entirely at night —
+ * does not displace a confirmation: only a real charge does. The
+ * confirmations stay stored and auditable either way; this decides only what
+ * the Trip's EK is.
+ *
+ * Applied here, on every read, rather than only in the Engine: a snapshot
+ * written before the rule still carries the full confirmation line beside its
+ * waiting time, and EK must follow the rule for it too. The Engine writes the
+ * confirmation line at €0 when superseded, so for a NEW snapshot both agree
+ * and its stored total counts the waiting time once.
+ */
+function resolveEk(
+  waitingTime: Prisma.Decimal,
+  costConfirmations: Prisma.Decimal,
+): Prisma.Decimal {
+  return waitingTime.greaterThan(ZERO) ? waitingTime : costConfirmations;
+}
+
+/**
  * The only three amounts an operator may type.
  *
  * ── WHY THE LIST IS THIS SHORT ──────────────────────────────────────────────
@@ -314,10 +341,11 @@ export function resolveEffectivePricing(
  *
  *   Brandstof is a percentage of the effective Tarief — correct the Tarief;
  *   Backload follows from Combination membership — change the grouping;
- *   Others is Waiting Time plus the priced Custom Properties — edit one of
- *     those, which is where the amount actually lives;
- *   EK is the Cost Confirmation, and the confirmation is the evidence — an
- *     amount typed over it would be a figure with no document behind it;
+ *   Others is the priced Custom Properties — edit those, which is where the
+ *     amount actually lives;
+ *   EK is the charged waiting time or the Cost Confirmations — edit the
+ *     waiting time; the confirmation is evidence, and an amount typed over it
+ *     would be a figure with no document behind it;
  *   Totaal is a sum, and a sum that disagrees with its parts is not a total.
  *
  * Toll and Tunnel are here because nothing calculates them yet: their value IS

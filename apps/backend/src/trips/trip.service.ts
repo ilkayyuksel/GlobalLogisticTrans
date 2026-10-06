@@ -30,9 +30,12 @@ import { toWaitingTimeWrite } from "./waiting-window";
 import { ImportTripsCommand } from "./import-trips.command";
 import { changesPricingInput } from "./billable-fields";
 import {
+  movesPlanningDate,
+  repriceAfterPlanningDateChange,
+} from "./planning-date-change";
+import {
   AssignmentSubject,
   DeletedTripCannotBeLooseException,
-  DocumentControlledFieldException,
   IncompleteWaitingWindowException,
   DuplicateBookingNumberException,
   GroupedTripCannotBeLooseException,
@@ -367,15 +370,13 @@ export class TripService {
    * actually changes: the rule applies to new assignments, and a Trip that
    * already carries a since-deactivated Vehicle must stay editable.
    *
-   * The destination and the transport times are checked separately, because
-   * whether they are manual depends on the TRIP rather than on the field — see
-   * `assertDocumentFieldsEditable`.
+   * The address — terminal and destination — is accepted on every Trip, imported
+   * or not, by decision of the business; see `UpdateTripDto`.
    */
   async update(id: string, dto: UpdateTripDto): Promise<TripResponseDto> {
     const existing = await this.requireTrip(id);
 
     this.assertWaitingWindowIsComplete(dto);
-    this.assertDocumentFieldsEditable(existing, dto);
 
     if (dto.vehicleId !== undefined && dto.vehicleId !== existing.vehicleId) {
       await this.assertAssignable("vehicle", dto.vehicleId);
@@ -404,7 +405,7 @@ export class TripService {
       changedFields: changedFieldNames(dto),
     });
 
-    return this.respondToUpdate(updated, dto);
+    return this.respondToUpdate(existing, updated, dto);
   }
 
   /**
@@ -426,18 +427,35 @@ export class TripService {
    * same-day TAR rule included, and cannot disagree. This service still knows
    * only the recalculation entry point, never the Engine itself.
    *
+   * ── AND THE PLANNING DATE ───────────────────────────────────────────────
+   * A date is a pricing input only for a genuine Combination, where it decides
+   * Leg 2's Over ST — and Leg 2 may be the OTHER Trip. So it is not one of the
+   * fields above: `repriceAfterPlanningDateChange` asks the pricing domain
+   * which CLOSED Trips the move affects and reprices exactly those, once each.
+   *
    * ── AND WHY THE STATUS IS NEVER TOUCHED ─────────────────────────────────
    * A CLOSED Trip stays CLOSED. The price of a finished job may change; whether
    * it is finished is changed only through the status endpoint.
    */
   private async respondToUpdate(
+    existing: Trip,
     updated: Trip,
     dto: UpdateTripDto,
   ): Promise<TripResponseDto> {
+    const datedOutcomes = movesPlanningDate(existing, updated)
+      ? await repriceAfterPlanningDateChange(
+          updated.id,
+          this.recalculation,
+          (tripId) => this.repository.findById(tripId),
+          this.logger,
+        )
+      : new Map<string, PricingRecalculationOutcome>();
     const response = await this.toResponse(updated);
+    const ownOutcome = datedOutcomes.get(updated.id);
 
-    if (!changesPricingInput(dto)) {
-      return response;
+    // Priced already by the date change: once is the same snapshot.
+    if (!changesPricingInput(dto) || ownOutcome !== undefined) {
+      return this.withOutcome(response, ownOutcome);
     }
 
     /*
@@ -1270,6 +1288,9 @@ export class TripService {
    * It cannot be a DTO decorator: `@IsOptional()` skips every validator on a
    * property that was not sent, which is precisely the case here — a start on
    * its own, with the end absent. So the rule lives where it can see both.
+   *
+   * The next-day flag belongs to the window and is accepted only beside two
+   * times: on its own, or beside a removal, there is nothing for it to mean.
    */
   private assertWaitingWindowIsComplete(dto: UpdateTripDto): void {
     const sent = [dto.waitingTimeStart, dto.waitingTimeEnd].filter(
@@ -1277,6 +1298,10 @@ export class TripService {
     );
 
     if (sent.length === 0) {
+      if (dto.waitingTimeEndsNextDay !== undefined) {
+        throw new IncompleteWaitingWindowException();
+      }
+
       return;
     }
 
@@ -1287,77 +1312,6 @@ export class TripService {
 
     if (!isComplete) {
       throw new IncompleteWaitingWindowException();
-    }
-  }
-
-  /**
-   * Who owns the fields a transport order states.
-   *
-   * A Trip created by hand has no source document, so the operator is the only
-   * possible author of its destination — and until now there was no way to
-   * change one entered wrongly, because it was excluded from every update as
-   * "parser-controlled". That description is only true where a parser exists.
-   *
-   * On an IMPORTED Trip it still is, FOR THE FIELDS THE DOCUMENT FILLED IN: a
-   * later UPDATE re-reads those and would overwrite anything typed here, so the
-   * request is refused rather than accepted and silently reverted.
-   *
-   * A field the document left EMPTY is the operator's, though. An order that
-   * names no destination imports with a null city, and guarding that null on
-   * behalf of a document with no opinion would leave the Trip permanently
-   * address-less.
-   *
-   * ── THE TRANSPORT TIMES ARE NOT ON THIS LIST ─────────────────────────────
-   * They used to be, and the owner decided otherwise: Begin and Eind are
-   * planning an operator adjusts as a day unfolds, on any Trip, exactly like
-   * the planning date beside them. A document may still revise them — that is
-   * what a later UPDATE is for — and until one does, the operator's value
-   * stands. An edit made here is an operator edit and writes no history: only
-   * a document's revision does that, through TripRevisionService.
-   *
-   * Only a field actually being SENT is checked. An update that leaves them
-   * alone is not a change to them, whatever the Trip's origin.
-   *
-   * There is deliberately no rule that the end must follow the start. A
-   * transport running past midnight is ordinary, and a single-time order stores
-   * the same value in both — inventing an ordering rule here would refuse
-   * planning the parser itself produces.
-   */
-  private assertDocumentFieldsEditable(trip: Trip, dto: UpdateTripDto): void {
-    if (trip.pdfDocumentId === null) {
-      return;
-    }
-
-    /*
-     * ── A DOCUMENT OWNS WHAT IT SAYS, NOT WHAT IT NEVER SAID ────────────────
-     * Some orders state no destination at all — the address block holds the
-     * postcode, a company and a street, and nothing else. The parser imports
-     * those with a null city rather than refusing a transport nobody can
-     * unblock, and the operator is then the only possible author of the
-     * address: refusing their edit would leave the Trip permanently without
-     * one, guarded on behalf of a document that never had an opinion.
-     *
-     * The protection is unchanged wherever the document DID state a value. A
-     * later UPDATE re-reads that field and would overwrite anything typed over
-     * it, so the request is still refused rather than accepted and silently
-     * reverted.
-     *
-     * Checked per FIELD, not per Trip: an order naming a country but no city
-     * keeps its country protected while its empty city is open.
-     */
-    const owned: ReadonlyArray<[keyof UpdateTripDto, keyof Trip, string]> = [
-      ["destinationCity", "destinationCity", "destination"],
-      ["destinationCountry", "destinationCountry", "destination"],
-    ];
-
-    for (const [field, column, description] of owned) {
-      if (dto[field] !== undefined && trip[column] !== null) {
-        throw new DocumentControlledFieldException(
-          trip.id,
-          trip.pdfDocumentId,
-          description,
-        );
-      }
     }
   }
 
@@ -1418,7 +1372,9 @@ export class TripService {
         dto.waitingTimeEnd === undefined
           ? undefined
           : toNullableTime(dto.waitingTimeEnd),
+        dto.waitingTimeEndsNextDay,
       ),
+      terminal: dto.terminal,
       destinationCity: dto.destinationCity,
       destinationCountry: dto.destinationCountry,
       startTime:
@@ -1441,6 +1397,7 @@ export class TripService {
 function toWaitingTimeOnCreate(dto: CreateTripDto): {
   waitingTimeStart: Date | null;
   waitingTimeEnd: Date | null;
+  waitingTimeEndsNextDay: boolean;
   waitingTimeMinutes: number | null;
 } {
   const window = toWaitingTimeWrite(
@@ -1450,11 +1407,13 @@ function toWaitingTimeOnCreate(dto: CreateTripDto): {
     dto.waitingTimeEnd === undefined
       ? undefined
       : toNullableTime(dto.waitingTimeEnd),
+    dto.waitingTimeEndsNextDay,
   );
 
   return {
     waitingTimeStart: window.waitingTimeStart ?? null,
     waitingTimeEnd: window.waitingTimeEnd ?? null,
+    waitingTimeEndsNextDay: window.waitingTimeEndsNextDay ?? false,
     waitingTimeMinutes:
       window.waitingTimeMinutes ?? dto.waitingTimeMinutes ?? null,
   };

@@ -29,6 +29,7 @@ function trip(overrides: Partial<LabelledTrip> = {}): LabelledTrip {
     customProperties: [],
     waitingTimeStart: null,
     waitingTimeEnd: null,
+    waitingTimeEndsNextDay: false,
     waitingTimeMinutes: null,
     costConfirmation: null,
     ...overrides,
@@ -177,6 +178,35 @@ describe("the waiting-time label", () => {
     expect(
       toWaitingLabel(trip({ waitingTimeStart: "07:00:00", waitingTimeEnd: "10:00:00", waitingTimeMinutes: 180 })),
     ).toBe("Wachttijd 07:00-10:00");
+  });
+
+  /** Without it, a sheet would show a two-hour window billed as sixteen hours. */
+  it("says when the window ends the next day", () => {
+    const nextDay = trip({
+      waitingTimeStart: "10:00:00",
+      waitingTimeEnd: "12:00:00",
+      waitingTimeEndsNextDay: true,
+      waitingTimeMinutes: 960,
+    });
+
+    expect(toWaitingLabel(nextDay)).toBe("Wachttijd 10:00-12:00 (volgende dag)");
+    expect(toWaitingLabel(nextDay, "Bekleme", "ertesi gün")).toBe(
+      "Bekleme 10:00-12:00 (ertesi gün)",
+    );
+  });
+
+  it("carries the next-day words into Remarks", () => {
+    expect(
+      remarksOf(
+        trip({
+          waitingTimeStart: "10:00:00",
+          waitingTimeEnd: "08:00:00",
+          waitingTimeEndsNextDay: true,
+          waitingTimeMinutes: 720,
+        }),
+        snapshotOf({ code: "WAITING_TIME" }),
+      ),
+    ).toBe("Wachttijd 10:00-08:00 (volgende dag)");
   });
 
   it("falls back to the duration when only one side was stored", () => {

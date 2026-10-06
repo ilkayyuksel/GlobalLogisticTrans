@@ -5,6 +5,7 @@ import { AppLoggerService } from "../logger/app-logger.service";
 import { CreateRoutePricingDto } from "./dto/create-route-pricing.dto";
 import {
   CombinationRoutePricingDto,
+  toCombinationOverSt,
   toRoutePricingResponse,
 } from "./dto/route-pricing-response.dto";
 import {
@@ -16,6 +17,7 @@ import {
 } from "./exceptions/route-pricing.exceptions";
 import { RoadEndpoints } from "./route-identity";
 import {
+  CombinationOverStData,
   CombinationRouteGroupWithLegs,
   RoutePricingRepository,
 } from "./route-pricing.repository";
@@ -84,6 +86,7 @@ export class CombinationRoutePricingService {
    */
   async create(
     legs: readonly CreateRoutePricingDto[],
+    overSt?: CombinationOverStData,
   ): Promise<CombinationRoutePricingDto> {
     this.assertExactlyTwoLegs(legs);
     this.assertDistinctRoutes(legs);
@@ -91,7 +94,7 @@ export class CombinationRoutePricingService {
 
     const created = await this.guardingUniqueness(legs, () =>
       this.repository.runInTransaction(async (repository) => {
-        const group = await repository.createGroup();
+        const group = await repository.createGroup(overSt);
 
         for (const [index, leg] of legs.entries()) {
           await repository.create(this.toLegData(leg, group.id, index));
@@ -125,6 +128,8 @@ export class CombinationRoutePricingService {
   async replaceLegs(
     combinationGroupId: string,
     legs: readonly CreateRoutePricingDto[],
+    /** Undefined leaves the stored Over ST untouched — see the leg sync. */
+    overSt?: CombinationOverStData,
   ): Promise<CombinationRoutePricingDto> {
     this.assertExactlyTwoLegs(legs);
     this.assertDistinctRoutes(legs);
@@ -149,8 +154,12 @@ export class CombinationRoutePricingService {
           );
         }
 
+        const group = overSt
+          ? await repository.setGroupOverSt(combinationGroupId, overSt)
+          : existing;
+
         return {
-          ...existing,
+          ...group,
           legs: await repository.findLegsOfGroup(combinationGroupId),
         };
       }),
@@ -344,7 +353,6 @@ export class CombinationRoutePricingService {
       departure: leg.departure,
       destination: leg.destination,
       basePrice: leg.basePrice,
-      kilometres: leg.kilometres ?? null,
       notes: leg.notes ?? null,
       combinationGroupId,
       combinationLegPosition: LEG_POSITIONS[index],
@@ -358,6 +366,7 @@ export class CombinationRoutePricingService {
       id: group.id,
       reviewed: group.reviewed,
       legs: group.legs.map(toRoutePricingResponse),
+      overSt: toCombinationOverSt(group),
       createdAt: group.createdAt,
       updatedAt: group.updatedAt,
     };

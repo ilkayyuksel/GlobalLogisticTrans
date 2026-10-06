@@ -69,7 +69,9 @@ const dialog = () => screen.getByRole("dialog");
 
 /** The Tarief cell of a combination's leg, as shown in its row. */
 function tariefOf(groupIndex: number, legIndex: number): string {
-  const group = within(routesSection()).getAllByRole("rowgroup")[groupIndex + 2];
+  // The Combi's section has its own table: its head first, then one group each.
+  const [, combinationsTable] = within(routesSection()).getAllByRole("table");
+  const group = within(combinationsTable).getAllByRole("rowgroup")[groupIndex + 1];
   const legRow = within(group).getAllByRole("row")[legIndex + 1];
 
   return within(legRow).getAllByRole("cell")[3].textContent ?? "";
@@ -121,7 +123,7 @@ describe("the confirmation", () => {
     expect(await screen.findByRole("dialog")).toHaveTextContent(
       `Prijzen van Leg 1 "${QUAY} → GENT" synchroniseren naar 1 andere Combination-routes?`,
     );
-    expect(dialog()).toHaveTextContent("Tarief 100.00 · KM 25.00 · Tunnel 10.00");
+    expect(dialog()).toHaveTextContent("Tarief 100.00 · Toll 25.00 · Tunnel 10.00");
     // The preview writes nothing.
     expect(writes()).toEqual([]);
   });

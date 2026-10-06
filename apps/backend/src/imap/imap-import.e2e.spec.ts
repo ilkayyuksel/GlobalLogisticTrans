@@ -368,7 +368,12 @@ describe("IMAP import, end to end with a real transport order", () => {
     // these tests takes exactly the path a real one takes.
     const importer = new PdfTripImporter(
       tripService,
-      new TripRevisionService(tripRepository, automaticFlat, logger),
+      new TripRevisionService(
+        tripRepository,
+        automaticFlat,
+        stubPricingRecalculation(),
+        logger,
+      ),
       pdfDocumentService,
       {
         record: jest.fn().mockResolvedValue({

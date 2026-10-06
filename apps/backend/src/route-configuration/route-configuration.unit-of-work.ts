@@ -9,7 +9,7 @@ import { RoutePricingRepository } from "../route-pricing/route-pricing.repositor
 import { RoutePricingService } from "../route-pricing/route-pricing.service";
 import { CombinationRouteConfigurationService } from "./combination-route-configuration.service";
 import { RouteConfigurationService } from "./route-configuration.service";
-import { RouteTunnelCostService } from "./route-tunnel-cost.service";
+import { RouteComponentCostService } from "./route-component-cost.service";
 
 /**
  * How long one import may hold its transaction.
@@ -85,7 +85,7 @@ export class RouteConfigurationUnitOfWork {
     const routePricingRepository = new RoutePricingRepository(client);
     const routeCostRepository = new RouteCostRepository(client);
 
-    const tunnelCosts = new RouteTunnelCostService(
+    const routeCosts = new RouteComponentCostService(
       new RouteCostService(routeCostRepository, this.logger),
       routeCostRepository,
       this.logger,
@@ -94,12 +94,12 @@ export class RouteConfigurationUnitOfWork {
     return {
       routes: new RouteConfigurationService(
         new RoutePricingService(routePricingRepository, this.logger),
-        tunnelCosts,
+        routeCosts,
         this.logger,
       ),
       combinations: new CombinationRouteConfigurationService(
         new CombinationRoutePricingService(routePricingRepository, this.logger),
-        tunnelCosts,
+        routeCosts,
         this.logger,
       ),
     };

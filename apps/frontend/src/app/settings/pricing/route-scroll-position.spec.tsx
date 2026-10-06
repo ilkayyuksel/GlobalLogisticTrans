@@ -73,20 +73,21 @@ async function expectTableToStayDuring(act: () => Promise<void>) {
   renderPage();
   await screen.findByText("Lille");
 
-  const table = within(routesSection()).getByRole("table");
+  // Both sections' tables: ordinary routes and Combinations.
+  const tables = within(routesSection()).getAllByRole("table");
 
   backend.holdRefetch = true;
   await act();
 
   // The refetch is in flight: the list is still the list, not a loading line.
   await waitFor(() => expect(backend.held.length).toBeGreaterThan(0));
-  expect(within(routesSection()).getByRole("table")).toBe(table);
+  expect(within(routesSection()).getAllByRole("table")).toEqual(tables);
   expect(within(routesSection()).queryByText(/Laden…/)).toBeNull();
 
   releaseRefetch();
 
   await waitFor(() => expect(backend.held).toHaveLength(0));
-  expect(within(routesSection()).getByRole("table")).toBe(table);
+  expect(within(routesSection()).getAllByRole("table")).toEqual(tables);
   expect(scrollTo).not.toHaveBeenCalled();
 }
 
@@ -152,10 +153,10 @@ describe("the scroll position", () => {
     renderPage();
 
     expect(await within(routesSection()).findAllByText(/Laden…/)).not.toHaveLength(0);
-    expect(within(routesSection()).queryByRole("table")).toBeNull();
+    expect(within(routesSection()).queryAllByRole("table")).toHaveLength(0);
 
     releaseRefetch();
 
-    expect(await within(routesSection()).findByRole("table")).toBeInTheDocument();
+    expect(await within(routesSection()).findAllByRole("table")).toHaveLength(2);
   });
 });
