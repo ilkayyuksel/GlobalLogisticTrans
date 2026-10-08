@@ -632,6 +632,44 @@ const PARSED_DOCUMENTS: readonly ExpectedDocument[] = [
   },
   {
     /*
+     * BUG — the country prefix written straight against the postcode, with the
+     * country on the line below:
+     *
+     *   [2030]
+     *   Zuidnatie Breakbulk Nv
+     *   Quay 468-484
+     *   Muisbroeklaan
+     *   B2030 Antwerp
+     *   Belgium
+     *
+     * Every prefixed rule demanded a dash, so `B2030` matched none of them and
+     * the order was refused. A glued prefix is read only when the country table
+     * knows it — see `glued-postcode-prefix.spec.ts`.
+     */
+    file: "BUG-CITY/transportorder1389100.pdf",
+    pageCount: 2,
+    layout: "SINGLE_TWO_PAGE",
+    documentStatus: "PLANNED",
+    trips: [
+      {
+        bookingNumber: "ANRDUB2816157",
+        direction: "COLLECTION",
+        containerType: "45PH",
+        containerNumber: null,
+        terminal: "PSA Quay 869",
+        destinationCity: "Antwerp",
+        destinationCountry: "Belgium",
+        date: "2026-10-09",
+        startTime: "08:00",
+        endTime: "14:00",
+        groupKey: null,
+        page: 1,
+        addressSection: "LOADING 1",
+      },
+    ],
+  },
+  {
+    /*
      * BUG — the city, a subdivision code and the block's own postcode on ONE
      * line, with no comma between them:
      *

@@ -162,6 +162,16 @@ F-62119 DOURGES
 
 Dourges, France
 
+B2030 Antwerp (country prefix written against the postcode; only known prefixes: B, BE, D, DE, F, FR, L, LU, NL)
+
+Belgium
+
+↓
+
+Antwerp, Belgium
+
+The postcode itself is not stored separately; it stays in the raw address.
+
 ---
 
 ## Terminal

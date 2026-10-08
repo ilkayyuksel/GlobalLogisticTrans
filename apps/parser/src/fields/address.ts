@@ -62,6 +62,44 @@ const STARTPOINT_LABEL = "Startpoint:";
 const POSTCODE = String.raw`\d{4,5}(?:\s?[A-Z]{2})?`;
 
 /**
+ * A country prefix written straight against the digits: `B2030`, `NL4612`.
+ *
+ * Only the prefixes the country table knows, in either letter case. Without a
+ * separator, "letters then digits" is also how a reference or a unit number
+ * looks, so the letters have to BE a postcode prefix — evidence, not shape.
+ */
+const GLUED_POSTCODE_PREFIX = Object.keys(COUNTRY_BY_POSTCODE_PREFIX)
+  .sort((left, right) => right.length - left.length)
+  .map((prefix) =>
+    [...prefix].map((letter) => `[${letter}${letter.toLowerCase()}]`).join(""),
+  )
+  .join("|");
+
+/**
+ * The country prefix of a postcode — the letters only, without the separator.
+ *
+ * ── TWO WAYS THE DOCUMENTS PRINT IT ─────────────────────────────────────────
+ *
+ *     BE-2040 Antwerp       letters, a dash, the digits
+ *     B2030 Antwerp         a known prefix written against the digits
+ *
+ * A real order printed the second form above `Belgium`, and every rule declined
+ * it: the prefixed rules demanded the dash, the bare ones a leading digit, and
+ * the bracketed last resort met the country line and refused. A document
+ * naming its destination plainly was reported as having no readable city.
+ *
+ * One fragment, shared by every rule that reads a prefixed postcode, so none of
+ * them can learn a prefix form the others do not.
+ */
+const POSTCODE_PREFIX = String.raw`[A-Za-z]{1,2}(?=\s*-)|(?:${GLUED_POSTCODE_PREFIX})(?=\d)`;
+
+/** The dash between prefix and digits; absent only on the glued form. */
+const PREFIX_SEPARATOR = String.raw`(?:\s*-\s*)?`;
+
+/** A prefix that may be there, for the rules that do not read its country. */
+const OPTIONAL_POSTCODE_PREFIX = `(?:(?:${POSTCODE_PREFIX})${PREFIX_SEPARATOR})?`;
+
+/**
  * `CC-NNNNN City` — the one line that identifies where a trip actually goes.
  *
  * ── THE PREFIX IS CASE-INSENSITIVE, AND HAS TO BE ───────────────────────────
@@ -87,7 +125,7 @@ const POSTCODE = String.raw`\d{4,5}(?:\s?[A-Z]{2})?`;
  * ────────────────────────────────────────────────────────────────────────────
  */
 export const POSTCODE_LINE = new RegExp(
-  String.raw`^([A-Za-z]{1,2})\s*-\s*(${POSTCODE})\s+(.+)$`,
+  String.raw`^(${POSTCODE_PREFIX})${PREFIX_SEPARATOR}(${POSTCODE})\s+(.+)$`,
 );
 
 /**
@@ -625,7 +663,7 @@ const POSTCODE_ONLY_LINE = /^\d{4,5}$/;
  * all.
  */
 const POSTCODE_THEN_CITY = new RegExp(
-  String.raw`^(?:[A-Za-z]{1,2}\s*-\s*)?` +
+  String.raw`^${OPTIONAL_POSTCODE_PREFIX}` +
     printedOnceOrTwice(String.raw`\d{4,8}(?:\s?[A-Z]{2})?`, "postcode") +
     String.raw`[\s,]+(?<city>[A-Za-z].*)$`,
 );
@@ -646,8 +684,9 @@ const POSTCODE_THEN_CITY = new RegExp(
  * `Kallo, Belgium` has no digits at all. The trailing comma the form prints is
  * optional, and the captured name is trimmed by `toCityName` as everywhere.
  */
-const CITY_THEN_POSTCODE =
-  /^(.+?)\s*,\s*(?:[A-Za-z]{1,2}\s*-\s*)?\d{4,5}(?:\s?[A-Z]{2})?\s*,?\s*$/;
+const CITY_THEN_POSTCODE = new RegExp(
+  String.raw`^(.+?)\s*,\s*${OPTIONAL_POSTCODE_PREFIX}\d{4,5}(?:\s?[A-Z]{2})?\s*,?\s*$`,
+);
 
 /**
  * The city first and the block's OWN postcode last, with no comma between —
