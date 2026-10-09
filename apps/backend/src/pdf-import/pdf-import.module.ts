@@ -10,6 +10,7 @@ import { PdfDocumentModule } from "../pdf-documents/pdf-document.module";
 import { TripModule } from "../trips/trip.module";
 import { PdfImportController } from "./pdf-import.controller";
 import { CostConfirmationMatchingService } from "./cost-confirmation-matching.service";
+import { ImportPersistenceVerifier } from "./import-persistence.verifier";
 import { PdfTripImporter } from "./pdf-trip-importer.service";
 import { PdfUploadService } from "./pdf-upload.service";
 
@@ -64,6 +65,7 @@ const MAX_FILES_PER_UPLOAD = 20;
     PdfTripImporter,
     PdfUploadService,
     CostConfirmationMatchingService,
+    ImportPersistenceVerifier,
   ],
   exports: [PdfTripImporter],
 })

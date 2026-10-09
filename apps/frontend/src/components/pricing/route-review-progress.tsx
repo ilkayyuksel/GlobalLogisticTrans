@@ -10,7 +10,7 @@ import type { TranslationKey } from "@/lib/i18n/translations";
  * can see what is left. It filters the VIEW and nothing else: no route changes,
  * no order changes, and what the Pricing Engine reads is untouched.
  */
-const REVIEW_FILTERS = ["ALL", "TODO", "REVIEWED"] as const;
+export const REVIEW_FILTERS = ["ALL", "TODO", "REVIEWED"] as const;
 
 export type ReviewFilter = (typeof REVIEW_FILTERS)[number];
 

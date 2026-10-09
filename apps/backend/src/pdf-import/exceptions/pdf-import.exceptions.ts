@@ -19,6 +19,7 @@ export const PdfImportErrorCode = {
   INVALID_COMBINATION: "IMPORT_INVALID_COMBINATION",
   COST_CONFIRMATION_REFUSED: "IMPORT_COST_CONFIRMATION_REFUSED",
   REVISION_REFUSED: "IMPORT_REVISION_REFUSED",
+  NOT_PERSISTED: "IMPORT_NOT_PERSISTED",
 } as const;
 
 export type PdfImportErrorCode =
@@ -146,6 +147,31 @@ export class RevisionRefusedException extends PdfImportException {
     super(
       PdfImportErrorCode.REVISION_REFUSED,
       `The revised order for booking "${bookingNumber}" was not applied: ${reason}`,
+    );
+  }
+}
+
+/**
+ * The document was read, but the record it should have produced is not there.
+ *
+ * A parse that succeeded is not an import that succeeded. This is raised when
+ * the database, checked AFTER the write, does not hold what the document says
+ * should now exist — a Trip for each transport it names, or the confirmation
+ * on the Trip it was matched to — so such a document is a failure like any
+ * other, and never quietly reported as imported.
+ *
+ * `missing` names each absent record the way an operator looks it up: the
+ * booking, the container and the document's own date.
+ */
+export class ImportNotPersistedException extends PdfImportException {
+  constructor(
+    readonly originalFilename: string,
+    readonly missing: readonly string[],
+    readonly reason: string,
+  ) {
+    super(
+      PdfImportErrorCode.NOT_PERSISTED,
+      `"${originalFilename}" was read, but ${reason}: ${missing.join("; ")}.`,
     );
   }
 }

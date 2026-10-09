@@ -152,6 +152,18 @@ describe("Manual PDF upload, end to end over HTTP", () => {
         },
       ),
       /*
+       * The booking-and-date half of document matching, which the import's
+       * own result check uses for a document that names no container.
+       */
+      findManyByBookingNumberAndOriginalDate: jest.fn(
+        ({ bookingNumber }: { bookingNumber: string }) =>
+          Promise.resolve(
+            createdTrips
+              .map((trip, index) => ({ id: `trip-${index + 1}`, ...trip }))
+              .filter((trip) => trip.bookingNumber === bookingNumber),
+          ),
+      ),
+      /*
        * Applying a NEW to a Trip that already exists writes through these. A
        * double that stopped at `create` would report the whole import as an
        * unexpected failure rather than as the re-statement it is.
@@ -625,6 +637,32 @@ describe("Manual PDF upload, end to end over HTTP", () => {
         .expect(200);
 
       expect(response.body.data.results[0].ok).toBe(true);
+      expect(mailSends).toEqual([]);
+    });
+
+    /**
+     * R. An upload read, and its Trip not there: the same database check as
+     * the mailbox runs, shown to the person who uploaded — and no mail.
+     */
+    it("shows a document whose Trip is missing, and sends nothing", async () => {
+      await upload()
+        .attach("files", readFixture("combination.pdf"), "combination.pdf")
+        .expect(200);
+      // Only the first leg is held now; the order repeats both.
+      createdTrips.splice(
+        createdTrips.findIndex((trip) => trip.bookingNumber === "ANRBEL2603249"),
+        1,
+      );
+
+      const response = await upload()
+        .attach("files", readFixture("combination.pdf"), "combination.pdf")
+        .expect(200);
+
+      expect(response.body.data.results[0]).toMatchObject({
+        ok: false,
+        code: "IMPORT_NOT_PERSISTED",
+      });
+      expect(response.body.data.results[0].message).toContain("ANRBEL2603249");
       expect(mailSends).toEqual([]);
     });
 

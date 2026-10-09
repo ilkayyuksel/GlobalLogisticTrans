@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Suspense, useCallback, useMemo, useState } from "react";
 
 import { DriverFormDialog } from "@/components/drivers/driver-form-dialog";
 import { DriversTable } from "@/components/drivers/drivers-table";
@@ -8,6 +8,9 @@ import { RittenPagination } from "@/components/ritten/ritten-pagination";
 import { EmptyState, ErrorState, LoadingState } from "@/components/ui/states";
 import { useAsync } from "@/hooks/use-async";
 import { useDebounced } from "@/hooks/use-debounced";
+import { useResetOnChange } from "@/hooks/use-reset-on-change";
+import { useUrlState } from "@/hooks/use-url-state";
+import { choiceParam, pageParam, textParam } from "@/lib/navigation/url-state-codecs";
 import { userFacingMessage } from "@/lib/api/client";
 import {
   activateDriver,
@@ -61,12 +64,29 @@ interface Feedback {
   readonly isError: boolean;
 }
 
+/**
+ * The list's search, filter and page, kept in the address so Back from a
+ * record returns to the same list — see `useUrlState`.
+ */
+const SEARCH_PARAM = textParam("search");
+const STATUS_PARAM = choiceParam<StatusFilter>("status", ["", "active", "inactive"], "");
+const PAGE_PARAM = pageParam();
+
 export default function DriversPage() {
+  // useSearchParams needs a Suspense boundary on a statically rendered page.
+  return (
+    <Suspense fallback={null}>
+      <DriversList />
+    </Suspense>
+  );
+}
+
+function DriversList() {
   const t = useTranslation();
 
-  const [search, setSearch] = useState("");
-  const [status, setStatus] = useState<StatusFilter>("");
-  const [page, setPage] = useState(1);
+  const [search, setSearch] = useUrlState(SEARCH_PARAM);
+  const [status, setStatus] = useUrlState(STATUS_PARAM);
+  const [page, setPage] = useUrlState(PAGE_PARAM);
   const [editing, setEditing] = useState<Driver | null>(null);
   const [isCreating, setIsCreating] = useState(false);
   const [busyDriverId, setBusyDriverId] = useState<string | null>(null);
@@ -83,9 +103,8 @@ export default function DriversPage() {
   );
 
   // A narrowed list has fewer pages; staying on page 4 would show nothing.
-  useEffect(() => {
-    setPage(1);
-  }, [query]);
+  // Not on mount: a list returned to with Back keeps the page it was left on.
+  useResetOnChange(query, () => setPage(1));
 
   const drivers = useAsync(
     useCallback(

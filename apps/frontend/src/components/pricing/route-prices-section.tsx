@@ -14,17 +14,23 @@ import { NormalRoutesTable } from "@/components/pricing/normal-routes-table";
 import {
   matchesFilter,
   RouteReviewProgress,
-  type ReviewFilter,
 } from "@/components/pricing/route-review-progress";
 import {
   BulkDeleteDialog,
   RouteSelectionToolbar,
 } from "@/components/pricing/route-selection-toolbar";
+import {
+  COMBINATIONS_OPEN_PARAM,
+  NORMAL_ROUTES_OPEN_PARAM,
+  ROUTE_REVIEW_FILTER_PARAM,
+  ROUTE_SEARCH_PARAM,
+} from "@/components/pricing/route-prices-url-state";
 import { useRouteSelection } from "@/components/pricing/use-route-selection";
 import { ConfirmDialog } from "@/components/ritten/confirm-dialog";
 import { CollapsibleSection } from "@/components/ui/collapsible-section";
 import { EmptyState, ErrorState, LoadingState } from "@/components/ui/states";
 import type { useAsync } from "@/hooks/use-async";
+import { useUrlState } from "@/hooks/use-url-state";
 import {
   bulkDeleteRouteConfigurations,
   createCombinationRouteConfiguration,
@@ -130,10 +136,13 @@ export function RoutePricesSection({
   const [pendingSync, setPendingSync] = useState<CombinationLegSync | null>(
     null,
   );
-  const [filter, setFilter] = useState<ReviewFilter>("ALL");
-  const [search, setSearch] = useState("");
-  const [isNormalOpen, setIsNormalOpen] = useState(true);
-  const [isCombinationsOpen, setIsCombinationsOpen] = useState(true);
+  // In the address, so Back finds the same rows open the same way.
+  const [filter, setFilter] = useUrlState(ROUTE_REVIEW_FILTER_PARAM);
+  const [search, setSearch] = useUrlState(ROUTE_SEARCH_PARAM);
+  const [isNormalOpen, setIsNormalOpen] = useUrlState(NORMAL_ROUTES_OPEN_PARAM);
+  const [isCombinationsOpen, setIsCombinationsOpen] = useUrlState(
+    COMBINATIONS_OPEN_PARAM,
+  );
   /*
    * ── A NEW COMBINATION IS SHOWN FIRST — FOR NOW ────────────────────────────
    * The stored order is oldest first, and stays the order. A Combination added

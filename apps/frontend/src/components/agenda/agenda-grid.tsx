@@ -48,6 +48,7 @@ export function AgendaGrid({
   hourHeightRem = HOUR_HEIGHT_REM,
   showDayHeaders = true,
   scrollClassName = "max-h-[75vh]",
+  scrollRestorationId,
   onCreateAt,
   onOpen,
   itemHref,
@@ -61,6 +62,11 @@ export function AgendaGrid({
   showDayHeaders?: boolean;
   /** The height the grid scrolls within. */
   scrollClassName?: string;
+  /**
+   * Set where the grid is the page's own scroller (the Agenda), so Back
+   * returns to the same hour and day; not on the Dashboard's small preview.
+   */
+  scrollRestorationId?: string;
   /** On the calendar: a click on an empty hour starts a new item there. */
   onCreateAt?: (date: string, startTime: string) => void;
   /** On the calendar: a click on an item opens it. */
@@ -95,7 +101,10 @@ export function AgendaGrid({
   );
 
   return (
-    <div className={cn("overflow-auto", scrollClassName)}>
+    <div
+      className={cn("overflow-auto", scrollClassName)}
+      data-scroll-restoration-id={scrollRestorationId}
+    >
       <div role="group" aria-label={label} style={{ minWidth: `${minWidthRem}rem` }}>
         {showDayHeaders ? (
           <div

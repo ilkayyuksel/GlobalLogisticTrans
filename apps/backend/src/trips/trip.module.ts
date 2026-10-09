@@ -9,6 +9,7 @@ import { VehicleAssignmentModule } from "../vehicle-assignments/vehicle-assignme
 import { VehicleModule } from "../vehicles/vehicle.module";
 import { AutomaticFlatPropertyService } from "./automatic-flat.service";
 import { DriverStatisticsController } from "./driver-statistics.controller";
+import { DocumentTripPresenceService } from "./document-trip-presence.service";
 import { DriverStatisticsService } from "./driver-statistics.service";
 import { TripController } from "./trip.controller";
 import { TripGroupController } from "./trip-group.controller";
@@ -86,6 +87,7 @@ import { TripService } from "./trip.service";
     DriverStatisticsService,
     TripService,
     TripRevisionService,
+    DocumentTripPresenceService,
     TripRepository,
     TripPlanningDataService,
     TripDocumentsService,
@@ -96,6 +98,13 @@ import { TripService } from "./trip.service";
   // TripDocumentsService is exported for the WhatsApp module: deciding WHICH
   // transport order to send a driver is a question about a Trip's document
   // history, and that history has exactly one owner.
-  exports: [TripService, TripRevisionService, TripDocumentsService],
+  // DocumentTripPresenceService is exported for the same boundary: the import
+  // checks its own result against the Trip domain's matching rules.
+  exports: [
+    TripService,
+    TripRevisionService,
+    TripDocumentsService,
+    DocumentTripPresenceService,
+  ],
 })
 export class TripModule {}

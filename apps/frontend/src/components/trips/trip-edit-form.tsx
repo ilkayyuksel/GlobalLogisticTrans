@@ -383,16 +383,35 @@ function toPayload(values: FormValues, opened: FormValues): UpdateTripPayload {
   return {
     containerNumber: emptyToNull(values.containerNumber),
     planningDate: values.planningDate || undefined,
-    // An empty selection sends null, which the backend documents as "unassign".
     // `driverId` is not sent at all: omitting a field leaves it untouched, so a
     // Trip that still carries an old override keeps it rather than having it
     // silently cleared by an unrelated edit.
-    vehicleId: values.vehicleId === NONE ? null : values.vehicleId,
+    ...toChangedVehiclePayload(values, opened),
     ...toChangedWaitingPayload(values, opened),
     distanceKm: emptyToNullNumber(values.distanceKm),
     ...toChangedExecutionPayload(values, opened),
     internalNotes: emptyToNull(values.internalNotes),
   };
+}
+
+/**
+ * The vehicle, only when the operator CHANGED it.
+ *
+ * An empty selection then sends null, which the backend documents as
+ * "unassign" — the explicit unlink. Unchanged sends nothing: the form may have
+ * been open while the truck was assigned from the Ritten list, and re-sending
+ * the empty value it opened with would unassign that truck as a side effect of
+ * saving a note.
+ */
+function toChangedVehiclePayload(
+  values: FormValues,
+  opened: FormValues,
+): UpdateTripPayload {
+  if (values.vehicleId === opened.vehicleId) {
+    return {};
+  }
+
+  return { vehicleId: values.vehicleId === NONE ? null : values.vehicleId };
 }
 
 /**

@@ -124,6 +124,31 @@ export function WaitingTimeCell({
     }
 
     /*
+     * Saving what the cell opened with is not a change, so nothing is sent.
+     * This is what protects a Trip whose waiting time predates the two
+     * columns: it opens EMPTY, and sending that emptiness would be the removal
+     * itself — the stored minutes would vanish because the editor had no times
+     * to show. Removal is the explicit button below, never a side effect.
+     */
+    const isUnchanged =
+      begin.trim() === storedBegin &&
+      end.trim() === storedEnd &&
+      endsNextDay === trip.waitingTimeEndsNextDay;
+    const isEmptyWithNoWindowToClear =
+      begin.trim() === "" &&
+      end.trim() === "" &&
+      storedBegin === "" &&
+      storedEnd === "";
+
+    if (isUnchanged || isEmptyWithNoWindowToClear) {
+      setLocalError(null);
+      setSaveError(null);
+      setIsEditing(false);
+
+      return;
+    }
+
+    /*
      * Both times or neither: the backend refuses a half-filled window, and an
      * emptied pair is how a waiting time is removed.
      */

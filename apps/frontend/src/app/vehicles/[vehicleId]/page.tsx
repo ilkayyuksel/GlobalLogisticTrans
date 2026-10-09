@@ -4,6 +4,7 @@ import { useParams } from "next/navigation";
 import { useCallback, useState } from "react";
 
 import Link from "next/link";
+import { BackLink } from "@/components/layout/back-link";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { ErrorState, LoadingState } from "@/components/ui/states";
@@ -157,12 +158,12 @@ export default function VehicleDetailPage() {
 
   return (
     <div className="mx-auto max-w-4xl space-y-4">
-      <Link
+      <BackLink
         href="/vehicles"
         className="text-sm font-medium text-primary hover:underline"
       >
         ← {t("vehicles.detail.back")}
-      </Link>
+      </BackLink>
 
       {vehicle.isLoading ? <LoadingState label={t("vehicles.loading")} /> : null}
 

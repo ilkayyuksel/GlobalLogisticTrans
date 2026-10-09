@@ -88,6 +88,53 @@ The frontend never communicates directly with infrastructure services.
 
 All communication goes through the backend.
 
+## Navigation: view state and scroll restoration
+
+Leaving a page and coming Back returns to the same page as it was left: the
+same list and the same scroll position. One mechanism serves every route; no
+page carries scroll code of its own.
+
+**View state lives in the address.** List pages keep their filters, search,
+date, view, sort and page in query parameters through `useUrlState`
+(`hooks/use-url-state.ts`, codecs in `lib/navigation/url-state-codecs.ts`):
+Ritten, Onderhoud, Voertuigen, Chauffeurs, Imports and Routeprijzen. A change
+REPLACES the current history entry (never a push) and nothing is written while
+a page mounts; a default value is no parameter. Back, Forward and a reload then
+restore it as the browser restores any address. Lists reset to page 1 when a
+filter changes, but not on mount (`useResetOnChange`).
+
+**Scroll positions belong to history entries.** `ScrollRestoration`, rendered
+once in the root layout, drives `ScrollTracker` (`lib/navigation/`):
+
+| Event | Effect |
+|---|---|
+| the user scrolls | the position is recorded for the entry on screen |
+| Back / Forward | the entry returned to gets its position back |
+| reload | the same, as the browser itself would |
+| any other navigation | nothing: a new page starts at the top (the router) |
+| refetch, state update, delete, inline edit | nothing |
+
+- **Entry identity:** a key in `history.state`, added through the native
+  History API the App Router integrates with. Router-written states lose it;
+  the same entry is re-stamped with its own key, a new one gets a new key. The
+  router's own fields are always kept, so Back never makes it reload a page.
+- **Storage:** in memory, mirrored to `sessionStorage` (`tms.navigation.entries`)
+  on `pagehide`; the 50 most recent entries are kept.
+- **Async content:** `useAsync` reports each load to `lib/navigation/page-loads`
+  until the render showing its result is committed. A restore applies the
+  position as soon as the content can hold it, re-applies it as content grows
+  (ResizeObserver), and applies it a last time when no load is pending — clamped
+  to the nearest reachable point if the list got shorter. User input ends it.
+- **Scrollers:** the window, plus containers that declare
+  `data-scroll-restoration-id`: each Ritten day table (sideways) and the Agenda
+  week grid. Other `overflow` boxes (dialogs, menus) are not remembered.
+- `history.scrollRestoration` is `manual`: the browser's own restore fires
+  before client data loads and would cut the position short.
+
+**Back links.** "Terug naar …" links are `BackLink`: when the page was opened
+from that list it calls `history.back()` — the same entry as the browser's Back
+button — and otherwise it is an ordinary link.
+
 ---
 
 # Backend

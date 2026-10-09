@@ -1,11 +1,13 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { Suspense, useCallback } from "react";
 
 import { ImportsTable } from "@/components/imports/imports-table";
 import { Card, CardHeader } from "@/components/ui/card";
 import { EmptyState, ErrorState, LoadingState } from "@/components/ui/states";
 import { useAsync } from "@/hooks/use-async";
+import { useUrlState } from "@/hooks/use-url-state";
+import { choiceParam, pageParam } from "@/lib/navigation/url-state-codecs";
 import { listImportedEmails } from "@/lib/api/imports";
 import type { ImportedEmailStatus, ImportType } from "@/lib/api/types";
 
@@ -38,10 +40,35 @@ const TYPE_OPTIONS: readonly { value: ImportType | ""; label: string }[] = [
  * here. The page answers four questions and no more: did it arrive, was it
  * handled, what did it ask for, and did it produce a document.
  */
+/**
+ * The list's search, filter and page, kept in the address so Back from a
+ * record returns to the same list — see `useUrlState`.
+ */
+const STATUS_PARAM = choiceParam(
+  "status",
+  STATUS_OPTIONS.map((option) => option.value),
+  "",
+);
+const TYPE_PARAM = choiceParam(
+  "type",
+  TYPE_OPTIONS.map((option) => option.value),
+  "",
+);
+const PAGE_PARAM = pageParam();
+
 export default function ImportsPage() {
-  const [status, setStatus] = useState<ImportedEmailStatus | "">("");
-  const [importType, setImportType] = useState<ImportType | "">("");
-  const [page, setPage] = useState(1);
+  // useSearchParams needs a Suspense boundary on a statically rendered page.
+  return (
+    <Suspense fallback={null}>
+      <ImportsList />
+    </Suspense>
+  );
+}
+
+function ImportsList() {
+  const [status, setStatus] = useUrlState(STATUS_PARAM);
+  const [importType, setImportType] = useUrlState(TYPE_PARAM);
+  const [page, setPage] = useUrlState(PAGE_PARAM);
 
   const { data, isLoading, error, reload } = useAsync(
     useCallback(

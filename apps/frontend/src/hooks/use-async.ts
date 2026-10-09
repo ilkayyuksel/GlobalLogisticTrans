@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { isSessionEndedError } from "@/lib/api/client";
+import { beginPageLoad } from "@/lib/navigation/page-loads";
 
 /**
  * Runs an asynchronous read and reports its three possible states.
@@ -94,6 +95,13 @@ export function useAsync<TData>(
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [...dependencies, reloadCount]);
+
+  /*
+   * Reported to scroll restoration from the first render of a load until the
+   * render that shows its outcome: this cleanup runs only once that render is
+   * committed, so "no load pending" means the DOM already holds the result.
+   */
+  useEffect(() => (isLoading ? beginPageLoad() : undefined), [isLoading]);
 
   const reload = useCallback(() => {
     setReloadCount((count) => count + 1);

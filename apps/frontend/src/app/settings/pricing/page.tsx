@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { Suspense, useCallback, useState } from "react";
 
 import { PriceSettingsSection } from "@/components/pricing/price-settings-section";
 import { RoutePricesSection } from "@/components/pricing/route-prices-section";
@@ -47,6 +47,16 @@ interface Feedback {
 }
 
 export default function PricingSettingsPage() {
+  // The route list keeps its view state in the address (useSearchParams),
+  // which needs a Suspense boundary on a statically rendered page.
+  return (
+    <Suspense fallback={null}>
+      <PricingSettings />
+    </Suspense>
+  );
+}
+
+function PricingSettings() {
   const t = useTranslation();
   const [feedback, setFeedback] = useState<Feedback | null>(null);
 

@@ -403,6 +403,84 @@ describe("the waiting-time window in the Ritten list", () => {
     });
   });
 
+  /**
+   * Opslaan is never a removal by accident. A legacy entry opens EMPTY because
+   * there are no times to show, and sending that emptiness used to erase the
+   * stored minutes. Only "Wachttijd verwijderen" removes an entry it did not
+   * receive new times for.
+   */
+  describe("saving without a change", () => {
+    it("sends nothing for a legacy entry saved as it opened", async () => {
+      await show(LEGACY);
+      await openEditor();
+
+      await save();
+
+      await waitFor(() => {
+        expect(screen.queryByLabelText(BEGIN)).toBeNull();
+      });
+      expect(mutationCalls(requestMock)).toHaveLength(0);
+      expect(screen.getByText("45 min")).toBeInTheDocument();
+    });
+
+    it("sends nothing for a legacy entry when only the next-day tick moved", async () => {
+      await show(LEGACY);
+      await openEditor();
+
+      await userEvent.click(screen.getByRole("checkbox", { name: /Volgende dag/i }));
+      await save();
+
+      await waitFor(() => {
+        expect(screen.queryByLabelText(BEGIN)).toBeNull();
+      });
+      expect(mutationCalls(requestMock)).toHaveLength(0);
+    });
+
+    it("sends nothing for a stored window saved as it opened", async () => {
+      await show({ ...MEASURED, waitingTimeEndsNextDay: true });
+      await openEditor();
+
+      await save();
+
+      await waitFor(() => {
+        expect(screen.queryByLabelText(BEGIN)).toBeNull();
+      });
+      expect(mutationCalls(requestMock)).toHaveLength(0);
+    });
+
+    it("still removes a legacy entry through the explicit button", async () => {
+      await show(LEGACY);
+      await openEditor();
+
+      await userEvent.click(
+        screen.getByRole("button", { name: "Wachttijd verwijderen" }),
+      );
+
+      await waitFor(() => {
+        expect(patchBody()).toEqual({
+          waitingTimeStart: null,
+          waitingTimeEnd: null,
+        });
+      });
+    });
+
+    it("still clears a stored window the operator emptied by hand", async () => {
+      await show(MEASURED);
+      await openEditor();
+
+      setClock(BEGIN, "");
+      setClock(END, "");
+      await save();
+
+      await waitFor(() => {
+        expect(patchBody()).toMatchObject({
+          waitingTimeStart: null,
+          waitingTimeEnd: null,
+        });
+      });
+    });
+  });
+
   describe("what it never touches", () => {
     it("sends nothing about the transport times", async () => {
       await show({ ...MEASURED, startTime: "09:00:00", endTime: "12:00:00" });

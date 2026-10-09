@@ -45,3 +45,18 @@ jest.mock("@/lib/auth/access-token", () => ({
   // real module is exercised by the auth specs, which unmock it.
   renewAccessToken: jest.fn(async () => null),
 }));
+
+/**
+ * Every test starts at `/`, with no history state.
+ *
+ * List pages keep their view state in the address now (`useUrlState`), and
+ * jsdom keeps one location for a whole spec file. Without this a test that
+ * moved the Ritten list to another day would hand that day to the next test,
+ * which expects today — the order of the tests would decide their outcome.
+ */
+afterEach(() => {
+  // Specs that run in the node environment have no window and no history.
+  if (typeof window !== "undefined") {
+    window.history.replaceState(null, "", "/");
+  }
+});

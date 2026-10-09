@@ -19,7 +19,8 @@ import {
   type CustomPropertyPayload,
 } from "@/lib/api/custom-properties";
 import type { CustomProperty } from "@/lib/api/types";
-import { useTranslation } from "@/lib/i18n/language-provider";
+import { sortAlphabetically } from "@/lib/custom-properties/alphabetical";
+import { useLanguage, useTranslation } from "@/lib/i18n/language-provider";
 import type { TranslationKey } from "@/lib/i18n/translations";
 import { cn } from "@/lib/cn";
 
@@ -52,6 +53,8 @@ interface Feedback {
 
 export default function CustomValuesPage() {
   const t = useTranslation();
+  // The list is shown alphabetically; see `sortAlphabetically`.
+  const { language } = useLanguage();
 
   const [editing, setEditing] = useState<CustomProperty | null>(null);
   const [isCreating, setIsCreating] = useState(false);
@@ -219,7 +222,12 @@ export default function CustomValuesPage() {
                 </tr>
               </thead>
               <tbody>
-                {properties.data.items.map((property) => (
+                {sortAlphabetically(
+                  properties.data.items,
+                  (property) => property.name,
+                  (property) => property.id,
+                  language,
+                ).map((property) => (
                   <PropertyRow
                     key={property.id}
                     property={property}

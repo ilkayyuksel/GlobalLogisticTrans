@@ -176,6 +176,11 @@ export interface RittenTableProps {
    * see `combinationPalette`.
    */
   palette: CombinationPalette;
+  /**
+   * Remembers the table's sideways scroll across Back, which matters once the
+   * money columns make it wider than the screen. One id per day section.
+   */
+  scrollRestorationId?: string;
 }
 
 export function RittenTable(props: RittenTableProps) {
@@ -187,7 +192,10 @@ export function RittenTable(props: RittenTableProps) {
      * columns decide how much room the table needs, and only a screen that
      * cannot fit even that makes the wrapper scroll sideways.
      */
-    <div className="overflow-x-auto">
+    <div
+      className="overflow-x-auto"
+      data-scroll-restoration-id={props.scrollRestorationId}
+    >
       <table className="w-full text-left text-sm">
         <caption className="sr-only">{t("ritten.rows.title")}</caption>
         <thead className="border-b border-border bg-hover/50 text-xs uppercase tracking-wide text-muted">

@@ -320,6 +320,31 @@ Every failure should be logged.
 
 No partial data should remain.
 
+## A document read is not a document imported
+
+After the write, the import checks in the database that the document left its
+record (`ImportPersistenceVerifier`), by the rules that should have produced it:
+
+| Document | Present when |
+|---|---|
+| Transport order (NEW, UPDATE) | every Trip it names is found by the document matcher — booking, normalised container and the document's OWN date (`original_planning_date`), then booking and date for a document naming no usable container. An ambiguous match counts as present. |
+| Cost confirmation | the Trip the CC matcher chose carries its `cc_number` |
+
+A record that is missing fails the import with `IMPORT_NOT_PERSISTED`, naming
+what is missing: the email is FAILED and forwarded once, an upload shows it.
+What was written stays; nothing is rolled back.
+
+A NEW whose identity is already held is applied to the Trips holding it, and
+that path never creates a Trip. So it is checked BEFORE anything is written that
+every Trip the document names is held (the exact lookup it applies with): a
+Combination or multi-container order whose first Trip exists and whose other
+does not is refused whole — and its retries write nothing either. This used to
+be reported as imported, with the missing Trip never created and nobody told.
+
+A valid repeat (every Trip held) is applied as before and is not a failure; a
+repeated cost confirmation (same Trip, same `cc_number`) is `ALREADY_RECORDED`
+and not stored twice; a different one on the same Trip is kept beside it.
+
 ## Forwarding a failed email import
 
 When an order that arrived BY EMAIL ends FAILED, the original email is
@@ -343,13 +368,18 @@ person sees a broken order the same day rather than on the imports page later.
   retries send nothing more. A retry that succeeds imports normally.
 - **Which failures.** Every failure of an email that was accepted (trusted
   sender, recognised subject): an unreadable PDF, an order or cost
-  confirmation that cannot be imported, a mail with no PDF or with several.
+  confirmation that cannot be imported, a document whose record is not in the
+  database after the import (`IMPORT_NOT_PERSISTED`), a mail with no PDF or
+  with several.
   NOT a failed attachment download (a network problem the next scan simply
   retries), not a duplicate booking (recorded as already imported), and not an
   email that was never accepted.
 - **A broken mail server changes nothing about the import.** The email is
   recorded FAILED first; a forward that cannot be sent is logged and tried
   again on the next scan.
+- **Sent, then marked.** `failure_forwarded_at` is written only after the mail
+  server accepted the forward. A process dying between the two can send one
+  duplicate alert — chosen over the other order, which could lose the alert.
 - **Off by default** (`ENABLE_IMPORT_FAILURE_FORWARD`). See `environment.md`.
 
 ---

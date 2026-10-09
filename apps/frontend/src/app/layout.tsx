@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import type { ReactNode } from "react";
 
 import { AppShell } from "@/components/layout/app-shell";
+import { ScrollRestoration } from "@/components/layout/scroll-restoration";
 import { LanguageProvider } from "@/lib/i18n/language-provider";
 import { THEME_SCRIPT, ThemeProvider } from "@/lib/theme/theme-provider";
 import "./globals.css";
@@ -33,6 +34,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
         <ThemeProvider>
           <LanguageProvider>
             <AppShell>{children}</AppShell>
+            <ScrollRestoration />
           </LanguageProvider>
         </ThemeProvider>
       </body>

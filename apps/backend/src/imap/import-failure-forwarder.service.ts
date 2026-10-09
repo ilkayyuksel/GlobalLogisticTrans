@@ -80,6 +80,11 @@ export class ImportFailureForwarder {
     }
 
     if (!isForwardableFailure(failure.error)) {
+      this.logger.log("Failed email not forwarded: the next scan retries it", {
+        messageId: message.messageId,
+        errorCode: failure.errorCode,
+      });
+
       return;
     }
 

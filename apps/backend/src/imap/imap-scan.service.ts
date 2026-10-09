@@ -395,9 +395,12 @@ export class ImapScanService {
     await this.importedEmailService.markFailed(importedEmail.id);
     counters.failed += 1;
 
-    // Left unread deliberately: the next scan retries it.
+    // Left unread deliberately: the next scan retries it. The reason names
+    // what was missing when the PDF parsed but its record did not appear.
     this.logger.warn("Email import failed", {
       messageId: message.messageId,
+      importType: importedEmail.importType,
+      attachments: message.attachments.map((attachment) => attachment.filename),
       errorCode: errorCodeOf(error),
       reason: error instanceof Error ? error.message : String(error),
     });

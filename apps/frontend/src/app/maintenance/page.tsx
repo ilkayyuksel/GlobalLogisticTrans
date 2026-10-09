@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Suspense, useCallback, useMemo, useState } from "react";
 
 import Link from "next/link";
 
@@ -16,6 +16,9 @@ import { CompleteIcon, RowActionButton } from "@/components/ritten/row-action-bu
 import { EmptyState, ErrorState, LoadingState } from "@/components/ui/states";
 import { useAsync } from "@/hooks/use-async";
 import { useDebounced } from "@/hooks/use-debounced";
+import { useResetOnChange } from "@/hooks/use-reset-on-change";
+import { useUrlState } from "@/hooks/use-url-state";
+import { choiceParam, pageParam, textParam } from "@/lib/navigation/url-state-codecs";
 import { userFacingMessage } from "@/lib/api/client";
 import { listActiveVehicles } from "@/lib/api/fleet";
 import {
@@ -64,13 +67,35 @@ interface Feedback {
   readonly isError: boolean;
 }
 
+/**
+ * The list's search, filter and page, kept in the address so Back from a
+ * record returns to the same list — see `useUrlState`.
+ */
+const SEARCH_PARAM = textParam("search");
+const VEHICLE_PARAM = textParam("vehicle");
+const STATUS_PARAM = choiceParam<MaintenanceStatus | "">(
+  "status",
+  ["", ...MAINTENANCE_STATUSES],
+  "",
+);
+const PAGE_PARAM = pageParam();
+
 export default function MaintenancePage() {
+  // useSearchParams needs a Suspense boundary on a statically rendered page.
+  return (
+    <Suspense fallback={null}>
+      <MaintenanceList />
+    </Suspense>
+  );
+}
+
+function MaintenanceList() {
   const t = useTranslation();
 
-  const [search, setSearch] = useState("");
-  const [vehicleId, setVehicleId] = useState("");
-  const [status, setStatus] = useState<MaintenanceStatus | "">("");
-  const [page, setPage] = useState(1);
+  const [search, setSearch] = useUrlState(SEARCH_PARAM);
+  const [vehicleId, setVehicleId] = useUrlState(VEHICLE_PARAM);
+  const [status, setStatus] = useUrlState(STATUS_PARAM);
+  const [page, setPage] = useUrlState(PAGE_PARAM);
   const [editing, setEditing] = useState<Maintenance | null>(null);
   const [isCreating, setIsCreating] = useState(false);
   const [completing, setCompleting] = useState<Maintenance | null>(null);
@@ -87,9 +112,8 @@ export default function MaintenancePage() {
     [debouncedSearch, vehicleId, status],
   );
 
-  useEffect(() => {
-    setPage(1);
-  }, [query]);
+  // Not on mount: a list returned to with Back keeps the page it was left on.
+  useResetOnChange(query, () => setPage(1));
 
   const records = useAsync(
     useCallback(

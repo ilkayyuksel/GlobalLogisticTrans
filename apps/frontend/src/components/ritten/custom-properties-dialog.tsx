@@ -18,7 +18,8 @@ import type {
   TripCustomProperty,
   TripCustomPropertyMutation,
 } from "@/lib/api/types";
-import { useTranslation } from "@/lib/i18n/language-provider";
+import { sortAlphabetically } from "@/lib/custom-properties/alphabetical";
+import { useLanguage, useTranslation } from "@/lib/i18n/language-provider";
 import { RittenDialog } from "./ritten-dialog";
 
 /**
@@ -93,6 +94,7 @@ export function CustomPropertiesDialog({
   onClose: () => void;
 }) {
   const t = useTranslation();
+  const { language } = useLanguage();
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<unknown>(null);
 
@@ -108,12 +110,21 @@ export function CustomPropertiesDialog({
    * The set as it stands after a change made in this dialog.
    *
    * It shadows the first load rather than replacing the hook: one read answers
-   * both this list and the row behind it, so a tick costs a single request. The
-   * ORDER is the backend's — nothing here sorts, because display order is a
-   * configured rule and a second implementation of it would eventually disagree.
+   * both this list and the row behind it, so a tick costs a single request.
+   *
+   * Both lists here are SHOWN alphabetically, as on the Custom Values page, so
+   * an operator finds a value where they expect it. Only the displayed copy is
+   * sorted: what is handed back to the row (`onChanged`) keeps the backend's
+   * display order, which the row and the exports use.
    */
   const [changed, setChanged] = useState<TripCustomProperty[] | null>(null);
   const assignments = changed ?? loaded.data ?? [];
+  const shownAssignments = sortAlphabetically(
+    assignments,
+    (assignment) => assignment.customProperty.name,
+    (assignment) => assignment.id,
+    language,
+  );
 
   const assignable = useAsync(
     useCallback(
@@ -136,23 +147,28 @@ export function CustomPropertiesDialog({
    * Waiting time is deliberately unaffected — it is a Trip field with its own
    * editor on the row, not a property in this list.
    */
-  const available = (assignable.data ?? []).filter(
-    /*
-     * `isAssignable` is the BACKEND's answer, not a rule restated here. It is
-     * narrower than "not system-managed": TAR is system-owned and still
-     * offered, because an operator may add an EXTRA TAR charge on top of the
-     * automatic one, while Toll, Tunnel and Flat stay closed.
-     */
-    (property) => !assignedIds.has(property.id) && property.isAssignable,
+  const available = sortAlphabetically(
+    (assignable.data ?? []).filter(
+      /*
+       * `isAssignable` is the BACKEND's answer, not a rule restated here. It is
+       * narrower than "not system-managed": TAR is system-owned and still
+       * offered, because an operator may add an EXTRA TAR charge on top of the
+       * automatic one, while Toll, Tunnel and Flat stay closed.
+       */
+      (property) => !assignedIds.has(property.id) && property.isAssignable,
+    ),
+    (property) => property.name,
+    (property) => property.id,
+    language,
   );
 
   /**
    * One assignment change, then the two authoritative answers it produced.
    *
    * The write already returned the Trip's recalculated pricing. The assignment
-   * SET is read again rather than patched locally: display order is the
-   * backend's, and a list this component reordered for itself would be the same
-   * rule in two places.
+   * SET is read again rather than patched locally, so what the row receives is
+   * the backend's own set in the backend's display order; this dialog only
+   * shows its copy alphabetically.
    */
   async function run(
     id: string,
@@ -203,7 +219,7 @@ export function CustomPropertiesDialog({
             <p className="mt-2 text-sm text-muted">{t("ritten.custom.empty")}</p>
           ) : (
             <ul className="mt-2 divide-y divide-border rounded-md border border-border">
-              {assignments.map((assignment) => (
+              {shownAssignments.map((assignment) => (
                 <li
                   key={assignment.id}
                   className="flex items-center justify-between gap-3 px-3 py-2"

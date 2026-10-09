@@ -1,9 +1,9 @@
 "use client";
 
-import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useCallback, useState } from "react";
 
+import { BackLink } from "@/components/layout/back-link";
 import { PricingPanel } from "@/components/pricing/pricing-panel";
 import { TripActionsBar } from "@/components/trips/trip-actions-bar";
 import { PdfViewerDialog } from "@/components/ritten/pdf-viewer-dialog";
@@ -159,9 +159,9 @@ function TripDetailView({
     <div className="mx-auto max-w-6xl space-y-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <Link href="/trips" className="text-sm text-primary hover:underline">
+          <BackLink href="/trips" className="text-sm text-primary hover:underline">
             ← {t("tripDetail.backToTrips")}
-          </Link>
+          </BackLink>
           <h1 className="mt-2 text-xl font-semibold text-foreground">
             {t("tripDetail.heading")} {trip.bookingNumber}
           </h1>
@@ -307,12 +307,12 @@ function TripLoadFailure({
         <p className="mt-1 text-sm text-secondary">
           {t("tripDetail.notFoundDescription")}
         </p>
-        <Link
+        <BackLink
           href="/trips"
           className="mt-4 inline-block text-sm text-primary hover:underline"
         >
           {t("tripDetail.backToTrips")}
-        </Link>
+        </BackLink>
       </div>
     );
   }

@@ -18,6 +18,8 @@ import { TripDocumentsService } from "../trips/trip-documents.service";
 import { TripPlanningDataService } from "../trips/trip-planning-data.service";
 import { TripRepository } from "../trips/trip.repository";
 import { TripRevisionService } from "../trips/trip-revision.service";
+import { DocumentTripPresenceService } from "../trips/document-trip-presence.service";
+import { ImportPersistenceVerifier } from "./import-persistence.verifier";
 import { TripService } from "../trips/trip.service";
 import { VehicleService } from "../vehicles/vehicle.service";
 import { CostConfirmationMatchingService } from "./cost-confirmation-matching.service";
@@ -526,6 +528,13 @@ export function buildHarness(storageDirectory: string) {
       new CostConfirmationMatchingService(
         tripService,
         pdfDocumentService,
+        logger,
+      ),
+      // The REAL check, over the same rows: whether a document left its record
+      // is exactly what the import tests are about.
+      new ImportPersistenceVerifier(
+        new DocumentTripPresenceService(tripRepository),
+        costConfirmationService,
         logger,
       ),
       logger,

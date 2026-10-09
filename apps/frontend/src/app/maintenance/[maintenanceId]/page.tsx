@@ -1,9 +1,9 @@
 "use client";
 
-import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useCallback, useState } from "react";
 
+import { BackLink } from "@/components/layout/back-link";
 import { CompleteMaintenanceDialog } from "@/components/maintenance/complete-maintenance-dialog";
 import {
   MaintenanceStatusBadge,
@@ -57,9 +57,9 @@ export default function MaintenanceDetailPage() {
 
   return (
     <div className="mx-auto max-w-[1100px] space-y-4">
-      <Link href="/maintenance" className="text-sm font-medium text-primary hover:underline">
+      <BackLink href="/maintenance" className="text-sm font-medium text-primary hover:underline">
         ← {t("maintenance.detail.back")}
-      </Link>
+      </BackLink>
 
       {record.isLoading && !current ? <LoadingState label={t("maintenance.loading")} /> : null}
 

@@ -631,15 +631,14 @@ describe("Trip management", () => {
       const [, payload] = updateTripMock.mock.calls[0];
 
       // Exactly the fields UpdateTripDto accepts — no booking number or status,
-      // which the backend rejects. An UNCHANGED address, waiting window or
-      // "Uitgevoerd op" is not sent at all: each would either reprice a
-      // CLOSED Trip for nothing or rewrite a value nobody touched.
+      // which the backend rejects. An UNCHANGED address, waiting window,
+      // vehicle or "Uitgevoerd op" is not sent at all: each would either
+      // reprice a CLOSED Trip for nothing or rewrite a value nobody touched.
       expect(Object.keys(payload).sort()).toEqual([
         "containerNumber",
         "distanceKm",
         "internalNotes",
         "planningDate",
-        "vehicleId",
       ]);
     });
 

@@ -18,6 +18,8 @@ import { TripCustomPropertyRepository } from "../trip-custom-properties/trip-cus
 import { CustomPropertyService } from "../custom-properties/custom-property.service";
 import { AutomaticFlatPropertyService } from "../trips/automatic-flat.service";
 import { TripRevisionService } from "../trips/trip-revision.service";
+import { DocumentTripPresenceService } from "../trips/document-trip-presence.service";
+import { ImportPersistenceVerifier } from "../pdf-import/import-persistence.verifier";
 import { TripService } from "../trips/trip.service";
 import { VehicleService } from "../vehicles/vehicle.service";
 import {
@@ -385,6 +387,11 @@ describe("IMAP import, end to end with a real transport order", () => {
       new CostConfirmationMatchingService(
         tripService,
         pdfDocumentService,
+        logger,
+      ),
+      new ImportPersistenceVerifier(
+        new DocumentTripPresenceService(tripRepository),
+        { isRecordedFor: jest.fn().mockResolvedValue(true) } as unknown as CostConfirmationService,
         logger,
       ),
       logger

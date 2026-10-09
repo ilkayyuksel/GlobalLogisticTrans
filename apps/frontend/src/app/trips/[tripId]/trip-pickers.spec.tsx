@@ -309,6 +309,43 @@ describe("The vehicle picker", () => {
       ).toBeInTheDocument();
     });
 
+    /**
+     * Only a CHANGED picker is sent. The form may have been open while the
+     * truck was assigned from the Ritten list; re-sending the empty value it
+     * opened with would unassign that truck as a side effect of saving a note.
+     */
+    it("does not send the vehicle when it was left as it opened", async () => {
+      getTripMock.mockResolvedValue(
+        buildTrip({
+          vehicleId: "vehicle-1",
+          vehicle: {
+            id: "vehicle-1",
+            licensePlate: "1-ABC-123",
+            displayColor: "#2563eb",
+            isActive: true,
+          },
+        }),
+      );
+
+      await openEditor();
+      await userEvent.click(screen.getByRole("button", { name: "Opslaan" }));
+
+      await waitFor(() => {
+        expect(updateTripMock).toHaveBeenCalled();
+      });
+      expect(updateTripMock.mock.calls[0][1]).not.toHaveProperty("vehicleId");
+    });
+
+    it("does not send an empty vehicle the form merely opened with", async () => {
+      await openEditor();
+      await userEvent.click(screen.getByRole("button", { name: "Opslaan" }));
+
+      await waitFor(() => {
+        expect(updateTripMock).toHaveBeenCalled();
+      });
+      expect(updateTripMock.mock.calls[0][1]).not.toHaveProperty("vehicleId");
+    });
+
     it("shows the backend's refusal", async () => {
       updateTripMock.mockRejectedValue(
         new ApiError("CONFLICT", "Vehicle is already booked for that interval.", 409),

@@ -78,7 +78,11 @@ export function DateSection({
           {t("ritten.empty.title")}
         </p>
       ) : (
-        <RittenTable trips={trips} {...table} />
+        <RittenTable
+          {...table}
+          trips={trips}
+          scrollRestorationId={`ritten-table:${date ?? "unscheduled"}`}
+        />
       )}
     </section>
   );

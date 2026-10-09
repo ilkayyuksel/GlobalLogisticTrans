@@ -110,6 +110,26 @@ type, terminal, destination city, destination country, the document's own date,
 start and end time, direction and parser metadata. Everything the operator owns
 is untouched.
 
+### Manually managed data disappears only by a manual action
+
+The waiting time (begin, end, Volgende dag and minutes — including a legacy
+duration stored without times), the operator's Custom Value assignments and the
+Trip's vehicle and driver links are cleared ONLY by an explicit action in the
+interface: "Wachttijd verwijderen" or emptying a stored window, removing a value
+in the Custom Values popup, or choosing "Geen voertuig". No UPDATE, repeated NEW,
+retry, document revision or recalculation may clear them, and none may bring
+back a value the operator removed.
+
+The backend guarantees this structurally rather than by a client flag: every
+automatic path reaches an existing Trip through `TripRevisionService`, whose
+write is typed as `DocumentRevisableTripFields` and cannot name a protected
+column. The one automatic Custom Value is Flat, decided by the container type;
+the rule only withdraws a Flat it added itself, never a manual one.
+
+On the manual side, a save sends only what the operator changed: an untouched
+waiting window or vehicle picker is not sent, so a form that opened empty — a
+legacy duration has no times to show — cannot clear the stored value.
+
 ### The latest update is what the interface highlights
 
 A Trip reports its most recent APPLIED update. The fields that update moved are

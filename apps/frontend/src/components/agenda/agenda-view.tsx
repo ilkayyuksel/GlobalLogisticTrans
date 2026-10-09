@@ -141,6 +141,7 @@ export function AgendaView({
             items={current.items}
             window={dayWindow}
             label={t("agenda.weekLabel")}
+            scrollRestorationId="agenda-week"
             onCreateAt={(date, startTime) => setDialog({ kind: "create", date, startTime })}
             onOpen={(item) => setDialog({ kind: "edit", item })}
           />

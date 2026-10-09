@@ -438,18 +438,21 @@ describe("Ritten editing", () => {
       expect(await screen.findByText("2 u 30 min")).toBeInTheDocument();
     });
 
-    it("sends null when both fields are left empty", async () => {
+    /*
+     * A legacy duration opens with both fields empty because there are no
+     * times to show. Saving that is not a removal — it used to erase the 45
+     * minutes. "Wachttijd verwijderen" is the removal.
+     */
+    it("sends nothing when a legacy entry is saved with both fields empty", async () => {
       await showTrip({ waitingTimeMinutes: 45 });
       await openWaitingTime();
 
       await userEvent.click(screen.getByRole("button", { name: "Opslaan" }));
 
       await waitFor(() => {
-        expect(patchCalls()[0][1]?.body).toEqual({
-          waitingTimeStart: null,
-          waitingTimeEnd: null,
-        });
+        expect(screen.queryByLabelText("Begin")).toBeNull();
       });
+      expect(patchCalls()).toHaveLength(0);
     });
 
     /** Half a window is refused, not guessed at: an end alone is not zero. */
@@ -510,6 +513,12 @@ describe("Ritten editing", () => {
       const before = listCalls(requestMock).length;
 
       await openWaitingTime();
+      fireEvent.change(screen.getByLabelText("Begin"), {
+        target: { value: "10:00" },
+      });
+      fireEvent.change(screen.getByLabelText("Eind"), {
+        target: { value: "11:00" },
+      });
       await userEvent.click(screen.getByRole("button", { name: "Opslaan" }));
 
       await screen.findByText("Rit bijgewerkt");

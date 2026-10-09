@@ -12,6 +12,7 @@ import {
   UnreadablePdfException,
 } from "./exceptions/pdf-import.exceptions";
 import { CostConfirmationMatchingService } from "./cost-confirmation-matching.service";
+import { ImportPersistenceVerifier } from "./import-persistence.verifier";
 import { PdfTripImporter } from "./pdf-trip-importer.service";
 
 /**
@@ -24,6 +25,8 @@ const parse = jest.fn<Promise<ParseResult>, [Uint8Array]>();
 
 jest.mock("@tms/parser", () => ({
   parse: (source: Uint8Array) => parse(source),
+  // The real rule: the import compares containers the way the Trip domain does.
+  normalizeContainerNumber: jest.requireActual("@tms/parser").normalizeContainerNumber,
 }));
 
 function buildParsedTrip(overrides: Partial<ParsedTrip> = {}): ParsedTrip {
@@ -143,6 +146,12 @@ describe("PdfTripImporter", () => {
         pdfDocumentService as unknown as PdfDocumentService,
         logger as unknown as AppLoggerService,
       ),
+      // Verified separately, against real rows: see import-persistence.spec.
+      {
+        assertTripsPersisted: jest.fn().mockResolvedValue(undefined),
+        assertEveryIdentityHeld: jest.fn().mockResolvedValue(undefined),
+        assertCostConfirmationPersisted: jest.fn().mockResolvedValue(undefined),
+      } as unknown as ImportPersistenceVerifier,
       logger as unknown as AppLoggerService
     );
   });

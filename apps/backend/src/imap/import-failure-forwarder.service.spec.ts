@@ -7,7 +7,10 @@ import {
 
 import { AppLoggerService } from "../logger/app-logger.service";
 import { OutgoingMessage, SmtpMailClient } from "../mail/smtp-mail.client";
-import { UnreadablePdfException } from "../pdf-import/exceptions/pdf-import.exceptions";
+import {
+  ImportNotPersistedException,
+  UnreadablePdfException,
+} from "../pdf-import/exceptions/pdf-import.exceptions";
 import { PdfTripImporter } from "../pdf-import/pdf-trip-importer.service";
 import {
   AttachmentDownloadException,
@@ -640,5 +643,80 @@ describe("forwarding a failed mailbox import", () => {
       processingStatus: EmailProcessingStatus.FAILED,
       processedAt: null,
     });
+  });
+});
+
+/*
+ * ── A DOCUMENT READ, AND ITS RECORD NOT THERE ───────────────────────────────
+ * The failure the forward was missing. The PDF parsed and the import ran, but
+ * the database did not hold the Trip — or the confirmation — the document
+ * describes. That is now an import failure like any other (see
+ * `ImportPersistenceVerifier`), and so it is forwarded exactly like one: once,
+ * after the mail server accepted it, and not again on the retries.
+ */
+describe("forwarding a document whose record is missing", () => {
+  function recordMissing(filename: string) {
+    return Promise.reject(
+      new ImportNotPersistedException(
+        filename,
+        ["booking ANRBEL2603249, container (none), 2025-05-22"],
+        "no Trip exists for",
+      ),
+    );
+  }
+
+  it("O/P/S. forwards the original once, however often it is retried", async () => {
+    const { sent, mailer } = recordingMailer();
+    const session = sessionServing([mailboxMessage()]);
+    const { service, table, importer } = buildScan({
+      session,
+      mailer,
+      importOutcome: recordMissing,
+    });
+
+    await service.scan();
+    await service.scan();
+    await service.scan();
+
+    expect(importer.import).toHaveBeenCalledTimes(3);
+    expect(sent).toHaveLength(1);
+    expect(sent[0].text).toContain("[IMPORT_NOT_PERSISTED]");
+    expect(sent[0].text).toContain("ANRBEL2603249");
+    // The original, whole: headers, body and every attachment travel inside.
+    expect(sent[0].attachments).toEqual([
+      expect.objectContaining({ content: RAW_SOURCE, contentType: "message/rfc822" }),
+    ]);
+
+    const row = table.rows.get("<1385766@carrier.test>");
+    expect(row?.processingStatus).toBe(EmailProcessingStatus.FAILED);
+    expect(session.markSeen).not.toHaveBeenCalled();
+  });
+
+  it("Q. retries the forward after an SMTP failure, then stops", async () => {
+    const sent: OutgoingMessage[] = [];
+    let smtpUp = false;
+    const mailer = {
+      send: jest.fn((message: OutgoingMessage) => {
+        if (!smtpUp) {
+          return Promise.reject(new Error("connect ECONNREFUSED 127.0.0.1:587"));
+        }
+
+        sent.push(message);
+
+        return Promise.resolve();
+      }),
+    };
+    const session = sessionServing([mailboxMessage()]);
+    const { service, table } = buildScan({ session, mailer, importOutcome: recordMissing });
+
+    await service.scan();
+    expect(table.rows.get("<1385766@carrier.test>")?.failureForwardedAt).toBeNull();
+
+    smtpUp = true;
+    await service.scan();
+    await service.scan();
+
+    expect(sent).toHaveLength(1);
+    expect(table.rows.get("<1385766@carrier.test>")?.failureForwardedAt).toBeInstanceOf(Date);
   });
 });

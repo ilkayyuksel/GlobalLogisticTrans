@@ -34,11 +34,13 @@ import { DuplicateBookingNumberException } from "../trips/exceptions/trip.except
 import { TripService } from "../trips/trip.service";
 import {
   CostConfirmationRefusedException,
+  ImportNotPersistedException,
   InvalidCombinationException,
   NoTripsFoundException,
   RevisionRefusedException,
   UnreadablePdfException,
 } from "./exceptions/pdf-import.exceptions";
+import { ImportPersistenceVerifier } from "./import-persistence.verifier";
 
 /** A Combination is one leg out and one leg back — never more, never fewer. */
 const TRIPS_PER_COMBINATION = 2;
@@ -185,6 +187,7 @@ export class PdfTripImporter {
     private readonly pdfDocumentService: PdfDocumentService,
     private readonly costConfirmations: CostConfirmationService,
     private readonly matching: CostConfirmationMatchingService,
+    private readonly verifier: ImportPersistenceVerifier,
     private readonly logger: AppLoggerService,
   ) {
     this.logger.setContext(PdfTripImporter.name);
@@ -232,6 +235,8 @@ export class PdfTripImporter {
       options.provenance,
     );
 
+    let created: TripResponseDto[];
+
     try {
       const command: ImportTripsCommand = {
         document: { kind: "new", data: prepared.document },
@@ -239,22 +244,7 @@ export class PdfTripImporter {
         trips,
       };
 
-      const created = await this.tripService.importTrips(command);
-
-      this.logger.log("Transport order import finished", {
-        originalFilename,
-        layout: parsed.layout,
-        tripCount: created.length,
-        combination,
-      });
-
-      return {
-        trips: created,
-        combination,
-        cancellations: [],
-        revisions: [],
-        costConfirmations: [],
-      };
+      created = await this.tripService.importTrips(command);
     } catch (error: unknown) {
       /*
        * An identity this system already holds is not a broken document — it is
@@ -278,6 +268,31 @@ export class PdfTripImporter {
 
       throw error;
     }
+
+    /*
+     * Checked after the commit and outside the block above: a Trip missing
+     * now is a failed import, but the rows that WERE written are valid, and
+     * that block's cleanup would delete the file they point at.
+     */
+    await this.verifier.assertTripsPersisted(
+      trips.map(identityOf),
+      originalFilename,
+    );
+
+    this.logger.log("Transport order import finished", {
+      originalFilename,
+      layout: parsed.layout,
+      tripCount: created.length,
+      combination,
+    });
+
+    return {
+      trips: created,
+      combination,
+      cancellations: [],
+      revisions: [],
+      costConfirmations: [],
+    };
   }
 
   /**
@@ -286,7 +301,8 @@ export class PdfTripImporter {
    * Committed outside the failed transaction, because that transaction is gone:
    * the insert was refused, and this is a second, self-contained piece of work
    * that stores the document and applies it. It creates no Trip — every
-   * identity here is one we already have.
+   * identity here must be one we already have, which is checked before
+   * anything is written (`assertEveryIdentityHeld`) rather than assumed.
    *
    * A failure to apply is not swallowed: the document is discarded with it, so
    * a file is never left behind describing work that did not happen.
@@ -296,11 +312,24 @@ export class PdfTripImporter {
     parsed: ParseSuccess,
     originalFilename: string,
   ): Promise<PdfImportResult> {
-    const document = await this.pdfDocumentService.persist(prepared);
-    const stored: StoredDocument = { id: document.id, storedFile: prepared };
+    const identities = parsed.trips.map((trip) =>
+      identityOf(this.toImportedTrip(trip)),
+    );
 
     try {
-      const revisions: RevisedBooking[] = [];
+      await this.verifier.assertEveryIdentityHeld(identities, originalFilename);
+    } catch (error: unknown) {
+      // Refused before anything was written: only the file may need to go.
+      await this.discardQuietly(prepared, originalFilename);
+
+      throw error;
+    }
+
+    const document = await this.pdfDocumentService.persist(prepared);
+    const stored: StoredDocument = { id: document.id, storedFile: prepared };
+    const revisions: RevisedBooking[] = [];
+
+    try {
 
       for (const trip of parsed.trips) {
         const result = await this.tripRevision.applyNewOrder(
@@ -318,24 +347,27 @@ export class PdfTripImporter {
         });
       }
 
-      this.logger.log("New order applied to Trips that already existed", {
-        originalFilename,
-        pdfDocumentId: stored.id,
-        outcomes: revisions.map((revision) => revision.action),
-      });
-
-      return {
-        trips: [],
-        combination: false,
-        cancellations: [],
-        revisions,
-        costConfirmations: [],
-      };
     } catch (error: unknown) {
       await this.forgetQuietly(stored, originalFilename);
 
       throw error;
     }
+
+    await this.verifier.assertTripsPersisted(identities, originalFilename);
+
+    this.logger.log("New order applied to Trips that already existed", {
+      originalFilename,
+      pdfDocumentId: stored.id,
+      outcomes: revisions.map((revision) => revision.action),
+    });
+
+    return {
+      trips: [],
+      combination: false,
+      cancellations: [],
+      revisions,
+      costConfirmations: [],
+    };
   }
 
   /**
@@ -519,6 +551,13 @@ export class PdfTripImporter {
         documentIsReferenced = true;
       }
 
+      // Everything above is written and stays, whatever the check finds.
+      documentIsReferenced = true;
+      await this.verifier.assertTripsPersisted(
+        parsed.trips.map((trip) => identityOf(this.toImportedTrip(trip))),
+        originalFilename,
+      );
+
       this.logger.log("Revised transport order applied", {
         originalFilename,
         layout: parsed.layout,
@@ -678,6 +717,11 @@ export class PdfTripImporter {
         `${confirmation.currency} ${confirmation.amount}`,
       );
 
+      await this.verifier.assertCostConfirmationPersisted(
+        { ccNumber: confirmation.ccNumber, tripId: trip.id },
+        originalFilename,
+      );
+
       this.logger.log("Cost confirmation processed", {
         originalFilename,
         ccNumber: confirmation.ccNumber,
@@ -709,7 +753,12 @@ export class PdfTripImporter {
        * evidence for that record — so it stays, like a refused revision's does.
        * Anything else failed before writing anything and is compensated away.
        */
-      if (!(error instanceof CostConfirmationRefusedException)) {
+      // Nor a confirmation that was written and then not found: what was
+      // written references this document, so it stays.
+      if (
+        !(error instanceof CostConfirmationRefusedException) &&
+        !(error instanceof ImportNotPersistedException)
+      ) {
         await this.forgetQuietly(document, originalFilename);
       }
 

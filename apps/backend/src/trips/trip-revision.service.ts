@@ -147,6 +147,33 @@ export interface DocumentReference {
  * with like. No email date, no import timestamp and no voyage date reaches
  * this: the parser reads that one labelled line and nothing else.
  */
+/**
+ * The ONLY Trip columns a transport document may write.
+ *
+ * A type rather than a comment, so the rule cannot erode by oversight: adding a
+ * manually managed column — `vehicleId`, `driverId`, any `waitingTime*` field,
+ * group membership, notes — to `toRevisedFields` is a compile error, not a
+ * review comment. The operator's data survives every UPDATE, repeated NEW and
+ * retry because no automatic path has a way to express a write to it, not
+ * because each call site remembers to leave it out.
+ *
+ * `planningDate` is narrowed to the stored shape because `movesPlanningDate`
+ * compares the value itself.
+ */
+export type DocumentRevisableTripFields = Pick<
+  Prisma.TripUncheckedUpdateInput,
+  | "containerNumber"
+  | "containerType"
+  | "terminal"
+  | "destinationCity"
+  | "destinationCountry"
+  | "startTime"
+  | "endTime"
+  | "direction"
+  | "parserMetadata"
+> &
+  Pick<Trip, "planningDate">;
+
 export function identityOf(document: ImportedTripData): TripIdentity {
   return {
     bookingNumber: document.bookingNumber,
@@ -715,13 +742,14 @@ export class TripRevisionService {
    * The fields a document is allowed to rewrite.
    *
    * ── WHAT IS DELIBERATELY ABSENT ───────────────────────────────────────────
-   * Everything the operator owns: vehicleId, driverId, waitingTimeMinutes,
-   * distanceKm, executionDatetime, internalNotes, custom properties and group
-   * membership. None appears below, which is what guarantees that a new PDF
-   * cannot quietly undo an afternoon of planning. The rule is expressed by
-   * listing what MAY change rather than by listing what may not, so a column
-   * added later is preserved by default instead of being overwritten by
-   * oversight.
+   * Everything the operator owns: vehicleId, driverId, the four waiting-time
+   * columns, distanceKm, executionDatetime, internalNotes, custom properties
+   * and group membership. None appears below, and `DocumentRevisableTripFields`
+   * makes it impossible to add one, which is what guarantees that a new PDF
+   * cannot quietly undo an afternoon of planning — nor bring back a value the
+   * operator removed. The rule is expressed by listing what MAY change rather
+   * than by listing what may not, so a column added later is preserved by
+   * default instead of being overwritten by oversight.
    *
    * The AUTOMATIC Flat assignment is the single exception, and it is not one of
    * these fields: the document states a container type, and what that type
@@ -729,7 +757,10 @@ export class TripRevisionService {
    * assigned by hand is still never touched.
    * ──────────────────────────────────────────────────────────────────────────
    */
-  private toRevisedFields(existing: Trip, document: ImportedTripData) {
+  private toRevisedFields(
+    existing: Trip,
+    document: ImportedTripData,
+  ): DocumentRevisableTripFields {
     const documentDate = toUtcDate(document.planningDate);
 
     return {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 
 import { combinationPalette } from "@/lib/ritten/combination";
 import { CombinationDialog } from "@/components/ritten/combination-dialog";
@@ -18,15 +18,10 @@ import { PdfViewerDialog } from "@/components/ritten/pdf-viewer-dialog";
 import { SelectionToolbar } from "@/components/ritten/selection-toolbar";
 import { PeriodNav } from "@/components/ritten/period-nav";
 import { RittenCounters } from "@/components/ritten/ritten-counters";
-import {
-  DEFAULT_RITTEN_SORT,
-  RittenSortControl,
-  type RittenSort,
-} from "@/components/ritten/ritten-sort";
+import { RittenSortControl } from "@/components/ritten/ritten-sort";
 import {
   EMPTY_RITTEN_FILTERS,
   RittenFilters,
-  type RittenFilterValues,
   hasActiveRittenFilters,
   toFilterParams,
 } from "@/components/ritten/ritten-filters";
@@ -36,6 +31,8 @@ import { EmptyState, ErrorState, LoadingState } from "@/components/ui/states";
 import { Spinner } from "@/components/ui/spinner";
 import { useAsync } from "@/hooks/use-async";
 import { useDebounced } from "@/hooks/use-debounced";
+import { useResetOnChange } from "@/hooks/use-reset-on-change";
+import { useUrlState } from "@/hooks/use-url-state";
 import { userFacingMessage } from "@/lib/api/client";
 import { listCustomProperties } from "@/lib/api/custom-properties";
 import { listActiveVehicles } from "@/lib/api/fleet";
@@ -78,6 +75,14 @@ import type {
 import { downloadBlob } from "@/lib/download";
 import { useTranslation } from "@/lib/i18n/language-provider";
 import type { TranslationKey } from "@/lib/i18n/translations";
+import {
+  RITTEN_DATE_PARAM,
+  RITTEN_FILTER_PARAMS,
+  RITTEN_PAGE_PARAM,
+  RITTEN_PRICES_PARAM,
+  RITTEN_SORT_PARAMS,
+  RITTEN_VIEW_PARAM,
+} from "./ritten-url-state";
 import { buildSections } from "@/lib/ritten/sections";
 import { toCostConfirmationLabel } from "@/lib/trips/cost-confirmation";
 import type { RittenActions } from "@/lib/ritten/row-actions";
@@ -86,7 +91,6 @@ import {
   periodQuery,
   periodStart,
   singleDayOf,
-  todayAnchor,
   type RittenView,
 } from "@/lib/ritten/period";
 
@@ -207,12 +211,25 @@ function isRowLocalOnly(payload: UpdateTripPayload): boolean {
 }
 
 export default function RittenPage() {
+  // useSearchParams needs a Suspense boundary on a statically rendered page.
+  return (
+    <Suspense fallback={null}>
+      <RittenList />
+    </Suspense>
+  );
+}
+
+function RittenList() {
   const t = useTranslation();
 
-  const [view, setView] = useState<RittenView>("day");
-  const [anchor, setAnchor] = useState<string>(todayAnchor);
-  const [filters, setFilters] = useState<RittenFilterValues>(EMPTY_RITTEN_FILTERS);
-  const [page, setPage] = useState(1);
+  /*
+   * The view state lives in the address (see `ritten-url-state`), so Back from
+   * a Trip returns to this same day, view, filter, sort and page.
+   */
+  const [view, setView] = useUrlState(RITTEN_VIEW_PARAM);
+  const [anchor, setAnchor] = useUrlState(RITTEN_DATE_PARAM);
+  const [filters, setFilters] = useUrlState(RITTEN_FILTER_PARAMS);
+  const [page, setPage] = useUrlState(RITTEN_PAGE_PARAM);
 
   /*
    * ── THE SELECTION IS NOT PER PAGE ─────────────────────────────────────────
@@ -253,13 +270,13 @@ export default function RittenPage() {
   const [busyTripId, setBusyTripId] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<Feedback | null>(null);
 
-  const [sort, setSort] = useState<RittenSort>(DEFAULT_RITTEN_SORT);
+  const [sort, setSort] = useUrlState(RITTEN_SORT_PARAMS);
   /*
    * Prices are off until asked for. The Ritten list is read over a driver's
    * shoulder and on a shared screen, so money is not on it by default — and
    * when it is off the columns are absent, not blanked.
    */
-  const [showPricing, setShowPricing] = useState(false);
+  const [showPricing, setShowPricing] = useUrlState(RITTEN_PRICES_PARAM);
 
   const debouncedSearch = useDebounced(filters.search, SEARCH_DEBOUNCE_MS);
 
@@ -294,9 +311,8 @@ export default function RittenPage() {
 
   // A narrowed period usually has fewer pages than the one being viewed, and
   // page 4 of a 1-page result is an empty screen that reads as "no trips".
-  useEffect(() => {
-    setPage(1);
-  }, [query]);
+  // Not on mount: a page returned to with Back keeps the page it was left on.
+  useResetOnChange(query, () => setPage(1));
 
   const pageSizeForView = PAGE_SIZE_BY_VIEW[view];
 

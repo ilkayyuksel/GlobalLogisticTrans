@@ -178,6 +178,19 @@ export class CostConfirmationService {
   }
 
   /**
+   * Whether this Trip carries the confirmation with this `cc_number`.
+   *
+   * The question an import asks AFTER `record`, by the same identity `record`
+   * deduplicates on: one Trip, one number. A Trip with several different
+   * confirmations is checked for the one that was just offered.
+   */
+  async isRecordedFor(tripId: string, ccNumber: string): Promise<boolean> {
+    const recorded = await this.repository.findAllByTrip(tripId);
+
+    return recorded.some((confirmation) => confirmation.ccNumber === ccNumber);
+  }
+
+  /**
    * The LATEST confirmation of each Trip on a page, keyed by Trip id.
    *
    * ── WHY THE LATEST AND NOT ALL OF THEM ──────────────────────────────────

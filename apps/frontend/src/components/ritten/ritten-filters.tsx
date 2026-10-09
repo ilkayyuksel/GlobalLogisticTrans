@@ -51,7 +51,7 @@ export interface RittenFilterValues {
 /** Alle / Betaald / Niet betaald, in the order the control offers them. */
 export type PaymentFilter = "" | "paid" | "unpaid";
 
-const PAYMENT_CHOICES: readonly PaymentFilter[] = ["", "paid", "unpaid"];
+export const PAYMENT_CHOICES: readonly PaymentFilter[] = ["", "paid", "unpaid"];
 
 export const EMPTY_RITTEN_FILTERS: RittenFilterValues = {
   search: "",
@@ -106,7 +106,7 @@ export function toFilterParams(
  * list does not show at all, and offering it here would be offering a filter
  * that can only ever return nothing.
  */
-const STATUS_CHOICES: readonly (TripStatus | "")[] = [
+export const STATUS_CHOICES: readonly (TripStatus | "")[] = [
   "OPEN",
   "CLOSED",
   "CANCELLED",

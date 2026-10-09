@@ -782,6 +782,72 @@ describe("every real Cost Confirmation, through the real workflow", () => {
       expect(result.costConfirmations[0].outcome).toBe("RECORDED");
     });
   });
+
+  /*
+   * ── THE RESULT IS CHECKED IN THE DATABASE ─────────────────────────────────
+   * A confirmation that was read is imported only once the Trip it was matched
+   * to carries it. Same identity `record` deduplicates on: one Trip, one
+   * `cc_number` — so two different confirmations on one Trip both pass, and a
+   * repeat of one passes without being stored twice (both pinned above, and
+   * both now run through this check).
+   */
+  describe("the result, checked in the database", () => {
+    const [WITH_CONTAINER] = EXPECTED;
+    const WITHOUT_CONTAINER = EXPECTED.find(
+      (entry) => entry.file === "CC-zonder-container.pdf",
+    ) as ExpectedConfirmation;
+
+    it("H. refuses a confirmation the parser cannot read", async () => {
+      await expect(
+        harness.importer.confirmCost(new Uint8Array([0x25, 0x50, 0x44, 0x46]), "cc.pdf"),
+      ).rejects.toThrow(expect.objectContaining({ code: "IMPORT_UNREADABLE_PDF" }));
+      expect(harness.costConfirmations).toHaveLength(0);
+    });
+
+    it("I. fails when the write reported success but the Trip does not carry it", async () => {
+      const trip = await seedTrip(WITH_CONTAINER);
+      jest.spyOn(harness.costConfirmationService, "record").mockResolvedValue({
+        outcome: "RECORDED",
+        confirmation: {} as never,
+        pricing: null,
+        reasonCode: null,
+      });
+
+      await expect(
+        harness.importer.confirmCost(readConfirmation(WITH_CONTAINER.file), WITH_CONTAINER.file),
+      ).rejects.toThrow(
+        expect.objectContaining({
+          code: "IMPORT_NOT_PERSISTED",
+          message: expect.stringContaining(`${WITH_CONTAINER.ccNumber} on Trip ${trip.id}`),
+        }),
+      );
+    });
+
+    it("J. accepts a confirmation found on the Trip it was matched to", async () => {
+      const trip = await seedTrip(WITH_CONTAINER);
+      const check = jest.spyOn(harness.costConfirmationService, "isRecordedFor");
+
+      await harness.importer.confirmCost(
+        readConfirmation(WITH_CONTAINER.file),
+        WITH_CONTAINER.file,
+      );
+
+      expect(check).toHaveBeenCalledWith(trip.id, WITH_CONTAINER.ccNumber);
+      await expect(check.mock.results[0].value).resolves.toBe(true);
+    });
+
+    it("N. checks a container-less confirmation on the Trip the CC matcher chose", async () => {
+      const trip = await seedTrip(WITHOUT_CONTAINER);
+      const check = jest.spyOn(harness.costConfirmationService, "isRecordedFor");
+
+      await harness.importer.confirmCost(
+        readConfirmation(WITHOUT_CONTAINER.file),
+        WITHOUT_CONTAINER.file,
+      );
+
+      expect(check).toHaveBeenCalledWith(trip.id, WITHOUT_CONTAINER.ccNumber);
+    });
+  });
 });
 
 /** The booking numbers currently in the harness, for a short assertion. */
