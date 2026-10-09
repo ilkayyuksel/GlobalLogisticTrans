@@ -218,7 +218,7 @@ describe("the Info column in a real BASIS workbook", () => {
         property("CUSTOM_PROPERTY", "50.00", TAR_ID),
         property("WAITING_TIME", "25.00", null),
       ),
-      { tarCharged: true, waitingLabel: "Wachttijd 1 u 30 min", remarks: "" },
+      { tarCharged: true, waitingLabel: "Wachttijd 1 u 30 min", remarks: "", costConfirmations: [] },
     );
 
     expect(info).toBe(

@@ -13,6 +13,9 @@ describe("TripPricingRepository", () => {
       findUnique: jest.Mock;
       create: jest.Mock;
       update: jest.Mock;
+      updateMany: jest.Mock;
+      findFirst: jest.Mock;
+      findMany: jest.Mock;
     };
   };
   let repository: TripPricingRepository;
@@ -23,6 +26,9 @@ describe("TripPricingRepository", () => {
         findUnique: jest.fn().mockResolvedValue(null),
         create: jest.fn().mockResolvedValue({}),
         update: jest.fn().mockResolvedValue({}),
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+        findFirst: jest.fn().mockResolvedValue(null),
+        findMany: jest.fn().mockResolvedValue([]),
       },
     };
 
@@ -54,6 +60,81 @@ describe("TripPricingRepository", () => {
 
     it("returns null when the Trip has no snapshot", async () => {
       expect(await repository.findByTripId("trip-1")).toBeNull();
+    });
+  });
+
+  /*
+   * The guard against an older calculation landing last IS the condition on
+   * `calculated_at` in the WHERE clause: Postgres re-checks it against the row
+   * as a concurrent writer left it.
+   */
+  /*
+   * ── A CURRENT PRICE BELONGS TO A CLOSED TRIP ──────────────────────────────
+   * The guard is the Trip's status in the WHERE clause: a reopened, cancelled
+   * or deleted Trip's snapshot stays stored and is simply not found here.
+   */
+  describe("the current reads", () => {
+    it("reads one Trip's snapshot only while the Trip is CLOSED", async () => {
+      await repository.findCurrentByTripId("trip-1");
+
+      expect(prisma.tripPricing.findFirst).toHaveBeenCalledWith({
+        where: { tripId: "trip-1", trip: { status: "CLOSED" } },
+      });
+    });
+
+    it("reads many Trips' snapshots only for CLOSED Trips", async () => {
+      await repository.findCurrentByTripIds(["trip-1", "trip-2"]);
+
+      expect(prisma.tripPricing.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { tripId: { in: ["trip-1", "trip-2"] }, trip: { status: "CLOSED" } },
+        }),
+      );
+    });
+
+    /* The Engine must still find a reopened Trip's snapshot to replace it. */
+    it("leaves the Engine's own read unfiltered", async () => {
+      await repository.findByTripId("trip-1");
+
+      expect(prisma.tripPricing.findUnique).toHaveBeenCalledWith({
+        where: { tripId: "trip-1" },
+      });
+    });
+  });
+
+  describe("updateUnlessNewerStored", () => {
+    const READ_AT = new Date("2026-08-17T09:00:01.000Z");
+
+    it("writes only while the stored snapshot is not newer", async () => {
+      await repository.updateUnlessNewerStored("pricing-1", {
+        calculatedAt: READ_AT,
+        calculationStatus: PricingCalculationStatus.CALCULATED,
+      });
+
+      expect(prisma.tripPricing.updateMany).toHaveBeenCalledWith({
+        where: { id: "pricing-1", calculatedAt: { lte: READ_AT } },
+        data: {
+          calculatedAt: READ_AT,
+          calculationStatus: PricingCalculationStatus.CALCULATED,
+        },
+      });
+    });
+
+    it("answers with the row it wrote", async () => {
+      prisma.tripPricing.findUnique.mockResolvedValue({ id: "pricing-1" });
+
+      await expect(
+        repository.updateUnlessNewerStored("pricing-1", { calculatedAt: READ_AT }),
+      ).resolves.toEqual({ id: "pricing-1" });
+    });
+
+    it("answers null when a newer snapshot is stored", async () => {
+      prisma.tripPricing.updateMany.mockResolvedValue({ count: 0 });
+
+      await expect(
+        repository.updateUnlessNewerStored("pricing-1", { calculatedAt: READ_AT }),
+      ).resolves.toBeNull();
+      expect(prisma.tripPricing.findUnique).not.toHaveBeenCalled();
     });
   });
 

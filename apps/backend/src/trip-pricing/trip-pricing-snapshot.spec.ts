@@ -84,7 +84,7 @@ describe("TripPricingService — atomic snapshot write", () => {
   let pricingRepository: {
     findByTripId: jest.Mock;
     create: jest.Mock;
-    update: jest.Mock;
+    updateUnlessNewerStored: jest.Mock;
   };
   let itemRepository: { createMany: jest.Mock; deleteByTripPricingId: jest.Mock };
   let trips: { findById: jest.Mock };
@@ -105,7 +105,7 @@ describe("TripPricingService — atomic snapshot write", () => {
         journal.push("create-parent");
         return buildSnapshot();
       }),
-      update: jest.fn().mockImplementation(async () => {
+      updateUnlessNewerStored: jest.fn().mockImplementation(async () => {
         journal.push("update-parent");
         return buildSnapshot();
       }),
@@ -126,7 +126,7 @@ describe("TripPricingService — atomic snapshot write", () => {
       findById: jest.fn(),
       findByTripId: jest.fn().mockResolvedValue(null),
       create: jest.fn(),
-      update: jest.fn(),
+      updateUnlessNewerStored: jest.fn(),
       runInTransaction: jest.fn(),
     } as unknown as jest.Mocked<TripPricingRepository>;
 
@@ -253,7 +253,7 @@ describe("TripPricingService — atomic snapshot write", () => {
       const stored = await service.replaceSnapshot(buildCommand());
 
       expect(pricingRepository.create).not.toHaveBeenCalled();
-      expect(pricingRepository.update).toHaveBeenCalledWith(
+      expect(pricingRepository.updateUnlessNewerStored).toHaveBeenCalledWith(
         PRICING_ID,
         expect.anything(),
       );
@@ -268,7 +268,7 @@ describe("TripPricingService — atomic snapshot write", () => {
         }),
       );
 
-      expect(pricingRepository.update).toHaveBeenCalledWith(PRICING_ID, {
+      expect(pricingRepository.updateUnlessNewerStored).toHaveBeenCalledWith(PRICING_ID, {
         totalPrice: new Prisma.Decimal("475.00"),
         calculatedAt: new Date("2026-08-17T09:00:01.000Z"),
         pricingEngineVersion: "1.0.0",
@@ -385,7 +385,7 @@ describe("TripPricingService — atomic snapshot write", () => {
       // The service's own repository handle is only used to open the
       // transaction; every write goes through the scoped clones.
       expect(repository.create).not.toHaveBeenCalled();
-      expect(repository.update).not.toHaveBeenCalled();
+      expect(repository.updateUnlessNewerStored).not.toHaveBeenCalled();
     });
   });
 
@@ -451,6 +451,57 @@ describe("TripPricingService — atomic snapshot write", () => {
         /already has a pricing snapshot|already exists/i,
       );
       expect(committed).toBeNull();
+    });
+
+    /*
+     * ── AN OLDER CALCULATION NEVER OVERWRITES A NEWER ONE ───────────────────
+     * Two recalculations of one Trip — two quick edits — may finish in either
+     * order. The store refuses the one whose inputs were read earlier.
+     */
+    it("keeps a stored snapshot whose inputs were read later", async () => {
+      const newer = buildSnapshot({
+        calculatedAt: new Date("2026-08-17T09:00:05.000Z"),
+      });
+      pricingRepository.findByTripId.mockResolvedValue(newer);
+      pricingRepository.updateUnlessNewerStored.mockResolvedValue(null);
+
+      const response = await service.replaceSnapshot(buildCommand());
+
+      expect(pricingRepository.updateUnlessNewerStored).toHaveBeenCalledWith(
+        PRICING_ID,
+        expect.objectContaining({
+          calculatedAt: new Date("2026-08-17T09:00:01.000Z"),
+        }),
+      );
+      expect(itemRepository.deleteByTripPricingId).not.toHaveBeenCalled();
+      expect(itemRepository.createMany).not.toHaveBeenCalled();
+      expect(response.calculatedAt).toEqual(newer.calculatedAt);
+      expect(logger.warn).toHaveBeenCalledWith(
+        "Discarded a calculation older than the stored snapshot",
+        { tripPricingId: PRICING_ID, tripId: TRIP_ID },
+      );
+    });
+
+    /*
+     * Closing prices the Trip and an edit straight afterwards prices it again;
+     * when both create, the loser may hold the NEWER inputs. It is retried as
+     * a replace rather than failing and leaving the older snapshot standing.
+     */
+    it("retries a lost first-snapshot race as a replace", async () => {
+      pricingRepository.findByTripId
+        .mockResolvedValueOnce(null)
+        .mockResolvedValue(buildSnapshot());
+      pricingRepository.create.mockRejectedValueOnce(
+        new Prisma.PrismaClientKnownRequestError("Unique constraint failed", {
+          code: "P2002",
+          clientVersion: "7.0.0",
+        }),
+      );
+
+      await service.replaceSnapshot(buildCommand());
+
+      expect(pricingRepository.updateUnlessNewerStored).toHaveBeenCalledTimes(1);
+      expect(committed).toEqual(["update-parent", "delete-items", "create-items"]);
     });
   });
 

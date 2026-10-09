@@ -214,10 +214,10 @@ export interface PricingCalculationContext {
   readonly overSt: PricingOverStInput | null;
 
   /**
-   * The Cost Confirmation of this Trip, or null when it has none.
+   * The Trip's Cost Confirmations, summed, or null when it has none.
    *
-   * At most one: `cost_confirmation.trip_id` is unique. The amount is the fixed
-   * -2 string the column holds, never a float — it is money, and it is passed
+   * A Trip may hold several, each `cc_number` once. The amount is the fixed-2
+   * sum the read side produced, never a float — it is money, and it is passed
    * through verbatim rather than recalculated.
    */
   readonly costConfirmation: PricingCostConfirmationInput | null;

@@ -62,7 +62,7 @@ export class EffectivePricingService {
    * would state the second.
    */
   async findForTrip(tripId: string): Promise<EffectivePricing | null> {
-    const snapshot = await this.snapshots.findByTripId(tripId);
+    const snapshot = await this.snapshots.findCurrentByTripId(tripId);
 
     if (!snapshot) {
       return null;
@@ -106,7 +106,7 @@ export class EffectivePricingService {
     }
 
     const [snapshots, overrideRows] = await Promise.all([
-      this.snapshots.findManyByTripIds(tripIds),
+      this.snapshots.findCurrentByTripIds(tripIds),
       this.overrides.findForTrips(tripIds),
     ]);
 

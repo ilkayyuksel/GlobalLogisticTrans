@@ -2,7 +2,6 @@ import { Injectable } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 
 import { AppLoggerService } from "../logger/app-logger.service";
-import { MissingCustomPropertyPriceException } from "./exceptions/pricing-engine.exceptions";
 import {
   PricingCalculationContext,
   PricingCustomPropertyInput,
@@ -49,6 +48,11 @@ export const CUSTOM_PROPERTY_CALCULATION_ORDER = 7;
  *
  * All arithmetic is Decimal. Amounts and property names are never logged.
  */
+/** A fixed-price property that states its amount. */
+type PricedCustomProperty = PricingCustomPropertyInput & {
+  readonly defaultPrice: string;
+};
+
 @Injectable()
 export class CustomPropertyCalculator implements PricingCalculationStep {
   constructor(private readonly logger: AppLoggerService) {
@@ -63,7 +67,8 @@ export class CustomPropertyCalculator implements PricingCalculationStep {
 
     const lines = context.assignedCustomProperties
       .filter(isFixedPrice)
-      .map((property) => this.propertyLine(context.tripId, property));
+      .filter((property) => this.hasConfiguredPrice(context.tripId, property))
+      .map((property) => this.propertyLine(property));
 
     this.logger.log("Custom property calculation completed", {
       tripId: context.tripId,
@@ -74,31 +79,46 @@ export class CustomPropertyCalculator implements PricingCalculationStep {
   }
 
   /**
-   * The property's own configured price, unchanged.
+   * Whether the property states an amount this step can charge.
    *
-   * A missing price is refused rather than treated as zero. The property was
-   * assigned deliberately, so the charge exists; only its amount is unknown,
-   * and inventing zero for it would put a quietly wrong figure on an invoice.
+   * ── A MISSING PRICE CONTRIBUTES NOTHING ───────────────────────────────────
+   * It used to refuse the WHOLE calculation, and the cost was out of all
+   * proportion to the gap: one assigned property nobody had priced left the
+   * Trip with no snapshot at all, so its Tarief, Backload, waiting time and
+   * Cost Confirmations went unpriced too and every column showed "-". On a
+   * Trip that was already priced, assigning such a property made the
+   * recalculation fail and kept the previous snapshot on screen.
+   *
+   * So it is now what an unconfigured route cost already is for Toll and
+   * Tunnel (see the Engine's `reportUnpricedRouteComponents`): no line,
+   * no invented amount, and a WARNING naming the property so an administrator
+   * can configure its price. Nothing is presented as zero — the property simply
+   * is not charged until it has a price.
+   * ──────────────────────────────────────────────────────────────────────────
+   */
+  private hasConfiguredPrice(
+    tripId: string,
+    property: PricingCustomPropertyInput,
+  ): property is PricedCustomProperty {
+    if (property.defaultPrice !== null) {
+      return true;
+    }
+
+    this.logger.warn("Fixed-price custom property has no configured price", {
+      tripId,
+      customPropertyId: property.customPropertyId,
+    });
+
+    return false;
+  }
+
+  /**
+   * The property's own configured price, unchanged.
    *
    * Quantity and unit price stay null — a fixed-price property is a flat
    * amount, not a rate per unit of anything.
    */
-  private propertyLine(
-    tripId: string,
-    property: PricingCustomPropertyInput,
-  ): PricingLine {
-    if (property.defaultPrice === null) {
-      this.logger.warn("Fixed-price custom property has no configured price", {
-        tripId,
-        customPropertyId: property.customPropertyId,
-      });
-
-      throw new MissingCustomPropertyPriceException(
-        tripId,
-        property.customPropertyId,
-      );
-    }
-
+  private propertyLine(property: PricedCustomProperty): PricingLine {
     return {
       component: PricingComponentCode.CUSTOM_PROPERTY,
       description: property.name,

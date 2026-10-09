@@ -41,11 +41,11 @@ function tripIds(count: number): string[] {
 
 describe("EffectivePricingService.findForTrips", () => {
   let service: EffectivePricingService;
-  let findManyByTripIds: jest.Mock;
+  let findCurrentByTripIds: jest.Mock;
   let findOverridesForTrips: jest.Mock;
 
   beforeEach(() => {
-    findManyByTripIds = jest
+    findCurrentByTripIds = jest
       .fn()
       .mockImplementation((ids: readonly string[]) =>
         Promise.resolve(ids.map(buildSnapshot)),
@@ -58,7 +58,7 @@ describe("EffectivePricingService.findForTrips", () => {
         findForTrips: findOverridesForTrips,
       } as unknown as TripPricingOverrideRepository,
       {
-        findManyByTripIds,
+        findCurrentByTripIds,
       } as unknown as TripPricingRepository,
     );
   });
@@ -67,7 +67,7 @@ describe("EffectivePricingService.findForTrips", () => {
     it.each([1, 2, 20, 100])("uses two queries for %i Trips", async (count) => {
       await service.findForTrips(tripIds(count));
 
-      expect(findManyByTripIds).toHaveBeenCalledTimes(1);
+      expect(findCurrentByTripIds).toHaveBeenCalledTimes(1);
       expect(findOverridesForTrips).toHaveBeenCalledTimes(1);
     });
 
@@ -83,7 +83,7 @@ describe("EffectivePricingService.findForTrips", () => {
 
       await service.findForTrips(ids);
 
-      expect(findManyByTripIds).toHaveBeenCalledWith(ids);
+      expect(findCurrentByTripIds).toHaveBeenCalledWith(ids);
       expect(findOverridesForTrips).toHaveBeenCalledWith(ids);
     });
   });
@@ -93,7 +93,7 @@ describe("EffectivePricingService.findForTrips", () => {
     const result = await service.findForTrips([]);
 
     expect(result.size).toBe(0);
-    expect(findManyByTripIds).not.toHaveBeenCalled();
+    expect(findCurrentByTripIds).not.toHaveBeenCalled();
     expect(findOverridesForTrips).not.toHaveBeenCalled();
   });
 
@@ -121,7 +121,7 @@ describe("EffectivePricingService.findForTrips", () => {
    * apart. The same distinction findForTrip makes by returning null.
    */
   it("omits a Trip that has never been priced", async () => {
-    findManyByTripIds.mockResolvedValue([buildSnapshot("trip-1")]);
+    findCurrentByTripIds.mockResolvedValue([buildSnapshot("trip-1")]);
 
     const result = await service.findForTrips(["trip-1", "trip-2"]);
 

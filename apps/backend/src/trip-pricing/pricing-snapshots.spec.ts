@@ -69,13 +69,13 @@ function buildSnapshot(tripId: string, code: string, amount: string) {
 
 describe("GET /trip-pricing/snapshots", () => {
   let app: INestApplication;
-  let repository: { findManyByTripIds: jest.Mock; findByTripId: jest.Mock };
+  let repository: { findCurrentByTripIds: jest.Mock; findCurrentByTripId: jest.Mock };
   let tripService: { findById: jest.Mock };
 
   beforeEach(async () => {
     repository = {
-      findManyByTripIds: jest.fn().mockResolvedValue([]),
-      findByTripId: jest.fn().mockResolvedValue(null),
+      findCurrentByTripIds: jest.fn().mockResolvedValue([]),
+      findCurrentByTripId: jest.fn().mockResolvedValue(null),
     };
     tripService = { findById: jest.fn().mockResolvedValue({ id: TRIP_A }) };
 
@@ -119,7 +119,7 @@ describe("GET /trip-pricing/snapshots", () => {
   });
 
   it("returns the snapshots of the Trips asked about", async () => {
-    repository.findManyByTripIds.mockResolvedValue([
+    repository.findCurrentByTripIds.mockResolvedValue([
       buildSnapshot(TRIP_A, "BASE_PRICE", "250.00"),
       buildSnapshot(TRIP_B, "TOLL", "9.75"),
     ]);
@@ -137,7 +137,7 @@ describe("GET /trip-pricing/snapshots", () => {
    * a catalog endpoint to resolve it against.
    */
   it("names each line's component by code", async () => {
-    repository.findManyByTripIds.mockResolvedValue([
+    repository.findCurrentByTripIds.mockResolvedValue([
       buildSnapshot(TRIP_A, "FUEL_SURCHARGE", "37.50"),
     ]);
 
@@ -156,8 +156,8 @@ describe("GET /trip-pricing/snapshots", () => {
       .get(`${BASE}?tripIds=${TRIP_A},${TRIP_B}`)
       .expect(200);
 
-    expect(repository.findManyByTripIds).toHaveBeenCalledTimes(1);
-    expect(repository.findManyByTripIds).toHaveBeenCalledWith([TRIP_A, TRIP_B]);
+    expect(repository.findCurrentByTripIds).toHaveBeenCalledTimes(1);
+    expect(repository.findCurrentByTripIds).toHaveBeenCalledWith([TRIP_A, TRIP_B]);
   });
 
   /**
@@ -165,7 +165,7 @@ describe("GET /trip-pricing/snapshots", () => {
    * empty snapshot, which a reader could not tell from a priced total of zero.
    */
   it("omits a Trip that has no snapshot", async () => {
-    repository.findManyByTripIds.mockResolvedValue([
+    repository.findCurrentByTripIds.mockResolvedValue([
       buildSnapshot(TRIP_A, "BASE_PRICE", "250.00"),
     ]);
 

@@ -44,6 +44,10 @@ export class TripExportController {
       query.nextDayWord,
     );
 
-    return [...labels.entries()].map(([tripId, label]) => ({ tripId, ...label }));
+    return [...labels.entries()].map(([tripId, label]) => ({
+      tripId,
+      ...label,
+      costConfirmations: [...label.costConfirmations],
+    }));
   }
 }

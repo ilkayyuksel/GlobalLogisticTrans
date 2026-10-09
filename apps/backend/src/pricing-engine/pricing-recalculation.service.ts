@@ -8,7 +8,11 @@ import {
 import { EffectivePricingService } from "../trip-pricing/effective-pricing.service";
 import { TripReadService } from "../trips/trip-read.service";
 import { CombinationMember, tripsRepricedByRegrouping } from "./combination-leg";
-import { PricingEngineException } from "./exceptions/pricing-engine.exceptions";
+import { hasCurrentPrice } from "../trip-pricing/current-pricing";
+import {
+  PricingEngineErrorCode,
+  PricingEngineException,
+} from "./exceptions/pricing-engine.exceptions";
 import { PricingComponentResolver } from "./pricing-component.resolver";
 import { PricingEngineService } from "./pricing-engine.service";
 
@@ -103,11 +107,34 @@ export class PricingRecalculationService {
    * atomically, and the first also covers the Trip that has never been priced.
    */
   async recalculate(tripId: string): Promise<PricingRecalculationOutcome> {
-    this.logger.log("Recalculating a Trip after a pricing input changed", {
-      tripId,
-    });
-
     try {
+      /*
+       * ── ONLY A CLOSED TRIP IS PRICED ────────────────────────────────────────
+       * An OPEN Trip whose waiting time, Custom Values, confirmations or group
+       * change is not calculated at all: it has no current price, and it is
+       * priced in full from whatever it holds when it closes. Checked here,
+       * once, for every caller, so no edit path can price a Trip that is not
+       * finished. The answer is the ordinary "no pricing" with its stable
+       * reason. Inside the `try`, so a failed read keeps the contract above.
+       */
+      const trip = await this.trips.findById(tripId);
+
+      if (trip && !hasCurrentPrice(trip.status)) {
+        this.logger.log("Not recalculated: the Trip is not CLOSED", {
+          tripId,
+          tripStatus: trip.status,
+        });
+
+        return {
+          pricing: null,
+          reasonCode: PricingEngineErrorCode.TRIP_NOT_CLOSED,
+        };
+      }
+
+      this.logger.log("Recalculating a Trip after a pricing input changed", {
+        tripId,
+      });
+
       const result = await this.engine.calculateAndStore(tripId);
 
       this.logger.log("Recalculation stored a new snapshot", {

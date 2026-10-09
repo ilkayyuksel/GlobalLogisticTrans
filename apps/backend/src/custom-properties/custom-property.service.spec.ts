@@ -30,10 +30,20 @@ function buildProperty(
   };
 }
 
-function uniqueViolation(): Prisma.PrismaClientKnownRequestError {
+/** P2002 as the `pg` driver adapter reports it: the key's columns, no target. */
+function uniqueViolation(
+  fields: string[] = ["name"],
+): Prisma.PrismaClientKnownRequestError {
   return new Prisma.PrismaClientKnownRequestError("Unique constraint failed", {
     code: "P2002",
     clientVersion: "7.9.1",
+    meta: {
+      modelName: "CustomProperty",
+      driverAdapterError: {
+        name: "DriverAdapterError",
+        cause: { kind: "UniqueConstraintViolation", constraint: { fields } },
+      },
+    },
   });
 }
 
@@ -269,11 +279,25 @@ describe("CustomPropertyService", () => {
     });
 
     it("translates a unique-index violation into a domain conflict", async () => {
-      repository.create.mockRejectedValue(uniqueViolation());
+      repository.create.mockRejectedValue(uniqueViolation(["name"]));
 
       await expect(service.create(dto)).rejects.toThrow(
         DuplicateCustomPropertyNameException,
       );
+    });
+
+    /*
+     * A conflict that names neither index is not guessed to be the name: it
+     * is a failure nobody planned for, and it stays one.
+     */
+    it("rethrows a unique conflict it cannot attribute", async () => {
+      const unattributed = new Prisma.PrismaClientKnownRequestError(
+        "Unique constraint failed",
+        { code: "P2002", clientVersion: "7.9.1" },
+      );
+      repository.create.mockRejectedValue(unattributed);
+
+      await expect(service.create(dto)).rejects.toBe(unattributed);
     });
 
     it("never logs business values", async () => {

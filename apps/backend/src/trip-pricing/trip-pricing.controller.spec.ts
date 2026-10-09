@@ -58,6 +58,7 @@ describe("TripPricingController (integration)", () => {
     repository = {
       findById: jest.fn().mockResolvedValue(null),
       findByTripId: jest.fn().mockResolvedValue(null),
+      findCurrentByTripId: jest.fn().mockResolvedValue(null),
       create: jest.fn().mockResolvedValue(buildTripPricing()),
       update: jest.fn().mockResolvedValue(buildTripPricing()),
     } as unknown as jest.Mocked<TripPricingRepository>;
@@ -137,7 +138,7 @@ describe("TripPricingController (integration)", () => {
 
   describe("GET /trip-pricing/trip/:tripId", () => {
     it("returns the snapshot belonging to the Trip", async () => {
-      repository.findByTripId.mockResolvedValue(buildTripPricing());
+      repository.findCurrentByTripId.mockResolvedValue(buildTripPricing());
 
       const response = await request(app.getHttpServer())
         .get(`${BASE}/trip/${TRIP_ID}`)

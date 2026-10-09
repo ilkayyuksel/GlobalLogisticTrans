@@ -497,8 +497,8 @@ model Trip {
 /// the other — see database_model.md "Cost Confirmation".
 ///
 /// Read-only once written: an external confirmation that an administrator can
-/// edit is no longer a confirmation. Exactly one may exist per Trip — see the
-/// unique constraint on trip_id.
+/// edit is no longer a confirmation. A Trip may hold several; each `cc_number`
+/// at most once per Trip — see the unique constraint on (trip_id, cc_number).
 model CostConfirmation {
   id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
 
@@ -514,7 +514,8 @@ model CostConfirmation {
   /// updated or deleted; a correction is a new row, as it always was.
   ///
   /// What stops the same document counting twice is `cc_number`, which is
-  /// Eucon's own reference — see `CostConfirmationService.record`.
+  /// Eucon's own reference — enforced by the unique (trip_id, cc_number) below
+  /// and answered as ALREADY_RECORDED by `CostConfirmationService.record`.
   tripId        String @map("trip_id") @db.Uuid
   /// The confirmation document itself. Non-null: an amount whose evidence
   /// cannot be produced is not a confirmation.
@@ -544,6 +545,11 @@ model CostConfirmation {
   /// importer at the moment the document is processed.
   @@index([tripId, receivedAt(sort: Desc)])
   @@index([pdfDocumentId])
+  /// The SAME confirmation for the same Trip exists once. The service checks
+  /// first; this is what still holds when two imports of one document run at
+  /// the same moment and both find nothing — the second insert is refused and
+  /// answered as already recorded. Different numbers for one Trip are allowed.
+  @@unique([tripId, ccNumber])
   @@map("cost_confirmation")
 }
 

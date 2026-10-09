@@ -45,8 +45,8 @@
     "backload": "50.00",
     "tol": "0.00",
     "tunnel": "0.00",
-    "others": "55.00",
-    "ek": "0.00",
+    "others": "0.00",
+    "ek": "55.00",
     "totaal": "105.00",
     "components": [
      {

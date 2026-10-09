@@ -214,6 +214,17 @@ describe("many updates to one Trip", () => {
       findById: jest.fn((id: string) =>
         Promise.resolve(stored.find((trip) => trip.id === id) ?? null),
       ),
+      /** The real one is a compare-and-set: it moves the Trip only from `from`. */
+      transitionStatus: jest.fn((id: string, from: TripStatus, to: TripStatus) => {
+        const trip = stored.find((candidate) => candidate.id === id) as
+          | { status: TripStatus }
+          | undefined;
+        if (!trip || trip.status !== from) {
+          return Promise.resolve(false);
+        }
+        Object.assign(trip, { status: to });
+        return Promise.resolve(true);
+      }),
       setStatus: jest.fn((id: string, status: TripStatus) => {
         const trip = stored.find((candidate) => candidate.id === id) as Trip;
         Object.assign(trip, { status });

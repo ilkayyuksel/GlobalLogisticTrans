@@ -88,4 +88,12 @@ export class TripExportLabelsDto {
     description: "Whether the Engine charged TAR, read from the stored snapshot.",
   })
   tarCharged!: boolean;
+
+  @ApiProperty({
+    type: [String],
+    example: ["CC4156173", "CC4139505"],
+    description:
+      "Every Cost Confirmation reference of the Trip, newest first, as the Remarks text ends with them. Empty when the Trip has none.",
+  })
+  costConfirmations!: string[];
 }

@@ -32,11 +32,30 @@ function buildProperty(
   };
 }
 
+/** P2002 as the classic query engine reports it: the index by name. */
 function uniqueViolation(target: string) {
   return new Prisma.PrismaClientKnownRequestError("Unique constraint failed", {
     code: "P2002",
     clientVersion: "7.0.0",
     meta: { target },
+  });
+}
+
+/**
+ * P2002 as the `pg` driver adapter this project uses reports it: no `target`
+ * at all, only the key's columns. This is the shape production produces.
+ */
+function adapterUniqueViolation(fields: string[]) {
+  return new Prisma.PrismaClientKnownRequestError("Unique constraint failed", {
+    code: "P2002",
+    clientVersion: "7.9.1",
+    meta: {
+      modelName: "CustomProperty",
+      driverAdapterError: {
+        name: "DriverAdapterError",
+        cause: { kind: "UniqueConstraintViolation", constraint: { fields } },
+      },
+    },
   });
 }
 
@@ -279,6 +298,50 @@ describe("CustomPropertyService — pricing component link", () => {
       await expect(
         service.create({ name: "TAR", defaultPrice: 35 }),
       ).rejects.toBeInstanceOf(DuplicateCustomPropertyNameException);
+    });
+
+    /*
+     * ── THE SHAPE PRODUCTION PRODUCES ───────────────────────────────────────
+     * Through the `pg` adapter `meta.target` is never set, and the old check
+     * read nothing else — so a refused component link was reported as a taken
+     * name. These pin the adapter's shape.
+     */
+    describe("as the pg adapter reports them", () => {
+      it("reports a component conflict when that index fired", async () => {
+        repository.create.mockRejectedValue(
+          adapterUniqueViolation(["pricing_component_id"]),
+        );
+
+        await expect(
+          service.create({ name: "Toll", pricingComponentId: COMPONENT_ID }),
+        ).rejects.toBeInstanceOf(DuplicateComponentLinkException);
+      });
+
+      it("reports a name conflict when the name index fired", async () => {
+        repository.create.mockRejectedValue(adapterUniqueViolation(["name"]));
+
+        await expect(
+          service.create({ name: "Toll", pricingComponentId: COMPONENT_ID }),
+        ).rejects.toBeInstanceOf(DuplicateCustomPropertyNameException);
+      });
+
+      it("rethrows a conflict on any other unique constraint", async () => {
+        const primaryKey = adapterUniqueViolation(["id"]);
+        repository.create.mockRejectedValue(primaryKey);
+
+        await expect(
+          service.create({ name: "Toll", pricingComponentId: COMPONENT_ID }),
+        ).rejects.toBe(primaryKey);
+      });
+
+      it("rethrows an ordinary database failure unchanged", async () => {
+        const failure = new Error("connection terminated unexpectedly");
+        repository.create.mockRejectedValue(failure);
+
+        await expect(
+          service.create({ name: "Toll", pricingComponentId: COMPONENT_ID }),
+        ).rejects.toBe(failure);
+      });
     });
   });
 

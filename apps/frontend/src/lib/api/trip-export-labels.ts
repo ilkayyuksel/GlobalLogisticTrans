@@ -15,6 +15,8 @@ export interface TripExportLabels {
   readonly waitingLabel: string | null;
   /** Whether the Engine charged TAR, read from the stored snapshot. */
   readonly tarCharged: boolean;
+  /** Every Cost Confirmation reference, `CC4139505`, newest first. */
+  readonly costConfirmations: readonly string[];
 }
 
 /** What a Trip with no labels says: nothing. */
@@ -22,6 +24,7 @@ export const NO_LABELS: TripExportLabels = {
   remarks: "",
   waitingLabel: null,
   tarCharged: false,
+  costConfirmations: [],
 };
 
 const LABELS_PATH = "/api/v1/trip-export/labels";

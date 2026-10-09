@@ -1245,12 +1245,24 @@ describe("PricingEngineService", () => {
           );
         });
 
-        it("refuses the whole calculation for an unpriced property", async () => {
-          assign([{ ...TAR, defaultPrice: null }], []);
+        /*
+         * One unpriced property no longer takes the Trip's whole price down:
+         * it contributes nothing, and everything else is still priced.
+         */
+        it("prices the rest of the Trip around an unpriced property", async () => {
+          assign([{ ...TAR, defaultPrice: null }, FLAT], []);
 
-          await expect(engine.calculate(TRIP_ID)).rejects.toMatchObject({
-            code: "PRICING_MISSING_CUSTOM_PROPERTY_PRICE",
-          });
+          const { lines } = await engine.calculate(TRIP_ID);
+          const propertyLines = lines.filter(
+            (line) => line.component === PricingComponentCode.CUSTOM_PROPERTY,
+          );
+
+          expect(propertyLines.map((line) => line.customPropertyId)).toEqual([
+            FLAT.customPropertyId,
+          ]);
+          expect(lines.map((line) => line.component)).toContain(
+            PricingComponentCode.BASE_PRICE,
+          );
         });
 
         it("charges fuel on the base price only, never on a property", async () => {
@@ -1732,7 +1744,11 @@ describe("PricingEngineService", () => {
       expect(snapshotWriter.writeSnapshot).toHaveBeenCalledTimes(1);
     });
 
-    it("leaves the old snapshot alone when a property has no price", async () => {
+    /*
+     * An unpriced property used to abort the reprocess and keep the OLD
+     * snapshot — with whatever Backload or EK it had — on screen as current.
+     */
+    it("replaces the snapshot even when a property has no price", async () => {
       snapshotWriter.findExistingSnapshot.mockResolvedValue(EXISTING_SNAPSHOT);
       engine = buildEngine([
         new CustomPropertyCalculator(logger as unknown as AppLoggerService),
@@ -1746,10 +1762,9 @@ describe("PricingEngineService", () => {
         },
       ]);
 
-      await expect(engine.reprocess(TRIP_ID)).rejects.toMatchObject({
-        code: "PRICING_MISSING_CUSTOM_PROPERTY_PRICE",
-      });
-      expect(snapshotWriter.writeSnapshot).not.toHaveBeenCalled();
+      await engine.reprocess(TRIP_ID);
+
+      expect(snapshotWriter.writeSnapshot).toHaveBeenCalledTimes(1);
     });
 
     it("propagates a persistence failure without reporting success", async () => {

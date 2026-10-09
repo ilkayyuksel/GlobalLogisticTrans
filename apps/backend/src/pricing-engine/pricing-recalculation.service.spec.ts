@@ -95,7 +95,10 @@ describe("PricingRecalculationService", () => {
         ]),
       ),
     };
-    trips = { findById: jest.fn() };
+    // A finished Trip: the only kind a recalculation prices.
+    trips = {
+      findById: jest.fn().mockResolvedValue({ id: TRIP_ID, status: "CLOSED" }),
+    };
     components = { legsPricedByPlanningDate: jest.fn().mockResolvedValue([]) };
     logger = {
       setContext: jest.fn(),
@@ -111,6 +114,46 @@ describe("PricingRecalculationService", () => {
       components as unknown as PricingComponentResolver,
       logger as unknown as AppLoggerService,
     );
+  });
+
+  /*
+   * ── AN UNFINISHED TRIP IS NOT PRICED ─────────────────────────────────────
+   * Edits to an OPEN Trip — waiting time, Custom Values, a confirmation, a
+   * group — must not calculate anything. It is priced in full when it closes.
+   */
+  describe("a Trip that is not CLOSED", () => {
+    it.each(["OPEN", "CANCELLED", "DELETED"])(
+      "calculates nothing for a %s Trip",
+      async (status) => {
+        trips.findById.mockResolvedValue({ id: TRIP_ID, status });
+
+        const outcome = await recalculation.recalculate(TRIP_ID);
+
+        expect(engine.calculateAndStore).not.toHaveBeenCalled();
+        expect(outcome).toEqual({
+          pricing: null,
+          reasonCode: "PRICING_TRIP_NOT_CLOSED",
+        });
+      },
+    );
+
+    it("logs it as an ordinary event, not as a pricing failure", async () => {
+      trips.findById.mockResolvedValue({ id: TRIP_ID, status: "OPEN" });
+
+      await recalculation.recalculate(TRIP_ID);
+
+      expect(logger.warn).not.toHaveBeenCalled();
+      expect(logger.error).not.toHaveBeenCalled();
+    });
+
+    it("still never throws when the Trip cannot be read", async () => {
+      trips.findById.mockRejectedValue(new Error("connection lost"));
+
+      await expect(recalculation.recalculate(TRIP_ID)).resolves.toEqual({
+        pricing: null,
+        reasonCode: "PRICING_RECALCULATION_FAILED",
+      });
+    });
   });
 
   describe("a successful recalculation", () => {

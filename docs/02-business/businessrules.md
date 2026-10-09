@@ -89,10 +89,10 @@ interface shows the document as "Rit aangemaakt" and does NOT mark the Trip
 "Bijgewerkt", which means an existing Trip was revised.
 
 A later UPDATE for that booking is an ordinary revision, compared against the
-Trip as the first one created it. Everything else is unchanged: a NEW order for
-the booking runs into the duplicate rule, a CANCEL cancels it, and an UPDATE
-after cancellation or for a CLOSED Trip is refused exactly as before - never by
-creating a second Trip.
+Trip as the first one created it. Everything else follows the rules below: a
+NEW order for the booking is applied to the existing Trip, a CANCEL cancels it
+while it is Open, an UPDATE after a cancellation reopens it, and an UPDATE for a
+CLOSED Trip is refused - never by creating a second Trip.
 
 ### Every UPDATE has its own change set
 
@@ -158,42 +158,62 @@ Cancelled
 Cancelled trips remain available for history and exports.
 
 Cancellation is a SOFT cancellation: the Trip, its pricing, its custom
-properties and its group membership are all preserved.
+properties, its waiting time and its group membership are all preserved.
 
-### Cancelled is terminal for automatic documents
+### Only an OPEN Trip is cancelled, judged at the moment of the write
 
-Once a Trip is Cancelled, no automatically processed PDF may move it again:
+A CANCEL document cancels a Trip only if it is OPEN when the status is written,
+not merely when the document was matched. The write is a compare-and-set
+(`UPDATE … WHERE status = 'OPEN'`), so a Trip an operator closes while the
+document is being processed stays CLOSED and the cancellation is recorded as
+refused (`REFUSED_CLOSED`). A cancellation writes the status and nothing else:
+waiting time, Custom Values, vehicle and driver are untouched.
 
-- an UPDATE: document is stored and refused (`REFUSED_CANCELLED`)
-- a NEW: document does not create a second Trip — a cancelled Trip keeps its
-  booking number, so the import runs into the existing one
-- a second CANCEL: document reports `ALREADY_CANCELLED` and writes nothing
+| Status when the CANCEL is written | Outcome             | Trip changed |
+|-----------------------------------|---------------------|--------------|
+| Open                              | `CANCELLED`         | status only  |
+| Cancelled                         | `ALREADY_CANCELLED` | no           |
+| Closed                            | `REFUSED_CLOSED`    | no           |
 
-The only way back to Open is the operator's explicit "Openen" action through
-the status endpoint. It changes the lifecycle state and nothing else, and it
-triggers no pricing.
+### Cancelled is not terminal: a later document reopens the Trip
+
+A cancellation is not the end of a Trip's life. Documents do not arrive in
+business order, and the LATEST document about a transport is the sender's word
+on it:
+
+- an UPDATE: for a Cancelled Trip reopens it (`REOPENED`) and applies its
+  fields, exactly as it would to an Open Trip;
+- a NEW: for an identity a Cancelled Trip holds does not create a second Trip —
+  it reopens that Trip and its transport data is re-read from the document;
+- a second CANCEL: reports `ALREADY_CANCELLED` and writes nothing.
+
+The reopening is recorded as its own event beside the document that caused it.
+Like every document, it never touches what the operator entered (see "Manually
+managed data disappears only by a manual action").
+
+Only CLOSED is final for documents: an UPDATE: or NEW: for a Closed Trip is
+stored and refused, because finished and priced work is never rewritten by a
+document that arrives afterwards. The operator's "Openen" action through the
+status endpoint remains the manual way back to Open, for a Cancelled and for a
+Closed Trip; it changes the lifecycle state and nothing else.
 
 ### Documents that could not be applied are still recorded
 
-An update after cancellation, a repeated cancellation, a cancellation of
-finished work and a new order for a booking number that is still held are all
-stored and recorded against the Trip they named. None of them changes it. The
-record says what arrived and why nothing moved.
+A repeated cancellation, a cancellation of a Closed Trip, and an UPDATE: or NEW:
+for a Closed Trip are all stored and recorded against the Trip they named. None
+of them changes it. The record says what arrived and why nothing moved.
 
-### Arrival order must not decide the outcome
+### The latest document decides
 
 A mailbox is not a queue: an UPDATE: and a CANCEL: for the same booking may be
-delivered or retried in either order. Both
+delivered or retried in either order, and the one processed LAST is the
+sender's latest word:
 
-    NEW -> UPDATE -> CANCEL
+    NEW -> UPDATE -> CANCEL     ends Cancelled
+    NEW -> CANCEL -> UPDATE     ends Open (the UPDATE reopens the Trip)
 
-and
-
-    NEW -> CANCEL -> UPDATE
-
-must end with the Trip Cancelled. Lifecycle correctness may never depend on the
-order documents are processed in — the rules above are what guarantee it, not
-the sequence of the scan.
+Either way, every document is kept and every step is recorded, so the history
+shows how the Trip got to where it is.
 
 ### No manual deletion
 
@@ -243,6 +263,11 @@ confirmation is stored with its PDF, and:
 - it never changes a status, a vehicle, a driver or a planning date
 - it never changes the waiting time
 
+A CANCELLED Trip receives its confirmations exactly like an OPEN one: the cost
+was incurred whether or not the transport went ahead. The Trip stays CANCELLED,
+the same `cc_number` is still recorded only once, and a different confirmation
+is kept beside it.
+
 A confirmation for a booking nobody holds is refused and nothing is written.
 The email stays unread, so the next scan offers it again once the Trip exists.
 
@@ -285,20 +310,22 @@ The amount is a statement by somebody else. There is no endpoint to create,
 change or delete a confirmation: it is written only by the import that read its
 document, and it is displayed read-only.
 
-### One per Trip
+### Several per Trip, each number once
 
-A Trip has at most ONE Cost Confirmation. Eucon confirms a Trip's waiting time
-once, and the first confirmation is the authoritative one. The database enforces
-it: `cost_confirmation.trip_id` is unique.
+A Trip may hold SEVERAL Cost Confirmations: Eucon confirms in instalments, every
+arrival is kept, and the Trip's confirmed amount is their sum (see EK above).
 
-The same confirmation arriving twice — the same number for the same Trip, under
-any filename — is recorded once and reported as already recorded.
+The same confirmation arriving twice — the same `cc_number` for the same Trip,
+under any filename, by a retry, a manual upload or the IMAP scan — is recorded
+once and reported as already recorded (`ALREADY_RECORDED`). The database
+enforces it: `(trip_id, cc_number)` is unique on `cost_confirmation`, so two
+imports of the same confirmation running at the same moment still produce one
+record, and the one that loses the race is answered as already recorded rather
+than failing.
 
-A DIFFERENT confirmation for a Trip that already has one is REFUSED. The
-existing amount stands: nothing is overwritten, nothing is summed, no second
-record is created, and the Trip itself is not touched. The refusal is recorded
-against the Trip with the document that carried it, so the arrival can still be
-found, and the email is left unread like any other refused document.
+A DIFFERENT confirmation number for the same Trip is stored beside the others.
+None of this changes the Trip itself — not its status, its waiting time or its
+Custom Values.
 
 ---
 

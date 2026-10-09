@@ -13,6 +13,7 @@ import { combinationPalette } from "@/lib/ritten/combination";
 import {
   toBasicRow,
   toManualPropertyIds,
+  toUnpricedPropertyIds,
   toPricingRow,
 } from "@/lib/ritten/export-rows";
 import {
@@ -120,6 +121,7 @@ export function ExportButton({
           pageSize: MAX_PAGE_SIZE,
         });
         const manualPropertyIds = toManualPropertyIds(properties.items);
+        const unpricedPropertyIds = toUnpricedPropertyIds(properties.items);
 
         const rows = trips.map((trip) =>
           toBasicRow(
@@ -127,6 +129,7 @@ export function ExportButton({
             snapshots.get(trip.id) ?? null,
             manualPropertyIds,
             labels.get(trip.id),
+            unpricedPropertyIds,
           ),
         );
 

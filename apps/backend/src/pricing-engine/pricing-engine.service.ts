@@ -1,5 +1,5 @@
 import { Inject, Injectable } from "@nestjs/common";
-import { PricingCalculationStatus, TripStatus } from "@prisma/client";
+import { PricingCalculationStatus } from "@prisma/client";
 
 import { AppLoggerService } from "../logger/app-logger.service";
 import { TripReadService, TripReadView } from "../trips/trip-read.service";
@@ -29,11 +29,15 @@ import { PRICING_ENGINE_VERSION } from "./pricing-engine.version";
 import { sumLineAmounts } from "./pricing-money";
 import { PricingRuleResolver } from "./pricing-rule.resolver";
 import { CostConfirmationReadService } from "../cost-confirmations/cost-confirmation-read.service";
+import { PRICED_TRIP_STATUS } from "../trip-pricing/current-pricing";
 import { PricingSnapshotWriter } from "./pricing-snapshot.writer";
 import { RouteCostResolver } from "./route-cost.resolver";
 
-/** pricing_rules.md: pricing exists only for a finished Trip. */
-const PRICEABLE_TRIP_STATUS = TripStatus.CLOSED;
+/**
+ * pricing_rules.md: pricing exists only for a finished Trip — the same status
+ * that has a current price to show (see `current-pricing.ts`).
+ */
+const PRICEABLE_TRIP_STATUS = PRICED_TRIP_STATUS;
 
 /** A Trip with no recorded waiting time waited zero minutes. */
 const NO_WAITING_TIME_MINUTES = 0;
@@ -88,6 +92,13 @@ export class PricingEngineService {
    * phase will be responsible for keeping it.
    */
   async calculate(tripId: string): Promise<PricingCalculationResult> {
+    /*
+     * Taken BEFORE a single input is read, and stored as `calculatedAt`. It is
+     * what orders two calculations of one Trip that run at once: the snapshot
+     * store never lets one that started reading earlier replace one that
+     * started later (see `TripPricingService.replaceSnapshot`).
+     */
+    const startedReadingAt = new Date();
     const preparation = await this.prepareCalculation(tripId);
     const lines = this.runCalculationSteps(preparation.context);
     const totalPrice = sumLineAmounts(lines.map((line) => line.amount));
@@ -115,7 +126,7 @@ export class PricingEngineService {
       ...preparation,
       lines,
       totalPrice,
-      calculatedAt: new Date(),
+      calculatedAt: startedReadingAt,
       pricingEngineVersion: PRICING_ENGINE_VERSION,
       pricingRuleVersion: preparation.context.rules.ruleVersion,
       calculationStatus: PricingCalculationStatus.CALCULATED,
@@ -296,8 +307,8 @@ export class PricingEngineService {
     );
 
     /*
-     * At most one per Trip — `cost_confirmation.trip_id` is unique — so this is
-     * a single lookup rather than a set. A Trip without one prices without an
+     * Every confirmation of the Trip, already summed by the read side — one
+     * lookup however many there are. A Trip without one prices without an
      * EK line at all, which is different from an EK of zero.
      */
     const costConfirmation = await this.costConfirmations.findForTrip(trip.id);

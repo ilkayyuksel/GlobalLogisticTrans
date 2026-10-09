@@ -2,6 +2,7 @@
   "ecf9aea5-8373-4337-88c2-82239c43e82d": {
     "remarks": "TAR",
     "waitingLabel": null,
-    "tarCharged": true
+    "tarCharged": true,
+    "costConfirmations": []
   }
 }

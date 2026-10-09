@@ -25,8 +25,6 @@ export interface LabelledTrip {
   /** Whether the end is on the day after the begin. */
   readonly waitingTimeEndsNextDay: boolean;
   readonly waitingTimeMinutes: number | null;
-  /** The LATEST confirmation, as the Ritten list shows it. */
-  readonly costConfirmation: { readonly ccNumber: string } | null;
 }
 
 /** A stored pricing snapshot, as far as its export words are concerned. */
@@ -46,6 +44,15 @@ export interface TripExportLabels {
   readonly waitingLabel: string | null;
   /** Whether the Engine charged TAR, read from the stored snapshot. */
   readonly tarCharged: boolean;
+  /**
+   * Every Cost Confirmation reference of the Trip, `CC4139505`, newest first.
+   *
+   * The same references the Remarks text ends with, on their own: the BASIS
+   * sheet composes its INFO column from parts rather than printing Remarks,
+   * and without them a Trip whose EK came from its confirmations showed the
+   * money nowhere and the documents behind it nowhere either.
+   */
+  readonly costConfirmations: readonly string[];
 }
 
 /** The word for waiting time when the caller names none: the documents' own. */
@@ -54,32 +61,28 @@ export const DEFAULT_WAITING_WORD = "Wachttijd";
 /** The words for a window ending the day after it began: the documents' own. */
 export const DEFAULT_NEXT_DAY_WORD = "volgende dag";
 
-/** The component code of the stored EK line, as the backend spells it. */
-const COST_CONFIRMATION_CODE = "COST_CONFIRMATION";
-
 /** Between the operator's own remarks and each confirmation reference. */
 const REMARKS_SEPARATOR = " | ";
 
 /** The word the sheet carries for a charged TAR. Never the number. */
 const TAR_MARK = "TAR";
 
-/**
- * The Cost Confirmation references on the stored EK line.
- *
- * The Engine writes them there itself — `Cost confirmation 4139505`, or
- * `Cost confirmations 4139505, 4156173` when a Trip was confirmed in
- * instalments — so the line that carries the money also says which documents
- * produced it. See `cost-confirmation.calculator.ts`.
- */
-const CONFIRMATION_REFERENCES = /^Cost confirmations?\s+(.+)$/i;
-
 const MINUTES_PER_HOUR = 60;
 
-/** Everything an export prints about one Trip, in one answer. */
+/**
+ * Everything an export prints about one Trip, in one answer.
+ *
+ * `snapshot` is the Trip's CURRENT pricing — null for a Trip that has none, an
+ * OPEN one included — and decides only what describes a charge (TAR).
+ * `confirmationNumbers` are the Trip's Cost Confirmation records, newest
+ * first, whatever its status: which documents Eucon sent is a fact about the
+ * Trip, not about its price.
+ */
 export function toTripExportLabels(
   trip: LabelledTrip,
   snapshot: LabelledSnapshot | null,
   automaticPropertyId: string | null,
+  confirmationNumbers: readonly string[],
   waitingWord: string = DEFAULT_WAITING_WORD,
   nextDayWord: string = DEFAULT_NEXT_DAY_WORD,
 ): TripExportLabels {
@@ -88,11 +91,13 @@ export function toTripExportLabels(
       trip,
       snapshot,
       automaticPropertyId,
+      confirmationNumbers,
       waitingWord,
       nextDayWord,
     ),
     waitingLabel: toWaitingLabel(trip, waitingWord, nextDayWord),
     tarCharged: wasTarChargedIn(snapshot, automaticPropertyId),
+    costConfirmations: toCostConfirmationLabels(confirmationNumbers),
   };
 }
 
@@ -113,8 +118,8 @@ export function toTripExportLabels(
  *              time, whether or not it was charged: the money column beside it
  *              says what it cost, and a free half hour is still a half hour the
  *              driver stood there.
- *   CC         every confirmation reference, as `toCostConfirmationLabels`
- *              reads them off the EK line.
+ *   CC         every confirmation reference the Trip holds, from its records —
+ *              see `toCostConfirmationLabels`.
  *
  * Nothing replaces what was already there, and nothing is invented: each part
  * is either the operator's own text or the Engine's own stored answer.
@@ -123,6 +128,7 @@ export function toPricingRemarks(
   trip: LabelledTrip,
   snapshot: LabelledSnapshot | null,
   automaticPropertyId: string | null,
+  confirmationNumbers: readonly string[],
   waitingWord: string = DEFAULT_WAITING_WORD,
   nextDayWord: string = DEFAULT_NEXT_DAY_WORD,
 ): string {
@@ -141,64 +147,37 @@ export function toPricingRemarks(
     parts.push(waiting);
   }
 
-  parts.push(...toCostConfirmationLabels(trip, snapshot));
+  parts.push(...toCostConfirmationLabels(confirmationNumbers));
 
   return parts.filter((part) => part !== "").join(REMARKS_SEPARATOR);
 }
 
 /**
- * Every confirmation reference belonging to THIS Trip, newest first.
+ * Every confirmation reference of the Trip, `CC4139505`, newest first, each once.
  *
- * ── WHY THE SNAPSHOT AND NOT A SEARCH ───────────────────────────────────────
- * The references are read off the Trip's own stored pricing, which is the only
- * source that cannot name somebody else's document: a snapshot belongs to one
- * Trip, and the Engine put those references on it from the confirmations it
- * actually priced. Nothing is matched on a booking number here.
+ * ── WHY THE RECORDS AND NOT THE PRICING SNAPSHOT ────────────────────────────
+ * These used to be read off the stored EK line, with the Trip's LATEST
+ * confirmation as the fallback. That tied a fact about the Trip — which
+ * documents Eucon sent for it — to whether its price is shown: a reopened Trip,
+ * whose snapshot is history rather than its price, kept only its latest
+ * reference. The numbers now come from the confirmation records themselves,
+ * so every one appears whatever the Trip's status, and reading them prices
+ * nothing.
  *
- * A Trip confirmed several times therefore keeps every reference. Duplicates
- * cannot arise: the backend refuses a second confirmation carrying a
- * `cc_number` it already holds, so one document counts once however often it
- * arrives.
- *
- * The Trip's own `costConfirmation` is the fallback, and it is the LATEST one
- * only — the Ritten list's display rule. It answers for a Trip whose snapshot
- * predates the confirmation, which is the one case the stored line cannot.
+ * The records cannot name another Trip's document: they are the Trip's own
+ * rows. Duplicates cannot reach the database — `(trip_id, cc_number)` is
+ * unique — and are removed here all the same, so a caller cannot print one
+ * twice.
  */
 export function toCostConfirmationLabels(
-  trip: LabelledTrip,
-  snapshot: LabelledSnapshot | null,
+  confirmationNumbers: readonly string[],
 ): string[] {
-  const stored = referencesOnSnapshot(snapshot);
-  const references =
-    stored.length > 0
-      ? stored
-      : trip.costConfirmation
-        ? [trip.costConfirmation.ccNumber]
-        : [];
-
-  return [...new Set(references)].map(toCostConfirmationLabel);
+  return [...new Set(confirmationNumbers)].map(toCostConfirmationLabel);
 }
 
 /** `CC4139505` — the prefix the Ritten list prints a confirmation with. */
 function toCostConfirmationLabel(ccNumber: string): string {
   return `CC${ccNumber}`;
-}
-
-function referencesOnSnapshot(snapshot: LabelledSnapshot | null): string[] {
-  const line = snapshot?.items.find(
-    (item) => item.pricingComponentCode === COST_CONFIRMATION_CODE,
-  );
-
-  const references = line ? CONFIRMATION_REFERENCES.exec(line.description) : null;
-
-  if (references === null) {
-    return [];
-  }
-
-  return references[1]
-    .split(",")
-    .map((reference) => reference.trim())
-    .filter((reference) => reference !== "");
 }
 
 /**

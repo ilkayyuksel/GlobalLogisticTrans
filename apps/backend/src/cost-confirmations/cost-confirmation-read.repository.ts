@@ -18,6 +18,13 @@ export type CostConfirmationPricingRow = Prisma.CostConfirmationGetPayload<{
  * record a confirmation — an amount with no document behind it. Writing stays
  * in CostConfirmationRepository, which the import path owns.
  */
+/** Newest first, with every tie broken, so two reads never disagree. */
+const NEWEST_FIRST = [
+  { receivedAt: "desc" },
+  { createdAt: "desc" },
+  { id: "desc" },
+] as const satisfies Prisma.CostConfirmationOrderByWithRelationInput[];
+
 @Injectable()
 export class CostConfirmationReadRepository {
   constructor(private readonly prisma: PrismaService) {}
@@ -36,12 +43,24 @@ export class CostConfirmationReadRepository {
   findAllByTrip(tripId: string): Promise<CostConfirmationPricingRow[]> {
     return this.prisma.costConfirmation.findMany({
       where: { tripId },
-      orderBy: [
-        { receivedAt: "desc" },
-        { createdAt: "desc" },
-        { id: "desc" },
-      ],
+      orderBy: NEWEST_FIRST,
       select: PRICING_COLUMNS,
+    });
+  }
+
+  /**
+   * The confirmation numbers of many Trips, in ONE query, newest first.
+   *
+   * Only the reference and its Trip: no amount, because whoever asks for the
+   * references is not pricing anything.
+   */
+  findNumbersForTrips(
+    tripIds: readonly string[],
+  ): Promise<{ tripId: string; ccNumber: string }[]> {
+    return this.prisma.costConfirmation.findMany({
+      where: { tripId: { in: [...tripIds] } },
+      orderBy: NEWEST_FIRST,
+      select: { tripId: true, ccNumber: true },
     });
   }
 }

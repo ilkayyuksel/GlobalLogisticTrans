@@ -52,6 +52,17 @@ export interface PricedTripLines {
   readonly others: number | null;
   /** The fixed-property lines behind `others`, for the Info/Kosten columns. */
   readonly customPropertyAmounts: readonly number[];
+  /**
+   * The same amounts with the property each one belongs to, in stored order —
+   * so a sheet that names properties can print their amounts in that order.
+   */
+  readonly customPropertyLines: readonly PricedPropertyLine[];
+}
+
+/** One stored Custom Property charge. */
+export interface PricedPropertyLine {
+  readonly customPropertyId: string | null;
+  readonly amount: number;
 }
 
 export const NO_PRICING: PricedTripLines = {
@@ -64,6 +75,7 @@ export const NO_PRICING: PricedTripLines = {
   ek: null,
   others: null,
   customPropertyAmounts: [],
+  customPropertyLines: [],
 };
 
 /**
@@ -124,6 +136,10 @@ export function toPricedTripLines(
     customPropertyAmounts: fixedCustomProperties.map((item) =>
       toAmount(item.amount),
     ),
+    customPropertyLines: fixedCustomProperties.map((item) => ({
+      customPropertyId: item.customPropertyId,
+      amount: toAmount(item.amount),
+    })),
   };
 }
 

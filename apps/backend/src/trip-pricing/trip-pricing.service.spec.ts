@@ -42,6 +42,7 @@ describe("TripPricingService", () => {
     repository = {
       findById: jest.fn().mockResolvedValue(null),
       findByTripId: jest.fn().mockResolvedValue(null),
+      findCurrentByTripId: jest.fn().mockResolvedValue(null),
       create: jest.fn().mockResolvedValue(buildTripPricing()),
       update: jest.fn().mockResolvedValue(buildTripPricing()),
     } as unknown as jest.Mocked<TripPricingRepository>;
@@ -75,12 +76,12 @@ describe("TripPricingService", () => {
   });
 
   describe("findByTripId", () => {
-    it("returns the snapshot belonging to the Trip", async () => {
-      repository.findByTripId.mockResolvedValue(buildTripPricing());
+    it("returns the CURRENT snapshot belonging to the Trip", async () => {
+      repository.findCurrentByTripId.mockResolvedValue(buildTripPricing());
 
       const result = await service.findByTripId(TRIP_ID);
 
-      expect(repository.findByTripId).toHaveBeenCalledWith(TRIP_ID);
+      expect(repository.findCurrentByTripId).toHaveBeenCalledWith(TRIP_ID);
       expect(result?.tripId).toBe(TRIP_ID);
     });
 
@@ -94,7 +95,7 @@ describe("TripPricingService", () => {
       await expect(service.findByTripId(TRIP_ID)).rejects.toBeInstanceOf(
         TripNotFoundException,
       );
-      expect(repository.findByTripId).not.toHaveBeenCalled();
+      expect(repository.findCurrentByTripId).not.toHaveBeenCalled();
     });
 
     /*
@@ -116,6 +117,17 @@ describe("TripPricingService", () => {
       });
 
       expect(await service.findByTripId(TRIP_ID)).toBeNull();
+    });
+
+    /*
+     * A reopened Trip keeps its old snapshot as history; it is not its price.
+     * The current read is the one that excludes it, never the engine's.
+     */
+    it("answers with the current snapshot, never the engine's unfiltered read", async () => {
+      repository.findByTripId.mockResolvedValue(buildTripPricing());
+
+      expect(await service.findByTripId(TRIP_ID)).toBeNull();
+      expect(repository.findByTripId).not.toHaveBeenCalled();
     });
   });
 

@@ -117,6 +117,7 @@ describe("TripRevisionService", () => {
     findByIdentity: jest.Mock;
     findByBookingNumber: jest.Mock;
     setStatus: jest.Mock;
+    transitionStatus: jest.Mock;
     update: jest.Mock;
     recordHistory: jest.Mock;
     runInTransaction: jest.Mock;
@@ -203,6 +204,17 @@ describe("TripRevisionService", () => {
             ) ?? null,
           ),
       ),
+      /** The real one is a compare-and-set: it moves the Trip only from `from`. */
+      transitionStatus: jest.fn((id: string, from: TripStatus, to: TripStatus) => {
+        const trip = stored.find((candidate) => candidate.id === id) as
+          | { status: TripStatus }
+          | undefined;
+        if (!trip || trip.status !== from) {
+          return Promise.resolve(false);
+        }
+        Object.assign(trip, { status: to });
+        return Promise.resolve(true);
+      }),
       setStatus: jest.fn((id: string, status: TripStatus) => {
         const trip = stored.find((candidate) => candidate.id === id) as Trip;
         Object.assign(trip, { status });
@@ -261,6 +273,7 @@ describe("TripRevisionService", () => {
 
       expect(outcome).toBe("ALREADY_CANCELLED");
       expect(repository.setStatus).not.toHaveBeenCalled();
+      expect(repository.transitionStatus).not.toHaveBeenCalled();
     });
 
     /*
@@ -275,6 +288,7 @@ describe("TripRevisionService", () => {
       expect(outcome).toBe("REFUSED_CLOSED");
       expect(stored[0].status).toBe(TripStatus.CLOSED);
       expect(repository.setStatus).not.toHaveBeenCalled();
+      expect(repository.transitionStatus).not.toHaveBeenCalled();
     });
 
     it("creates nothing when no Trip holds the booking number", async () => {
@@ -294,7 +308,7 @@ describe("TripRevisionService", () => {
 
       expect(first).toBe("CANCELLED");
       expect(second).toBe("ALREADY_CANCELLED");
-      expect(repository.setStatus).toHaveBeenCalledTimes(1);
+      expect(repository.transitionStatus).toHaveBeenCalledTimes(1);
       expect(stored).toHaveLength(1);
     });
 
@@ -309,9 +323,58 @@ describe("TripRevisionService", () => {
       expect(stored[1].status).toBe(TripStatus.CANCELLED);
     });
 
+    /*
+     * ── THE RACE ────────────────────────────────────────────────────────────
+     * The Trip is OPEN when the cancellation matches it and CLOSED by an
+     * operator before the write. The decision belongs to the status the row
+     * holds at the write, so finished work stays finished.
+     */
+    describe("when the Trip stops being OPEN between the match and the write", () => {
+      function closedConcurrentlyBy(status: TripStatus): void {
+        (repository as unknown as { findById: jest.Mock }).findById = jest.fn(
+          (id: string) => Promise.resolve(stored.find((trip) => trip.id === id) ?? null),
+        );
+        const compareAndSet = repository.transitionStatus.getMockImplementation()!;
+        repository.transitionStatus.mockImplementationOnce(
+          (id: string, from: TripStatus, to: TripStatus) => {
+            Object.assign(stored[0], { status });
+            return compareAndSet(id, from, to);
+          },
+        );
+      }
+
+      it("leaves a Trip closed in between CLOSED", async () => {
+        stored.push(buildTrip({ waitingTimeMinutes: 135, vehicleId: "vehicle-1" }));
+        closedConcurrentlyBy(TripStatus.CLOSED);
+
+        const outcome = await service.cancelByIdentity(identity());
+
+        expect(outcome).toBe("REFUSED_CLOSED");
+        expect(stored[0]).toMatchObject({
+          status: TripStatus.CLOSED,
+          waitingTimeMinutes: 135,
+          vehicleId: "vehicle-1",
+        });
+        expect(repository.setStatus).not.toHaveBeenCalled();
+        expect(repository.update).not.toHaveBeenCalled();
+      });
+
+      it("reports a Trip cancelled in between as already cancelled", async () => {
+        stored.push(buildTrip());
+        closedConcurrentlyBy(TripStatus.CANCELLED);
+
+        const outcome = await service.cancelByIdentity(identity());
+
+        expect(outcome).toBe("ALREADY_CANCELLED");
+        expect(history).toEqual([
+          expect.objectContaining({ eventType: "CANCEL_REDUNDANT" }),
+        ]);
+      });
+    });
+
     it("leaves the Trip untouched when the write fails", async () => {
       stored.push(buildTrip());
-      repository.setStatus.mockRejectedValue(new Error("database unavailable"));
+      repository.transitionStatus.mockRejectedValue(new Error("database unavailable"));
 
       await expect(service.cancelByIdentity(identity())).rejects.toThrow();
       expect(stored[0].status).toBe(TripStatus.OPEN);

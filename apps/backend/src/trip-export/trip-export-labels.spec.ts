@@ -1,6 +1,11 @@
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 
+import { Prisma } from "@prisma/client";
+
+import { toEffectivePricingDto } from "../trip-pricing/dto/effective-pricing.dto";
+import { resolveEffectivePricing, type EngineAmount } from "../trip-pricing/effective-pricing";
+
 import {
   toPricingRemarks,
   toTripExportLabels,
@@ -31,7 +36,6 @@ function trip(overrides: Partial<LabelledTrip> = {}): LabelledTrip {
     waitingTimeEnd: null,
     waitingTimeEndsNextDay: false,
     waitingTimeMinutes: null,
-    costConfirmation: null,
     ...overrides,
   };
 }
@@ -55,10 +59,19 @@ function confirmedBy(...ccNumbers: string[]): string {
     : `Cost confirmations ${ccNumbers.join(", ")}`;
 }
 
-const remarksOf = (labelled: LabelledTrip, snapshot: LabelledSnapshot | null) =>
-  toPricingRemarks(labelled, snapshot, TAR_ID);
+const remarksOf = (
+  labelled: LabelledTrip,
+  snapshot: LabelledSnapshot | null,
+  confirmationNumbers: readonly string[] = [],
+) => toPricingRemarks(labelled, snapshot, TAR_ID, confirmationNumbers);
 
-describe("the Cost Confirmation references in Remarks", () => {
+/**
+ * ── THE REFERENCES COME FROM THE RECORDS, NOT FROM THE PRICE ────────────────
+ * Which documents Eucon sent is a fact about the Trip. It used to be read off
+ * the stored EK line, so a Trip whose price is not shown — an OPEN one, whose
+ * snapshot is history — kept only its latest reference.
+ */
+describe("the Cost Confirmation references", () => {
   const WITH_PROPERTY = trip({ customProperties: [{ id: "prop-1", name: "Aan/Afkoppelen" }] });
 
   it("says nothing when the Trip has no confirmation", () => {
@@ -68,43 +81,38 @@ describe("the Cost Confirmation references in Remarks", () => {
   });
 
   it("adds the reference of the one confirmation, keeping the remarks", () => {
-    expect(
-      remarksOf(
-        WITH_PROPERTY,
-        snapshotOf({ code: "BASE_PRICE" }, { code: "COST_CONFIRMATION", description: confirmedBy("4139505") }),
-      ),
-    ).toBe("Aan/Afkoppelen | CC4139505");
+    expect(remarksOf(WITH_PROPERTY, snapshotOf({ code: "BASE_PRICE" }), ["4139505"])).toBe(
+      "Aan/Afkoppelen | CC4139505",
+    );
   });
 
-  it("names every confirmation of a Trip confirmed in instalments", () => {
+  it("names every confirmation, newest first, as the records come", () => {
     expect(
-      remarksOf(
-        WITH_PROPERTY,
-        snapshotOf({ code: "COST_CONFIRMATION", description: confirmedBy("4139505", "4156173", "4161980") }),
-      ),
-    ).toBe("Aan/Afkoppelen | CC4139505 | CC4156173 | CC4161980");
+      remarksOf(WITH_PROPERTY, null, ["4161980", "4156173", "4139505"]),
+    ).toBe("Aan/Afkoppelen | CC4161980 | CC4156173 | CC4139505");
   });
 
   it("never repeats a reference", () => {
-    expect(
-      remarksOf(trip(), snapshotOf({ code: "COST_CONFIRMATION", description: confirmedBy("4139505", "4139505") })),
-    ).toBe("CC4139505");
+    expect(remarksOf(trip(), null, ["4139505", "4139505"])).toBe("CC4139505");
   });
 
-  /** A snapshot older than the confirmation: the Trip's latest one answers. */
-  it("falls back to the Trip's own latest confirmation", () => {
-    expect(
-      remarksOf(trip({ costConfirmation: { ccNumber: "4208847" } }), snapshotOf({ code: "BASE_PRICE" })),
-    ).toBe("CC4208847");
+  /* An OPEN Trip has no current snapshot; its documents are still its own. */
+  it("names every confirmation of a Trip with no current price", () => {
+    const labels = toTripExportLabels(trip(), null, TAR_ID, ["4156173", "4139505"]);
+
+    expect(labels.costConfirmations).toEqual(["CC4156173", "CC4139505"]);
+    expect(labels.remarks).toBe("CC4156173 | CC4139505");
+    expect(labels.tarCharged).toBe(false);
   });
 
-  it("prefers the references on the stored EK line over the fallback", () => {
+  /* The stored line is not a source: a Trip without records names none. */
+  it("does not read references off the stored EK line", () => {
     expect(
       remarksOf(
-        trip({ costConfirmation: { ccNumber: "4208847" } }),
+        trip(),
         snapshotOf({ code: "COST_CONFIRMATION", description: confirmedBy("4139505") }),
       ),
-    ).toBe("CC4139505");
+    ).toBe("");
   });
 });
 
@@ -158,6 +166,7 @@ describe("TAR and the waiting time in Remarks", () => {
           { code: "WAITING_TIME" },
           { code: "COST_CONFIRMATION", description: confirmedBy("4139505") },
         ),
+        ["4139505"],
       ),
     ).toBe("Aan/Afkoppelen | TAR | Wachttijd 07:00-10:00 | CC4139505");
   });
@@ -262,7 +271,10 @@ describe("the live captures the browser's export tests read", () => {
     : [];
 
   interface Capture {
-    readonly trips: (LabelledTrip & { readonly id: string })[];
+    readonly trips: (LabelledTrip & {
+      readonly id: string;
+      readonly costConfirmation: { readonly ccNumber: string } | null;
+    })[];
     readonly snapshots: (LabelledSnapshot & { readonly pricing: { readonly tripId: string } })[];
     readonly settings: { readonly key: string; readonly category: string; readonly value: string }[];
   }
@@ -277,9 +289,36 @@ describe("the live captures the browser's export tests read", () => {
     return Object.fromEntries(
       capture.trips.map((each) => [
         each.id,
-        toTripExportLabels(each, byTrip.get(each.id) ?? null, automaticPropertyId),
+        toTripExportLabels(
+          each,
+          byTrip.get(each.id) ?? null,
+          automaticPropertyId,
+          recordsOf(each, byTrip.get(each.id) ?? null),
+        ),
       ]),
     );
+  }
+
+  /**
+   * The Trip's confirmation records, as far as a capture holds them.
+   *
+   * A capture stores the API's answers, not the confirmation table: the
+   * numbers it does hold are those the Engine wrote on the EK line, and the
+   * Trip's latest confirmation. Every captured Trip was CLOSED when captured,
+   * so that line names exactly the records it was priced from.
+   */
+  function recordsOf(
+    each: Capture["trips"][number],
+    snapshot: LabelledSnapshot | null,
+  ): string[] {
+    const line = snapshot?.items.find((item) => item.pricingComponentCode === "COST_CONFIRMATION");
+    const stated = line ? /^Cost confirmations?\s+(.+)$/i.exec(line.description) : null;
+
+    if (stated) {
+      return stated[1].split(",").map((number) => number.trim());
+    }
+
+    return each.costConfirmation ? [each.costConfirmation.ccNumber] : [];
   }
 
   it("finds the captures", () => {
@@ -297,4 +336,87 @@ describe("the live captures the browser's export tests read", () => {
 
     expect(JSON.parse(readFileSync(contract, "utf8"))).toEqual(computed);
   });
+
+  /*
+   * ── THE CAPTURES' PRICING IS THE BACKEND'S CURRENT READ ───────────────────
+   * Each captured Trip carries the `pricing` the API answered with when it was
+   * captured. The read rule has moved since — the waiting time left Others and
+   * became an EK source — and nothing checked the captures, so they kept the
+   * old answer beside a snapshot whose current answer differs. A browser test
+   * reading `trip.pricing` then tested a state the running system can no
+   * longer produce. This holds them to `resolveEffectivePricing`, and
+   * `UPDATE_LABEL_FIXTURES=1` rewrites the `pricing` of the Trips that drifted.
+   */
+  it.each(captures)("%s carries the pricing the backend reads today", (file) => {
+    const path = join(CAPTURES, file);
+    const text = readFileSync(path, "utf8");
+    const capture = JSON.parse(text) as PricedCapture;
+    const byTrip = new Map(capture.snapshots.map((snapshot) => [snapshot.pricing.tripId, snapshot]));
+    const current = (tripId: string) => {
+      const snapshot = byTrip.get(tripId);
+
+      return snapshot
+        ? toEffectivePricingDto(resolveEffectivePricing(snapshot.items.map(toEngineAmount), []))
+        : null;
+    };
+
+    if (process.env.UPDATE_LABEL_FIXTURES === "1") {
+      const drifted = capture.trips.filter(
+        (trip) => JSON.stringify(trip.pricing) !== JSON.stringify(current(trip.id)),
+      );
+
+      if (drifted.length > 0) {
+        for (const trip of drifted) {
+          trip.pricing = current(trip.id);
+        }
+        writeFileSync(path, reformatLike(text, capture));
+      }
+    }
+
+    const reread = JSON.parse(readFileSync(path, "utf8")) as typeof capture;
+
+    for (const trip of reread.trips) {
+      expect({ tripId: trip.id, pricing: trip.pricing }).toEqual({
+        tripId: trip.id,
+        pricing: current(trip.id),
+      });
+    }
+  });
 });
+
+/** A capture, as far as its Trips' pricing is concerned. */
+interface PricedCapture {
+  readonly trips: { readonly id: string; pricing: unknown }[];
+  readonly snapshots: {
+    readonly pricing: { readonly tripId: string };
+    readonly items: readonly CapturedItem[];
+  }[];
+}
+
+interface CapturedItem {
+  readonly pricingComponentCode: string;
+  readonly amount: string;
+  readonly customPropertyId: string | null;
+  readonly description: string;
+  readonly unitPrice: string | null;
+}
+
+/** A captured line as the backend's own effective read takes it. */
+function toEngineAmount(item: CapturedItem): EngineAmount {
+  return {
+    componentCode: item.pricingComponentCode,
+    amount: new Prisma.Decimal(item.amount),
+    customPropertyId: item.customPropertyId,
+    description: item.description,
+    unitPrice: item.unitPrice === null ? null : new Prisma.Decimal(item.unitPrice),
+  };
+}
+
+/** Rewritten in the file's own indentation, line endings and final newline. */
+function reformatLike(original: string, value: unknown): string {
+  const lineEnding = original.includes("\r\n") ? "\r\n" : "\n";
+  const indent = /^\{\r?\n( +)"/.exec(original)?.[1].length ?? 1;
+  const body = JSON.stringify(value, null, indent).replace(/\n/g, lineEnding);
+
+  return /\r?\n$/.test(original) ? body + lineEnding : body;
+}

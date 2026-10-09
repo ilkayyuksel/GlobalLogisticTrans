@@ -230,6 +230,50 @@ Administrator applies new configuration.
 The Trip's status is never touched. A CLOSED Trip stays CLOSED: the price of a
 finished job may change, the fact that it is finished may not.
 
+## Only a CLOSED Trip has a current price
+
+Pricing describes finished work. A Trip's stored snapshot is its CURRENT price
+only while the Trip is CLOSED (`trip-pricing/current-pricing.ts`, the single
+rule; the Engine's own precondition reads the same constant):
+
+- CLOSED → the snapshot is shown everywhere.
+- Reopened (CLOSED → OPEN), cancelled or deleted → no price is shown anywhere,
+  at once. The snapshot is NOT deleted: it stays stored as history.
+- OPEN → CLOSED → the Engine prices the Trip in full from its current data and
+  replaces the old snapshot; the ordering guard below still applies.
+- Edits to a Trip that is not CLOSED — waiting time, Custom Values, a Cost
+  Confirmation, a group — calculate nothing: `PricingRecalculationService`
+  checks the status first and answers `pricing: null` with
+  `PRICING_TRIP_NOT_CLOSED`. The same edits to a CLOSED Trip reprice it.
+
+The reads that show a price (effective pricing, the snapshot endpoints, the
+export labels) use the repository's `findCurrent…` queries, which join on the
+Trip's status. The Engine and the snapshot store use the unfiltered read, so a
+reopened Trip's old snapshot can still be found and replaced.
+
+## A Custom Property without a price contributes nothing
+
+A fixed-price Custom Property may be configured without a price. Assigned to a
+Trip, it adds no Others line and the Engine logs a warning naming the property;
+everything else on the Trip is priced as usual. Nothing is invented: the
+property is simply not charged until an Administrator configures its price and
+the Trip is recalculated.
+
+This used to refuse the whole calculation, which left a CLOSED Trip with no
+snapshot — every pricing column showed "-" — and made any later recalculation
+fail, so the previous snapshot stayed on screen. It is the same rule that
+already applied to a Toll or Tunnel property on a route with no configured cost.
+
+## Concurrent recalculations of one Trip
+
+Two recalculations of the same Trip may run at once — two quick edits, or an
+edit straight after closing — and finish in either order. A snapshot's
+`calculated_at` is the moment the Engine STARTED reading the Trip, and the
+snapshot store never replaces a snapshot whose inputs were read later than the
+one being written (a conditional update on `calculated_at`). The older result is
+discarded with a warning. When two FIRST snapshots race, the loser is retried as
+an ordinary replace instead of failing.
+
 ## Automatic recalculation after grouping or ungrouping
 
 A Trip's Combination leg is decided by its GROUP, and the leg decides the

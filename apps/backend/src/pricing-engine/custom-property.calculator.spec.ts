@@ -5,7 +5,6 @@ import {
   CUSTOM_PROPERTY_CALCULATION_ORDER,
   CustomPropertyCalculator,
 } from "./custom-property.calculator";
-import { MissingCustomPropertyPriceException } from "./exceptions/pricing-engine.exceptions";
 import {
   PricingCalculationContext,
   PricingCustomPropertyInput,
@@ -276,59 +275,46 @@ describe("CustomPropertyCalculator", () => {
     });
   });
 
+  /*
+   * ── A MISSING PRICE CONTRIBUTES NOTHING ─────────────────────────────────────
+   * It used to refuse the whole calculation, which left the Trip with no
+   * snapshot and every column at "-". It is now what an unconfigured route
+   * cost is for Toll and Tunnel: no line, no invented zero, and a warning.
+   */
   describe("a property with no configured price", () => {
     const UNPRICED = fixedPrice("property-unpriced", "Unpriced", null);
 
-    it("refuses the calculation", () => {
-      expect(() => calculator.calculate(buildContext([UNPRICED]))).toThrow(
-        MissingCustomPropertyPriceException,
+    it("does not refuse the calculation", () => {
+      expect(() => calculator.calculate(buildContext([UNPRICED]))).not.toThrow();
+    });
+
+    it("produces no line for it, not even a zero one", () => {
+      expect(calculator.calculate(buildContext([UNPRICED]))).toEqual([]);
+    });
+
+    it("still charges every priced property beside it", () => {
+      const lines = calculator.calculate(buildContext([TAR, UNPRICED, FLAT]));
+
+      expect(lines.map((line) => line.customPropertyId)).toEqual([
+        TAR.customPropertyId,
+        FLAT.customPropertyId,
+      ]);
+    });
+
+    it("warns, naming the property by id and never by name", () => {
+      calculator.calculate(buildContext([UNPRICED]));
+
+      expect(logger.warn).toHaveBeenCalledWith(
+        "Fixed-price custom property has no configured price",
+        expect.objectContaining({ customPropertyId: "property-unpriced" }),
       );
-    });
-
-    it("carries the stable error code", () => {
-      try {
-        calculator.calculate(buildContext([UNPRICED]));
-        throw new Error("expected the calculation to be refused");
-      } catch (error) {
-        expect((error as MissingCustomPropertyPriceException).code).toBe(
-          "PRICING_MISSING_CUSTOM_PROPERTY_PRICE",
-        );
-      }
-    });
-
-    it("does not silently produce a zero line", () => {
-      let produced: unknown;
-
-      try {
-        produced = calculator.calculate(buildContext([UNPRICED]));
-      } catch {
-        produced = undefined;
-      }
-
-      expect(produced).toBeUndefined();
-    });
-
-    it("does not silently skip the property", () => {
-      expect(() =>
-        calculator.calculate(buildContext([TAR, UNPRICED])),
-      ).toThrow(MissingCustomPropertyPriceException);
-    });
-
-    it("names the property by id, never by name or price", () => {
-      try {
-        calculator.calculate(buildContext([UNPRICED]));
-      } catch (error) {
-        const message = (error as Error).message;
-
-        expect(message).toContain("property-unpriced");
-        expect(message).not.toContain("Unpriced");
-      }
+      expect(JSON.stringify(logger.warn.mock.calls)).not.toContain("Unpriced");
     });
 
     it("does not fire for a linked property, which correctly has no price", () => {
-      expect(() =>
-        calculator.calculate(buildContext([TOLL_PROPERTY])),
-      ).not.toThrow();
+      calculator.calculate(buildContext([TOLL_PROPERTY]));
+
+      expect(logger.warn).not.toHaveBeenCalled();
     });
   });
 
@@ -457,12 +443,10 @@ describe("CustomPropertyCalculator", () => {
       expect(logged).not.toContain("Secret Name");
     });
 
-    it("logs only ids when refusing an unpriced property", () => {
-      expect(() =>
-        calculator.calculate(
-          buildContext([fixedPrice("property-unpriced", "Secret Name", null)]),
-        ),
-      ).toThrow();
+    it("logs only ids when skipping an unpriced property", () => {
+      calculator.calculate(
+        buildContext([fixedPrice("property-unpriced", "Secret Name", null)]),
+      );
 
       expect(logger.warn).toHaveBeenCalledWith(
         "Fixed-price custom property has no configured price",

@@ -18,6 +18,7 @@ describe("TripRepository", () => {
       count: jest.Mock;
       create: jest.Mock;
       update: jest.Mock;
+      updateMany: jest.Mock;
     };
     pdfDocument: { findUnique: jest.Mock };
     $transaction: jest.Mock;
@@ -33,6 +34,7 @@ describe("TripRepository", () => {
         count: jest.fn().mockResolvedValue(0),
         create: jest.fn().mockResolvedValue({}),
         update: jest.fn().mockResolvedValue({}),
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
       },
       pdfDocument: { findUnique: jest.fn().mockResolvedValue(null) },
       $transaction: jest.fn().mockResolvedValue([[], 0]),
@@ -504,6 +506,39 @@ describe("TripRepository", () => {
         });
       },
     );
+
+    /*
+     * The guard against a stale read IS the status in the WHERE clause: the
+     * database re-checks it against the row as a concurrent writer left it.
+     */
+    describe("transitionStatus", () => {
+      it("writes only the status, and only while the Trip still holds `from`", async () => {
+        await repository.transitionStatus(
+          "trip-1",
+          TripStatus.OPEN,
+          TripStatus.CANCELLED,
+        );
+
+        expect(prisma.trip.updateMany).toHaveBeenCalledWith({
+          where: { id: "trip-1", status: TripStatus.OPEN },
+          data: { status: TripStatus.CANCELLED },
+        });
+      });
+
+      it("reports a moved Trip", async () => {
+        await expect(
+          repository.transitionStatus("trip-1", TripStatus.OPEN, TripStatus.CANCELLED),
+        ).resolves.toBe(true);
+      });
+
+      it("reports a Trip that no longer held `from`", async () => {
+        prisma.trip.updateMany.mockResolvedValue({ count: 0 });
+
+        await expect(
+          repository.transitionStatus("trip-1", TripStatus.OPEN, TripStatus.CANCELLED),
+        ).resolves.toBe(false);
+      });
+    });
   });
 
   it("exposes no delete operation, because Trips are never removed", () => {

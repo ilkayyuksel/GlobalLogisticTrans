@@ -171,6 +171,15 @@ describe("Manual PDF upload, end to end over HTTP", () => {
       setStatus: jest.fn((id: string, status: string) =>
         Promise.resolve({ id, ...createdTrips[0], status }),
       ),
+      /** Compare-and-set, like the real one. */
+      transitionStatus: jest.fn((_id: string, from: string, to: string) => {
+        const trip = createdTrips[0] as { status?: string } | undefined;
+        if (!trip || (trip.status ?? "OPEN") !== from) {
+          return Promise.resolve(false);
+        }
+        trip.status = to;
+        return Promise.resolve(true);
+      }),
       update: jest.fn((id: string, data: Record<string, unknown>) => {
         Object.assign(createdTrips[0], data);
 

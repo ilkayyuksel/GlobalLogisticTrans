@@ -21,6 +21,35 @@ import { TripPricingRepository } from "./trip-pricing.repository";
 /** Prisma's unique-constraint violation code. */
 const PRISMA_UNIQUE_VIOLATION = "P2002";
 
+/** What one snapshot write did. */
+interface StoredSnapshot {
+  readonly parent: TripPricing;
+  readonly outcome: "CREATED" | "REPLACED" | "SUPERSEDED";
+}
+
+function isUniqueViolation(error: unknown): boolean {
+  return (
+    error instanceof Prisma.PrismaClientKnownRequestError &&
+    error.code === PRISMA_UNIQUE_VIOLATION
+  );
+}
+
+function toItemRows(
+  tripPricingId: string,
+  items: readonly PricingSnapshotItemData[],
+) {
+  return items.map((item) => ({
+    tripPricingId,
+    pricingComponentId: item.pricingComponentId,
+    customPropertyId: item.customPropertyId,
+    description: item.description,
+    amount: item.amount,
+    calculationOrder: item.calculationOrder,
+    quantity: item.quantity,
+    unitPrice: item.unitPrice,
+  }));
+}
+
 /** One calculated line, ready to be stored. No arithmetic remains. */
 export interface PricingSnapshotItemData {
   readonly pricingComponentId: string;
@@ -95,7 +124,11 @@ export class TripPricingService {
   async findByTripId(tripId: string): Promise<TripPricingResponseDto | null> {
     await this.requireTrip(tripId);
 
-    return this.findSnapshotByTripId(tripId);
+    // The CURRENT snapshot: a reopened Trip's old one is history, not its
+    // price. See `current-pricing.ts`.
+    const tripPricing = await this.repository.findCurrentByTripId(tripId);
+
+    return tripPricing ? toTripPricingResponse(tripPricing) : null;
   }
 
   /**
@@ -143,7 +176,8 @@ export class TripPricingService {
   async findManyByTripIds(
     tripIds: readonly string[],
   ): Promise<PricingSnapshotDto[]> {
-    const snapshots = await this.repository.findManyByTripIds(tripIds);
+    // CLOSED Trips only: an export must not print a reopened Trip's old price.
+    const snapshots = await this.repository.findCurrentByTripIds(tripIds);
 
     return snapshots.map((snapshot) => ({
       pricing: toTripPricingResponse(snapshot),
@@ -182,46 +216,19 @@ export class TripPricingService {
     command: ReplacePricingSnapshotCommand,
   ): Promise<TripPricingResponseDto> {
     const stored = await this.runGuardingTrip(command.tripId, () =>
-      this.repository.runInTransaction(async ({ pricing, items }) => {
-        const existing = await pricing.findByTripId(command.tripId);
-
-        const parent = existing
-          ? await pricing.update(existing.id, {
-              totalPrice: command.totalPrice,
-              calculatedAt: command.calculatedAt,
-              pricingEngineVersion: command.pricingEngineVersion,
-              pricingRuleVersion: command.pricingRuleVersion,
-              calculationStatus: command.calculationStatus,
-            })
-          : await pricing.create({
-              tripId: command.tripId,
-              totalPrice: command.totalPrice,
-              calculatedAt: command.calculatedAt,
-              pricingEngineVersion: command.pricingEngineVersion,
-              pricingRuleVersion: command.pricingRuleVersion,
-              calculationStatus: command.calculationStatus,
-            });
-
-        if (existing) {
-          await items.deleteByTripPricingId(parent.id);
-        }
-
-        await items.createMany(
-          command.items.map((item) => ({
-            tripPricingId: parent.id,
-            pricingComponentId: item.pricingComponentId,
-            customPropertyId: item.customPropertyId,
-            description: item.description,
-            amount: item.amount,
-            calculationOrder: item.calculationOrder,
-            quantity: item.quantity,
-            unitPrice: item.unitPrice,
-          })),
-        );
-
-        return { parent, wasReplaced: existing !== null };
-      }),
+      this.writeRetryingFirstSnapshot(command),
     );
+
+    if (stored.outcome === "SUPERSEDED") {
+      // Not an error: a later calculation of the same Trip already stored the
+      // answer for newer inputs, and that answer stands.
+      this.logger.warn("Discarded a calculation older than the stored snapshot", {
+        tripPricingId: stored.parent.id,
+        tripId: stored.parent.tripId,
+      });
+
+      return toTripPricingResponse(stored.parent);
+    }
 
     // Neither the total nor any line amount is logged: both are commercial
     // information. The counts are what an administrator traces.
@@ -230,10 +237,79 @@ export class TripPricingService {
       tripId: stored.parent.tripId,
       calculationStatus: stored.parent.calculationStatus,
       itemCount: command.items.length,
-      wasReplaced: stored.wasReplaced,
+      wasReplaced: stored.outcome === "REPLACED",
     });
 
     return toTripPricingResponse(stored.parent);
+  }
+
+  /**
+   * One snapshot write, retried once when it lost the race to create the first.
+   *
+   * Closing a Trip prices it, and an operator editing it straight afterwards
+   * prices it again. When neither finds a snapshot, both create one and the
+   * unique `trip_id` refuses the second — which may be the one with the NEWER
+   * inputs. A second attempt finds the row the first created and goes through
+   * the ordinary replace, where the ordering rule below decides.
+   */
+  private async writeRetryingFirstSnapshot(
+    command: ReplacePricingSnapshotCommand,
+  ): Promise<StoredSnapshot> {
+    try {
+      return await this.writeSnapshotOnce(command);
+    } catch (error: unknown) {
+      if (!isUniqueViolation(error)) {
+        throw error;
+      }
+
+      this.logger.log("First pricing snapshot raced another write; retrying", {
+        tripId: command.tripId,
+      });
+
+      return this.writeSnapshotOnce(command);
+    }
+  }
+
+  /**
+   * ── AN OLDER CALCULATION NEVER OVERWRITES A NEWER ONE ─────────────────────
+   * Two recalculations of one Trip can run at once — two quick edits, or an
+   * edit straight after closing — and finish in either order. `calculatedAt`
+   * is when the Engine STARTED reading the Trip, so a snapshot whose inputs were
+   * read later is never replaced by one read earlier. The header update is
+   * conditional on exactly that, in one statement; the items follow only when
+   * it wrote.
+   */
+  private writeSnapshotOnce(
+    command: ReplacePricingSnapshotCommand,
+  ): Promise<StoredSnapshot> {
+    return this.repository.runInTransaction(async ({ pricing, items }) => {
+      const existing = await pricing.findByTripId(command.tripId);
+      const header = {
+        totalPrice: command.totalPrice,
+        calculatedAt: command.calculatedAt,
+        pricingEngineVersion: command.pricingEngineVersion,
+        pricingRuleVersion: command.pricingRuleVersion,
+        calculationStatus: command.calculationStatus,
+      };
+
+      if (!existing) {
+        const parent = await pricing.create({ tripId: command.tripId, ...header });
+        await items.createMany(toItemRows(parent.id, command.items));
+
+        return { parent, outcome: "CREATED" };
+      }
+
+      const parent = await pricing.updateUnlessNewerStored(existing.id, header);
+
+      if (!parent) {
+        return { parent: existing, outcome: "SUPERSEDED" };
+      }
+
+      await items.deleteByTripPricingId(parent.id);
+      await items.createMany(toItemRows(parent.id, command.items));
+
+      return { parent, outcome: "REPLACED" };
+    });
   }
 
   /**
@@ -287,10 +363,7 @@ export class TripPricingService {
     try {
       return await operation();
     } catch (error: unknown) {
-      if (
-        error instanceof Prisma.PrismaClientKnownRequestError &&
-        error.code === PRISMA_UNIQUE_VIOLATION
-      ) {
+      if (isUniqueViolation(error)) {
         throw new DuplicateTripPricingException(tripId);
       }
 

@@ -2,21 +2,25 @@
   "8b414194-836a-462c-90d4-22470bb937a9": {
     "remarks": "",
     "waitingLabel": null,
-    "tarCharged": false
+    "tarCharged": false,
+    "costConfirmations": []
   },
   "b0ec1d7f-3567-4ddf-85af-c314dca5080e": {
     "remarks": "",
     "waitingLabel": null,
-    "tarCharged": false
+    "tarCharged": false,
+    "costConfirmations": []
   },
   "840d83dd-48b1-4fa7-ad25-f4d1b55dd1cf": {
     "remarks": "",
     "waitingLabel": null,
-    "tarCharged": false
+    "tarCharged": false,
+    "costConfirmations": []
   },
   "ae2ae612-d0eb-49ac-8833-27f9ae1d6c84": {
     "remarks": "",
     "waitingLabel": null,
-    "tarCharged": false
+    "tarCharged": false,
+    "costConfirmations": []
   }
 }

@@ -115,6 +115,7 @@ describe("sequences of transport documents", () => {
       findByIdentity: jest.Mock;
       findByBookingNumber: jest.Mock;
       setStatus: jest.Mock;
+      transitionStatus: jest.Mock;
       update: jest.Mock;
       recordHistory: jest.Mock;
       runInTransaction: jest.Mock;
@@ -194,6 +195,17 @@ describe("sequences of transport documents", () => {
             ) ?? null,
           ),
       ),
+      /** The real one is a compare-and-set: it moves the Trip only from `from`. */
+      transitionStatus: jest.fn((id: string, from: TripStatus, to: TripStatus) => {
+        const trip = stored.find((candidate) => candidate.id === id) as
+          | { status: TripStatus }
+          | undefined;
+        if (!trip || trip.status !== from) {
+          return Promise.resolve(false);
+        }
+        Object.assign(trip, { status: to });
+        return Promise.resolve(true);
+      }),
       setStatus: jest.fn((id: string, status: TripStatus) => {
         const trip = stored.find((candidate) => candidate.id === id) as Trip;
         Object.assign(trip, { status });

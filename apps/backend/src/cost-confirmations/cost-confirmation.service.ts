@@ -4,7 +4,10 @@ import { CostConfirmation } from "@prisma/client";
 import { AppLoggerService } from "../logger/app-logger.service";
 import { PricingRecalculationService } from "../pricing-engine/pricing-recalculation.service";
 import { EffectivePricingDto } from "../trip-pricing/dto/effective-pricing.dto";
-import { CostConfirmationRepository } from "./cost-confirmation.repository";
+import {
+  CostConfirmationRepository,
+  violatesConfirmationIdentity,
+} from "./cost-confirmation.repository";
 import { CostConfirmationDto } from "./dto/cost-confirmation-response.dto";
 
 /**
@@ -25,11 +28,11 @@ import { CostConfirmationDto } from "./dto/cost-confirmation-response.dto";
  * about what Eucon said.
  * ────────────────────────────────────────────────────────────────────────────
  *
- * ── ONE PER TRIP ────────────────────────────────────────────────────────────
- * Eucon confirms a Trip's waiting time once. The FIRST confirmation is the
- * authoritative one: a later, different one is refused rather than applied, and
- * the database says so too — `cost_confirmation.trip_id` is unique, so no path
- * through this code can produce a second even if this check were bypassed.
+ * ── EACH NUMBER ONCE PER TRIP ───────────────────────────────────────────────
+ * A Trip may hold several confirmations — Eucon confirms in instalments — but
+ * the SAME `cc_number` only once. This service checks first, and the database
+ * says so too: `(trip_id, cc_number)` is unique, so two imports of one document
+ * racing each other still produce one row. See `record`.
  * ────────────────────────────────────────────────────────────────────────────
  *
  * ── BUT IT IS A PRICING INPUT ───────────────────────────────────────────────
@@ -97,17 +100,12 @@ export class CostConfirmationService {
   }
 
   /**
-   * Records the confirmation of a Trip that has none.
+   * Records a confirmation against its Trip, whatever the Trip's status.
    *
-   * Two ways it does not write, and they mean different things:
-   *
+   *   a NEW number           → recorded, and the Trip is repriced;
    *   the SAME number again  → harmless. One message arriving twice, most
-   *                            often under another filename. Reported, not
-   *                            refused, and nothing written a second time.
-   *   a DIFFERENT number     → refused. The Trip already has its confirmed
-   *                            cost, and a second one is not something this
-   *                            business has. The first stays authoritative:
-   *                            nothing is overwritten, nothing is summed.
+   *                            often under another filename. Reported as
+   *                            ALREADY_RECORDED, and nothing written again.
    */
   async record(
     command: RecordCostConfirmationCommand,
@@ -130,29 +128,16 @@ export class CostConfirmationService {
     );
 
     if (duplicate) {
-      this.logger.log("Cost confirmation already recorded", {
-        tripId: command.tripId,
-        ccNumber: command.ccNumber,
-      });
-
-      return {
-        outcome: "ALREADY_RECORDED",
-        confirmation: duplicate,
-        // Nothing was written, so nothing can have changed.
-        pricing: null,
-        reasonCode: null,
-      };
+      return this.alreadyRecorded(command, duplicate);
     }
 
-    const confirmation = await this.repository.create({
-      tripId: command.tripId,
-      pdfDocumentId: command.pdfDocumentId,
-      ccNumber: command.ccNumber,
-      costCode: command.costCode,
-      amount: command.amount,
-      currency: command.currency,
-      receivedAt: command.receivedAt,
-    });
+    const inserted = await this.insertUnlessRecordedConcurrently(command);
+
+    if (inserted.outcome === "ALREADY_RECORDED") {
+      return this.alreadyRecorded(command, inserted.confirmation);
+    }
+
+    const confirmation = inserted.confirmation;
 
     this.logger.log("Cost confirmation recorded", {
       tripId: command.tripId,
@@ -174,6 +159,92 @@ export class CostConfirmationService {
       confirmation,
       pricing: outcome.pricing,
       reasonCode: outcome.reasonCode,
+    };
+  }
+
+  /**
+   * Inserts the confirmation, or finds the one a concurrent import inserted.
+   *
+   * ── THE RACE THE CHECK ABOVE CANNOT CLOSE ─────────────────────────────────
+   * The check in `record` and this insert are two statements. Two imports of
+   * one document running at the same moment — the IMAP scan and a manual
+   * upload, or a retry overlapping the first attempt — can both find nothing
+   * and both insert. The unique `(trip_id, cc_number)` lets exactly one of them
+   * through; the other is refused with P2002.
+   *
+   * That refusal is the duplicate case, so it is answered as such — but only
+   * when it is PROVEN: the violated constraint must be this one, and the row
+   * that won must be read back for this Trip and this number. Any other unique
+   * conflict, any other database error, and a winner that cannot be found are
+   * rethrown unchanged; nothing is reported as recorded that is not.
+   *
+   * The insert is a single statement outside any transaction, so its refusal
+   * leaves nothing half-written and needs no rollback.
+   * ──────────────────────────────────────────────────────────────────────────
+   */
+  private async insertUnlessRecordedConcurrently(
+    command: RecordCostConfirmationCommand,
+  ): Promise<
+    | { readonly outcome: "RECORDED"; readonly confirmation: CostConfirmation }
+    | { readonly outcome: "ALREADY_RECORDED"; readonly confirmation: CostConfirmation }
+  > {
+    try {
+      return {
+        outcome: "RECORDED",
+        confirmation: await this.repository.create({
+          tripId: command.tripId,
+          pdfDocumentId: command.pdfDocumentId,
+          ccNumber: command.ccNumber,
+          costCode: command.costCode,
+          amount: command.amount,
+          currency: command.currency,
+          receivedAt: command.receivedAt,
+        }),
+      };
+    } catch (error: unknown) {
+      if (!violatesConfirmationIdentity(error)) {
+        throw error;
+      }
+
+      const winner = (await this.repository.findAllByTrip(command.tripId)).find(
+        (confirmation) => confirmation.ccNumber === command.ccNumber,
+      );
+
+      if (!winner) {
+        this.logger.error(
+          "Cost confirmation refused as a duplicate, but no matching row exists",
+          { tripId: command.tripId, ccNumber: command.ccNumber },
+        );
+
+        throw error;
+      }
+
+      this.logger.warn("Cost confirmation recorded concurrently by another import", {
+        tripId: command.tripId,
+        ccNumber: command.ccNumber,
+        recordedConfirmationId: winner.id,
+      });
+
+      return { outcome: "ALREADY_RECORDED", confirmation: winner };
+    }
+  }
+
+  /** The answer for a confirmation the Trip already holds. */
+  private alreadyRecorded(
+    command: RecordCostConfirmationCommand,
+    confirmation: CostConfirmation,
+  ): CostConfirmationResult {
+    this.logger.log("Cost confirmation already recorded", {
+      tripId: command.tripId,
+      ccNumber: command.ccNumber,
+    });
+
+    return {
+      outcome: "ALREADY_RECORDED",
+      confirmation,
+      // Nothing was written, so nothing can have changed.
+      pricing: null,
+      reasonCode: null,
     };
   }
 

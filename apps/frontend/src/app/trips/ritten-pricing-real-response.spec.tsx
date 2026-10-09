@@ -1,4 +1,4 @@
-import { screen, within } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import { request } from "@/lib/api/client";
@@ -349,5 +349,54 @@ describe("a Trip that has never been priced", () => {
     for (const index of Object.values(CELL)) {
       expect(within(cells[index]).queryAllByRole("button")).toHaveLength(0);
     }
+  });
+});
+
+/**
+ * ── REOPENING TAKES THE PRICE AWAY AT ONCE ──────────────────────────────────
+ * Only a CLOSED Trip has a current price. Reopened, the backend answers it
+ * with `pricing: null` — its old snapshot is history, not its price — and the
+ * row shows the empty marker in all eight columns on the very next load.
+ */
+describe("a priced Trip that is reopened", () => {
+  const BOOKING = "ANRDUB2797999";
+  const priced = buildTrip({
+    id: "trip-reopened",
+    bookingNumber: BOOKING,
+    status: "CLOSED",
+    pricing: CONFIGURED_ROUTE_PRICING,
+  });
+
+  it("shows the empty marker in all eight columns once it is OPEN", async () => {
+    respondWith(requestMock, {
+      trips: buildPage([priced]),
+      onTripUpdate: () => {
+        // What the backend answers from now on: OPEN, and no current price.
+        const reopened = { ...priced, status: "OPEN", pricing: null } as typeof priced;
+        respondWith(requestMock, { trips: buildPage([reopened]) });
+
+        return reopened;
+      },
+    });
+    renderRitten();
+    await userEvent.click(toggle());
+    expect(pricingCells(await rowOf(BOOKING))[CELL.totaal]).toHaveTextContent("618");
+
+    await userEvent.click(
+      screen.getByRole("button", { name: `Heropenen ${BOOKING}` }),
+    );
+    await userEvent.click(
+      within(await screen.findByRole("dialog")).getByRole("button", {
+        name: "Heropenen",
+      }),
+    );
+
+    await waitFor(() => {
+      const cells = pricingCells(screen.getByText(BOOKING).closest("tr") as HTMLElement);
+
+      for (const index of Object.values(CELL)) {
+        expect(cells[index]).toHaveTextContent("—");
+      }
+    });
   });
 });

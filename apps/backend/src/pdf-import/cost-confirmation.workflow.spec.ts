@@ -733,6 +733,82 @@ describe("every real Cost Confirmation, through the real workflow", () => {
     });
   });
 
+  /**
+   * A confirmation for a CANCELLED Trip is stored exactly as for an OPEN one.
+   *
+   * The cost was incurred whether or not the transport went ahead — waiting at
+   * a terminal for an order that was then called off is still waiting — so the
+   * cancellation is no reason to refuse the money. Nor is the confirmation a
+   * reason to undo the cancellation: the Trip stays CANCELLED.
+   */
+  describe("a confirmation for a CANCELLED Trip", () => {
+    type SeededTrip = Awaited<ReturnType<typeof seedTrip>>;
+
+    async function seedCancelledTrip(): Promise<SeededTrip> {
+      const trip = await seedTrip(EXPECTED[0]);
+      (trip as { status: TripStatus }).status = TripStatus.CANCELLED;
+      return trip;
+    }
+
+    function confirm(index: number) {
+      return harness.importer.confirmCost(
+        readConfirmation(EXPECTED[index].file),
+        EXPECTED[index].file,
+      );
+    }
+
+    it("is recorded against the cancelled Trip", async () => {
+      const trip = await seedCancelledTrip();
+
+      const result = await confirm(0);
+
+      expect(result.costConfirmations).toEqual([
+        expect.objectContaining({ tripId: trip.id, outcome: "RECORDED" }),
+      ]);
+      expect(harness.costConfirmations).toEqual([
+        expect.objectContaining({ tripId: trip.id, ccNumber: EXPECTED[0].ccNumber }),
+      ]);
+    });
+
+    it("leaves the Trip CANCELLED and its operator data untouched", async () => {
+      const trip = await seedCancelledTrip();
+      const before = { ...trip };
+
+      await confirm(0);
+
+      expect(trip).toEqual(before);
+      expect(trip.status).toBe(TripStatus.CANCELLED);
+      expect(trip.waitingTimeMinutes).toBe(150);
+      expect(trip.vehicleId).toBe("vehicle-1");
+      expect(
+        harness.history.filter((entry) => entry.eventType === "REOPENED"),
+      ).toEqual([]);
+    });
+
+    it("records the same confirmation only once", async () => {
+      await seedCancelledTrip();
+
+      await confirm(0);
+      const repeat = await confirm(0);
+
+      expect(repeat.costConfirmations[0].outcome).toBe("ALREADY_RECORDED");
+      expect(harness.costConfirmations).toHaveLength(1);
+    });
+
+    it("records a different confirmation for the same Trip as well", async () => {
+      const trip = await seedCancelledTrip();
+      await confirm(0);
+
+      retarget(trip, EXPECTED[2]);
+      await confirm(2);
+
+      expect(
+        harness.costConfirmations.map((row) => row.ccNumber).sort(),
+      ).toEqual([EXPECTED[0].ccNumber, EXPECTED[2].ccNumber].sort());
+      expect(trip.status).toBe(TripStatus.CANCELLED);
+    });
+  });
+
   describe("what is refused", () => {
     it("refuses a transport order sent as a confirmation", async () => {
       await seedTrip({ ...EXPECTED[0], bookingNumber: "ANRDUB2602247" });

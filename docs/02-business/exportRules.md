@@ -178,6 +178,62 @@ Total
 
 No calculations should occur during export.
 
+## Only a CLOSED Trip has a current price
+
+A Trip that is OPEN, CANCELLED or DELETED shows no price anywhere — in the
+Ritten list, both workbooks, the Trip page and the invoice check — even when
+an older snapshot is stored for it. That snapshot is kept as history and is
+replaced when the Trip closes again, which prices it afresh from its current
+data. The rule lives in one place in the backend (`current-pricing.ts`).
+
+## Where every money and remarks column comes from
+
+Both workbooks are built in the browser from three backend answers: the Trip
+(`GET /trips`, including its effective `pricing`), its stored pricing snapshot
+(the Engine's lines), and the export words (`GET /trip-export/labels`). The
+snapshot decides WHETHER a component applies — no line, an empty cell; a
+stored €0 is printed as 0.00. The effective pricing decides what it is worth
+where an operator may correct it. Nothing is calculated in the export.
+
+### BASIS (the daily dispatch sheet)
+
+| Column | Source and rule |
+|---|---|
+| COMBI EN KOST | The stored amounts joined with ` + `, in this order: the COMBINATION line (Backload, €50 per leg the Engine charged); the operator's Custom Properties, in the order INFO names them; the system-managed property charges (TAR, Flat); the EK — the effective EK (`trip.pricing.ek`: the charged waiting time, else the summed Cost Confirmations), printed when the snapshot has a waiting-time or Cost Confirmation line. A property without a price has no line and therefore no amount. |
+| INFO | LOSRIT; `COMBI` when the snapshot has a COMBINATION line; the operator's PRICED Custom Properties (not route-priced, not system-managed), in display order; `TAR` when the Engine charged it; the waiting window when minutes were recorded; every Cost Confirmation reference (`CC4139505`), also when a charged waiting time is the EK; the operator's UNPRICED Custom Properties; the internal note. |
+
+The two columns are read side by side, amount under word, so every word that
+has an amount comes first and in the same order as its amount. A Custom
+Property without a price is information only: it has no amount and is named
+after all of them. Which properties are priced: for a priced Trip, those with a
+stored line (an explicit €0 price has one, and prints `0.00`); for a Trip with
+no current price, those with a configured price in the catalog.
+
+An OPEN Trip has no current price (see below): COMBI EN KOST is empty, and
+INFO carries no `COMBI` and no `TAR`, which describe a charge. Its properties,
+waiting window, CC references, LOSRIT and note are still printed.
+
+The CC references (in INFO and in Remarks) come from the Trip's Cost
+Confirmation records — every one, newest first, each once — never from the
+pricing snapshot. Which documents Eucon sent is a fact about the Trip, so an
+OPEN Trip names all of them; reading them calculates nothing.
+
+BASIS has no Tarief, Brandstof, Toll, Tunnel, EK or total column; those are
+in PRIJSOVERZICHT.
+
+### PRIJSOVERZICHT (the price list)
+
+| Column | Source and rule |
+|---|---|
+| Tarief, Brandstof, Backload, Tol, Tunnel | Present when the snapshot has the line; the amount is the effective one, so a corrected Tarief carries its own fuel. |
+| Others | The stored Custom Property lines, summed. |
+| Wachttijd | The stored waiting-time line. Informational: it is not added to anything. |
+| EK | The effective EK, exactly as in BASIS (shared `toEkAmount`). |
+| Remarks | The backend's Remarks text: properties, TAR, the waiting window, every CC reference. |
+
+The total of a Trip is Tarief + Brandstof + Backload + Tol + Tunnel + Others +
+EK; the Wachttijd column is never part of it.
+
 ---
 
 # Combination Trips

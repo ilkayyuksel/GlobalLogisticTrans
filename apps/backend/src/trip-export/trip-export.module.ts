@@ -1,5 +1,6 @@
 import { Module } from "@nestjs/common";
 
+import { CostConfirmationReadModule } from "../cost-confirmations/cost-confirmation-read.module";
 import { SettingsModule } from "../settings/settings.module";
 import { TripPricingModule } from "../trip-pricing/trip-pricing.module";
 import { TripModule } from "../trips/trip.module";
@@ -13,7 +14,12 @@ import { TripExportLabelsService } from "./trip-export-labels.service";
  * customer's workbook that the browser's exports print into ours.
  */
 @Module({
-  imports: [TripModule, TripPricingModule, SettingsModule],
+  imports: [
+    TripModule,
+    TripPricingModule,
+    SettingsModule,
+    CostConfirmationReadModule,
+  ],
   controllers: [TripExportController],
   providers: [TripExportLabelsService],
   exports: [TripExportLabelsService],

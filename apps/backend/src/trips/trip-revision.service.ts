@@ -221,8 +221,10 @@ export class TripRevisionService {
    * AMBIGUOUS_BOOKING_MATCH: a fifth outcome, and the only one that asks a
    * person. Nothing is chosen on its behalf.
    *
-   * The read and the write share one transaction, so a Trip that closes between
-   * them cannot be cancelled on the strength of a stale read.
+   * A shared transaction alone does not stop a stale read under READ
+   * COMMITTED: a Trip could be closed between the match and the write. So the
+   * write is a compare-and-set on OPEN (`transitionStatus`) and the outcome is
+   * decided on the status the row holds at that moment.
    */
   async cancelByIdentity(
     identity: TripIdentity,
@@ -265,14 +267,45 @@ export class TripRevisionService {
           return "NO_MATCHING_TRIP";
         }
 
-        const trip = match.trip;
         matchMethod = match.method;
 
         /*
-         * Every outcome below is RECORDED, including the two that write nothing
-         * to the Trip. A cancellation that arrived and did nothing is still
-         * something that arrived, and the audit trail is where an operator
-         * finds out why the status did not move.
+         * Only an OPEN Trip is cancelled, and "OPEN" means OPEN at the moment
+         * of the write — not when it was matched. The transition is a
+         * compare-and-set, so a Trip closed by an operator in between is left
+         * CLOSED rather than overwritten. Only the status is written: a
+         * cancellation never touches the waiting time, the Custom Values or
+         * anything else the operator entered.
+         */
+        if (
+          match.trip.status === TripStatus.OPEN &&
+          (await repository.transitionStatus(
+            match.trip.id,
+            TripStatus.OPEN,
+            TripStatus.CANCELLED,
+          ))
+        ) {
+          await this.record(repository, match.trip.id, document, {
+            eventType: TripHistoryEvent.Cancelled,
+            previousValue: { status: TripStatus.OPEN },
+            newValue: { status: TripStatus.CANCELLED },
+            description: "Cancelled by a transport document.",
+          });
+
+          return "CANCELLED";
+        }
+
+        // Lost the race: decide on the status the Trip holds NOW.
+        const trip =
+          match.trip.status === TripStatus.OPEN
+            ? ((await repository.findById(match.trip.id)) ?? match.trip)
+            : match.trip;
+
+        /*
+         * Every outcome below is RECORDED, although none writes to the Trip.
+         * A cancellation that arrived and did nothing is still something that
+         * arrived, and the audit trail is where an operator finds out why the
+         * status did not move.
          */
         if (trip.status === TripStatus.CANCELLED) {
           await this.record(repository, trip.id, document, {
@@ -283,25 +316,17 @@ export class TripRevisionService {
           return "ALREADY_CANCELLED";
         }
 
-        if (trip.status !== TripStatus.OPEN) {
-          await this.record(repository, trip.id, document, {
-            eventType: TripHistoryEvent.CancelRefused,
-            description:
-              "Cancellation received for a CLOSED Trip. Finished work is not undone.",
-          });
-
-          return "REFUSED_CLOSED";
-        }
-
-        await repository.setStatus(trip.id, TripStatus.CANCELLED);
+        /*
+         * CLOSED, or — after a lost race — whatever the Trip became instead of
+         * OPEN. Nothing is written: a cancellation applies to OPEN work only.
+         */
         await this.record(repository, trip.id, document, {
-          eventType: TripHistoryEvent.Cancelled,
-          previousValue: { status: TripStatus.OPEN },
-          newValue: { status: TripStatus.CANCELLED },
-          description: "Cancelled by a transport document.",
+          eventType: TripHistoryEvent.CancelRefused,
+          description:
+            "Cancellation received for a CLOSED Trip. Finished work is not undone.",
         });
 
-        return "CANCELLED";
+        return "REFUSED_CLOSED";
       },
     );
 

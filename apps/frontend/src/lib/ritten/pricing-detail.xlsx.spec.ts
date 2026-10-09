@@ -302,6 +302,7 @@ describe("the Remarks column", () => {
     remarks: "Aan/Afkoppelen | TAR | Wachttijd 07:00-10:00 | CC4139505",
     waitingLabel: "Wachttijd 07:00-10:00",
     tarCharged: true,
+    costConfirmations: ["CC4139505"],
   };
 
   it("prints the backend's Remarks text exactly as given", async () => {

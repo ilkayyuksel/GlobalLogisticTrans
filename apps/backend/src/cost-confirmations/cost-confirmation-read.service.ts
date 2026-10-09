@@ -78,4 +78,38 @@ export class CostConfirmationReadService {
       amount: total.toFixed(MONEY_DECIMAL_PLACES),
     };
   }
+
+  /**
+   * Every confirmation number of each Trip, newest first, each number once.
+   *
+   * ── WHY NOT FROM THE PRICING SNAPSHOT ─────────────────────────────────────
+   * The references are a fact about the Trip — which documents Eucon sent for
+   * it — not about its price. They used to be read off the stored EK line,
+   * and a Trip whose price is not shown (an OPEN Trip, see
+   * `current-pricing.ts`) then lost all but its latest reference. Read from
+   * the records themselves, they are the same whatever the Trip's status.
+   *
+   * Nothing is calculated and nothing is written.
+   */
+  async findNumbersForTrips(
+    tripIds: readonly string[],
+  ): Promise<Map<string, string[]>> {
+    const byTrip = new Map<string, string[]>();
+
+    if (tripIds.length === 0) {
+      return byTrip;
+    }
+
+    for (const row of await this.repository.findNumbersForTrips(tripIds)) {
+      const numbers = byTrip.get(row.tripId) ?? [];
+
+      if (!numbers.includes(row.ccNumber)) {
+        numbers.push(row.ccNumber);
+      }
+
+      byTrip.set(row.tripId, numbers);
+    }
+
+    return byTrip;
+  }
 }

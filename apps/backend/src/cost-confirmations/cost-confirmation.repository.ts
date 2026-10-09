@@ -1,6 +1,7 @@
 import { Injectable } from "@nestjs/common";
 import { CostConfirmation, Prisma } from "@prisma/client";
 
+import { violatesUniqueConstraint } from "../common/unique-violation";
 import { PrismaService } from "../prisma/prisma.service";
 
 export type CreateCostConfirmationData =
@@ -29,6 +30,24 @@ const NEWEST_FIRST = [
   { createdAt: "desc" },
   { id: "desc" },
 ] as const satisfies Prisma.CostConfirmationOrderByWithRelationInput[];
+
+/** The one constraint a duplicate confirmation violates. */
+const CONFIRMATION_IDENTITY = {
+  columns: ["trip_id", "cc_number"],
+  indexName: "cost_confirmation_trip_id_cc_number_key",
+} as const;
+
+/**
+ * Whether an insert was refused by `(trip_id, cc_number)` and by nothing else.
+ *
+ * Any other unique conflict is NOT a duplicate confirmation, and treating it as
+ * one would report a real failure as "already recorded". How the violated
+ * constraint is read from Prisma's error — through the `pg` adapter or the
+ * classic engine — is `violatesUniqueConstraint`'s business.
+ */
+export function violatesConfirmationIdentity(error: unknown): boolean {
+  return violatesUniqueConstraint(error, CONFIRMATION_IDENTITY);
+}
 
 @Injectable()
 export class CostConfirmationRepository {

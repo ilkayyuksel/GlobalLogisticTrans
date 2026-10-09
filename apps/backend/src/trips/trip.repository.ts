@@ -745,7 +745,17 @@ export class TripRepository {
     return this.prisma.tripCustomProperty.findMany({
       where: { tripId: { in: [...tripIds] } },
       include: { customProperty: true },
-      orderBy: { customProperty: { displayOrder: "asc" } },
+      /*
+       * Display order first, as an administrator arranged it; the name and
+       * then the identity break a tie, so two properties sharing a display
+       * order cannot swap places between two reads — an export pairs their
+       * amounts with their names by position.
+       */
+      orderBy: [
+        { customProperty: { displayOrder: "asc" } },
+        { customProperty: { name: "asc" } },
+        { customPropertyId: "asc" },
+      ],
     });
   }
 
@@ -790,6 +800,29 @@ export class TripRepository {
 
   update(id: string, data: UpdateTripData): Promise<Trip> {
     return this.prisma.trip.update({ where: { id }, data });
+  }
+
+  /**
+   * Moves a Trip to `to` ONLY while it still holds `from`; true when it moved.
+   *
+   * A compare-and-set in one statement. Under READ COMMITTED, Postgres makes a
+   * concurrent writer of the same row wait and then re-checks `status = from`
+   * against the row as that writer left it — so a Trip closed between our read
+   * and this write is not moved, where an unconditional `setStatus` would turn
+   * CLOSED into CANCELLED. No lock has to be taken explicitly, and the status
+   * is the only column written.
+   */
+  async transitionStatus(
+    id: string,
+    from: TripStatus,
+    to: TripStatus,
+  ): Promise<boolean> {
+    const { count } = await this.prisma.trip.updateMany({
+      where: { id, status: from },
+      data: { status: to },
+    });
+
+    return count === 1;
   }
 
   /** Used by the status endpoint, by soft delete and by restore. */

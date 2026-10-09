@@ -2,6 +2,7 @@ import { Injectable } from "@nestjs/common";
 import { CustomProperty, Prisma } from "@prisma/client";
 
 import { changedFieldNames } from "../common/changed-fields";
+import { violatesUniqueConstraint } from "../common/unique-violation";
 import { buildPaginationMeta } from "../common/dto/pagination-meta.dto";
 import { AppLoggerService } from "../logger/app-logger.service";
 import { CustomPropertyRepository } from "./custom-property.repository";
@@ -28,8 +29,17 @@ import {
   systemManagedReasonFor,
 } from "./system-managed-property";
 
-/** Prisma's unique-constraint violation code. */
-const PRISMA_UNIQUE_VIOLATION = "P2002";
+/** The partial unique index on an ACTIVE property's name. */
+const ACTIVE_NAME = {
+  columns: ["name"],
+  indexName: "custom_property_name_active_key",
+} as const;
+
+/** The partial unique index on an ACTIVE property's component link. */
+const ACTIVE_COMPONENT_LINK = {
+  columns: ["pricing_component_id"],
+  indexName: "custom_property_pricing_component_active_key",
+} as const;
 
 /** Position given to the very first property, when the table is empty. */
 const FIRST_DISPLAY_ORDER = 1;
@@ -474,6 +484,12 @@ export class CustomPropertyService {
    * component link — so the index named in the error decides which conflict is
    * reported. Guessing would tell an administrator the name is taken when in
    * fact the component is.
+   *
+   * It used to read only `meta.target`, which the `pg` driver adapter never
+   * sets — so a refused component link was always reported as a taken name,
+   * and any other unique conflict was too. Each index is now recognised
+   * explicitly (see `violatesUniqueConstraint`), and a conflict that is
+   * neither is rethrown unchanged rather than mislabelled.
    */
   private async runGuardingUniqueness<TResult>(
     name: string,
@@ -484,13 +500,13 @@ export class CustomPropertyService {
       return await operation();
     } catch (error: unknown) {
       if (
-        error instanceof Prisma.PrismaClientKnownRequestError &&
-        error.code === PRISMA_UNIQUE_VIOLATION
+        pricingComponentId !== null &&
+        violatesUniqueConstraint(error, ACTIVE_COMPONENT_LINK)
       ) {
-        if (pricingComponentId !== null && violatedComponentIndex(error)) {
-          throw new DuplicateComponentLinkException(pricingComponentId);
-        }
+        throw new DuplicateComponentLinkException(pricingComponentId);
+      }
 
+      if (violatesUniqueConstraint(error, ACTIVE_NAME)) {
         throw new DuplicateCustomPropertyNameException(name);
       }
 
@@ -519,14 +535,4 @@ export class CustomPropertyService {
 /** Prisma returns money as a Decimal; the rules compare plain numbers. */
 function toNullableNumber(value: Prisma.Decimal | null): number | null {
   return value === null ? null : Number(value);
-}
-
-/** True when the failing index is the one on the component link. */
-function violatedComponentIndex(
-  error: Prisma.PrismaClientKnownRequestError,
-): boolean {
-  const target = error.meta?.target;
-  const named = Array.isArray(target) ? target.join(",") : String(target ?? "");
-
-  return named.includes("pricing_component");
 }

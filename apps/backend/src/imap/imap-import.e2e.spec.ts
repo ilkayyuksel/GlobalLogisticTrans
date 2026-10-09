@@ -257,6 +257,17 @@ describe("IMAP import, end to end with a real transport order", () => {
         Object.assign(trip as Record<string, unknown>, data);
         return Promise.resolve(trip);
       }),
+      /** The real one is a compare-and-set: it moves the Trip only from `from`. */
+      transitionStatus: jest.fn((id: string, from: TripStatus, to: TripStatus) => {
+        const trip = createdTrips.find((candidate) => candidate.id === id) as
+          | { status: TripStatus }
+          | undefined;
+        if (!trip || trip.status !== from) {
+          return Promise.resolve(false);
+        }
+        Object.assign(trip, { status: to });
+        return Promise.resolve(true);
+      }),
       setStatus: jest.fn((id: string, status: TripStatus) => {
         const trip = createdTrips.find((candidate) => candidate.id === id);
         Object.assign(trip as Record<string, unknown>, { status });

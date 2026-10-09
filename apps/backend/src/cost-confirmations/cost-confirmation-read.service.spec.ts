@@ -178,3 +178,72 @@ describe("CostConfirmationReadService", () => {
     expect(await service.findForTrip(TRIP_ID)).toBeNull();
   });
 });
+
+/**
+ * Every confirmation number of a set of Trips, for the export's references.
+ *
+ * Read from the records, not from any price, so a Trip with no current price
+ * — an OPEN one — still names every document Eucon sent for it.
+ */
+describe("CostConfirmationReadService.findNumbersForTrips", () => {
+  let repository: { findNumbersForTrips: jest.Mock };
+  let service: CostConfirmationReadService;
+
+  beforeEach(() => {
+    repository = { findNumbersForTrips: jest.fn().mockResolvedValue([]) };
+    service = new CostConfirmationReadService(
+      repository as unknown as CostConfirmationReadRepository,
+    );
+  });
+
+  it("groups the numbers by Trip, in the order the records come", async () => {
+    repository.findNumbersForTrips.mockResolvedValue([
+      { tripId: "trip-a", ccNumber: "4161980" },
+      { tripId: "trip-b", ccNumber: "4132482" },
+      { tripId: "trip-a", ccNumber: "4139505" },
+    ]);
+
+    const numbers = await service.findNumbersForTrips(["trip-a", "trip-b"]);
+
+    expect(numbers.get("trip-a")).toEqual(["4161980", "4139505"]);
+    expect(numbers.get("trip-b")).toEqual(["4132482"]);
+  });
+
+  it("names each number once", async () => {
+    repository.findNumbersForTrips.mockResolvedValue([
+      { tripId: "trip-a", ccNumber: "4139505" },
+      { tripId: "trip-a", ccNumber: "4139505" },
+    ]);
+
+    expect((await service.findNumbersForTrips(["trip-a"])).get("trip-a")).toEqual([
+      "4139505",
+    ]);
+  });
+
+  it("has no entry for a Trip without confirmations", async () => {
+    expect((await service.findNumbersForTrips(["trip-a"])).has("trip-a")).toBe(false);
+  });
+
+  it("asks nothing for no Trips", async () => {
+    await service.findNumbersForTrips([]);
+
+    expect(repository.findNumbersForTrips).not.toHaveBeenCalled();
+  });
+});
+
+describe("CostConfirmationReadRepository.findNumbersForTrips", () => {
+  it("reads the numbers of all the Trips in one query, newest first", async () => {
+    const findMany = jest.fn().mockResolvedValue([]);
+    const repository = new CostConfirmationReadRepository({
+      costConfirmation: { findMany },
+    } as unknown as PrismaService);
+
+    await repository.findNumbersForTrips(["trip-a", "trip-b"]);
+
+    expect(findMany).toHaveBeenCalledWith({
+      where: { tripId: { in: ["trip-a", "trip-b"] } },
+      orderBy: [{ receivedAt: "desc" }, { createdAt: "desc" }, { id: "desc" }],
+      select: { tripId: true, ccNumber: true },
+    });
+  });
+});

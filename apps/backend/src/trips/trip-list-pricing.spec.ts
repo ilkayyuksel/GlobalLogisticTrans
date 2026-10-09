@@ -88,8 +88,8 @@ function buildSnapshot(tripId: string, basePrice: string) {
 }
 
 describe("the Ritten list carries the effective pricing of each Trip", () => {
-  let findManyByTripIds: jest.Mock;
-  let findByTripId: jest.Mock;
+  let findCurrentByTripIds: jest.Mock;
+  let findCurrentByTripId: jest.Mock;
   let findOverridesForTrips: jest.Mock;
   let findOverridesForTrip: jest.Mock;
   let findByTripPricingId: jest.Mock;
@@ -107,7 +107,7 @@ describe("the Ritten list carries the effective pricing of each Trip", () => {
   }
 
   beforeEach(() => {
-    findManyByTripIds = jest
+    findCurrentByTripIds = jest
       .fn()
       .mockImplementation((ids: readonly string[]) =>
         Promise.resolve(
@@ -124,7 +124,7 @@ describe("the Ritten list carries the effective pricing of each Trip", () => {
      * rather than a vacuous one, and rejecting so a call that slipped through
      * would fail loudly instead of quietly returning nothing.
      */
-    findByTripId = jest
+    findCurrentByTripId = jest
       .fn()
       .mockRejectedValue(new Error("per-Trip snapshot read on a list path"));
     findByTripPricingId = jest
@@ -142,8 +142,8 @@ describe("the Ritten list carries the effective pricing of each Trip", () => {
         findForTrip: findOverridesForTrip,
       } as unknown as TripPricingOverrideRepository,
       {
-        findManyByTripIds,
-        findByTripId,
+        findCurrentByTripIds,
+        findCurrentByTripId,
       } as unknown as TripPricingRepository,
     );
 
@@ -269,7 +269,7 @@ describe("the Ritten list carries the effective pricing of each Trip", () => {
 
       await service.findAll({ page: 1, pageSize: 25 });
 
-      expect(findManyByTripIds).not.toHaveBeenCalled();
+      expect(findCurrentByTripIds).not.toHaveBeenCalled();
     });
   });
 
@@ -305,7 +305,7 @@ describe("the Ritten list carries the effective pricing of each Trip", () => {
 
         await service.findAll({ page: 1, pageSize: 200 });
 
-        expect(findManyByTripIds).toHaveBeenCalledTimes(1);
+        expect(findCurrentByTripIds).toHaveBeenCalledTimes(1);
         expect(findOverridesForTrips).toHaveBeenCalledTimes(1);
       },
     );
@@ -316,7 +316,7 @@ describe("the Ritten list carries the effective pricing of each Trip", () => {
 
       await service.findAll({ page: 1, pageSize: 200 });
 
-      expect(findManyByTripIds).toHaveBeenCalledWith(
+      expect(findCurrentByTripIds).toHaveBeenCalledWith(
         trips.map((trip) => trip.id),
       );
     });
@@ -332,7 +332,7 @@ describe("the Ritten list carries the effective pricing of each Trip", () => {
       await service.findAll({ page: 1, pageSize: 200 });
 
       expect(findForTripSpy).not.toHaveBeenCalled();
-      expect(findByTripId).not.toHaveBeenCalled();
+      expect(findCurrentByTripId).not.toHaveBeenCalled();
       expect(findByTripPricingId).not.toHaveBeenCalled();
       expect(findOverridesForTrip).not.toHaveBeenCalled();
     });

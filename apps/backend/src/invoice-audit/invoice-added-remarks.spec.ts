@@ -3,6 +3,7 @@ import { Prisma, TripStatus } from "@prisma/client";
 
 import { AppLoggerService } from "../logger/app-logger.service";
 import { SettingNotFoundException } from "../settings/exceptions/setting.exceptions";
+import { CostConfirmationReadService } from "../cost-confirmations/cost-confirmation-read.service";
 import { SettingsService } from "../settings/settings.service";
 import { TripExportLabelsService } from "../trip-export/trip-export-labels.service";
 import type { EffectivePricing } from "../trip-pricing/effective-pricing";
@@ -75,6 +76,7 @@ describe("the Remarks of a transport added to the invoice", () => {
     described: DescribedTrip,
     lines: Line[],
     tarConfigured = true,
+    confirmationNumbers: string[] = [],
   ): Promise<ExcelJS.CellValue> {
     const missing = {
       id: MISSING_ID,
@@ -113,7 +115,6 @@ describe("the Remarks of a transport added to the invoice", () => {
           waitingTimeStart: null,
           waitingTimeEnd: null,
           waitingTimeMinutes: null,
-          costConfirmation: null,
           ...described,
         },
       ]),
@@ -139,10 +140,17 @@ describe("the Remarks of a transport added to the invoice", () => {
         return { value: TAR_ID };
       }),
     };
+    // The Trip's Cost Confirmation records — the source of the references.
+    const confirmations = {
+      findNumbersForTrips: jest.fn(
+        async () => new Map([[MISSING_ID, confirmationNumbers]]),
+      ),
+    };
     const exportLabels = new TripExportLabelsService(
       tripService as unknown as TripService,
       pricingService as unknown as TripPricingService,
       settings as unknown as SettingsService,
+      confirmations as unknown as CostConfirmationReadService,
       logger,
     );
 
@@ -208,20 +216,23 @@ describe("the Remarks of a transport added to the invoice", () => {
     ).toBe("TAR");
   });
 
-  /** N — every Cost Confirmation on the stored EK line. */
-  it("names every Cost Confirmation on the stored EK line", async () => {
+  /** N — every Cost Confirmation the Trip holds, from its records. */
+  it("names every Cost Confirmation the Trip holds", async () => {
     expect(
-      await remarksOfAdded({}, [
-        ["BASE_PRICE"],
-        ["COST_CONFIRMATION", undefined, "Cost confirmations 4208847, 4156173"],
-      ]),
+      await remarksOfAdded(
+        {},
+        [
+          ["BASE_PRICE"],
+          ["COST_CONFIRMATION", undefined, "Cost confirmations 4208847, 4156173"],
+        ],
+        true,
+        ["4208847", "4156173"],
+      ),
     ).toBe("CC4208847 | CC4156173");
   });
 
-  it("names the latest confirmation when the snapshot predates it", async () => {
-    expect(
-      await remarksOfAdded({ costConfirmation: { ccNumber: "4208847" } }, [["BASE_PRICE"]]),
-    ).toBe("CC4208847");
+  it("names a confirmation the stored snapshot predates", async () => {
+    expect(await remarksOfAdded({}, [["BASE_PRICE"]], true, ["4208847"])).toBe("CC4208847");
   });
 
   it("states the waiting window", async () => {
@@ -248,6 +259,8 @@ describe("the Remarks of a transport added to the invoice", () => {
           ["WAITING_TIME"],
           ["COST_CONFIRMATION", undefined, "Cost confirmation 4208847"],
         ],
+        true,
+        ["4208847"],
       ),
     ).toBe("Aan/Afkoppelen | TAR | Wachttijd 08:30-14:00 | CC4208847");
   });

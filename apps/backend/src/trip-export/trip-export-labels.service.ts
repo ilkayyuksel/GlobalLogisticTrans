@@ -1,5 +1,6 @@
 import { Injectable } from "@nestjs/common";
 
+import { CostConfirmationReadService } from "../cost-confirmations/cost-confirmation-read.service";
 import { AppLoggerService } from "../logger/app-logger.service";
 import {
   PRICING_SETTINGS_CATEGORY,
@@ -32,6 +33,7 @@ export class TripExportLabelsService {
     private readonly trips: TripService,
     private readonly pricing: TripPricingService,
     private readonly settings: SettingsService,
+    private readonly costConfirmations: CostConfirmationReadService,
     private readonly logger: AppLoggerService,
   ) {
     this.logger.setContext(TripExportLabelsService.name);
@@ -46,11 +48,15 @@ export class TripExportLabelsService {
       return new Map();
     }
 
-    const [trips, snapshots, automaticPropertyId] = await Promise.all([
-      this.trips.findManyByIds(tripIds),
-      this.pricing.findManyByTripIds(tripIds),
-      this.automaticPropertyId(),
-    ]);
+    const [trips, snapshots, automaticPropertyId, confirmations] =
+      await Promise.all([
+        this.trips.findManyByIds(tripIds),
+        // CURRENT snapshots only: an OPEN Trip's old one describes no charge.
+        this.pricing.findManyByTripIds(tripIds),
+        this.automaticPropertyId(),
+        // The records themselves, whatever the Trip's status.
+        this.costConfirmations.findNumbersForTrips(tripIds),
+      ]);
 
     const snapshotByTrip = new Map(
       snapshots.map((snapshot) => [snapshot.pricing.tripId, snapshot]),
@@ -63,6 +69,7 @@ export class TripExportLabelsService {
           trip,
           snapshotByTrip.get(trip.id) ?? null,
           automaticPropertyId,
+          confirmations.get(trip.id) ?? [],
           waitingWord,
           nextDayWord,
         ),

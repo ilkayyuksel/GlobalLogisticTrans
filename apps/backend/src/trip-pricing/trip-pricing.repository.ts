@@ -2,6 +2,7 @@ import { Injectable } from "@nestjs/common";
 import { Prisma, TripPricing } from "@prisma/client";
 
 import { PrismaService } from "../prisma/prisma.service";
+import { PRICED_TRIP_STATUS } from "./current-pricing";
 import { TripPricingItemRepository } from "../trip-pricing-items/trip-pricing-item.repository";
 import type { TripPricingItemWithComponent } from "../trip-pricing-items/dto/trip-pricing-item-response.dto";
 
@@ -78,11 +79,21 @@ export class TripPricingRepository {
    * state, and an empty row would be indistinguishable from a priced one whose
    * total happens to be zero.
    */
-  findManyByTripIds(
+  /**
+   * The CURRENT snapshots of many Trips: those of CLOSED Trips only.
+   *
+   * A reopened, cancelled or deleted Trip keeps its snapshot as history, and
+   * it is simply absent here — the same answer as a Trip never priced. See
+   * `current-pricing.ts`.
+   */
+  findCurrentByTripIds(
     tripIds: readonly string[],
   ): Promise<TripPricingWithItems[]> {
     return this.prisma.tripPricing.findMany({
-      where: { tripId: { in: [...tripIds] } },
+      where: {
+        tripId: { in: [...tripIds] },
+        trip: { status: PRICED_TRIP_STATUS },
+      },
       include: {
         items: {
           include: { pricingComponent: { select: { code: true } } },
@@ -92,8 +103,22 @@ export class TripPricingRepository {
     });
   }
 
+  /**
+   * The Trip's stored snapshot, WHATEVER its status.
+   *
+   * For the Engine and the snapshot store, which must find a reopened Trip's
+   * old snapshot to replace it when the Trip closes again. Never for showing a
+   * price — that is `findCurrentByTripId`.
+   */
   findByTripId(tripId: string): Promise<TripPricing | null> {
     return this.prisma.tripPricing.findUnique({ where: { tripId } });
+  }
+
+  /** The Trip's CURRENT snapshot: only while the Trip is CLOSED. */
+  findCurrentByTripId(tripId: string): Promise<TripPricing | null> {
+    return this.prisma.tripPricing.findFirst({
+      where: { tripId, trip: { status: PRICED_TRIP_STATUS } },
+    });
   }
 
   create(data: CreateTripPricingData): Promise<TripPricing> {
@@ -102,5 +127,26 @@ export class TripPricingRepository {
 
   update(id: string, data: UpdateTripPricingData): Promise<TripPricing> {
     return this.prisma.tripPricing.update({ where: { id }, data });
+  }
+
+  /**
+   * Rewrites a snapshot's header unless the stored one describes LATER inputs.
+   *
+   * A conditional UPDATE in one statement: a concurrent writer of the same row
+   * waits on its lock, and Postgres then re-checks `calculated_at` against the
+   * row as that writer left it. Two recalculations of one Trip therefore cannot
+   * land out of order. Null when the stored snapshot is newer and nothing was
+   * written.
+   */
+  async updateUnlessNewerStored(
+    id: string,
+    data: Prisma.TripPricingUncheckedUpdateManyInput & { calculatedAt: Date },
+  ): Promise<TripPricing | null> {
+    const { count } = await this.prisma.tripPricing.updateMany({
+      where: { id, calculatedAt: { lte: data.calculatedAt } },
+      data,
+    });
+
+    return count === 1 ? this.findById(id) : null;
   }
 }

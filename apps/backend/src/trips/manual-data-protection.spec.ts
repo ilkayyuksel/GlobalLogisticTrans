@@ -214,6 +214,13 @@ describe("manually managed Trip data", () => {
         trip = { ...trip, status };
         return Promise.resolve(trip);
       }),
+      transitionStatus: jest.fn((_id: string, from: TripStatus, to: TripStatus) => {
+        if (trip.status !== from) {
+          return Promise.resolve(false);
+        }
+        trip = { ...trip, status: to };
+        return Promise.resolve(true);
+      }),
       recordHistory: jest.fn().mockResolvedValue(undefined),
       runInTransaction: jest.fn(),
       runTripWriteTransaction: jest.fn(),

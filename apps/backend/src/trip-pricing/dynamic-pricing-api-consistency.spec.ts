@@ -82,10 +82,10 @@ describe("a mutation's pricing equals the Ritten list's pricing", () => {
         ),
       } as unknown as TripPricingOverrideRepository,
       {
-        findByTripId: jest.fn((tripId: string) =>
+        findCurrentByTripId: jest.fn((tripId: string) =>
           Promise.resolve(snapshotOf(tripId)),
         ),
-        findManyByTripIds: jest.fn((ids: readonly string[]) =>
+        findCurrentByTripIds: jest.fn((ids: readonly string[]) =>
           Promise.resolve(ids.map(snapshotOf)),
         ),
       } as unknown as TripPricingRepository,
@@ -101,7 +101,10 @@ describe("a mutation's pricing equals the Ritten list's pricing", () => {
         }),
       } as unknown as PricingEngineService,
       effectivePricing,
-      {} as unknown as TripReadService,
+      // A finished Trip: the only kind a recalculation prices.
+      {
+        findById: jest.fn((id: string) => Promise.resolve({ id, status: "CLOSED" })),
+      } as unknown as TripReadService,
       {} as unknown as PricingComponentResolver,
       {
         setContext: jest.fn(),
@@ -177,8 +180,8 @@ describe("a mutation's pricing equals the Ritten list's pricing", () => {
    */
   it("still reads a whole page in two queries", async () => {
     const snapshots = effectivePricing["snapshots"] as unknown as {
-      findManyByTripIds: jest.Mock;
-      findByTripId: jest.Mock;
+      findCurrentByTripIds: jest.Mock;
+      findCurrentByTripId: jest.Mock;
     };
     const overrides = effectivePricing["overrides"] as unknown as {
       findForTrips: jest.Mock;
@@ -188,8 +191,8 @@ describe("a mutation's pricing equals the Ritten list's pricing", () => {
       Array.from({ length: 50 }, (_, index) => `trip-${index}`),
     );
 
-    expect(snapshots.findManyByTripIds).toHaveBeenCalledTimes(1);
+    expect(snapshots.findCurrentByTripIds).toHaveBeenCalledTimes(1);
     expect(overrides.findForTrips).toHaveBeenCalledTimes(1);
-    expect(snapshots.findByTripId).not.toHaveBeenCalled();
+    expect(snapshots.findCurrentByTripId).not.toHaveBeenCalled();
   });
 });
