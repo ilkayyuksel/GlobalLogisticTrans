@@ -1,4 +1,4 @@
-import { PricingCalculationStatus } from "@prisma/client";
+import { PricingCalculationStatus, Prisma } from "@prisma/client";
 
 import { PrismaService } from "../prisma/prisma.service";
 import { TripPricingRepository } from "./trip-pricing.repository";
@@ -17,6 +17,8 @@ describe("TripPricingRepository", () => {
       findFirst: jest.Mock;
       findMany: jest.Mock;
     };
+    tripPricingRouteLeg: { deleteMany: jest.Mock; createMany: jest.Mock };
+    $transaction: jest.Mock;
   };
   let repository: TripPricingRepository;
 
@@ -30,6 +32,12 @@ describe("TripPricingRepository", () => {
         findFirst: jest.fn().mockResolvedValue(null),
         findMany: jest.fn().mockResolvedValue([]),
       },
+      tripPricingRouteLeg: {
+        deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
+        createMany: jest.fn().mockResolvedValue({ count: 0 }),
+      },
+      // Runs the read against the same client, as a transaction would.
+      $transaction: jest.fn((work: (client: unknown) => unknown) => work(prisma)),
     };
 
     repository = new TripPricingRepository(prisma as unknown as PrismaService);
@@ -90,6 +98,53 @@ describe("TripPricingRepository", () => {
           where: { tripId: { in: ["trip-1", "trip-2"] }, trip: { status: "CLOSED" } },
         }),
       );
+    });
+
+    /** The header, its lines and its route as one calculation, never two halves. */
+    it("reads snapshots with their lines and route in one REPEATABLE READ transaction", async () => {
+      await repository.findCurrentByTripIds(["trip-1"]);
+
+      expect(prisma.$transaction).toHaveBeenCalledWith(expect.any(Function), {
+        isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead,
+      });
+      expect(prisma.tripPricing.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          include: expect.objectContaining({
+            items: expect.any(Object),
+            routeLegs: { orderBy: { legPosition: "asc" } },
+          }),
+        }),
+      );
+    });
+  });
+
+  describe("replaceRouteLegs", () => {
+    const LEG = {
+      legPosition: null,
+      isPricedLeg: true,
+      routePricingId: "route-1",
+      departure: "Quay 869",
+      destination: "Ghlin",
+      matchMethod: "EXACT" as const,
+    };
+
+    it("replaces every leg of the snapshot", async () => {
+      await repository.replaceRouteLegs("pricing-1", [LEG]);
+
+      expect(prisma.tripPricingRouteLeg.deleteMany).toHaveBeenCalledWith({
+        where: { tripPricingId: "pricing-1" },
+      });
+      expect(prisma.tripPricingRouteLeg.createMany).toHaveBeenCalledWith({
+        data: [{ ...LEG, tripPricingId: "pricing-1" }],
+      });
+    });
+
+    /** No match: the old legs go, and nothing claims a route. */
+    it("leaves no leg when nothing matched", async () => {
+      await repository.replaceRouteLegs("pricing-1", []);
+
+      expect(prisma.tripPricingRouteLeg.deleteMany).toHaveBeenCalled();
+      expect(prisma.tripPricingRouteLeg.createMany).not.toHaveBeenCalled();
     });
 
     /* The Engine must still find a reopened Trip's snapshot to replace it. */

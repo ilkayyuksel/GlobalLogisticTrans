@@ -8,7 +8,6 @@ import { CustomPropertyService } from "../custom-properties/custom-property.serv
 import { TripCustomPropertyReadService } from "../trip-custom-properties/trip-custom-property-read.service";
 import { TripReadService, TripReadView } from "../trips/trip-read.service";
 import { MissingTripPricingInputException } from "./exceptions/pricing-engine.exceptions";
-import { CombinationMember } from "./combination-leg";
 import {
   PricingBaseSource,
   PricingRuleConfiguration,
@@ -63,6 +62,7 @@ function buildRules(
     strategy: PricingStrategy.ROUTE_BASED,
     fuelPercentage: "15",
     combinationSurcharge: "75",
+    overStSurcharge: "70.00",
     automaticCustomPropertyId: AUTOMATIC_PROPERTY_ID,
     waitingTimeFreeMinutes: 60,
     waitingTimeThresholdMinutes: 0,
@@ -107,13 +107,9 @@ function assignment(
   return { customPropertyId: id, name, pricingComponentId, defaultPrice };
 }
 
-/** No pair is configured unless a test says so: the road match then applies. */
-const combinationPricing = {
-  findConfiguredCombination: jest.fn().mockResolvedValue(null),
-};
-
 describe("PricingComponentResolver", () => {
-  let routePricingService: { findConfiguredRoute: jest.Mock };
+  let routePricingService: { findAllOrdinary: jest.Mock };
+  let combinationPricing: { findAll: jest.Mock };
   let tripCustomProperties: { findByTripId: jest.Mock };
   let ruleResolver: { resolveDistanceRatePerKm: jest.Mock };
   let customPropertyService: { findById: jest.Mock };
@@ -124,8 +120,10 @@ describe("PricingComponentResolver", () => {
 
   beforeEach(() => {
     routePricingService = {
-      findConfiguredRoute: jest.fn().mockResolvedValue(ROUTE_PRICING),
+      findAllOrdinary: jest.fn().mockResolvedValue([ROUTE_PRICING]),
     };
+    // No Combination is configured unless a test says so.
+    combinationPricing = { findAll: jest.fn().mockResolvedValue([]) };
     tripCustomProperties = {
       findByTripId: jest.fn().mockResolvedValue([]),
     };
@@ -176,28 +174,16 @@ describe("PricingComponentResolver", () => {
       return resolver.resolveBaseSource(
         trip,
         rules,
-        await resolver.resolveConfiguredRoute(trip),
+        (await resolver.resolveRouteSelection(trip)).route,
       );
     }
 
-    it("looks the route up by terminal and destination city", async () => {
+    /** An ordinary Trip is priced against the ORDINARY configurations only. */
+    it("matches among the ordinary configurations, never a Combination's", async () => {
       await priceRouteBased();
 
-      expect(routePricingService.findConfiguredRoute).toHaveBeenCalledWith(
-        "Antwerp",
-        "Rotterdam",
-        RouteConfigurationKind.NORMAL,
-      );
-    });
-
-    /** An ordinary Trip is priced against the ORDINARY configuration of its road. */
-    it("asks for the ordinary configuration, not a Combination one", async () => {
-      await priceRouteBased();
-
-      expect(routePricingService.findConfiguredRoute).toHaveBeenCalledTimes(1);
-      expect(
-        routePricingService.findConfiguredRoute.mock.calls[0][2],
-      ).toBe(RouteConfigurationKind.NORMAL);
+      expect(routePricingService.findAllOrdinary).toHaveBeenCalledTimes(1);
+      expect(combinationPricing.findAll).not.toHaveBeenCalled();
     });
 
     it("returns the configured base price as an exact string", async () => {
@@ -234,7 +220,7 @@ describe("PricingComponentResolver", () => {
      * silently absent.
      */
     it("prices at zero when no active route pricing is configured", async () => {
-      routePricingService.findConfiguredRoute.mockResolvedValue(null);
+      routePricingService.findAllOrdinary.mockResolvedValue([]);
 
       const source = await priceRouteBased();
 
@@ -250,7 +236,7 @@ describe("PricingComponentResolver", () => {
       const source = await priceRouteBased(buildTrip({ terminal: null }));
 
       expect(source).toMatchObject({ basePrice: "0.00", routePricingId: null });
-      expect(routePricingService.findConfiguredRoute).not.toHaveBeenCalled();
+      expect(routePricingService.findAllOrdinary).not.toHaveBeenCalled();
     });
 
     it("prices at zero when the Trip has no destination", async () => {
@@ -259,18 +245,18 @@ describe("PricingComponentResolver", () => {
       );
 
       expect(source).toMatchObject({ basePrice: "0.00", routePricingId: null });
-      expect(routePricingService.findConfiguredRoute).not.toHaveBeenCalled();
+      expect(routePricingService.findAllOrdinary).not.toHaveBeenCalled();
     });
 
     /** The gap is still reported, so an administrator can close it. */
     it("says so in the log rather than passing over it", async () => {
-      routePricingService.findConfiguredRoute.mockResolvedValue(null);
+      routePricingService.findAllOrdinary.mockResolvedValue([]);
 
       await priceRouteBased();
 
       expect(logger.warn).toHaveBeenCalledWith(
-        "No route pricing matched; the Trip prices at zero",
-        { tripId: TRIP_ID, hasTerminal: true, hasDestination: true },
+        "Route pricing not matched; route components priced at zero",
+        expect.objectContaining({ tripId: TRIP_ID, routeMatch: "NOT_FOUND" }),
       );
     });
 
@@ -283,140 +269,165 @@ describe("PricingComponentResolver", () => {
 
   /**
    * ── WHICH CONFIGURATION OF A ROAD APPLIES ────────────────────────────────
-   * A road may be configured twice: once as an ordinary route and once as a leg
-   * of a Combination, priced differently because a Combination's outbound and
-   * return are their own transports. No new rule decides between them — the
-   * existing `combinationLegOf` does, the same answer the TAR allocation uses.
+   * The road is the Trip's real driving direction, compared by the central
+   * matcher (`route-matcher.ts`, tested on its own). These tests prove the
+   * resolver asks it the right question: ordinary routes for an ordinary Trip,
+   * the PAIR of roads for a genuine Combination, and an honest "nothing" —
+   * with its reason — when no configuration is reliable.
    * ──────────────────────────────────────────────────────────────────────────
    */
   describe("which configured route a Trip matches", () => {
-    /** One document that printed an outbound delivery and a return collection. */
-    function combinationTrip(): TripReadView {
-      return buildTrip({
-        tripGroupId: GROUP_ID,
-        pdfDocumentId: DOCUMENT_ID,
-        direction: TripDirection.DELIVERY,
+    function ordinary(departure: string, destination: string, id = ROUTE_ID) {
+      return { ...ROUTE_PRICING, id, departure, destination };
+    }
+
+    it("matches the ordinary configuration exactly", async () => {
+      expect(await resolver.resolveRouteSelection(buildTrip())).toEqual({
+        route: {
+          routePricingId: ROUTE_ID,
+          basePrice: "380.00",
+          departure: "Antwerp",
+          destination: "Rotterdam",
+          kind: RouteConfigurationKind.NORMAL,
+          overSt: null,
+        },
+        // What the snapshot records: the configured road as it reads now.
+        trace: {
+          routePricingId: ROUTE_ID,
+          method: "EXACT",
+          combinationRouteGroupId: null,
+          legs: [
+            {
+              legPosition: null,
+              isPricedLeg: true,
+              routePricingId: ROUTE_ID,
+              departure: "Antwerp",
+              destination: "Rotterdam",
+              method: "EXACT",
+            },
+          ],
+        },
       });
-    }
+    });
 
-    function genuinePair(): CombinationMember[] {
-      return [
-        {
-          id: TRIP_ID,
-          tripGroupId: GROUP_ID,
-          pdfDocumentId: DOCUMENT_ID,
-          direction: TripDirection.DELIVERY,
-        },
-        {
-          id: OTHER_TRIP_ID,
-          tripGroupId: GROUP_ID,
-          pdfDocumentId: DOCUMENT_ID,
-          direction: TripDirection.COLLECTION,
-        },
-      ];
-    }
+    /** The configured spelling travels on, so its Toll and Tunnel are found. */
+    it("matches a difference in letter case as NORMALIZED", async () => {
+      routePricingService.findAllOrdinary.mockResolvedValue([
+        ordinary("ANTWERP", "ROTTERDAM"),
+      ]);
 
-    /** What the second lookup — the Combination one — answers. */
-    function configure(combinationLeg: unknown, ordinary: unknown): void {
-      routePricingService.findConfiguredRoute.mockImplementation(
-        async (_departure: string, _destination: string, kind: string) =>
-          kind === RouteConfigurationKind.COMBINATION ? combinationLeg : ordinary,
+      const selection = await resolver.resolveRouteSelection(buildTrip());
+
+      expect(selection.trace.method).toBe("NORMALIZED");
+      expect(selection.route).toMatchObject({
+        routePricingId: ROUTE_ID,
+        departure: "ANTWERP",
+        destination: "ROTTERDAM",
+      });
+    });
+
+    it("matches a single trusted typo as FUZZY, and says so", async () => {
+      const selection = await resolver.resolveRouteSelection(
+        buildTrip({ destinationCity: "Roterdam" }),
       );
-    }
 
-    it("matches the ordinary configuration for a Trip in no group", async () => {
-      const matched = await resolver.resolveConfiguredRoute(buildTrip());
-
-      expect(matched).toEqual({
-        routePricingId: ROUTE_ID,
-        basePrice: "380.00",
-        kind: RouteConfigurationKind.NORMAL,
-        overSt: null,
-      });
+      expect(selection.trace.method).toBe("FUZZY");
+      expect(selection.route?.routePricingId).toBe(ROUTE_ID);
+      expect(logger.log).toHaveBeenCalledWith(
+        "Route matched by a trusted typo",
+        expect.objectContaining({ tripId: TRIP_ID, routeMatch: "FUZZY" }),
+      );
     });
 
-    it("matches the Combination leg for a genuine Combination Trip", async () => {
-      trips.findByGroupId.mockResolvedValue(genuinePair());
-      configure({ ...ROUTE_PRICING, id: LEG_ID, basePrice: "100.00" }, null);
+    it("matches nothing, with the nearest candidates, when nothing is reliable", async () => {
+      const selection = await resolver.resolveRouteSelection(
+        buildTrip({ destinationCity: "Gent" }),
+      );
 
-      const matched = await resolver.resolveConfiguredRoute(combinationTrip());
-
-      expect(matched).toEqual({
-        routePricingId: LEG_ID,
-        basePrice: "100.00",
-        kind: RouteConfigurationKind.COMBINATION,
-        overSt: null,
+      expect(selection).toEqual({
+        route: null,
+        trace: {
+            routePricingId: null,
+            method: "NOT_FOUND",
+            combinationRouteGroupId: null,
+            legs: [],
+          },
       });
+      expect(logger.warn).toHaveBeenCalledWith(
+        "Route pricing not matched; route components priced at zero",
+        expect.objectContaining({
+          tripId: TRIP_ID,
+          departure: "Antwerp",
+          destination: "Gent",
+          routeMatch: "NOT_FOUND",
+          routePricingId: null,
+          nearest: [
+            expect.objectContaining({
+              routePricingId: ROUTE_ID,
+              departureEdits: 0,
+            }),
+          ],
+        }),
+      );
     });
 
-    /**
-     * ── AND THE LEG FALLS BACK ─────────────────────────────────────────────
-     * Every Combination Trip priced before Combination routes existed was priced
-     * against the ordinary configuration. Refusing to match would silently
-     * reprice all of them to zero, so the fallback is what keeps existing
-     * pricing unchanged; configuring a Combination route is what changes it.
-     */
-    it("falls back to the ordinary route when no Combination is configured", async () => {
-      trips.findByGroupId.mockResolvedValue(genuinePair());
-      configure(null, ROUTE_PRICING);
+    /** Never logs an amount: a warning is read by more people than a price. */
+    it("logs no configured amount with the nearest candidates", async () => {
+      await resolver.resolveRouteSelection(buildTrip({ destinationCity: "Gent" }));
 
-      const matched = await resolver.resolveConfiguredRoute(combinationTrip());
-
-      expect(matched).toMatchObject({
-        routePricingId: ROUTE_ID,
-        kind: RouteConfigurationKind.NORMAL,
-      });
+      expect(JSON.stringify(logger.warn.mock.calls)).not.toContain("380.00");
     });
 
-    /** A group an operator made by hand claims nothing about pairing. */
-    it("matches the ordinary configuration for a manual group", async () => {
-      trips.findByGroupId.mockResolvedValue([
-        {
-          id: TRIP_ID,
-          tripGroupId: GROUP_ID,
-          pdfDocumentId: DOCUMENT_ID,
-          direction: TripDirection.DELIVERY,
-        },
-        {
-          id: OTHER_TRIP_ID,
-          tripGroupId: GROUP_ID,
-          pdfDocumentId: "a-different-document",
-          direction: TripDirection.COLLECTION,
-        },
+    it("never chooses between two configurations of one road", async () => {
+      routePricingService.findAllOrdinary.mockResolvedValue([
+        ordinary("ANTWERP", "ROTTERDAM", "route-a"),
+        ordinary("antwerp", "rotterdam", "route-b"),
       ]);
-      configure({ ...ROUTE_PRICING, id: LEG_ID }, ROUTE_PRICING);
 
-      const matched = await resolver.resolveConfiguredRoute(combinationTrip());
-
-      expect(matched).toMatchObject({
-        routePricingId: ROUTE_ID,
-        kind: RouteConfigurationKind.NORMAL,
+      expect(await resolver.resolveRouteSelection(buildTrip())).toEqual({
+        route: null,
+        trace: {
+            routePricingId: null,
+            method: "AMBIGUOUS",
+            combinationRouteGroupId: null,
+            legs: [],
+          },
       });
     });
 
-    /** A malformed pair is reported elsewhere and never priced on a guess. */
-    it("matches the ordinary configuration for a malformed pair", async () => {
-      trips.findByGroupId.mockResolvedValue([
-        {
-          id: TRIP_ID,
-          tripGroupId: GROUP_ID,
-          pdfDocumentId: DOCUMENT_ID,
-          direction: TripDirection.DELIVERY,
-        },
-        {
-          id: OTHER_TRIP_ID,
-          tripGroupId: GROUP_ID,
-          pdfDocumentId: DOCUMENT_ID,
-          direction: TripDirection.DELIVERY,
-        },
-      ]);
-      configure({ ...ROUTE_PRICING, id: LEG_ID }, ROUTE_PRICING);
+    /** The road is directional: the reverse is a different transport. */
+    describe("direction", () => {
+      it("never matches a road configured the other way round", async () => {
+        routePricingService.findAllOrdinary.mockResolvedValue([
+          ordinary("Rotterdam", "Antwerp"),
+        ]);
 
-      const matched = await resolver.resolveConfiguredRoute(combinationTrip());
+        expect(
+          (await resolver.resolveRouteSelection(buildTrip())).trace.method,
+        ).toBe("NOT_FOUND");
+      });
 
-      expect(matched).toMatchObject({
-        routePricingId: ROUTE_ID,
-        kind: RouteConfigurationKind.NORMAL,
+      it("prices a collection on its road from the city to the terminal", async () => {
+        routePricingService.findAllOrdinary.mockResolvedValue([
+          ordinary("Rotterdam", "Antwerp"),
+        ]);
+
+        const selection = await resolver.resolveRouteSelection(
+          buildTrip({ direction: TripDirection.COLLECTION }),
+        );
+
+        expect(selection).toMatchObject({
+          trace: { method: "EXACT", legs: [{ departure: "Rotterdam", destination: "Antwerp" }] },
+          route: { routePricingId: ROUTE_ID },
+        });
+      });
+
+      it("does not price a collection on the terminal-first road", async () => {
+        const selection = await resolver.resolveRouteSelection(
+          buildTrip({ direction: TripDirection.COLLECTION }),
+        );
+
+        expect(selection.trace.method).toBe("NOT_FOUND");
       });
     });
 
@@ -426,22 +437,355 @@ describe("PricingComponentResolver", () => {
       ["no destination", { destinationCity: null }],
     ])("matches nothing for a Trip with %s", async (_name, overrides) => {
       expect(
-        await resolver.resolveConfiguredRoute(buildTrip(overrides)),
-      ).toBeNull();
-      expect(routePricingService.findConfiguredRoute).not.toHaveBeenCalled();
-    });
-
-    it("matches nothing when the road is configured in neither context", async () => {
-      configure(null, null);
-
-      expect(await resolver.resolveConfiguredRoute(buildTrip())).toBeNull();
+        await resolver.resolveRouteSelection(buildTrip(overrides)),
+      ).toEqual({
+        route: null,
+        trace: {
+            routePricingId: null,
+            method: "NOT_FOUND",
+            combinationRouteGroupId: null,
+            legs: [],
+          },
+      });
+      expect(routePricingService.findAllOrdinary).not.toHaveBeenCalled();
     });
 
     /** An ordinary Trip is not in a group, so its group is never read. */
     it("reads no group for a Trip that is in none", async () => {
-      await resolver.resolveConfiguredRoute(buildTrip());
+      await resolver.resolveRouteSelection(buildTrip());
 
       expect(trips.findByGroupId).not.toHaveBeenCalled();
+      expect(combinationPricing.findAll).not.toHaveBeenCalled();
+    });
+  });
+
+  /**
+   * ── A COMBINATION IS IDENTIFIED BY ITS PAIR ──────────────────────────────
+   * One road may be a leg of several Combinations. Only BOTH roads of the
+   * genuine pair name one, so a single road never picks a Combination — and a
+   * pair that names none, or more than one, falls back to the ordinary route.
+   * ──────────────────────────────────────────────────────────────────────────
+   */
+  describe("a genuine Combination", () => {
+    type ConfiguredOverSt = {
+      tarief: string | null;
+      toll: string | null;
+      tunnel: string | null;
+    };
+    const NO_OVER_ST: ConfiguredOverSt = { tarief: null, toll: null, tunnel: null };
+    const RETURN_LEG_ID = "6b2e1d2f-3c4e-4f5a-9b0c-1d2e3f4a5b6c";
+
+    /** Outbound: delivery Antwerp → Rotterdam. Return: collection Gent → Antwerp. */
+    function outbound(overrides: Partial<TripReadView> = {}): TripReadView {
+      return buildTrip({
+        tripGroupId: GROUP_ID,
+        pdfDocumentId: DOCUMENT_ID,
+        direction: TripDirection.DELIVERY,
+        ...overrides,
+      });
+    }
+
+    function inbound(overrides: Partial<TripReadView> = {}): TripReadView {
+      return buildTrip({
+        id: OTHER_TRIP_ID,
+        tripGroupId: GROUP_ID,
+        pdfDocumentId: DOCUMENT_ID,
+        direction: TripDirection.COLLECTION,
+        destinationCity: "Gent",
+        ...overrides,
+      });
+    }
+
+    function leg(
+      id: string,
+      departure: string,
+      destination: string,
+      position: number,
+      groupId: string,
+    ) {
+      return {
+        ...ROUTE_PRICING,
+        id,
+        departure,
+        destination,
+        basePrice: position === 1 ? "100.00" : "90.00",
+        combinationGroupId: groupId,
+        combinationLegPosition: position,
+        reviewed: false,
+      };
+    }
+
+    function combination(
+      id: string,
+      returnFrom: string,
+      overSt: ConfiguredOverSt = NO_OVER_ST,
+      ids: [string, string] = [LEG_ID, RETURN_LEG_ID],
+    ) {
+      return {
+        id,
+        reviewed: false,
+        legs: [
+          leg(ids[0], "Antwerp", "Rotterdam", 1, id),
+          leg(ids[1], returnFrom, "Antwerp", 2, id),
+        ],
+        overSt,
+        createdAt: new Date("2026-01-01T00:00:00Z"),
+        updatedAt: new Date("2026-01-01T00:00:00Z"),
+      };
+    }
+
+    function pair(
+      own: Partial<TripReadView> = {},
+      partner: Partial<TripReadView> = {},
+    ): [TripReadView, TripReadView] {
+      const members: [TripReadView, TripReadView] = [outbound(own), inbound(partner)];
+      trips.findByGroupId.mockResolvedValue(members);
+
+      return members;
+    }
+
+    it("prices each leg on its own leg of the configured pair", async () => {
+      const [first, second] = pair();
+      combinationPricing.findAll.mockResolvedValue([combination("combo-1", "Gent")]);
+
+      expect(await resolver.resolveRouteSelection(first)).toEqual({
+        route: {
+          routePricingId: LEG_ID,
+          basePrice: "100.00",
+          departure: "Antwerp",
+          destination: "Rotterdam",
+          kind: RouteConfigurationKind.COMBINATION,
+          overSt: null,
+        },
+        // Both legs of the selected pair, this Trip's marked.
+        trace: {
+          routePricingId: LEG_ID,
+          method: "EXACT",
+          combinationRouteGroupId: "combo-1",
+          legs: [
+            {
+              legPosition: 1,
+              isPricedLeg: true,
+              routePricingId: LEG_ID,
+              departure: "Antwerp",
+              destination: "Rotterdam",
+              method: "EXACT",
+            },
+            {
+              legPosition: 2,
+              isPricedLeg: false,
+              routePricingId: RETURN_LEG_ID,
+              departure: "Gent",
+              destination: "Antwerp",
+              method: "EXACT",
+            },
+          ],
+        },
+      });
+      expect(
+        (await resolver.resolveRouteSelection(second)).route,
+      ).toMatchObject({ routePricingId: RETURN_LEG_ID, basePrice: "90.00" });
+    });
+
+    /** The outbound alone fits both; the return decides. */
+    it("chooses the Combination by its pair, not by a shared outbound", async () => {
+      const [first] = pair();
+      combinationPricing.findAll.mockResolvedValue([
+        combination("combo-brugge", "Brugge", NO_OVER_ST, ["leg-b1", "leg-b2"]),
+        combination("combo-gent", "Gent", NO_OVER_ST, ["leg-g1", "leg-g2"]),
+      ]);
+
+      expect(
+        (await resolver.resolveRouteSelection(first)).route?.routePricingId,
+      ).toBe("leg-g1");
+    });
+
+    it.each([
+      ["a road that is no leg at all", [combination("combo-1", "Brugge")], "LEG_NOT_IDENTIFIED"],
+      [
+        "both roads configured, but in different Combinations",
+        [
+          combination("combo-1", "Brugge", NO_OVER_ST, ["leg-11", "leg-12"]),
+          {
+            ...combination("combo-2", "Gent", NO_OVER_ST, ["leg-21", "leg-22"]),
+            legs: [
+              leg("leg-21", "Antwerp", "Brussel", 1, "combo-2"),
+              leg("leg-22", "Gent", "Antwerp", 2, "combo-2"),
+            ],
+          },
+        ],
+        "PAIR_NOT_CONFIGURED",
+      ],
+      [
+        "two Combinations of this pair",
+        [
+          combination("combo-1", "Gent", NO_OVER_ST, ["leg-11", "leg-12"]),
+          combination("combo-2", "Gent", NO_OVER_ST, ["leg-21", "leg-22"]),
+        ],
+        "AMBIGUOUS",
+      ],
+    ])("falls back to the ordinary route with %s", async (_name, groups, reason) => {
+      const [first] = pair();
+      combinationPricing.findAll.mockResolvedValue(groups);
+
+      expect(await resolver.resolveRouteSelection(first)).toMatchObject({
+        route: { routePricingId: ROUTE_ID, kind: RouteConfigurationKind.NORMAL },
+        // Never a Combination recorded for a pair that was not identified.
+        trace: { method: "EXACT", combinationRouteGroupId: null, legs: [{ legPosition: null }] },
+      });
+      expect(logger.warn).toHaveBeenCalledWith(
+        "Combination pair not identified; pricing the ordinary route",
+        expect.objectContaining({ tripId: TRIP_ID, reason }),
+      );
+    });
+
+    /** A group an operator made by hand claims nothing about pairing. */
+    it("matches the ordinary configuration for a manual group", async () => {
+      const [first] = pair({}, { pdfDocumentId: "a-different-document" });
+      combinationPricing.findAll.mockResolvedValue([combination("combo-1", "Gent")]);
+
+      expect(await resolver.resolveRouteSelection(first)).toMatchObject({
+        route: { routePricingId: ROUTE_ID, kind: RouteConfigurationKind.NORMAL },
+      });
+      expect(combinationPricing.findAll).not.toHaveBeenCalled();
+    });
+
+    /** A malformed pair is reported elsewhere and never priced on a guess. */
+    it("matches the ordinary configuration for a malformed pair", async () => {
+      const [first] = pair({}, { direction: TripDirection.DELIVERY });
+      combinationPricing.findAll.mockResolvedValue([combination("combo-1", "Gent")]);
+
+      expect(await resolver.resolveRouteSelection(first)).toMatchObject({
+        route: { routePricingId: ROUTE_ID, kind: RouteConfigurationKind.NORMAL },
+      });
+    });
+
+    /**
+     * ── OVER ST ────────────────────────────────────────────────────────────
+     * Leg 2 only, planningDates that differ, Over ST configured. The amounts
+     * travel on the match; the calculators add them (and the €70) — see
+     * combination-over-st.pricing.spec.ts.
+     */
+    describe("Over ST", () => {
+      const OVER_ST: ConfiguredOverSt = { tarief: "50.00", toll: null, tunnel: "0.00" };
+
+      async function overStOf(
+        legDates: { first: string | null; second: string | null },
+        configured: ConfiguredOverSt = OVER_ST,
+        priced: "first" | "second" = "second",
+      ) {
+        const [first, second] = pair(
+          { planningDate: legDates.first },
+          { planningDate: legDates.second },
+        );
+        combinationPricing.findAll.mockResolvedValue([
+          combination("combo-1", "Gent", configured),
+        ]);
+
+        return (
+          await resolver.resolveRouteSelection(priced === "first" ? first : second)
+        ).route?.overSt;
+      }
+
+      it("applies to Leg 2 planned on another day, unstated amounts as zero", async () => {
+        expect(
+          await overStOf({ first: "2026-08-17", second: "2026-08-18" }),
+        ).toEqual({ tarief: "50.00", toll: "0.00", tunnel: "0.00" });
+      });
+
+      it("never applies to Leg 1", async () => {
+        expect(
+          await overStOf({ first: "2026-08-17", second: "2026-08-18" }, OVER_ST, "first"),
+        ).toBeNull();
+      });
+
+      it("does not apply on the same day", async () => {
+        expect(
+          await overStOf({ first: "2026-08-17", second: "2026-08-17" }),
+        ).toBeNull();
+      });
+
+      it("does not apply when a planningDate is missing", async () => {
+        expect(await overStOf({ first: null, second: "2026-08-18" })).toBeNull();
+        expect(logger.log).toHaveBeenCalledWith(
+          "Combination matched by its pair of roads",
+          expect.objectContaining({ overStApplies: false, overStReason: "DATE_MISSING" }),
+        );
+      });
+
+      it("does not apply when the Combination has no Over ST configured", async () => {
+        expect(
+          await overStOf({ first: "2026-08-17", second: "2026-08-18" }, NO_OVER_ST),
+        ).toBeNull();
+        expect(logger.log).toHaveBeenCalledWith(
+          "Combination matched by its pair of roads",
+          expect.objectContaining({ overStApplies: false, overStReason: "NOT_CONFIGURED" }),
+        );
+      });
+
+      it("applies when every amount is configured as zero", async () => {
+        expect(
+          await overStOf(
+            { first: "2026-08-17", second: "2026-08-18" },
+            { tarief: "0.00", toll: "0.00", tunnel: "0.00" },
+          ),
+        ).toEqual({ tarief: "0.00", toll: "0.00", tunnel: "0.00" });
+      });
+    });
+
+    /** A leg's road decides the pair both legs are priced on. */
+    describe("the Trips a road change reprices", () => {
+      it("names the Trip and its same-document group members", async () => {
+        const [first] = pair();
+
+        expect(await resolver.tripsPricedByRoadOf(first)).toEqual([TRIP_ID, OTHER_TRIP_ID]);
+      });
+
+      /** Even a pair a direction change just made malformed: its price moves too. */
+      it("names them whether or not the pair is genuine now", async () => {
+        const [first] = pair({}, { direction: TripDirection.DELIVERY });
+
+        expect(await resolver.tripsPricedByRoadOf(first)).toEqual([TRIP_ID, OTHER_TRIP_ID]);
+      });
+
+      it("leaves out a member of another document", async () => {
+        const [first] = pair({}, { pdfDocumentId: "another-document" });
+
+        expect(await resolver.tripsPricedByRoadOf(first)).toEqual([TRIP_ID]);
+      });
+
+      it("names only the Trip itself outside any group, reading nothing", async () => {
+        expect(await resolver.tripsPricedByRoadOf(buildTrip())).toEqual([TRIP_ID]);
+        expect(trips.findByGroupId).not.toHaveBeenCalled();
+      });
+    });
+
+    /** Found by the same pair match, so the Trips named are the ones whose price moves. */
+    describe("the Trips a planningDate change reprices", () => {
+      it("names the partner when the Trip is Leg 1", async () => {
+        const [first] = pair();
+        combinationPricing.findAll.mockResolvedValue([combination("combo-1", "Gent")]);
+
+        expect(await resolver.legsPricedByPlanningDate(first)).toEqual([OTHER_TRIP_ID]);
+      });
+
+      it("names the Trip itself when it is Leg 2", async () => {
+        const [, second] = pair();
+        combinationPricing.findAll.mockResolvedValue([combination("combo-1", "Gent")]);
+
+        expect(await resolver.legsPricedByPlanningDate(second)).toEqual([OTHER_TRIP_ID]);
+      });
+
+      it("names nobody when the pair is not configured", async () => {
+        const [first] = pair();
+        combinationPricing.findAll.mockResolvedValue([combination("combo-1", "Brugge")]);
+
+        expect(await resolver.legsPricedByPlanningDate(first)).toEqual([]);
+      });
+
+      it("names nobody for a Trip in no group", async () => {
+        expect(await resolver.legsPricedByPlanningDate(buildTrip())).toEqual([]);
+      });
     });
   });
 
@@ -488,7 +832,7 @@ describe("PricingComponentResolver", () => {
         null,
       );
 
-      expect(routePricingService.findConfiguredRoute).not.toHaveBeenCalled();
+      expect(routePricingService.findAllOrdinary).not.toHaveBeenCalled();
     });
 
     it("propagates a missing distance-rate setting", async () => {

@@ -1,6 +1,7 @@
 "use client";
 
 import { InlineCell } from "@/components/ritten/inline-cell";
+import { RouteMatchHint } from "@/components/ritten/route-match-hint";
 import {
   OVERRIDABLE_COMPONENTS,
   type OverridableComponent,
@@ -45,6 +46,8 @@ interface EditableColumn {
   readonly labelKey: "ritten.column.tarief" | "ritten.column.tol" | "ritten.column.tunnel";
   readonly componentCode: OverridableComponent;
   readonly amountOf: (pricing: EffectivePricing) => string;
+  /** The Tarief also says which configured route the stored price came from. */
+  readonly showsRouteMatch?: boolean;
 }
 
 const EDITABLE_COLUMNS: Record<string, EditableColumn> = {
@@ -52,6 +55,7 @@ const EDITABLE_COLUMNS: Record<string, EditableColumn> = {
     labelKey: "ritten.column.tarief",
     componentCode: OVERRIDABLE_COMPONENTS.tarief,
     amountOf: (pricing) => pricing.tarief,
+    showsRouteMatch: true,
   },
   tol: {
     labelKey: "ritten.column.tol",
@@ -205,6 +209,7 @@ function EditableAmountCell({
   return (
     <td className="whitespace-nowrap px-1.5 py-2 text-right tabular-nums text-secondary">
       <span className="inline-flex items-center justify-end gap-1">
+        {column.showsRouteMatch ? <RouteMatchHint routeMatch={pricing.routeMatch} /> : null}
         <InlineCell
           label={`${label} ${t("ritten.pricing.editLabel")}`}
           kind="number"

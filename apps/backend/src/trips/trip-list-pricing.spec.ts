@@ -4,7 +4,6 @@ import { CostConfirmationService } from "../cost-confirmations/cost-confirmation
 import { DomainEventBus } from "../common/events/domain-event-bus";
 import { DriverService } from "../drivers/driver.service";
 import { AppLoggerService } from "../logger/app-logger.service";
-import { TripPricingItemRepository } from "../trip-pricing-items/trip-pricing-item.repository";
 import { EffectivePricingService } from "../trip-pricing/effective-pricing.service";
 import { TripPricingOverrideRepository } from "../trip-pricing/trip-pricing-override.repository";
 import { TripPricingRepository } from "../trip-pricing/trip-pricing.repository";
@@ -76,6 +75,10 @@ function buildSnapshot(tripId: string, basePrice: string) {
   return {
     id: `pricing-${tripId}`,
     tripId,
+    routeMatch: null,
+    routePricingId: null,
+    combinationRouteGroupId: null,
+    routeLegs: [],
     items: [
       {
         pricingComponent: { code: "BASE_PRICE" },
@@ -136,7 +139,6 @@ describe("the Ritten list carries the effective pricing of each Trip", () => {
     findOverridesForTrips = jest.fn().mockResolvedValue([]);
 
     const effectivePricing = new EffectivePricingService(
-      { findByTripPricingId } as unknown as TripPricingItemRepository,
       {
         findForTrips: findOverridesForTrips,
         findForTrip: findOverridesForTrip,

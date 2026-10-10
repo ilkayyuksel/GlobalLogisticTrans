@@ -31,7 +31,8 @@ import { ImportTripsCommand } from "./import-trips.command";
 import { changesPricingInput } from "./billable-fields";
 import {
   movesPlanningDate,
-  repriceAfterPlanningDateChange,
+  movesRoad,
+  repriceAfterCombinationInputChange,
 } from "./planning-date-change";
 import {
   AssignmentSubject,
@@ -430,8 +431,14 @@ export class TripService {
    * ── AND THE PLANNING DATE ───────────────────────────────────────────────
    * A date is a pricing input only for a genuine Combination, where it decides
    * Leg 2's Over ST — and Leg 2 may be the OTHER Trip. So it is not one of the
-   * fields above: `repriceAfterPlanningDateChange` asks the pricing domain
+   * fields above: `repriceAfterCombinationInputChange` asks the pricing domain
    * which CLOSED Trips the move affects and reprices exactly those, once each.
+   *
+   * ── AND THE ROAD ────────────────────────────────────────────────────────
+   * Terminal and destination are this Trip's own pricing inputs, but for a leg
+   * of a Combination they also decide which configured pair its PARTNER is
+   * priced on. So a real change of the road reprices the partner too, through
+   * the same call — and this Trip once, not twice.
    *
    * ── AND WHY THE STATUS IS NEVER TOUCHED ─────────────────────────────────
    * A CLOSED Trip stays CLOSED. The price of a finished job may change; whether
@@ -442,18 +449,24 @@ export class TripService {
     updated: Trip,
     dto: UpdateTripDto,
   ): Promise<TripResponseDto> {
-    const datedOutcomes = movesPlanningDate(existing, updated)
-      ? await repriceAfterPlanningDateChange(
-          updated.id,
-          this.recalculation,
-          (tripId) => this.repository.findById(tripId),
-          this.logger,
-        )
-      : new Map<string, PricingRecalculationOutcome>();
+    const changed = {
+      planningDate: movesPlanningDate(existing, updated),
+      road: movesRoad(existing, updated),
+    };
+    const pairOutcomes =
+      changed.planningDate || changed.road
+        ? await repriceAfterCombinationInputChange(
+            updated.id,
+            changed,
+            this.recalculation,
+            (tripId) => this.repository.findById(tripId),
+            this.logger,
+          )
+        : new Map<string, PricingRecalculationOutcome>();
     const response = await this.toResponse(updated);
-    const ownOutcome = datedOutcomes.get(updated.id);
+    const ownOutcome = pairOutcomes.get(updated.id);
 
-    // Priced already by the date change: once is the same snapshot.
+    // Priced already by the date or road change: once is the same snapshot.
     if (!changesPricingInput(dto) || ownOutcome !== undefined) {
       return this.withOutcome(response, ownOutcome);
     }

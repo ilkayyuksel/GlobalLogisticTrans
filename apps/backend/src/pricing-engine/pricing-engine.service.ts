@@ -20,6 +20,7 @@ import {
   PricingPreparation,
 } from "./pricing-calculation-result";
 import { PricingComponentResolver } from "./pricing-component.resolver";
+import { pricingRoadOf } from "./combination-over-st";
 import {
   PRICING_CALCULATION_STEPS,
   PricingCalculationStep,
@@ -259,7 +260,9 @@ export class PricingEngineService {
 
     /*
      * The route is read straight off the Trip and does not depend on the
-     * strategy: a Trip runs one route however its base price is derived.
+     * strategy: a Trip runs one route however its base price is derived. It is
+     * the road in its real driving direction — terminal → city for a delivery,
+     * city → terminal for a collection — the same road the matcher compares.
      *
      * A missing destination is NOT refused. It used to be — the Trip was
      * reported as having no priceable input — but the consequence was that no
@@ -269,7 +272,8 @@ export class PricingEngineService {
      * as a route nobody configured: zero, visibly, with everything else still
      * working. See `resolveRouteBaseSource`.
      */
-    const route: PricingRouteIdentity = {
+    const road = pricingRoadOf(trip);
+    const route: PricingRouteIdentity = road ?? {
       departure: trip.terminal,
       destination: trip.destinationCity ?? "",
     };
@@ -277,12 +281,13 @@ export class PricingEngineService {
     /*
      * The configured route, matched ONCE for this Trip and then read by three
      * components: the Tarief, the toll and the tunnel — and, for Leg 2 of a
-     * Combination planned on another day than Leg 1, the Over ST on top. A road may be configured twice — as an ordinary route and as a leg
-     * of a Combination — so three separate lookups could match three different
-     * rows and price a Trip with a mixture of them.
+     * Combination planned on another day than Leg 1, the Over ST on top. A
+     * road may be configured twice — as an ordinary route and as a leg of a
+     * Combination — so three separate lookups could match three different rows
+     * and price a Trip with a mixture of them.
      */
-    const matchedRoute =
-      await this.componentResolver.resolveConfiguredRoute(trip);
+    const selection = await this.componentResolver.resolveRouteSelection(trip);
+    const matchedRoute = selection.route;
 
     const baseSource = await this.componentResolver.resolveBaseSource(
       trip,
@@ -294,7 +299,6 @@ export class PricingEngineService {
 
     const routeCosts = await this.routeCostResolver.resolve(
       trip.id,
-      route,
       matchedRoute,
     );
     // Both halves of every route-priced component are now known, so a gap
@@ -331,6 +335,7 @@ export class PricingEngineService {
       isCombination: carriesCombinationSurcharge(trip),
       waitingTimeMinutes: trip.waitingTimeMinutes ?? NO_WAITING_TIME_MINUTES,
       route,
+      routeMatch: selection.trace,
       baseSource,
       rules,
       assignedCustomProperties,
@@ -348,6 +353,7 @@ export class PricingEngineService {
       strategy: rules.strategy,
       isCombination: context.isCombination,
       isReprocess: existingSnapshot !== null,
+      routeMatch: selection.trace.method,
       assignedCustomPropertyCount: assignedCustomProperties.length,
       routeCostCount: routeCosts.length,
       durationMs,

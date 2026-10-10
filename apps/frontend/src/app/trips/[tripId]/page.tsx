@@ -58,6 +58,9 @@ interface Feedback {
  * because closing a Trip also triggers pricing — a separate operation that can
  * fail on its own. Assuming the Trip is priced because the status call
  * succeeded is exactly the mistake this avoids.
+ *
+ * The one exception is reprocessing: its response is not a prediction but the
+ * stored snapshot itself, read back by the backend, so it is shown directly.
  */
 export default function TripDetailPage() {
   const t = useTranslation();
@@ -97,23 +100,41 @@ function TripDetailView({
   const [viewingDocument, setViewingDocument] = useState<string | null>(null);
   const [isBusy, setIsBusy] = useState(false);
   const [feedback, setFeedback] = useState<Feedback | null>(null);
+  /**
+   * The snapshot a reprocess answered with, for the detail it was made on.
+   *
+   * Keyed to that detail: once the page reloads for any other reason, the
+   * freshly read snapshot is shown and this one is ignored.
+   */
+  const [reprocessed, setReprocessed] = useState<{
+    detail: TripDetail;
+    snapshot: PricingSnapshot;
+  } | null>(null);
   const { trip } = detail;
+  const shownPricing =
+    reprocessed?.detail === detail ? reprocessed.snapshot : detail.pricing;
 
   /**
-   * Runs one backend operation and reloads the Trip from the backend.
+   * Runs one backend operation and then shows what the backend now holds.
    *
-   * The reload is the point: after any change the page shows what the backend
-   * actually holds, not what this component predicted it would hold.
+   * By default that means reloading the Trip: the page shows what the backend
+   * actually holds, not what this component predicted it would hold. An
+   * operation whose response IS what the backend now holds — read back from
+   * storage — may apply it instead (`onSuccess`); a failure applies nothing.
    */
   const runAction = useCallback(
-    async (operation: () => Promise<unknown>, successMessage: string) => {
+    async <TResult,>(
+      operation: () => Promise<TResult>,
+      successMessage: string,
+      onSuccess: (result: TResult) => void = () => onChanged(),
+    ) => {
       setIsBusy(true);
       setFeedback(null);
 
       try {
-        await operation();
+        const result = await operation();
         setFeedback({ tone: "success", message: successMessage });
-        onChanged();
+        onSuccess(result);
       } catch (caught: unknown) {
         setFeedback({ tone: "error", message: userFacingMessage(caught) });
       } finally {
@@ -146,13 +167,20 @@ function TripDetailView({
     [onChanged, trip.id, t],
   );
 
+  /*
+   * The reprocess response is the snapshot just stored — its amounts and the
+   * route it was matched to, read back by the backend in one consistent read,
+   * the same read a GET would make. So it is shown as it is: no second request,
+   * and nothing from it when the reprocess failed.
+   */
   const handleReprocess = useCallback(
     () =>
       runAction(
         () => reprocessTripPricing(trip.id),
         t("tripDetail.feedback.repriced"),
+        (snapshot) => setReprocessed({ detail, snapshot }),
       ),
-    [runAction, trip.id, t],
+    [runAction, trip.id, t, detail],
   );
 
   return (
@@ -226,7 +254,7 @@ function TripDetailView({
       />
 
       <PricingPanel
-        snapshot={detail.pricing}
+        snapshot={shownPricing}
         tripStatus={trip.status}
         isReprocessing={isBusy}
         onReprocess={handleReprocess}

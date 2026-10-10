@@ -1,5 +1,6 @@
 "use client";
 
+import { RouteMatchSection } from "@/components/pricing/route-match-section";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardHeader } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/states";
@@ -158,6 +159,8 @@ function PricingBreakdown({ snapshot }: { snapshot: PricingSnapshot }) {
           {t("pricing.rules")} {pricing.pricingRuleVersion}
         </span>
       </div>
+
+      {snapshot.routeMatch ? <RouteMatchSection routeMatch={snapshot.routeMatch} /> : null}
 
       <div className="overflow-x-auto">
         <table className="mt-3 w-full text-left text-sm">

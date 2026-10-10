@@ -1,4 +1,9 @@
-import { PricingCalculationStatus, Prisma, TripPricing } from "@prisma/client";
+import {
+  PricingCalculationStatus,
+  Prisma,
+  RouteMatchMethod,
+  TripPricing,
+} from "@prisma/client";
 
 import { AppLoggerService } from "../logger/app-logger.service";
 import { TripPricingItemRepository } from "../trip-pricing-items/trip-pricing-item.repository";
@@ -25,6 +30,9 @@ function buildSnapshot(overrides: Partial<TripPricing> = {}): TripPricing {
     pricingEngineVersion: "1.0.0",
     pricingRuleVersion: "2026.1",
     calculationStatus: PricingCalculationStatus.CALCULATED,
+    routePricingId: "route-1",
+    routeMatch: RouteMatchMethod.EXACT,
+    combinationRouteGroupId: null,
     notes: null,
     createdAt: new Date("2026-08-01T00:00:00Z"),
     updatedAt: new Date("2026-08-17T09:00:00.000Z"),
@@ -42,6 +50,19 @@ function buildCommand(
     pricingEngineVersion: "1.0.0",
     pricingRuleVersion: "2026.1",
     calculationStatus: PricingCalculationStatus.CALCULATED,
+    routePricingId: "route-1",
+    routeMatch: RouteMatchMethod.EXACT,
+    combinationRouteGroupId: null,
+    routeLegs: [
+      {
+        legPosition: null,
+        isPricedLeg: true,
+        routePricingId: "route-1",
+        departure: "Antwerp",
+        destination: "Rotterdam",
+        matchMethod: RouteMatchMethod.EXACT,
+      },
+    ],
     items: [
       {
         pricingComponentId: "component-base",
@@ -85,6 +106,7 @@ describe("TripPricingService — atomic snapshot write", () => {
     findByTripId: jest.Mock;
     create: jest.Mock;
     updateUnlessNewerStored: jest.Mock;
+    replaceRouteLegs: jest.Mock;
   };
   let itemRepository: { createMany: jest.Mock; deleteByTripPricingId: jest.Mock };
   let trips: { findById: jest.Mock };
@@ -108,6 +130,9 @@ describe("TripPricingService — atomic snapshot write", () => {
       updateUnlessNewerStored: jest.fn().mockImplementation(async () => {
         journal.push("update-parent");
         return buildSnapshot();
+      }),
+      replaceRouteLegs: jest.fn().mockImplementation(async () => {
+        journal.push("replace-route");
       }),
     };
 
@@ -163,7 +188,7 @@ describe("TripPricingService — atomic snapshot write", () => {
       await service.replaceSnapshot(buildCommand());
 
       expect(repository.runInTransaction).toHaveBeenCalledTimes(1);
-      expect(committed).toEqual(["create-parent", "create-items"]);
+      expect(committed).toEqual(["create-parent", "create-items", "replace-route"]);
     });
 
     it("stores every field the snapshot carries", async () => {
@@ -176,6 +201,9 @@ describe("TripPricingService — atomic snapshot write", () => {
         pricingEngineVersion: "1.0.0",
         pricingRuleVersion: "2026.1",
         calculationStatus: PricingCalculationStatus.CALCULATED,
+        routePricingId: "route-1",
+        routeMatch: RouteMatchMethod.EXACT,
+    combinationRouteGroupId: null,
       });
     });
 
@@ -246,7 +274,28 @@ describe("TripPricingService — atomic snapshot write", () => {
         "update-parent",
         "delete-items",
         "create-items",
+        "replace-route",
       ]);
+    });
+
+    /** The route belongs to the amounts: stored with them, from the same command. */
+    it("replaces the matched route with the breakdown", async () => {
+      const command = buildCommand();
+
+      await service.replaceSnapshot(command);
+
+      expect(pricingRepository.replaceRouteLegs).toHaveBeenCalledWith(
+        PRICING_ID,
+        command.routeLegs,
+      );
+      expect(pricingRepository.updateUnlessNewerStored).toHaveBeenCalledWith(
+        PRICING_ID,
+        expect.objectContaining({
+          routePricingId: "route-1",
+          routeMatch: RouteMatchMethod.EXACT,
+          combinationRouteGroupId: null,
+        }),
+      );
     });
 
     it("keeps the snapshot's identity rather than creating a new one", async () => {
@@ -274,6 +323,9 @@ describe("TripPricingService — atomic snapshot write", () => {
         pricingEngineVersion: "1.0.0",
         pricingRuleVersion: "2026.2",
         calculationStatus: PricingCalculationStatus.CALCULATED,
+        routePricingId: "route-1",
+        routeMatch: RouteMatchMethod.EXACT,
+    combinationRouteGroupId: null,
       });
     });
 
@@ -423,7 +475,7 @@ describe("TripPricingService — atomic snapshot write", () => {
       // One transaction, three writes. Nothing escapes it, so a concurrent
       // reprocess can never observe a half-replaced breakdown.
       expect(repository.runInTransaction).toHaveBeenCalledTimes(1);
-      expect(committed).toHaveLength(3);
+      expect(committed).toHaveLength(4);
     });
 
     it("re-reads the existing snapshot inside the transaction", async () => {
@@ -475,6 +527,8 @@ describe("TripPricingService — atomic snapshot write", () => {
       );
       expect(itemRepository.deleteByTripPricingId).not.toHaveBeenCalled();
       expect(itemRepository.createMany).not.toHaveBeenCalled();
+      // Nor the route: an older calculation's match never replaces a newer one.
+      expect(pricingRepository.replaceRouteLegs).not.toHaveBeenCalled();
       expect(response.calculatedAt).toEqual(newer.calculatedAt);
       expect(logger.warn).toHaveBeenCalledWith(
         "Discarded a calculation older than the stored snapshot",
@@ -501,7 +555,12 @@ describe("TripPricingService — atomic snapshot write", () => {
       await service.replaceSnapshot(buildCommand());
 
       expect(pricingRepository.updateUnlessNewerStored).toHaveBeenCalledTimes(1);
-      expect(committed).toEqual(["update-parent", "delete-items", "create-items"]);
+      expect(committed).toEqual([
+        "update-parent",
+        "delete-items",
+        "create-items",
+        "replace-route",
+      ]);
     });
   });
 

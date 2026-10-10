@@ -9,6 +9,16 @@ const ROUTE = {
   destination: "Rotterdam",
 };
 
+/** An ordinary configured route, as the matcher returned it. */
+const NORMAL_MATCH = {
+  routePricingId: "9c858901-8a57-4791-81fe-4c455b099bc9",
+  basePrice: "380.00",
+  departure: ROUTE.departure,
+  destination: ROUTE.destination,
+  overSt: null,
+  kind: "NORMAL" as const,
+};
+
 /** One route cost, shaped as RouteCostService returns it. */
 function routeCost(
   id: string,
@@ -51,8 +61,8 @@ describe("RouteCostResolver", () => {
     );
   });
 
-  it("looks the costs up by the Trip's route", async () => {
-    await resolver.resolve(TRIP_ID, ROUTE);
+  it("looks the costs up by the matched configuration's road", async () => {
+    await resolver.resolve(TRIP_ID, NORMAL_MATCH);
 
     expect(routeCostService.findActiveForRoute).toHaveBeenCalledWith(
       ROUTE.departure,
@@ -66,7 +76,7 @@ describe("RouteCostResolver", () => {
       routeCost("cost-2", "component-tunnel", "TUNNEL", "12.50"),
     ]);
 
-    expect(await resolver.resolve(TRIP_ID, ROUTE)).toEqual([
+    expect(await resolver.resolve(TRIP_ID, NORMAL_MATCH)).toEqual([
       {
         routeCostId: "cost-1",
         pricingComponentId: "component-toll",
@@ -87,7 +97,7 @@ describe("RouteCostResolver", () => {
       routeCost("cost-1", "component-toll", "TOLL", "9.75"),
     ]);
 
-    const [cost] = await resolver.resolve(TRIP_ID, ROUTE);
+    const [cost] = await resolver.resolve(TRIP_ID, NORMAL_MATCH);
 
     expect(typeof cost.amount).toBe("string");
     expect(cost.amount).toBe("9.75");
@@ -99,7 +109,7 @@ describe("RouteCostResolver", () => {
       routeCost("cost-1", "component-toll", "TOLL", "9.75"),
     ]);
 
-    const resolved = await resolver.resolve(TRIP_ID, ROUTE);
+    const resolved = await resolver.resolve(TRIP_ID, NORMAL_MATCH);
 
     expect(resolved.map((cost) => cost.componentCode)).toEqual([
       "TUNNEL",
@@ -114,33 +124,50 @@ describe("RouteCostResolver", () => {
    */
   describe("a route with no configured costs", () => {
     it("returns an empty list rather than throwing", async () => {
-      await expect(resolver.resolve(TRIP_ID, ROUTE)).resolves.toEqual([]);
+      await expect(resolver.resolve(TRIP_ID, NORMAL_MATCH)).resolves.toEqual([]);
     });
 
     it("does not warn, because this is the normal case", async () => {
-      await resolver.resolve(TRIP_ID, ROUTE);
+      await resolver.resolve(TRIP_ID, NORMAL_MATCH);
 
       expect(logger.warn).not.toHaveBeenCalled();
     });
   });
 
-  describe("a Trip with no terminal", () => {
-    const routeWithoutDeparture = { departure: null, destination: "Rotterdam" };
-
-    it("resolves nothing, because there is no route identity to match", async () => {
-      const resolved = await resolver.resolve(TRIP_ID, routeWithoutDeparture);
-
-      expect(resolved).toEqual([]);
-      expect(routeCostService.findActiveForRoute).not.toHaveBeenCalled();
+  /**
+   * The configuration as STORED, not the Trip's spelling of it: a Trip matched
+   * despite a difference in letter case or a trusted typo must still find the
+   * Toll and Tunnel of the route that priced its Tarief.
+   */
+  it("reads the costs by the configured spelling, never the Trip's", async () => {
+    await resolver.resolve(TRIP_ID, {
+      ...NORMAL_MATCH,
+      departure: "Quay 869",
+      destination: "WAREGEM",
     });
 
-    it("warns, because this differs from a route that resolved to nothing", async () => {
-      await resolver.resolve(TRIP_ID, routeWithoutDeparture);
+    expect(routeCostService.findActiveForRoute).toHaveBeenCalledWith(
+      "Quay 869",
+      "WAREGEM",
+    );
+  });
 
-      expect(logger.warn).toHaveBeenCalledWith(
-        "Trip has no terminal, so no route cost can be matched",
-        { tripId: TRIP_ID },
-      );
+  /**
+   * Nothing reliable matched: the Toll and Tunnel follow the Tarief to zero
+   * rather than come from a lookup by the Trip's own text — a guess the
+   * Tarief was refused.
+   */
+  describe("when nothing was matched", () => {
+    it("resolves no cost and reads none", async () => {
+      expect(await resolver.resolve(TRIP_ID, null)).toEqual([]);
+      expect(routeCostService.findActiveForRoute).not.toHaveBeenCalled();
+      expect(routeCostService.findActiveForRoutePricing).not.toHaveBeenCalled();
+    });
+
+    it("does not warn again: the route match already did", async () => {
+      await resolver.resolve(TRIP_ID, null);
+
+      expect(logger.warn).not.toHaveBeenCalled();
     });
   });
 
@@ -150,10 +177,11 @@ describe("RouteCostResolver", () => {
         routeCost("cost-1", "component-toll", "TOLL", "1234.56"),
       ]);
 
-      await resolver.resolve(TRIP_ID, ROUTE);
+      await resolver.resolve(TRIP_ID, NORMAL_MATCH);
 
       expect(logger.log).toHaveBeenCalledWith("Route costs resolved", {
         tripId: TRIP_ID,
+        routePricingId: NORMAL_MATCH.routePricingId,
         routeCostCount: 1,
         components: ["TOLL"],
       });
@@ -164,7 +192,7 @@ describe("RouteCostResolver", () => {
         routeCost("cost-1", "component-toll", "TOLL", "1234.56"),
       ]);
 
-      await resolver.resolve(TRIP_ID, ROUTE);
+      await resolver.resolve(TRIP_ID, NORMAL_MATCH);
 
       const logged = JSON.stringify([
         ...logger.log.mock.calls,
@@ -187,19 +215,14 @@ describe("RouteCostResolver", () => {
     const COMBINATION_MATCH = {
       routePricingId: "5a1f0c1e-2b3d-4e5f-8a9b-0c1d2e3f4a5b",
       basePrice: "100.00",
+      departure: ROUTE.departure,
+      destination: ROUTE.destination,
       overSt: null,
       kind: "COMBINATION" as const,
     };
 
-    const NORMAL_MATCH = {
-      routePricingId: "9c858901-8a57-4791-81fe-4c455b099bc9",
-      basePrice: "380.00",
-      overSt: null,
-      kind: "NORMAL" as const,
-    };
-
     it("reads the costs owned by that leg", async () => {
-      await resolver.resolve(TRIP_ID, ROUTE, COMBINATION_MATCH);
+      await resolver.resolve(TRIP_ID, COMBINATION_MATCH);
 
       expect(routeCostService.findActiveForRoutePricing).toHaveBeenCalledWith(
         COMBINATION_MATCH.routePricingId,
@@ -208,7 +231,7 @@ describe("RouteCostResolver", () => {
 
     /** The decisive one: the ordinary route's tunnel is never even looked at. */
     it("never reads the road's costs", async () => {
-      await resolver.resolve(TRIP_ID, ROUTE, COMBINATION_MATCH);
+      await resolver.resolve(TRIP_ID, COMBINATION_MATCH);
 
       expect(routeCostService.findActiveForRoute).not.toHaveBeenCalled();
     });
@@ -218,9 +241,7 @@ describe("RouteCostResolver", () => {
         routeCost("cost-leg", "component-tunnel", "TUNNEL", "3.75"),
       ]);
 
-      expect(
-        await resolver.resolve(TRIP_ID, ROUTE, COMBINATION_MATCH),
-      ).toEqual([
+      expect(await resolver.resolve(TRIP_ID, COMBINATION_MATCH)).toEqual([
         {
           routeCostId: "cost-leg",
           pricingComponentId: "component-tunnel",
@@ -231,7 +252,7 @@ describe("RouteCostResolver", () => {
     });
 
     it("reads the road's costs for an ordinary match", async () => {
-      await resolver.resolve(TRIP_ID, ROUTE, NORMAL_MATCH);
+      await resolver.resolve(TRIP_ID, NORMAL_MATCH);
 
       expect(routeCostService.findActiveForRoute).toHaveBeenCalledWith(
         ROUTE.departure,
@@ -240,19 +261,12 @@ describe("RouteCostResolver", () => {
       expect(routeCostService.findActiveForRoutePricing).not.toHaveBeenCalled();
     });
 
-    /** No match at all is the road, which is how every caller behaved before. */
-    it("reads the road's costs when nothing was matched", async () => {
-      await resolver.resolve(TRIP_ID, ROUTE, null);
-
-      expect(routeCostService.findActiveForRoute).toHaveBeenCalled();
-    });
-
     it("logs the leg it read, and no amount", async () => {
       routeCostService.findActiveForRoutePricing.mockResolvedValue([
         routeCost("cost-leg", "component-tunnel", "TUNNEL", "1234.56"),
       ]);
 
-      await resolver.resolve(TRIP_ID, ROUTE, COMBINATION_MATCH);
+      await resolver.resolve(TRIP_ID, COMBINATION_MATCH);
 
       expect(logger.log).toHaveBeenCalledWith(
         "Combination leg route costs resolved",

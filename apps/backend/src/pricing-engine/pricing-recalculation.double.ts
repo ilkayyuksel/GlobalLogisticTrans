@@ -24,6 +24,7 @@ export function stubPricingRecalculation(
 ): PricingRecalculationService & {
   recalculate: jest.Mock;
   tripsAffectedByPlanningDate: jest.Mock;
+  tripsAffectedByRoadChange: jest.Mock;
 } {
   return {
     recalculate: jest.fn().mockResolvedValue(outcome),
@@ -34,9 +35,12 @@ export function stubPricingRecalculation(
     // An ordinary Trip: its planningDate moves no price. A spec about a
     // Combination's date names the Leg 2 it expects.
     tripsAffectedByPlanningDate: jest.fn().mockResolvedValue([]),
+    // A Trip in no group: its road moves only its own price.
+    tripsAffectedByRoadChange: jest.fn((tripId: string) => Promise.resolve([tripId])),
   } as unknown as PricingRecalculationService & {
     recalculate: jest.Mock;
     tripsAffectedByRegrouping: jest.Mock;
     tripsAffectedByPlanningDate: jest.Mock;
+    tripsAffectedByRoadChange: jest.Mock;
   };
 }

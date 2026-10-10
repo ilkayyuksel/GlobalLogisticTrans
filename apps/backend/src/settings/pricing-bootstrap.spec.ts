@@ -99,6 +99,7 @@ describe("the pricing settings catalog", () => {
     ["PRICING_STRATEGY", "ROUTE_BASED"],
     ["FUEL_PERCENTAGE", "15"],
     ["COMBINATION_SURCHARGE", "50.00"],
+    ["OVER_ST_SURCHARGE", "70.00"],
     ["WAITING_TIME_FREE_MINUTES", "120"],
     ["WAITING_TIME_THRESHOLD_MINUTES", "150"],
     ["WAITING_TIME_BLOCK_MINUTES", "15"],

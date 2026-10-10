@@ -169,6 +169,19 @@ export class RoutePricingRepository {
     return matches[0] ?? null;
   }
 
+  /**
+   * Every ORDINARY route, in a stable order — what a Trip's road is matched
+   * against (`route-matcher.ts`). The matcher needs them all: whether a road
+   * is a typo of one configuration, or fits two, cannot be answered from the
+   * exact matches alone.
+   */
+  findAllOrdinary(): Promise<RoutePricing[]> {
+    return this.prisma.routePricing.findMany({
+      where: { combinationGroupId: null },
+      orderBy: { id: "asc" },
+    });
+  }
+
   create(data: CreateRoutePricingData): Promise<RoutePricing> {
     return this.prisma.routePricing.create({ data });
   }

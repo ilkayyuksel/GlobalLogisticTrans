@@ -59,6 +59,7 @@ const RULES = {
   strategy: PricingStrategy.ROUTE_BASED,
   fuelPercentage: "15",
   combinationSurcharge: "50.00",
+  overStSurcharge: "70.00",
   automaticCustomPropertyId: TAR_ID,
   waitingTimeFreeMinutes: 120,
   waitingTimeThresholdMinutes: 150,
@@ -69,7 +70,7 @@ const RULES = {
 
 /** No pair is configured unless a test says so: the road match then applies. */
 const combinationPricing = {
-  findConfiguredCombination: jest.fn().mockResolvedValue(null),
+  findAll: jest.fn().mockResolvedValue([]),
 };
 
 describe("TAR is charged once per day per number", () => {
@@ -82,7 +83,7 @@ describe("TAR is charged once per day per number", () => {
     groupMembers = jest.fn().mockResolvedValue([]);
 
     resolver = new PricingComponentResolver(
-      { findConfiguredRoute: jest.fn().mockResolvedValue(null) } as unknown as RoutePricingService,
+      { findAllOrdinary: jest.fn().mockResolvedValue([]) } as unknown as RoutePricingService,
       combinationPricing as unknown as CombinationRoutePricingService,
       { findByTripId: jest.fn().mockResolvedValue([]) } as unknown as TripCustomPropertyReadService,
       {

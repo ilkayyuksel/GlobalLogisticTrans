@@ -1,7 +1,10 @@
 import { Injectable } from "@nestjs/common";
 
-import { TripPricingItemRepository } from "../trip-pricing-items/trip-pricing-item.repository";
-import { TripPricingRepository } from "./trip-pricing.repository";
+import { toRouteMatchView, type RouteMatchView } from "./route-match-view";
+import {
+  TripPricingRepository,
+  type TripPricingWithItemsAndRoute,
+} from "./trip-pricing.repository";
 import {
   EffectivePricing,
   resolveEffectivePricing,
@@ -9,6 +12,14 @@ import {
   type OverrideAmount,
 } from "./effective-pricing";
 import { TripPricingOverrideRepository } from "./trip-pricing-override.repository";
+
+/**
+ * A Trip's current pricing: the effective amounts, and the route the stored
+ * calculation was priced against — both read from the SAME snapshot.
+ */
+export type CurrentTripPricing = EffectivePricing & {
+  readonly routeMatch: RouteMatchView;
+};
 
 /**
  * The effective pricing of a Trip — the shared source every screen reads.
@@ -38,13 +49,6 @@ export class EffectivePricingService {
    * pricing.
    */
   constructor(
-    /*
-     * The REPOSITORY rather than the item service: the response DTO carries a
-     * component id and a formatted string, and this layer needs the component
-     * CODE and an exact Decimal. Reading the rows avoids parsing back what was
-     * just formatted.
-     */
-    private readonly tripPricingItems: TripPricingItemRepository,
     private readonly overrides: TripPricingOverrideRepository,
     /*
      * Both reads. The repository returns snapshots WITH their lines and
@@ -61,22 +65,17 @@ export class EffectivePricingService {
    * Trip priced at nothing are different facts, and showing zeros for the first
    * would state the second.
    */
-  async findForTrip(tripId: string): Promise<EffectivePricing | null> {
-    const snapshot = await this.snapshots.findCurrentByTripId(tripId);
-
-    if (!snapshot) {
-      return null;
-    }
-
-    const [items, overrideRows] = await Promise.all([
-      this.tripPricingItems.findByTripPricingId(snapshot.id),
+  async findForTrip(tripId: string): Promise<CurrentTripPricing | null> {
+    // The batch read for one Trip: header, lines and route in one consistent
+    // read, so the route shown always belongs to the amounts shown.
+    const [[snapshot], overrideRows] = await Promise.all([
+      this.snapshots.findCurrentByTripIds([tripId]),
       this.overrides.findForTrip(tripId),
     ]);
 
-    return resolveEffectivePricing(
-      items.map(toEngineAmount),
-      overrideRows.map(toOverrideAmount),
-    );
+    return snapshot
+      ? toCurrentPricing(snapshot, overrideRows.map(toOverrideAmount))
+      : null;
   }
 
   /**
@@ -97,7 +96,7 @@ export class EffectivePricingService {
    */
   async findForTrips(
     tripIds: readonly string[],
-  ): Promise<Map<string, EffectivePricing>> {
+  ): Promise<Map<string, CurrentTripPricing>> {
     // No ids is not a query. Prisma would happily send an empty IN list, but
     // asking the database a question with no possible answer is still a round
     // trip.
@@ -119,20 +118,27 @@ export class EffectivePricingService {
       overridesByTrip.set(row.tripId, existing);
     }
 
-    const byTrip = new Map<string, EffectivePricing>();
+    const byTrip = new Map<string, CurrentTripPricing>();
 
     for (const snapshot of snapshots) {
       byTrip.set(
         snapshot.tripId,
-        resolveEffectivePricing(
-          snapshot.items.map(toEngineAmount),
-          overridesByTrip.get(snapshot.tripId) ?? [],
-        ),
+        toCurrentPricing(snapshot, overridesByTrip.get(snapshot.tripId) ?? []),
       );
     }
 
     return byTrip;
   }
+}
+
+function toCurrentPricing(
+  snapshot: TripPricingWithItemsAndRoute,
+  overrides: readonly OverrideAmount[],
+): CurrentTripPricing {
+  return {
+    ...resolveEffectivePricing(snapshot.items.map(toEngineAmount), [...overrides]),
+    routeMatch: toRouteMatchView(snapshot),
+  };
 }
 
 /** A stored item, as the pure resolver needs it. */

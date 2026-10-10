@@ -29,9 +29,14 @@ import { WaitingTimeCalculator } from "./waiting-time.calculator";
  *
  * ── THE RULE ────────────────────────────────────────────────────────────────
  * A Combination's Over ST (Tarief, Toll, Tunnel) is added to LEG 2, component
- * by component, ONLY when Leg 2's planningDate differs from Leg 1's. Leg 1 never
- * carries it. Fuel follows the effective Tarief. The €50 Backload, waiting time,
- * Cost Confirmations and EK are untouched.
+ * by component, ONLY when Leg 2's planningDate differs from Leg 1's and Over ST
+ * is configured; Leg 2's Tarief then also carries the OVER_ST_SURCHARGE Setting
+ * (€70) once. Leg 1 never carries any of it. Fuel follows the effective
+ * Tarief. The €50 Backload, waiting time, Cost Confirmations and EK are
+ * untouched.
+ *
+ * Leg 1 delivers Quay 869 → GENT; Leg 2 collects LESSINES → Quay 869 — each
+ * configured in its real driving direction.
  *
  * The Combination is the one configured for the PAIR of roads its two Trips
  * drive — Tarief, Toll, Tunnel and Over ST all come from that configuration.
@@ -48,6 +53,7 @@ const RULES = {
   strategy: PricingStrategy.ROUTE_BASED,
   fuelPercentage: "15",
   combinationSurcharge: "50.00",
+  overStSurcharge: "70.00",
   automaticCustomPropertyId: "property-tar",
   waitingTimeFreeMinutes: 120,
   waitingTimeThresholdMinutes: 150,
@@ -115,6 +121,7 @@ describe("Over ST on Leg 2 of a Combination", () => {
   let leg2: TripReadView;
   let overSt: OverSt;
   let configuredPair: boolean;
+  let surcharge: string;
   let costConfirmation: { ccNumbers: string[]; amount: string } | null;
   let snapshotWriter: { findExistingSnapshot: jest.Mock; writeSnapshot: jest.Mock };
   let engine: PricingEngineService;
@@ -125,10 +132,10 @@ describe("Over ST on Leg 2 of a Combination", () => {
     leg2 = trip({
       id: LEG2_TRIP,
       direction: TripDirection.COLLECTION,
-      terminal: "GENT",
       destinationCity: "LESSINES",
       planningDate: "2026-10-07",
     });
+    surcharge = "70.00";
     overSt = { ...FULL_OVER_ST };
     configuredPair = true;
     costConfirmation = null;
@@ -145,23 +152,25 @@ describe("Over ST on Leg 2 of a Combination", () => {
       findByGroupId: jest.fn(async () => [leg1, leg2]),
     };
     const combinationPricing = {
-      findConfiguredCombination: jest.fn(async () =>
+      findAll: jest.fn(async () =>
         configuredPair
-          ? {
-              id: "combination-1",
-              reviewed: false,
-              legs: [
-                legRow(LEG1_ROW, 1, "Quay 869", "GENT", "100.00"),
-                legRow(LEG2_ROW, 2, "GENT", "LESSINES", "80.00"),
-              ],
-              overSt,
-              createdAt: new Date(),
-              updatedAt: new Date(),
-            }
-          : null,
+          ? [
+              {
+                id: "combination-1",
+                reviewed: false,
+                legs: [
+                  legRow(LEG1_ROW, 1, "Quay 869", "GENT", "100.00"),
+                  legRow(LEG2_ROW, 2, "LESSINES", "Quay 869", "80.00"),
+                ],
+                overSt,
+                createdAt: new Date(),
+                updatedAt: new Date(),
+              },
+            ]
+          : [],
       ),
     };
-    const routePricing = { findConfiguredRoute: jest.fn().mockResolvedValue(null) };
+    const routePricing = { findAllOrdinary: jest.fn().mockResolvedValue([]) };
     const routeCosts = {
       findActiveForRoute: jest.fn().mockResolvedValue([]),
       findActiveForRoutePricing: jest.fn(async (id: string) =>
@@ -175,7 +184,7 @@ describe("Over ST on Leg 2 of a Combination", () => {
       writeSnapshot: jest.fn().mockResolvedValue("snapshot-1"),
     };
     const ruleResolver = {
-      resolve: jest.fn().mockResolvedValue(RULES),
+      resolve: jest.fn(async () => ({ ...RULES, overStSurcharge: surcharge })),
       resolveDistanceRatePerKm: jest.fn(),
     } as unknown as PricingRuleResolver;
 
@@ -230,6 +239,9 @@ describe("Over ST on Leg 2 of a Combination", () => {
   const overStLines = (lines: readonly PricingLine[]) =>
     lines.filter((line) => line.description === "Over ST");
 
+  const surchargeLines = (lines: readonly PricingLine[]) =>
+    lines.filter((line) => line.description === "Over ST toeslag");
+
   it("A. adds nothing when both legs are planned on the same day", async () => {
     leg2 = { ...leg2, planningDate: "2026-10-06" };
 
@@ -242,7 +254,7 @@ describe("Over ST on Leg 2 of a Combination", () => {
   it("B/C. adds all three to Leg 2 when the planning dates differ", async () => {
     const { columns: amounts } = await priced(LEG2_TRIP);
 
-    expect(amounts).toMatchObject({ BASE_PRICE: "130.00", TOLL: "25.00", TUNNEL: "8.00" });
+    expect(amounts).toMatchObject({ BASE_PRICE: "200.00", TOLL: "25.00", TUNNEL: "8.00" });
   });
 
   /** I — its own lines, under the existing components, amounts exact. */
@@ -259,10 +271,10 @@ describe("Over ST on Leg 2 of a Combination", () => {
   });
 
   it.each([
-    ["D. only the Tarief", { tarief: "50.00", toll: null, tunnel: null }, { BASE_PRICE: "130.00", TOLL: "15.00", TUNNEL: "5.00" }],
-    ["E. only the Toll", { tarief: null, toll: "10.00", tunnel: null }, { BASE_PRICE: "80.00", TOLL: "25.00", TUNNEL: "5.00" }],
-    ["F. only the Tunnel", { tarief: null, toll: null, tunnel: "3.00" }, { BASE_PRICE: "80.00", TOLL: "15.00", TUNNEL: "8.00" }],
-    ["G. zero and unstated amounts", { tarief: "50.00", toll: "0.00", tunnel: null }, { BASE_PRICE: "130.00", TOLL: "15.00", TUNNEL: "5.00" }],
+    ["D. only the Tarief", { tarief: "50.00", toll: null, tunnel: null }, { BASE_PRICE: "200.00", TOLL: "15.00", TUNNEL: "5.00" }],
+    ["E. only the Toll", { tarief: null, toll: "10.00", tunnel: null }, { BASE_PRICE: "150.00", TOLL: "25.00", TUNNEL: "5.00" }],
+    ["F. only the Tunnel", { tarief: null, toll: null, tunnel: "3.00" }, { BASE_PRICE: "150.00", TOLL: "15.00", TUNNEL: "8.00" }],
+    ["G. zero and unstated amounts", { tarief: "50.00", toll: "0.00", tunnel: null }, { BASE_PRICE: "200.00", TOLL: "15.00", TUNNEL: "5.00" }],
   ])("%s", async (_, configured, expected) => {
     overSt = configured;
 
@@ -310,11 +322,11 @@ describe("Over ST on Leg 2 of a Combination", () => {
     expect(overStLines(lines)).toEqual([]);
   });
 
-  /** Fuel follows the effective Tarief, as the business decided: 15% of 130. */
-  it("charges fuel on the effective Tarief", async () => {
+  /** Fuel follows the effective Tarief, as the business decided: 15% of 200. */
+  it("charges fuel on the effective Tarief, the €70 included", async () => {
     const { columns: amounts } = await priced(LEG2_TRIP);
 
-    expect(amounts.FUEL_SURCHARGE).toBe("19.50");
+    expect(amounts.FUEL_SURCHARGE).toBe("30.00");
   });
 
   it("L. keeps the €50 Backload on both legs, never as Over ST", async () => {
@@ -336,7 +348,7 @@ describe("Over ST on Leg 2 of a Combination", () => {
     const effective = resolveEffectivePricing(toEngineAmounts(lines), []);
 
     expect(effective.ek.toFixed(2)).toBe("27.50");
-    expect(effective.tarief.toFixed(2)).toBe("130.00");
+    expect(effective.tarief.toFixed(2)).toBe("200.00");
   });
 
   /** N — a charged waiting time still becomes EK and supersedes the CC. */
@@ -356,9 +368,100 @@ describe("Over ST on Leg 2 of a Combination", () => {
     const { lines, totalPrice } = await priced(LEG2_TRIP);
     const effective = resolveEffectivePricing(toEngineAmounts(lines), []);
 
-    // 130 + 50 Backload + 19.50 fuel + 25 + 8
-    expect(totalPrice.toFixed(2)).toBe("232.50");
-    expect(effective.totaal.toFixed(2)).toBe("232.50");
+    // 200 Tarief + 50 Backload + 30 fuel + 25 + 8
+    expect(totalPrice.toFixed(2)).toBe("313.00");
+    expect(effective.totaal.toFixed(2)).toBe("313.00");
+  });
+
+  /**
+   * ── THE €70 OVER ST SURCHARGE ─────────────────────────────────────────────
+   * Once, on Leg 2's Tarief, exactly when Over ST applies. Produced by every
+   * calculation from scratch, so it can neither accumulate nor outlive the rule.
+   */
+  describe("the Over ST surcharge", () => {
+    it("adds it once to Leg 2's Tarief, as its own Tarief line", async () => {
+      const { lines } = await priced(LEG2_TRIP);
+
+      expect(
+        surchargeLines(lines).map((line) => [line.component, line.amount.toFixed(2)]),
+      ).toEqual([["BASE_PRICE", "70.00"]]);
+    });
+
+    it("never accumulates over repeated calculations", async () => {
+      snapshotWriter.findExistingSnapshot.mockResolvedValue({
+        tripPricingId: "snapshot-1",
+        calculationStatus: "CALCULATED",
+        itemCount: 9,
+      });
+
+      const first = await priced(LEG2_TRIP);
+      const second = await priced(LEG2_TRIP);
+      const third = await priced(LEG2_TRIP);
+
+      expect(surchargeLines(third.lines)).toHaveLength(1);
+      expect(second.totalPrice.toFixed(2)).toBe(first.totalPrice.toFixed(2));
+      expect(third.columns.BASE_PRICE).toBe("200.00");
+    });
+
+    it("disappears when the planning dates become equal again", async () => {
+      expect(surchargeLines((await priced(LEG2_TRIP)).lines)).toHaveLength(1);
+
+      leg2 = { ...leg2, planningDate: "2026-10-06" };
+      const { lines, columns: amounts } = await priced(LEG2_TRIP);
+
+      expect(surchargeLines(lines)).toEqual([]);
+      expect(amounts.BASE_PRICE).toBe("80.00");
+    });
+
+    it.each([
+      ["Leg 1", () => undefined, LEG1_TRIP],
+      ["the same day", () => (leg2 = { ...leg2, planningDate: "2026-10-06" }), LEG2_TRIP],
+      ["a missing planningDate", () => (leg2 = { ...leg2, planningDate: null }), LEG2_TRIP],
+      ["a pair not configured as a Combination", () => (configuredPair = false), LEG2_TRIP],
+      [
+        "a Combination with no Over ST configured",
+        () => (overSt = { tarief: null, toll: null, tunnel: null }),
+        LEG2_TRIP,
+      ],
+    ])("is not charged for %s", async (_name, arrange, tripId) => {
+      arrange();
+
+      expect(surchargeLines((await priced(tripId)).lines)).toEqual([]);
+    });
+
+    /** 0.00 is a statement: Over ST is configured, at zero — the €70 still applies. */
+    it("is charged when every Over ST amount is configured as zero", async () => {
+      overSt = { tarief: "0.00", toll: "0.00", tunnel: "0.00" };
+
+      const { lines, columns: amounts } = await priced(LEG2_TRIP);
+
+      expect(overStLines(lines)).toEqual([]);
+      expect(surchargeLines(lines)).toHaveLength(1);
+      expect(amounts).toMatchObject({ BASE_PRICE: "150.00", TOLL: "15.00", TUNNEL: "5.00" });
+    });
+
+    it("follows the OVER_ST_SURCHARGE Setting", async () => {
+      surcharge = "65.00";
+
+      expect((await priced(LEG2_TRIP)).columns.BASE_PRICE).toBe("195.00");
+    });
+
+    it("stores the surcharge when a CLOSED Leg 2 is recalculated", async () => {
+      await engine.calculateAndStore(LEG2_TRIP);
+
+      const [result] = snapshotWriter.writeSnapshot.mock.calls[0];
+
+      expect(surchargeLines(result.lines)).toHaveLength(1);
+      expect(result.context.routeMatch).toEqual({
+        routePricingId: LEG2_ROW,
+        method: "EXACT",
+        combinationRouteGroupId: "combination-1",
+        legs: [
+          expect.objectContaining({ legPosition: 1, isPricedLeg: false, routePricingId: LEG1_ROW }),
+          expect.objectContaining({ legPosition: 2, isPricedLeg: true, routePricingId: LEG2_ROW }),
+        ],
+      });
+    });
   });
 
   /** A pair nobody configured: the road match applies, and owes no Over ST. */
@@ -430,7 +533,7 @@ describe("Over ST on Leg 2 of a Combination", () => {
       leg2 = { ...leg2, planningDate: "2026-10-08" };
       const { columns: leg2Columns } = await priced(LEG2_TRIP);
 
-      expect(leg2Columns.BASE_PRICE).toBe("130.00");
+      expect(leg2Columns.BASE_PRICE).toBe("200.00");
       expect(leg2Columns.TOLL).toBe("25.00");
       expect(leg2Columns.TUNNEL).toBe("8.00");
     });

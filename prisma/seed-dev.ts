@@ -435,6 +435,14 @@ async function main(): Promise<void> {
       },
       {
         category: "PRICING",
+        key: "OVER_ST_SURCHARGE",
+        value: "70.00",
+        valueType: "DECIMAL",
+        description:
+          "Added once to the Tarief of Leg 2 of a Combination when Over ST applies: the two legs are planned on different days and the Combination has Over ST configured.",
+      },
+      {
+        category: "PRICING",
         key: "DISTANCE_RATE_PER_KM",
         value: "2.75",
         valueType: "DECIMAL",

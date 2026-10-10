@@ -14,7 +14,7 @@ import {
   TripNotPriceableException,
 } from "../pricing-engine/exceptions/pricing-engine.exceptions";
 import { PricingEngineService } from "../pricing-engine/pricing-engine.service";
-import { TripPricingItemService } from "../trip-pricing-items/trip-pricing-item.service";
+import { TripNotClosedException } from "../trip-pricing/exceptions/trip-pricing.exceptions";
 import { TripPricingService } from "../trip-pricing/trip-pricing.service";
 import { PricingReprocessController } from "./pricing-reprocess.controller";
 
@@ -32,8 +32,29 @@ const STORED_PRICING = {
   pricingRuleVersion: "2026.1",
   calculationStatus: PricingCalculationStatus.CALCULATED,
   notes: null,
+  routePricingId: "route-1",
+  routeMatchMethod: "NORMALIZED",
+  combinationRouteGroupId: null,
   createdAt: new Date("2026-08-01T00:00:00Z"),
   updatedAt: new Date("2026-08-17T09:00:01.000Z"),
+};
+
+/** The route the stored calculation recorded, as the snapshot read returns it. */
+const STORED_ROUTE_MATCH = {
+  method: "NORMALIZED",
+  routePricingId: "route-1",
+  combinationRouteGroupId: null,
+  legs: [
+    {
+      legPosition: null,
+      isPricedLeg: true,
+      routePricingId: "route-1",
+      departure: "MSC PSA European Terminal",
+      destination: "ROTTERDAM",
+      method: "NORMALIZED",
+    },
+  ],
+  overSt: null,
 };
 
 const STORED_ITEMS = [
@@ -72,21 +93,21 @@ const STORED_ITEMS = [
 /**
  * Integration tests: real routing, the global ValidationPipe, the response
  * interceptor, the global exception filter and the Engine's own exception
- * filter all run. Only the three services are stubbed.
+ * filter all run. Only the services are stubbed.
  */
 describe("PricingReprocessController (integration)", () => {
   let app: INestApplication;
   let pricingEngine: { reprocess: jest.Mock };
-  let tripPricingService: { findByTripId: jest.Mock };
-  let tripPricingItemService: { findByTripPricingId: jest.Mock };
+  let tripPricingService: { requireCurrentSnapshot: jest.Mock };
 
   beforeEach(async () => {
     pricingEngine = { reprocess: jest.fn().mockResolvedValue({}) };
     tripPricingService = {
-      findByTripId: jest.fn().mockResolvedValue(STORED_PRICING),
-    };
-    tripPricingItemService = {
-      findByTripPricingId: jest.fn().mockResolvedValue({ items: STORED_ITEMS }),
+      requireCurrentSnapshot: jest.fn().mockResolvedValue({
+        pricing: STORED_PRICING,
+        items: STORED_ITEMS,
+        routeMatch: STORED_ROUTE_MATCH,
+      }),
     };
 
     const logger = {
@@ -103,7 +124,6 @@ describe("PricingReprocessController (integration)", () => {
       providers: [
         { provide: PricingEngineService, useValue: pricingEngine },
         { provide: TripPricingService, useValue: tripPricingService },
-        { provide: TripPricingItemService, useValue: tripPricingItemService },
         { provide: AppLoggerService, useValue: logger },
         { provide: APP_FILTER, useClass: AllExceptionsFilter },
         { provide: APP_INTERCEPTOR, useClass: ResponseInterceptor },
@@ -194,20 +214,41 @@ describe("PricingReprocessController (integration)", () => {
       expect(body.data.items.every((item: { amount: string }) => typeof item.amount === "string")).toBe(true);
     });
 
-    it("reads the breakdown of the snapshot it just wrote", async () => {
-      await request(app.getHttpServer()).post(ROUTE).expect(200);
-
-      expect(tripPricingItemService.findByTripPricingId).toHaveBeenCalledWith(
-        PRICING_ID,
-      );
-    });
-
     it("reads back from the database rather than echoing the calculation", async () => {
       // The response must describe what was persisted, so a caller can never be
-      // shown a breakdown that differs from the stored one.
+      // shown a breakdown that differs from the stored one — one consistent
+      // read of header, lines and route, the GET /trip-pricing/snapshots read.
       await request(app.getHttpServer()).post(ROUTE).expect(200);
 
-      expect(tripPricingService.findByTripId).toHaveBeenCalledWith(TRIP_ID);
+      expect(tripPricingService.requireCurrentSnapshot).toHaveBeenCalledWith(TRIP_ID);
+    });
+
+    it("returns the route the stored price was matched to, from the same read", async () => {
+      const { body } = await request(app.getHttpServer()).post(ROUTE).expect(200);
+
+      expect(body.data.routeMatch).toEqual(STORED_ROUTE_MATCH);
+      expect(body.data.pricing).toMatchObject({
+        routePricingId: "route-1",
+        routeMatchMethod: "NORMALIZED",
+        combinationRouteGroupId: null,
+      });
+    });
+  });
+
+  /**
+   * Reopened between the write and the read-back: no current price exists, so
+   * the stored snapshot is never presented as one.
+   */
+  describe("a Trip that is no longer CLOSED when read back", () => {
+    it("returns the conflict of a non-CLOSED Trip, with no pricing", async () => {
+      tripPricingService.requireCurrentSnapshot.mockRejectedValue(
+        new TripNotClosedException(TRIP_ID, TripStatus.OPEN, TripStatus.CLOSED),
+      );
+
+      const { body } = await request(app.getHttpServer()).post(ROUTE).expect(409);
+
+      expect(body.error.message).toContain("OPEN");
+      expect(body.data).toBeUndefined();
     });
   });
 
@@ -312,7 +353,7 @@ describe("PricingReprocessController (integration)", () => {
 
       await request(app.getHttpServer()).post(ROUTE).expect(409);
 
-      expect(tripPricingService.findByTripId).not.toHaveBeenCalled();
+      expect(tripPricingService.requireCurrentSnapshot).not.toHaveBeenCalled();
     });
   });
 

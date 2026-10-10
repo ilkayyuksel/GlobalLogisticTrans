@@ -54,6 +54,9 @@ export class PricingRuleResolver {
       combinationSurcharge: await this.requireNonNegativeDecimal(
         PricingSettingKey.COMBINATION_SURCHARGE,
       ),
+      overStSurcharge: await this.requireNonNegativeDecimal(
+        PricingSettingKey.OVER_ST_SURCHARGE,
+      ),
       automaticCustomPropertyId: await this.requireNonEmptyText(
         PricingSettingKey.AUTOMATIC_CUSTOM_PROPERTY_ID,
       ),

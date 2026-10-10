@@ -44,6 +44,10 @@ function buildSnapshot(tripId: string, code: string, amount: string) {
     pricingRuleVersion: "2026.1",
     calculationStatus: "CALCULATED",
     notes: null,
+    routeMatch: null,
+    routePricingId: null,
+    combinationRouteGroupId: null,
+    routeLegs: [],
     createdAt: new Date(),
     updatedAt: new Date(),
     items: [

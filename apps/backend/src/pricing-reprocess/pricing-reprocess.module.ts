@@ -1,7 +1,6 @@
 import { Module } from "@nestjs/common";
 
 import { PricingEngineModule } from "../pricing-engine/pricing-engine.module";
-import { TripPricingItemModule } from "../trip-pricing-items/trip-pricing-item.module";
 import { TripPricingModule } from "../trip-pricing/trip-pricing.module";
 import { PricingReprocessController } from "./pricing-reprocess.controller";
 
@@ -22,7 +21,7 @@ import { PricingReprocessController } from "./pricing-reprocess.controller";
  * borrows every service it needs.
  */
 @Module({
-  imports: [PricingEngineModule, TripPricingModule, TripPricingItemModule],
+  imports: [PricingEngineModule, TripPricingModule],
   controllers: [PricingReprocessController],
 })
 export class PricingReprocessModule {}

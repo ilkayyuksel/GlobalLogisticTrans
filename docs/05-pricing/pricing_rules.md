@@ -405,15 +405,73 @@ tunnel, held together by a `combination_route_group` row — see
 > This is route **configuration**. It is not a `trip_group`: that decides which
 > Trips carry the €50 Backload, and nothing in it is read here.
 
+## How a road is matched
+
+One matcher — `route-pricing/route-matcher.ts` — for every trigger: closing,
+closing again, every repricing edit, (un)grouping, a planning-date change and an
+explicit reprocess all price through the Engine, and the Engine asks the matcher.
+There is no per-trigger route selection.
+
+**The road** is the Trip's real driving direction (`toTripRoute`): a DELIVERY
+drives terminal → city, a COLLECTION city → terminal, a Trip without a direction
+terminal → city. A route is configured the way it is driven, so a collection's
+route is configured city → terminal. **The direction is never reversed** to find
+a match: the reverse road is a different transport.
+
+The layers, in order — the first that answers wins:
+
+| Layer | Recorded as | What it accepts |
+|---|---|---|
+| Exact | `EXACT` | both ends equal, the terminal compared canonically (the PSA-before-Quay rule — the only configured equivalent) |
+| Safe normalisation | `NORMALIZED` | equal after: canonical terminal, accents removed, lower case, `- _ . , ' / ( ) [ ]` read as a space, whitespace collapsed |
+| One trusted typo | `FUZZY` | one end equal after normalisation; the other **one** edit away (a letter added, removed, changed, or two neighbours swapped), both spellings **8+ letters**, no digits; and no other configured road sharing that equal end fewer than **3** edits away (else `AMBIGUOUS`) |
+| Nothing reliable | `NOT_FOUND` | the route components are priced at zero |
+| More than one | `AMBIGUOUS` | never chosen between; the route components are priced at zero |
+
+Why those thresholds: across every real place name in the documents, the
+captures and the customer's price list, the closest two *different* places are
+two edits apart and all such pairs are 7 letters or shorter (Gent/Genk,
+Evergem/Avelgem); from 8 letters on, the closest pair is three apart. One edit
+on 8+ letters therefore never reaches another real place, and the runner-up
+margin refuses a typo that could belong to two roads.
+
+**No aliases are invented.** `Kallo` and `Kallo (Beveren)`, `Antwerp` and
+`Antwerpen`, `Saint` and `St` are different spellings to the matcher; making them
+equal is a business decision, to be configured, never guessed.
+
+**No match is not a zero price.** Every snapshot records which configuration
+priced it and how — `trip_pricing.route_pricing_id` and `trip_pricing.route_match`
+— so a Tarief of zero from `NOT_FOUND` is never mistaken for a route configured
+at zero (`EXACT`, with its id). Nothing reliable is logged as a **warning** with
+the Trip, the road, the layers tried and the three nearest configurations with
+their edit scores; a trusted typo is logged as such. Amounts are never logged.
+
+**Which route a stored price came from is visible.** Every snapshot also keeps
+the road(s) it matched as they were configured then (`trip_pricing_route_leg`)
+and, for a Combination, the selected pair (`trip_pricing.combination_route_group_id`).
+The API returns this as `routeMatch` — on the snapshot read
+(`GET /trip-pricing/snapshots`, the Trip detail panel) and on the effective
+pricing of every Trip (`GET /trips`, the Ritten Tarief cell) — read from the
+stored calculation, never matched again for display. A changed or removed
+configuration therefore does not change what a stored price says about itself;
+an older snapshot reports `method: null` ("not recorded") rather than a guess;
+an OPEN Trip has no current price and therefore no current route. For a
+Combination, `routeMatch.overSt` reports the Over ST and the surcharge the
+calculation applied, read from its own lines.
+
+**Configuration never reprices.** Changing, adding or removing a route or a
+Combination changes no stored price; it is read by the next calculation of a
+Trip (an edit while CLOSED, closing again, or an explicit reprocess).
+
 ## The rule that decides
 
-No new matching rule was invented. The one that already existed decides, and it
-is the same answer the TAR allocation uses — `combinationLegOf`, described under
-*What counts as a genuine Combination* below:
+Which kind of configuration applies is decided by the rule that already existed —
+the same answer the TAR allocation uses, `combinationLegOf`, described under
+*What counts as a genuine Combination* below — and then by the **pair**:
 
 | The Trip's leg | Configuration it prices against |
 |---|---|
-| DELIVERY or COLLECTION of a genuine Combination | the **Combination** configuration of its road, if one exists |
+| DELIVERY or COLLECTION of a genuine Combination | the leg of the **Combination configured for both roads of the pair** — each road matched as above, then the one Combination holding both |
 | NONE — an ordinary Trip, or a group an operator made by hand | the **ordinary** configuration |
 | INVALID — the Trips of one document are grouped but are not one delivery and one collection | the **ordinary** configuration |
 
@@ -422,11 +480,17 @@ ordinary configuration rather than a Combination one.
 
 ### A genuine leg falls back
 
-A genuine Combination leg whose road has **no** Combination configuration prices
-against the ordinary one. Every Combination Trip priced before Combination routes
-existed was priced exactly that way; refusing to match would silently reprice all
-of them to zero. The fallback is therefore what keeps existing pricing unchanged,
-and configuring a Combination route is what changes it.
+A genuine Combination leg whose **pair** is not identified prices against the
+ordinary configuration of its own road. Not identified means: either road is no
+configured leg at all, both roads are legs but of different Combinations, or
+more than one Combination holds the pair (`AMBIGUOUS`). The reason is logged as a
+warning. Every Combination Trip priced before Combination routes existed was
+priced against the ordinary route; the fallback keeps that, and configuring the
+Combination of the pair is what changes it.
+
+A **single road never picks a Combination.** One road may be a leg of many
+Combinations — a shared outbound with different returns — and choosing the first
+of them was arbitrary. That fallback was removed.
 
 ## One match, read three times
 
@@ -440,8 +504,14 @@ Concretely, from the matched row:
 | Amount | Source |
 |---|---|
 | Tarief | `route_pricing.base_price` of the matched row |
-| Toll | the TOLL `route_cost` of the matched row's owner — the LEG for a Combination leg, the ROAD otherwise |
-| Tunnel | the TUNNEL `route_cost` of the matched row's owner — the LEG for a Combination leg, the ROAD otherwise |
+| Toll | the TOLL `route_cost` of the matched row's owner — the LEG for a Combination leg, the matched row's own (configured) road otherwise |
+| Tunnel | the TUNNEL `route_cost` of the matched row's owner — the LEG for a Combination leg, the matched row's own (configured) road otherwise |
+
+The ordinary route's costs are read by the **configured** spelling of the matched
+row, not the Trip's: a Trip matched despite a difference in letter case or a
+trusted typo finds the Toll and Tunnel of the route that priced its Tarief. With
+no match there are no route costs at all — the Toll and Tunnel follow the Tarief
+to zero rather than come from a lookup the Tarief was refused.
 
 A Combination leg **owns** its route costs (`route_cost.route_pricing_id`), which
 is what stops the two configurations of one road sharing a toll or tunnel
@@ -501,32 +571,44 @@ For a period the toll was derived as `route_pricing.kilometres` ×
 A Combination carries **Over ST** — its own Tarief, Toll and Tunnel — beside its
 two legs, stored on `combination_route_group`. It is charged:
 
-- on **Leg 2** only — never on Leg 1;
+- on **Leg 2** only — never on Leg 1 (the leg position is the configured
+  Combination's, identified by the pair);
 - only when Leg 2's `planningDate` **differs** from Leg 1's. The original
   planning date, a document date or a creation date play no part; a leg with no
   planning date owes no Over ST;
+- only when the Combination **has Over ST configured**: at least one of its three
+  amounts filled in. `0.00` counts as filled in; all three empty means no Over
+  ST — and no surcharge — logged with the reason `NOT_CONFIGURED`;
 - **component by component**: Leg 2's Tarief + Over ST Tarief, Toll + Over ST
-  Toll, Tunnel + Over ST Tunnel. An unstated or zero component adds nothing.
+  Toll, Tunnel + Over ST Tunnel. An unstated or zero component adds nothing;
+- plus the **Over ST surcharge** — the Setting `PRICING.OVER_ST_SURCHARGE`,
+  70.00 by default — **once**, on Leg 2's Tarief.
 
-| Leg 1 date | Leg 2 date | Leg 2 (80 / 15 / 5) with Over ST 50 / 10 / 3 |
+| Leg 1 date | Leg 2 date | Leg 2 Tarief / Toll / Tunnel (80 / 15 / 5) with Over ST 50 / 10 / 3 |
 |---|---|---|
 | 2026-10-06 | 2026-10-06 | 80 / 15 / 5 |
-| 2026-10-06 | 2026-10-07 | 130 / 25 / 8 |
+| 2026-10-06 | 2026-10-07 | 200 (80 + 50 + 70) / 25 / 8 |
 
-The additions are written as lines of their own — BASE_PRICE, TOLL and TUNNEL,
-described "Over ST" — so the Tarief, Tol and Tunnel columns, the exports and the
-invoice check read Leg 2's effective amounts from the snapshot, and nothing
-recalculates them. **Fuel** is charged on the effective Tarief (Over ST
+The additions are written as lines of their own — BASE_PRICE, TOLL and TUNNEL
+described "Over ST", and a BASE_PRICE line "Over ST toeslag" for the surcharge —
+so the Tarief, Tol and Tunnel columns, the exports and the invoice check read
+Leg 2's effective amounts from the snapshot, and nothing recalculates them.
+**Fuel** is charged on the effective Tarief (Over ST and the surcharge
 included), as decided by the business. The €50 Backload, the waiting time, the
 Cost Confirmations and the EK rule are unaffected.
+
+Every calculation produces these lines **from scratch** — never on top of a
+stored snapshot — so recalculating twice adds nothing twice, and a calculation
+after the dates are equal again carries none of it.
 
 ### Which Combination
 
 A road may be a leg of many Combinations, so a Combination Trip is matched by
 the **pair** of roads its two Trips drive (the same identity, `isSameCombination`,
-that keeps a pair from being configured twice). Tarief, Toll, Tunnel and Over
-ST all come from that one configuration. When the pair is not configured, the
-leg falls back to the match by its own road, as before, and owes no Over ST.
+that keeps a pair from being configured twice, matched with the layers above).
+Tarief, Toll, Tunnel and Over ST all come from that one configuration. When the
+pair is not identified, the leg prices against the ordinary route of its own
+road and owes no Over ST.
 
 Over ST reaches a Trip only when it is priced (closed or repriced); stored
 snapshots do not change until then.
@@ -559,6 +641,19 @@ change reprices Leg 2 by itself, without "Prijs opnieuw berekenen":
   Trips, but may date one whose CLOSED partner is Leg 2. Shared helper:
   `trips/planning-date-change.ts`.
 - `originalPlanningDate` triggers nothing: Over ST does not read it.
+
+### A road change reprices the pair
+
+A leg's road — terminal, destination city or direction — decides which
+configured PAIR both legs are priced on. So a real change of it (an edit of a
+CLOSED Trip, or a document revising an OPEN leg whose partner is CLOSED)
+reprices the Trip and every CLOSED member of its group from the same document
+(`PricingRecalculationService.tripsAffectedByRoadChange` →
+`PricingComponentResolver.tripsPricedByRoadOf`), deliberately whether or not
+the pair is genuine right now: a direction change can make it malformed, and
+the partner's price moves either way. A date and a road changed by one write
+reprice each Trip once (`trips/planning-date-change.ts`,
+`repriceAfterCombinationInputChange`).
 - Not in `changesPricingInput`: that list names a Trip's OWN inputs, while a
   date change may reprice the partner and must leave an ordinary Trip alone.
 
@@ -837,6 +932,7 @@ Examples include:
 - Waiting Time Billing Interval
 - Waiting Time Block Price
 - Combination Surcharge
+- Over ST Surcharge (Leg 2, when Over ST applies)
 - Route Prices
 - Route Costs (Toll, Tunnel)
 - Distance Rate

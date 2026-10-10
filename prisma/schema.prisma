@@ -141,6 +141,24 @@ enum PricingCalculationStatus {
   @@map("pricing_calculation_status")
 }
 
+/// How a Trip's road was matched to a configured route when it was priced.
+/// See `route-pricing/route-matcher.ts`, which is the one place it is decided.
+///
+///   EXACT       equal as configured (with the canonical terminal rule)
+///   NORMALIZED  equal after safe normalisation (case, accents, punctuation)
+///   FUZZY       one end a single trusted typo of a configured route
+///   NOT_FOUND   no configured route; route components priced at zero
+///   AMBIGUOUS   several configured routes fit; none chosen, priced at zero
+enum RouteMatchMethod {
+  EXACT
+  NORMALIZED
+  FUZZY
+  NOT_FOUND
+  AMBIGUOUS
+
+  @@map("route_match_method")
+}
+
 enum EmailProcessingStatus {
   RECEIVED
   PROCESSING
@@ -1268,11 +1286,29 @@ model TripPricing {
 
   notes String? @db.Text
 
+  /// The configured route (a `route_pricing` row) this calculation took its
+  /// Tarief, Toll and Tunnel from, or NULL when none was matched. No foreign
+  /// key on purpose: a route configuration may later be changed or removed,
+  /// and the snapshot stays the record of what was used then.
+  routePricingId String? @map("route_pricing_id") @db.Uuid
+
+  /// How that route was matched — or why none was. NULL on snapshots written
+  /// before this was recorded. NOT_FOUND and AMBIGUOUS mean the route
+  /// components are zero because nothing reliable matched, which is a
+  /// different fact from a configured route priced at zero.
+  routeMatch RouteMatchMethod? @map("route_match")
+
+  /// The Combination configuration (a `combination_route_group` row) whose
+  /// pair of legs priced this Trip, or NULL when it was priced on an ordinary
+  /// route or on none. No foreign key, for the same reason as above.
+  combinationRouteGroupId String? @map("combination_route_group_id") @db.Uuid
+
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  trip  Trip              @relation(fields: [tripId], references: [id], onDelete: Restrict)
-  items TripPricingItem[]
+  trip      Trip                  @relation(fields: [tripId], references: [id], onDelete: Restrict)
+  items     TripPricingItem[]
+  routeLegs TripPricingRouteLeg[]
 
   @@index([calculatedAt])
   @@index([calculationStatus])
@@ -1335,6 +1371,44 @@ model TripPricingOverride {
 }
 
 /// change — it only requires a new PricingComponent record.
+/// The configured route(s) a snapshot was priced against, AS THEY WERE then.
+///
+/// One row for an ordinary route; two for a Combination — both legs of the
+/// selected pair, with the leg that priced this Trip marked. No row when no
+/// route matched: `trip_pricing.route_match` then says why. Written and
+/// replaced together with the snapshot, in the same transaction, so a route
+/// shown beside a price always belongs to the calculation that produced it.
+///
+/// Only what explains the match is copied — the road and how it matched —
+/// never the configured amounts: those are on the snapshot's own items.
+model TripPricingRouteLeg {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+
+  tripPricingId String @map("trip_pricing_id") @db.Uuid
+
+  /// 1 or 2 for a Combination leg; NULL for an ordinary route.
+  legPosition Int? @map("leg_position") @db.SmallInt
+
+  /// True for the leg that priced THIS Trip; the other is its partner's.
+  isPricedLeg Boolean @map("is_priced_leg")
+
+  /// The configuration matched. No foreign key: it may be changed or removed.
+  routePricingId String @map("route_pricing_id") @db.Uuid
+
+  /// The configured road as it read when the calculation ran.
+  departure   String @db.Text
+  destination String @db.Text
+
+  matchMethod RouteMatchMethod @map("match_method")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  tripPricing TripPricing @relation(fields: [tripPricingId], references: [id], onDelete: Cascade)
+
+  @@unique([tripPricingId, legPosition])
+  @@map("trip_pricing_route_leg")
+}
+
 model TripPricingItem {
   id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
 

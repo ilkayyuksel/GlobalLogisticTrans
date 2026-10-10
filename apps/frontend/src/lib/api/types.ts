@@ -323,8 +323,61 @@ export interface TripPricing {
   pricingRuleVersion: string;
   calculationStatus: PricingCalculationStatus;
   notes: string | null;
+  /**
+   * The route configuration that priced this snapshot and how it matched.
+   * Optional: absent from responses of backends older than the field.
+   */
+  routePricingId?: string | null;
+  routeMatchMethod?: RouteMatchMethod | null;
+  combinationRouteGroupId?: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+/**
+ * How a stored calculation matched its route. NOT_FOUND and AMBIGUOUS mean no
+ * reliable route was found and the route components are zero.
+ */
+export type RouteMatchMethod =
+  | "EXACT"
+  | "NORMALIZED"
+  | "FUZZY"
+  | "NOT_FOUND"
+  | "AMBIGUOUS";
+
+/** One configured road a stored price came from, as it was configured then. */
+export interface RouteMatchLeg {
+  /** 1 or 2 for a Combination leg; null for an ordinary route. */
+  legPosition: number | null;
+  /** True for the leg that priced THIS Trip. */
+  isPricedLeg: boolean;
+  routePricingId: string;
+  departure: string;
+  destination: string;
+  method: RouteMatchMethod;
+}
+
+/** What Over ST added to the stored calculation, read from its own lines. */
+export interface AppliedOverSt {
+  applied: boolean;
+  tarief: string;
+  toll: string;
+  tunnel: string;
+  surcharge: string;
+}
+
+/**
+ * Which configured route a stored price came from — recorded by the backend
+ * when it calculated, never matched again for display.
+ */
+export interface RouteMatch {
+  /** Null: an older calculation that did not record its match. */
+  method: RouteMatchMethod | null;
+  routePricingId: string | null;
+  combinationRouteGroupId: string | null;
+  legs: RouteMatchLeg[];
+  /** Null unless a Combination priced the Trip. */
+  overSt: AppliedOverSt | null;
 }
 
 export interface TripPricingItem {
@@ -400,12 +453,22 @@ export interface EffectivePricing {
   ek: string;
   totaal: string;
   components: EffectivePricingComponent[];
+  /**
+   * The route the stored calculation behind these amounts was priced against.
+   * Optional: absent from responses of backends older than the field.
+   */
+  routeMatch?: RouteMatch | null;
 }
 
 /** What the reprocess endpoint returns, and what the detail page displays. */
 export interface PricingSnapshot {
   pricing: TripPricing;
   items: TripPricingItem[];
+  /**
+   * The route the stored calculation was matched to. Present on the snapshot
+   * read and on the reprocess response; absent only from older backends.
+   */
+  routeMatch?: RouteMatch;
 }
 
 /** What a document did to a Trip, as its history lists it. */

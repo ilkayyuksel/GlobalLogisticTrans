@@ -548,6 +548,46 @@ describe("TripDetailPage", () => {
       expect(await screen.findByText("-15.00 EUR")).toBeInTheDocument();
     });
 
+    /** The route the stored price came from, as the snapshot recorded it. */
+    it("shows which configured route the stored price came from", async () => {
+      getPricingSnapshotMock.mockResolvedValue({
+        ...buildSnapshot([buildItem()]),
+        routeMatch: {
+          method: "EXACT",
+          routePricingId: "route-1",
+          combinationRouteGroupId: null,
+          legs: [
+            {
+              legPosition: null,
+              isPricedLeg: true,
+              routePricingId: "route-1",
+              departure: "Quay 869",
+              destination: "Ghlin",
+              method: "EXACT",
+            },
+          ],
+          overSt: null,
+        },
+      });
+
+      render(<TripDetailPage />);
+
+      const section = await screen.findByRole("region", { name: "Gematchte route" });
+      expect(within(section).getByText("Quay 869 → Ghlin")).toBeInTheDocument();
+      expect(within(section).getByText("EXACT")).toBeInTheDocument();
+    });
+
+    /** No current price, no current route: an OPEN Trip shows neither. */
+    it("shows no route for an OPEN Trip, which has no current price", async () => {
+      getTripMock.mockResolvedValue(buildTrip({ status: "OPEN" }));
+      getPricingSnapshotMock.mockResolvedValue(null);
+
+      render(<TripDetailPage />);
+
+      expect(await screen.findByText("Nog geen prijs")).toBeInTheDocument();
+      expect(screen.queryByRole("region", { name: "Gematchte route" })).not.toBeInTheDocument();
+    });
+
     it("shows the engine and rule versions of the snapshot", async () => {
       getPricingSnapshotMock.mockResolvedValue(buildSnapshot([buildItem()]));
 
@@ -610,23 +650,32 @@ describe("TripDetailPage", () => {
     });
 
     /**
-     * The page refetches rather than trusting the mutation's own response, so
-     * what appears is what the backend now holds.
+     * The reprocess response IS the stored snapshot — amounts and matched
+     * route, read back by the backend — so the panel shows it directly.
      */
-    it("shows the pricing the backend holds after reprocessing", async () => {
-      getPricingSnapshotMock
-        .mockResolvedValueOnce(
-          buildSnapshot([buildItem({ amount: "400.00" })], "400.00"),
-        )
-        .mockResolvedValue(
-          buildSnapshot(
-            [buildItem({ description: "Base price", amount: "410.00" })],
-            "410.00",
-          ),
-        );
-      reprocessMock.mockResolvedValue(
-        buildSnapshot([buildItem({ amount: "410.00" })], "410.00"),
+    it("shows the reprocessed price and route straight from the response", async () => {
+      getPricingSnapshotMock.mockResolvedValue(
+        buildSnapshot([buildItem({ amount: "400.00" })], "400.00"),
       );
+      reprocessMock.mockResolvedValue({
+        ...buildSnapshot([buildItem({ amount: "410.00" })], "410.00"),
+        routeMatch: {
+          method: "FUZZY",
+          routePricingId: "route-charleroi",
+          combinationRouteGroupId: null,
+          legs: [
+            {
+              legPosition: null,
+              isPricedLeg: true,
+              routePricingId: "route-charleroi",
+              departure: "Quay 869",
+              destination: "Charleroi",
+              method: "FUZZY",
+            },
+          ],
+          overSt: null,
+        },
+      });
 
       render(<TripDetailPage />);
 
@@ -639,12 +688,15 @@ describe("TripDetailPage", () => {
         expect(screen.getAllByText("410.00 EUR")).toHaveLength(2);
       });
       expect(screen.queryByText("400.00 EUR")).not.toBeInTheDocument();
+      const section = screen.getByRole("region", { name: "Gematchte route" });
+      expect(within(section).getByText("Quay 869 → Charleroi")).toBeInTheDocument();
+      expect(within(section).getByText("FUZZY")).toBeInTheDocument();
     });
 
-    it("refetches the trip after reprocessing instead of trusting the response", async () => {
-      getPricingSnapshotMock.mockResolvedValue(
-        buildSnapshot([buildItem()], "482.35"),
-      );
+    /** 12. No second request is needed to learn the match. */
+    it("needs no further request after reprocessing", async () => {
+      getPricingSnapshotMock.mockResolvedValue(buildSnapshot([buildItem()], "482.35"));
+      reprocessMock.mockResolvedValue(buildSnapshot([buildItem()], "490.00"));
 
       render(<TripDetailPage />);
 
@@ -652,9 +704,9 @@ describe("TripDetailPage", () => {
         await screen.findByRole("button", { name: /prijs opnieuw berekenen/i }),
       );
 
-      await waitFor(() => {
-        expect(getTripMock.mock.calls.length).toBeGreaterThan(1);
-      });
+      expect(await screen.findByText("490.00 EUR")).toBeInTheDocument();
+      expect(getPricingSnapshotMock).toHaveBeenCalledTimes(1);
+      expect(getTripMock).toHaveBeenCalledTimes(1);
     });
 
     it("reports a refusal without losing the existing snapshot", async () => {
@@ -680,7 +732,11 @@ describe("TripDetailPage", () => {
           "No active route cost for this terminal and destination.",
         ),
       ).toBeInTheDocument();
+      // 11. The stored price stays shown as the stored price, with the error:
+      // never a success message, never presented as a new calculation.
       expect(screen.getByText("482.35 EUR")).toBeInTheDocument();
+      expect(screen.getByRole("alert")).toHaveTextContent("No active route cost");
+      expect(screen.queryByText(/opnieuw berekend/i)).not.toBeInTheDocument();
     });
 
     it("asks the backend to reprocess this trip", async () => {

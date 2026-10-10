@@ -4,7 +4,6 @@ import { AppLoggerService } from "../logger/app-logger.service";
 import { PricingComponentResolver } from "../pricing-engine/pricing-component.resolver";
 import { PricingEngineService } from "../pricing-engine/pricing-engine.service";
 import { PricingRecalculationService } from "../pricing-engine/pricing-recalculation.service";
-import { TripPricingItemRepository } from "../trip-pricing-items/trip-pricing-item.repository";
 import { TripReadService } from "../trips/trip-read.service";
 import { toEffectivePricingDto } from "./dto/effective-pricing.dto";
 import { EffectivePricingService } from "./effective-pricing.service";
@@ -65,14 +64,13 @@ describe("a mutation's pricing equals the Ritten list's pricing", () => {
       id: `pricing-${tripId}`,
       tripId,
       items: buildItems(ENGINE_LINES),
+      routeMatch: null,
+      routePricingId: null,
+      combinationRouteGroupId: null,
+      routeLegs: [],
     });
 
     effectivePricing = new EffectivePricingService(
-      {
-        findByTripPricingId: jest
-          .fn()
-          .mockResolvedValue(buildItems(ENGINE_LINES)),
-      } as unknown as TripPricingItemRepository,
       {
         findForTrip: jest.fn((tripId: string) =>
           Promise.resolve(overrideRows.filter((row) => row.tripId === tripId)),

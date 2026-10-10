@@ -5,6 +5,18 @@ import { AppLoggerService } from "../logger/app-logger.service";
 import { CombinationRoutePricingService } from "../route-pricing/combination-route-pricing.service";
 import { RouteConfigurationKind } from "../route-pricing/route-pricing.repository";
 import { RoutePricingService } from "../route-pricing/route-pricing.service";
+import type {
+  CombinationRoutePricingDto,
+  RoutePricingResponseDto,
+} from "../route-pricing/dto/route-pricing-response.dto";
+import type { RoadEndpoints } from "../route-pricing/route-identity";
+import {
+  RouteMatchMethod,
+  matchCombinationPair,
+  matchRoad,
+  type CombinationPairMatch,
+  type ScoredCandidate,
+} from "../route-pricing/route-matcher";
 import { TripCustomPropertyReadService } from "../trip-custom-properties/trip-custom-property-read.service";
 import { meaningfulTarNummer } from "../trips/tar-nummer";
 import { toUtcDate } from "../common/dates";
@@ -50,13 +62,39 @@ const UNCONFIGURED_ROUTE_BASE = {
 export interface MatchedRouteConfiguration {
   readonly routePricingId: string;
   readonly basePrice: string;
+  /**
+   * The configured road itself, as stored — not the Trip's spelling of it. An
+   * ordinary route's Toll and Tunnel are looked up by THIS road, so all three
+   * components come from the one configuration that was matched.
+   */
+  readonly departure: string;
+  readonly destination: string;
   /** Which of the two configurations of this road was matched. */
   readonly kind: RouteConfigurationKind;
   /** The Over ST this Trip owes on top, or null — see `combination-over-st.ts`. */
   readonly overSt: PricingOverStInput | null;
 }
 import { PricingRuleResolver } from "./pricing-rule.resolver";
-import { legFor, overStOwed, partnerOf, roadOf } from "./combination-over-st";
+import { decideOverSt, partnerOf, pricingRoadOf } from "./combination-over-st";
+import type { PricingRouteMatchTrace } from "./pricing-calculation-context";
+import { combinationTrace, ordinaryRouteTrace } from "./route-match-trace";
+
+/** Which configured route a Trip prices against, and how it was matched. */
+export interface RouteSelection {
+  /** The configuration, or null when nothing reliable matched. */
+  readonly route: MatchedRouteConfiguration | null;
+  /** What the snapshot records about the match — see `route-match-trace.ts`. */
+  readonly trace: PricingRouteMatchTrace;
+}
+
+/** A Combination pair as pricing looks it up: a partner, then the pair. */
+type PairLookup =
+  | { readonly kind: "NO_PARTNER" }
+  | {
+      readonly kind: "LOOKED_UP";
+      readonly partner: TripReadView;
+      readonly match: CombinationPairMatch<CombinationRoutePricingDto, RoutePricingResponseDto>;
+    };
 
 /**
  * Resolves the pricing inputs a specific Trip will be priced against.
@@ -325,126 +363,184 @@ export class PricingComponentResolver {
    * no extra query.
    */
   /**
-   * The route configuration this Trip prices against, or null when it has none.
+   * The route configuration this Trip prices against, and how it was matched.
    *
-   * ── WHICH OF THE TWO CONFIGURATIONS OF A ROAD ─────────────────────────────
-   * A road may be configured twice: once as an ordinary route and once as a leg
-   * of a Combination, priced differently because a Combination's outbound and
-   * return are their own transports. The existing domain rule decides which one
-   * applies, and no new rule is invented here: `combinationLegOf` already
-   * answers whether a Trip is a leg of a GENUINE Combination — one document that
-   * printed an outbound delivery and a return collection — and it is the same
-   * answer the TAR allocation uses.
+   * ── ONE MATCHER, EVERY TRIGGER ────────────────────────────────────────────
+   * Closing, reclosing, every repricing edit, regrouping, a date change and an
+   * explicit reprocess all price through the Engine, and the Engine asks HERE.
+   * The road is the Trip's real driving direction (`pricingRoadOf`) and the
+   * comparison is `route-matcher.ts`: exact, then safe normalisation, then a
+   * single trusted typo — never an alias, never a reversed road.
    *
-   *   DELIVERY or COLLECTION  a genuine Combination leg: the Combination
-   *                           configuration of its road, if one exists.
-   *   NONE                    an ordinary Trip, or a group an operator made by
-   *                           hand: the ordinary configuration.
-   *   INVALID                 the Trips of one document are grouped but are not
-   *                           one delivery and one collection. Reported
-   *                           elsewhere and never priced on a guess, so it takes
-   *                           the ordinary configuration rather than a
-   *                           Combination one.
+   * ── WHICH CONFIGURATION ───────────────────────────────────────────────────
+   *   a leg of a GENUINE Combination (`combinationLegOf`) whose PAIR of roads
+   *     is one configured Combination → that Combination's leg, with its Over ST;
+   *   anything else, or a pair that is not identified → the ordinary route.
    *
-   * ── AND WHY A LEG FALLS BACK ──────────────────────────────────────────────
-   * A genuine Combination leg whose road has no Combination configuration takes
-   * the ORDINARY one. Every Combination Trip priced before Combination routes
-   * existed was priced exactly that way, and refusing to match would silently
-   * reprice all of them to zero. The fallback is therefore what keeps existing
-   * pricing unchanged; configuring a Combination route is what changes it.
+   * A road alone never picks a Combination: one road may be a leg of many, and
+   * the first of them is not an answer. That fallback is gone.
    *
-   * Null whenever nobody has said: no terminal, no destination, or no
-   * configuration for the road in either context. None of those is an error —
-   * see `resolveRouteBaseSource`.
+   * ── NOTHING RELIABLE ──────────────────────────────────────────────────────
+   * `route` is null and `method` says why — NOT_FOUND or AMBIGUOUS. The Trip
+   * still prices, with zero route components, and the reason is logged as a
+   * warning and stored on the snapshot: never mistaken for a configured route
+   * priced at zero.
    */
-  async resolveConfiguredRoute(
-    trip: TripReadView,
-  ): Promise<MatchedRouteConfiguration | null> {
-    /*
-     * A route needs two ends. A Trip missing either cannot MATCH a
-     * configuration, which is the same situation as a road nobody has
-     * configured — so it takes the same answer rather than a different one.
-     */
-    if (!trip.terminal || !trip.destinationCity) {
-      return null;
+  async resolveRouteSelection(trip: TripReadView): Promise<RouteSelection> {
+    const road = pricingRoadOf(trip);
+
+    if (!road) {
+      this.logger.warn("Route pricing not matched: the Trip has no complete road", {
+        tripId: trip.id,
+        terminal: trip.terminal,
+        destinationCity: trip.destinationCity,
+        direction: trip.direction,
+        result: "route components priced at zero",
+      });
+
+      return { route: null, trace: ordinaryRouteTrace(null, RouteMatchMethod.NOT_FOUND) };
     }
 
     if (await this.isGenuineCombinationLeg(trip)) {
-      const paired = await this.matchCombinationPair(trip);
+      const combination = await this.selectCombinationLeg(trip, road);
 
-      if (paired) {
-        return paired;
+      if (combination) {
+        return combination;
       }
-
-      /*
-       * The pair is not configured as a Combination: fall back to the road, as
-       * before. A match by road alone cannot name the Combination, so it owes
-       * no Over ST.
-       */
-      const leg = await this.routePricingService.findConfiguredRoute(
-        trip.terminal,
-        trip.destinationCity,
-        RouteConfigurationKind.COMBINATION,
-      );
-
-      if (leg) {
-        return this.toMatch(leg, RouteConfigurationKind.COMBINATION);
-      }
-
-      this.logger.log(
-        "No Combination route configured for this leg; using the ordinary route",
-        { tripId: trip.id },
-      );
     }
 
-    const ordinary = await this.routePricingService.findConfiguredRoute(
-      trip.terminal,
-      trip.destinationCity,
-      RouteConfigurationKind.NORMAL,
-    );
+    return this.selectOrdinaryRoute(trip, road);
+  }
 
-    return ordinary
-      ? this.toMatch(ordinary, RouteConfigurationKind.NORMAL)
-      : null;
+  private async selectOrdinaryRoute(
+    trip: TripReadView,
+    road: RoadEndpoints,
+  ): Promise<RouteSelection> {
+    const match = matchRoad(road, await this.routePricingService.findAllOrdinary());
+    /*
+     * Several ordinary configurations of one road: the duplicate rule refuses
+     * that on the way in, but configurations differing only in letter case
+     * slipped past it before. Never choose between them.
+     */
+    const method =
+      match.matches.length > 1 ? RouteMatchMethod.AMBIGUOUS : match.method;
+    const route = match.matches.length === 1 ? match.matches[0] : null;
+
+    this.reportRouteMatch(trip, road, method, match.nearest, route?.id ?? null);
+
+    return {
+      route: route ? this.toMatch(route, RouteConfigurationKind.NORMAL) : null,
+      trace: ordinaryRouteTrace(route, method),
+    };
   }
 
   /**
-   * The Combination configured for this Trip's PAIR of roads, and the leg of it
-   * this Trip is — or null when the pair is not configured.
-   *
-   * ── WHY THE PAIR ──────────────────────────────────────────────────────────
-   * One road may be a leg of many Combinations, each with its own prices and its
-   * own Over ST, and a lookup by road can only take the first. The two Trips of a
-   * genuine Combination name their pair, so the configuration is found by both
-   * roads — the identity `isSameCombination` already enforces — and Tarief,
-   * Toll, Tunnel and Over ST all come from that one configuration.
+   * The leg of the Combination configured for this Trip's PAIR of roads, or
+   * null when the pair is not identified — the caller then prices the ordinary
+   * route, and the reason is logged.
    */
-  private async matchCombinationPair(
+  private async selectCombinationLeg(
     trip: TripReadView,
-  ): Promise<MatchedRouteConfiguration | null> {
-    const pair = await this.findCombinationPair(trip);
-    const leg = pair ? legFor(pair.ownRoad, pair.combination.legs) : null;
+    road: RoadEndpoints,
+  ): Promise<RouteSelection | null> {
+    const lookup = await this.findCombinationPair(trip, road);
 
-    if (!pair || !leg) {
+    if (lookup.kind === "NO_PARTNER" || lookup.match.kind !== "MATCHED") {
+      this.logger.warn("Combination pair not identified; pricing the ordinary route", {
+        tripId: trip.id,
+        reason: lookup.kind === "NO_PARTNER" ? "NO_PARTNER" : lookup.match.kind,
+        departure: road.departure,
+        destination: road.destination,
+        ...(lookup.kind === "LOOKED_UP" && lookup.match.kind !== "MATCHED"
+          ? {
+              partnerTripId: lookup.partner.id,
+              legMethods: lookup.match.roads.map((each) => each.method),
+            }
+          : {}),
+      });
+
       return null;
     }
 
-    const overSt = overStOwed(
-      leg.combinationLegPosition,
+    const { group, legs, method, methods } = lookup.match;
+    const ownLeg = legs[0];
+    const overSt = decideOverSt(
+      ownLeg.combinationLegPosition,
       trip,
-      pair.partner,
-      pair.combination.overSt,
+      lookup.partner,
+      group.overSt,
     );
 
     this.logger.log("Combination matched by its pair of roads", {
       tripId: trip.id,
-      combinationGroupId: pair.combination.id,
-      legPosition: leg.combinationLegPosition,
-      // Whether Over ST applies, never its amounts.
-      overStApplies: overSt !== null,
+      combinationGroupId: group.id,
+      routePricingId: ownLeg.id,
+      legPosition: ownLeg.combinationLegPosition,
+      routeMatch: method,
+      // Whether Over ST applies and why, never its amounts.
+      overStApplies: overSt.applies,
+      ...(overSt.applies ? {} : { overStReason: overSt.reason }),
     });
 
-    return { ...this.toMatch(leg, RouteConfigurationKind.COMBINATION), overSt };
+    return {
+      route: {
+        ...this.toMatch(ownLeg, RouteConfigurationKind.COMBINATION),
+        overSt: overSt.applies ? overSt.amounts : null,
+      },
+      trace: combinationTrace(
+        group.id,
+        method,
+        { leg: ownLeg, method: methods[0] },
+        { leg: legs[1], method: methods[1] },
+      ),
+    };
+  }
+
+  /**
+   * The match, logged at the level it deserves.
+   *
+   * A reliable match is information; a typo that was trusted says so; nothing
+   * reliable is a WARNING with what was tried and the nearest configurations
+   * and their scores — enough to find and fix it. Route names are logged,
+   * amounts never.
+   */
+  private reportRouteMatch(
+    trip: TripReadView,
+    road: RoadEndpoints,
+    method: RouteMatchMethod,
+    nearest: readonly ScoredCandidate<RoutePricingResponseDto>[],
+    routePricingId: string | null,
+  ): void {
+    const context = {
+      tripId: trip.id,
+      departure: road.departure,
+      destination: road.destination,
+      routeMatch: method,
+      routePricingId,
+    };
+
+    if (routePricingId !== null) {
+      this.logger.log(
+        method === RouteMatchMethod.FUZZY
+          ? "Route matched by a trusted typo"
+          : "Route matched",
+        context,
+      );
+
+      return;
+    }
+
+    this.logger.warn("Route pricing not matched; route components priced at zero", {
+      ...context,
+      attempted: ["EXACT", "NORMALIZED", "FUZZY"],
+      nearest: nearest.map((candidate) => ({
+        routePricingId: candidate.route.id,
+        departure: candidate.route.departure,
+        destination: candidate.route.destination,
+        departureEdits: candidate.departureEdits,
+        destinationEdits: candidate.destinationEdits,
+      })),
+    });
   }
 
   /**
@@ -456,30 +552,53 @@ export class PricingComponentResolver {
    * So the answer is the leg of this Trip's genuine pair that the configured
    * Combination holds at position 2: this Trip itself, its partner, or neither.
    *
-   * Found exactly as pricing finds it — by the PAIR of roads and the genuine
-   * Combination rule — so the Trips named are the Trips whose price would move.
-   * Nothing for an ordinary Trip, a manual group or an unconfigured pair: their
-   * pricing does not read planningDate through this rule.
+   * Found exactly as pricing finds it — the same pair match — so the Trips
+   * named are the Trips whose price would move.
    */
   async legsPricedByPlanningDate(trip: TripReadView): Promise<string[]> {
-    if (!(await this.isGenuineCombinationLeg(trip))) {
+    const road = pricingRoadOf(trip);
+
+    if (!road || !(await this.isGenuineCombinationLeg(trip))) {
       return [];
     }
 
-    const pair = await this.findCombinationPair(trip);
+    const lookup = await this.findCombinationPair(trip, road);
 
-    if (!pair) {
+    if (lookup.kind === "NO_PARTNER" || lookup.match.kind !== "MATCHED") {
       return [];
     }
 
-    return [trip, pair.partner]
-      .filter((member) => {
-        const road = roadOf(member);
-        const leg = road ? legFor(road, pair.combination.legs) : null;
+    const [ownLeg, partnerLeg] = lookup.match.legs;
 
-        return leg?.combinationLegPosition === 2;
-      })
+    return [
+      { id: trip.id, leg: ownLeg },
+      { id: lookup.partner.id, leg: partnerLeg },
+    ]
+      .filter((member) => member.leg.combinationLegPosition === 2)
       .map((member) => member.id);
+  }
+
+  /**
+   * The Trips whose pricing reads this Trip's road (terminal, destination or
+   * direction): this Trip and every member of its group from the same
+   * document — the candidates for its genuine pair.
+   *
+   * Deliberately wider than the pair as it stands now: a changed direction can
+   * make a genuine pair malformed (or the reverse), and the partner's price
+   * moves either way. Repricing a Trip whose price does not move stores the
+   * same answer again; missing one leaves a stale price.
+   */
+  async tripsPricedByRoadOf(trip: TripReadView): Promise<string[]> {
+    if (trip.tripGroupId === null || trip.pdfDocumentId === null) {
+      return [trip.id];
+    }
+
+    const members = await this.groupMembers(trip);
+    const sameDocument = members
+      .filter((member) => member.pdfDocumentId === trip.pdfDocumentId)
+      .map((member) => member.id);
+
+    return [...new Set([trip.id, ...sameDocument])];
   }
 
   /**
@@ -488,21 +607,25 @@ export class PricingComponentResolver {
    * One lookup for both questions — which configuration prices a leg, and
    * which leg reads the planning dates — so the two can never disagree.
    */
-  private async findCombinationPair(trip: TripReadView) {
+  private async findCombinationPair(
+    trip: TripReadView,
+    road: RoadEndpoints,
+  ): Promise<PairLookup> {
     const partner = partnerOf(trip, await this.groupMembers(trip));
-    const ownRoad = roadOf(trip);
-    const partnerRoad = partner ? roadOf(partner) : null;
+    const partnerRoad = partner ? pricingRoadOf(partner) : null;
 
-    if (!partner || !ownRoad || !partnerRoad) {
-      return null;
+    if (!partner || !partnerRoad) {
+      return { kind: "NO_PARTNER" };
     }
 
-    const combination = await this.combinationPricing.findConfiguredCombination([
-      ownRoad,
-      partnerRoad,
-    ]);
-
-    return combination ? { combination, partner, ownRoad } : null;
+    return {
+      kind: "LOOKED_UP",
+      partner,
+      match: matchCombinationPair(
+        [road, partnerRoad],
+        await this.combinationPricing.findAll(),
+      ),
+    };
   }
 
   /**
@@ -520,12 +643,14 @@ export class PricingComponentResolver {
   }
 
   private toMatch(
-    route: { id: string; basePrice: string },
+    route: { id: string; basePrice: string; departure: string; destination: string },
     kind: RouteConfigurationKind,
   ): MatchedRouteConfiguration {
     return {
       routePricingId: route.id,
       basePrice: route.basePrice,
+      departure: route.departure,
+      destination: route.destination,
       kind,
       overSt: null,
     };
@@ -584,10 +709,9 @@ export class PricingComponentResolver {
      * ────────────────────────────────────────────────────────────────────────
      */
     if (!matchedRoute) {
-      this.logger.warn("No route pricing matched; the Trip prices at zero", {
+      // Already reported as a warning by `resolveRouteSelection`, with why.
+      this.logger.log("No route pricing matched; the Trip prices at zero", {
         tripId: trip.id,
-        hasTerminal: Boolean(trip.terminal),
-        hasDestination: Boolean(trip.destinationCity),
       });
 
       return UNCONFIGURED_ROUTE_BASE;

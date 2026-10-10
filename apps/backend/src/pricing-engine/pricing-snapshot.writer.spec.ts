@@ -37,7 +37,9 @@ function buildResult(
 ): PricingCalculationResult {
   return {
     tripId: TRIP_ID,
-    context: {} as PricingCalculationResult["context"],
+    context: {
+      routeMatch: { routePricingId: "route-1", method: "EXACT", combinationRouteGroupId: null, legs: [] },
+    } as unknown as PricingCalculationResult["context"],
     isReprocess: false,
     preparedAt: new Date("2026-08-17T09:00:00.000Z"),
     durationMs: 12,
@@ -166,6 +168,79 @@ describe("PricingSnapshotWriter", () => {
           pricingEngineVersion: "1.0.0",
           pricingRuleVersion: "2026.1",
           calculationStatus: PricingCalculationStatus.CALCULATED,
+        }),
+      );
+    });
+
+    /** Which configuration priced the Trip, and how: a zero Tarief explains itself. */
+    it("stores the route match trace with the snapshot", async () => {
+      await writer.writeSnapshot(
+        buildResult([], {
+          context: {
+            routeMatch: {
+              routePricingId: null,
+              method: "NOT_FOUND",
+              combinationRouteGroupId: null,
+              legs: [],
+            },
+          } as unknown as PricingCalculationResult["context"],
+        }),
+      );
+
+      expect(tripPricingService.replaceSnapshot).toHaveBeenCalledWith(
+        expect.objectContaining({
+          routePricingId: null,
+          routeMatch: "NOT_FOUND",
+          combinationRouteGroupId: null,
+          routeLegs: [],
+        }),
+      );
+    });
+
+    it("stores both legs of the selected Combination with the snapshot", async () => {
+      const leg = (position: number, isPricedLeg: boolean) => ({
+        legPosition: position,
+        isPricedLeg,
+        routePricingId: `leg-${position}`,
+        departure: position === 1 ? "Quay 869" : "Mons",
+        destination: position === 1 ? "Ghlin" : "Quay 869",
+        method: position === 1 ? "EXACT" : "FUZZY",
+      });
+
+      await writer.writeSnapshot(
+        buildResult([], {
+          context: {
+            routeMatch: {
+              routePricingId: "leg-2",
+              method: "FUZZY",
+              combinationRouteGroupId: "combination-1",
+              legs: [leg(1, false), leg(2, true)],
+            },
+          } as unknown as PricingCalculationResult["context"],
+        }),
+      );
+
+      expect(tripPricingService.replaceSnapshot).toHaveBeenCalledWith(
+        expect.objectContaining({
+          combinationRouteGroupId: "combination-1",
+          routeLegs: [
+            {
+              legPosition: 1,
+              isPricedLeg: false,
+              routePricingId: "leg-1",
+              departure: "Quay 869",
+              destination: "Ghlin",
+              matchMethod: "EXACT",
+            },
+            {
+              legPosition: 2,
+              isPricedLeg: true,
+              routePricingId: "leg-2",
+              departure: "Mons",
+              destination: "Quay 869",
+              matchMethod: "FUZZY",
+            },
+          ],
         }),
       );
     });

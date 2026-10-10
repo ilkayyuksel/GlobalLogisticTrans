@@ -34,6 +34,7 @@ function buildContext(
     isCombination,
     waitingTimeMinutes: 0,
     route: { departure: "PSA Antwerp", destination: "Dourges" },
+    routeMatch: { routePricingId: "route-1", method: "EXACT", combinationRouteGroupId: null, legs: [] },
     baseSource: {
       strategy: PricingStrategy.ROUTE_BASED,
       routePricingId: "route-1",
@@ -43,6 +44,7 @@ function buildContext(
       strategy: PricingStrategy.ROUTE_BASED,
       fuelPercentage: "15",
       combinationSurcharge,
+      overStSurcharge: "70.00",
       automaticCustomPropertyId: "property-tar",
       waitingTimeFreeMinutes: 60,
       waitingTimeThresholdMinutes: 0,

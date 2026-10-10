@@ -115,6 +115,11 @@ export class RoutePricingService {
     return matches[0] ? toRoutePricingResponse(matches[0]) : null;
   }
 
+  /** Every ordinary route, for the pricing route matcher. Reads, never writes. */
+  async findAllOrdinary(): Promise<RoutePricingResponseDto[]> {
+    return (await this.repository.findAllOrdinary()).map(toRoutePricingResponse);
+  }
+
   async create(dto: CreateRoutePricingDto): Promise<RoutePricingResponseDto> {
     // One ORDINARY configuration per route: an existing record for the same
     // route is a conflict, and there is no longer a dormant state one could hide

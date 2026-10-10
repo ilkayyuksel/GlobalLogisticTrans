@@ -30,11 +30,13 @@ function buildContext(
     isCombination: false,
     waitingTimeMinutes: 0,
     route,
+    routeMatch: { routePricingId: "route-1", method: "EXACT", combinationRouteGroupId: null, legs: [] },
     baseSource,
     rules: {
       strategy: baseSource.strategy,
       fuelPercentage: "15",
       combinationSurcharge: "75",
+      overStSurcharge: "70.00",
       automaticCustomPropertyId: "property-tar",
       waitingTimeFreeMinutes: 60,
       waitingTimeThresholdMinutes: 0,

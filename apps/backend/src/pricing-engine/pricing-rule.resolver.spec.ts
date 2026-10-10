@@ -21,6 +21,7 @@ const SEEDED_VALUES: Record<string, string> = {
   [PricingSettingKey.STRATEGY]: PricingStrategy.ROUTE_BASED,
   [PricingSettingKey.FUEL_PERCENTAGE]: "15",
   [PricingSettingKey.COMBINATION_SURCHARGE]: "75",
+  [PricingSettingKey.OVER_ST_SURCHARGE]: "70.00",
   [PricingSettingKey.AUTOMATIC_CUSTOM_PROPERTY_ID]: "property-tar",
   [PricingSettingKey.WAITING_TIME_FREE_MINUTES]: "60",
   [PricingSettingKey.WAITING_TIME_THRESHOLD_MINUTES]: "0",
@@ -98,6 +99,7 @@ describe("PricingRuleResolver", () => {
         strategy: PricingStrategy.ROUTE_BASED,
         fuelPercentage: "15",
         combinationSurcharge: "75",
+        overStSurcharge: "70.00",
         automaticCustomPropertyId: "property-tar",
         waitingTimeFreeMinutes: 60,
         waitingTimeThresholdMinutes: 0,
@@ -118,6 +120,7 @@ describe("PricingRuleResolver", () => {
         `${PRICING_SETTINGS_CATEGORY}.${PricingSettingKey.STRATEGY}`,
         `${PRICING_SETTINGS_CATEGORY}.${PricingSettingKey.FUEL_PERCENTAGE}`,
         `${PRICING_SETTINGS_CATEGORY}.${PricingSettingKey.COMBINATION_SURCHARGE}`,
+        `${PRICING_SETTINGS_CATEGORY}.${PricingSettingKey.OVER_ST_SURCHARGE}`,
         `${PRICING_SETTINGS_CATEGORY}.${PricingSettingKey.AUTOMATIC_CUSTOM_PROPERTY_ID}`,
         `${PRICING_SETTINGS_CATEGORY}.${PricingSettingKey.WAITING_TIME_FREE_MINUTES}`,
         `${PRICING_SETTINGS_CATEGORY}.${PricingSettingKey.WAITING_TIME_THRESHOLD_MINUTES}`,
@@ -231,6 +234,7 @@ describe("PricingRuleResolver", () => {
       const AMOUNT_KEYS = [
         PricingSettingKey.FUEL_PERCENTAGE,
         PricingSettingKey.COMBINATION_SURCHARGE,
+        PricingSettingKey.OVER_ST_SURCHARGE,
         PricingSettingKey.WAITING_TIME_BLOCK_PRICE,
       ];
 
@@ -388,7 +392,7 @@ describe("PricingRuleResolver", () => {
       await resolver.resolve();
 
       // Nine keys, read again on the second call — and each read once per call.
-      expect(settingsService.findOne).toHaveBeenCalledTimes(18);
+      expect(settingsService.findOne).toHaveBeenCalledTimes(20);
     });
   });
 

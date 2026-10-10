@@ -23,7 +23,9 @@ import {
 import { AutomaticFlatPropertyService } from "./automatic-flat.service";
 import {
   movesPlanningDate,
-  repriceAfterPlanningDateChange,
+  movesRoad,
+  repriceAfterCombinationInputChange,
+  type CombinationInputChange,
 } from "./planning-date-change";
 import { TripIdentity, TripRepository } from "./trip.repository";
 
@@ -173,6 +175,18 @@ export type DocumentRevisableTripFields = Pick<
   | "parserMetadata"
 > &
   Pick<Trip, "planningDate">;
+
+/** The values a Combination's pricing reads, copied before a write. */
+function pairInputsOf(
+  trip: Trip,
+): Pick<Trip, "planningDate" | "terminal" | "destinationCity" | "direction"> {
+  return {
+    planningDate: trip.planningDate,
+    terminal: trip.terminal,
+    destinationCity: trip.destinationCity,
+    direction: trip.direction,
+  };
+}
 
 export function identityOf(document: ImportedTripData): TripIdentity {
   return {
@@ -351,13 +365,14 @@ export class TripRevisionService {
    * The revised Trip itself is not priced: it stays OPEN, and an OPEN Trip has
    * no pricing to invalidate. Pricing happens when it is closed, exactly as
    * before. The one exception is its CLOSED Combination partner when the
-   * document moved this Trip's date — see `repriceIfMovedDay`.
+   * document moved this Trip's date or road — see
+   * `repriceIfCombinationInputChanged`.
    */
   async applyDocumentRevision(
     document: ImportedTripData,
     source?: DocumentReference,
   ): Promise<RevisionResult> {
-    let movedDay = false;
+    let changed: CombinationInputChange = { planningDate: false, road: false };
     const result = await this.repository.runTripWriteTransaction(
       async ({
         trips: repository,
@@ -446,8 +461,13 @@ export class TripRevisionService {
         const changes = detectFieldChanges(trip, document);
 
         const revised = this.toRevisedFields(trip, document);
-        movedDay = movesPlanningDate(trip, revised);
+        const before = pairInputsOf(trip);
         const updated = await repository.update(trip.id, revised);
+        // Compared as stored, so a document that repeats a value moves nothing.
+        changed = {
+          planningDate: movesPlanningDate(before, updated),
+          road: movesRoad(before, updated),
+        };
 
         /*
          * The container type may just have changed, and the Flat property has
@@ -479,7 +499,7 @@ export class TripRevisionService {
       changedFields: result.changedFields,
     });
 
-    await this.repriceIfMovedDay(movedDay, result);
+    await this.repriceIfCombinationInputChanged(changed, result);
 
     return result;
   }
@@ -516,7 +536,7 @@ export class TripRevisionService {
     document: ImportedTripData,
     source?: DocumentReference,
   ): Promise<RevisionResult> {
-    let movedDay = false;
+    let changed: CombinationInputChange = { planningDate: false, road: false };
     const result = await this.repository.runTripWriteTransaction(
       async ({
         trips: repository,
@@ -555,8 +575,13 @@ export class TripRevisionService {
         }
 
         const revised = this.toRevisedFields(trip, document);
-        movedDay = movesPlanningDate(trip, revised);
+        const before = pairInputsOf(trip);
         const updated = await repository.update(trip.id, revised);
+        // Compared as stored, so a document that repeats a value moves nothing.
+        changed = {
+          planningDate: movesPlanningDate(before, updated),
+          road: movesRoad(before, updated),
+        };
 
         // The container type may have moved with the rest; Flat follows it.
         await this.automaticFlat.synchronise(
@@ -590,30 +615,34 @@ export class TripRevisionService {
       tripId: result.trip?.id ?? null,
     });
 
-    await this.repriceIfMovedDay(movedDay, result);
+    await this.repriceIfCombinationInputChanged(changed, result);
 
     return result;
   }
 
   /**
-   * Reprices the CLOSED Combination leg a document moved to another day.
+   * Reprices the CLOSED Combination leg a document moved to another day or
+   * another road.
    *
    * A document only ever rewrites an OPEN Trip, which has no price — but its
-   * partner may be CLOSED, and when the partner is Leg 2 its Over ST depends on
-   * this Trip's date. Which Trips that reaches is the pricing domain's answer;
-   * see `repriceAfterPlanningDateChange`. After the transaction has committed,
-   * so the Engine reads the new date. Never throws: the revision stands.
+   * partner may be CLOSED: when the partner is Leg 2 its Over ST depends on
+   * this Trip's date, and either leg's road decides which configured pair both
+   * are priced on. Which Trips that reaches is the pricing domain's answer;
+   * see `repriceAfterCombinationInputChange`. After the transaction has
+   * committed, so the Engine reads the new values. Never throws: the revision
+   * stands.
    */
-  private async repriceIfMovedDay(
-    movedDay: boolean,
+  private async repriceIfCombinationInputChanged(
+    changed: CombinationInputChange,
     result: RevisionResult,
   ): Promise<void> {
-    if (!movedDay || !result.trip) {
+    if ((!changed.planningDate && !changed.road) || !result.trip) {
       return;
     }
 
-    await repriceAfterPlanningDateChange(
+    await repriceAfterCombinationInputChange(
       result.trip.id,
+      changed,
       this.recalculation,
       (tripId) => this.repository.findById(tripId),
       this.logger,

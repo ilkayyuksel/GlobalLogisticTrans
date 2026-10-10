@@ -1,5 +1,9 @@
 import { ApiProperty, ApiPropertyOptional } from "@nestjs/swagger";
-import { PricingCalculationStatus, TripPricing } from "@prisma/client";
+import {
+  PricingCalculationStatus,
+  RouteMatchMethod,
+  TripPricing,
+} from "@prisma/client";
 
 import { MONEY_DECIMAL_PLACES } from "../../common/dto/money";
 
@@ -51,6 +55,26 @@ export class TripPricingResponseDto {
   @ApiPropertyOptional({ nullable: true })
   notes!: string | null;
 
+  @ApiPropertyOptional({
+    format: "uuid",
+    nullable: true,
+    description:
+      "The route configuration this calculation took its Tarief, Toll and Tunnel from; null when none matched or the snapshot predates the record.",
+  })
+  routePricingId!: string | null;
+
+  @ApiPropertyOptional({
+    enum: RouteMatchMethod,
+    enumName: "RouteMatchMethod",
+    nullable: true,
+    description:
+      "How that route was matched. Null on a snapshot written before this was recorded. The full account — the road(s) and the Combination — is `routeMatch` on the snapshot read.",
+  })
+  routeMatchMethod!: RouteMatchMethod | null;
+
+  @ApiPropertyOptional({ format: "uuid", nullable: true })
+  combinationRouteGroupId!: string | null;
+
   @ApiProperty({ format: "date-time" })
   createdAt!: Date;
 
@@ -71,6 +95,9 @@ export function toTripPricingResponse(
     pricingRuleVersion: tripPricing.pricingRuleVersion,
     calculationStatus: tripPricing.calculationStatus,
     notes: tripPricing.notes,
+    routePricingId: tripPricing.routePricingId,
+    routeMatchMethod: tripPricing.routeMatch,
+    combinationRouteGroupId: tripPricing.combinationRouteGroupId,
     createdAt: tripPricing.createdAt,
     updatedAt: tripPricing.updatedAt,
   };

@@ -1,5 +1,10 @@
 import { NotFoundException } from "@nestjs/common";
-import { PricingCalculationStatus, Prisma, TripStatus } from "@prisma/client";
+import {
+  PricingCalculationStatus,
+  Prisma,
+  TripDirection,
+  TripStatus,
+} from "@prisma/client";
 
 import { AppLoggerService } from "../logger/app-logger.service";
 import { TripReadService, TripReadView } from "../trips/trip-read.service";
@@ -71,6 +76,7 @@ const RULES: PricingRuleConfiguration = {
   strategy: PricingStrategy.ROUTE_BASED,
   fuelPercentage: "15",
   combinationSurcharge: "75",
+  overStSurcharge: "70.00",
   automaticCustomPropertyId: "property-tar",
   waitingTimeFreeMinutes: 60,
   waitingTimeThresholdMinutes: 0,
@@ -121,7 +127,7 @@ describe("PricingEngineService", () => {
   let componentResolver: {
     resolveBaseSource: jest.Mock;
     resolveAssignedCustomProperties: jest.Mock;
-    resolveConfiguredRoute: jest.Mock;
+    resolveRouteSelection: jest.Mock;
     resolveCombinationLeg: jest.Mock;
   };
   let routeCostResolver: { resolve: jest.Mock };
@@ -168,7 +174,15 @@ describe("PricingEngineService", () => {
        * unless a test says otherwise, which is the ordinary case on this
        * business's data: most roads have no configured price.
        */
-      resolveConfiguredRoute: jest.fn().mockResolvedValue(null),
+      resolveRouteSelection: jest.fn().mockResolvedValue({
+        route: null,
+        trace: {
+          routePricingId: null,
+          method: "NOT_FOUND",
+          combinationRouteGroupId: null,
+          legs: [],
+        },
+      }),
       /*
        * A stand-in, not the rule. Which Trips form a genuine Combination is
        * decided by combinationLegOf() and proved in the resolver spec; here the
@@ -219,13 +233,9 @@ describe("PricingEngineService", () => {
         expect.objectContaining({ id: TRIP_ID }),
         expect.objectContaining({ automaticCustomPropertyId: "property-tar" }),
       );
-      // The match travels with the route: a Combination leg's costs are found by
-      // the leg, and every other Trip's by the road.
-      expect(routeCostResolver.resolve).toHaveBeenCalledWith(
-        TRIP_ID,
-        ROUTE,
-        null,
-      );
+      // The costs follow the match: a Combination leg's are found by the leg,
+      // an ordinary route's by its configured road, and no match has none.
+      expect(routeCostResolver.resolve).toHaveBeenCalledWith(TRIP_ID, null);
       expect(snapshotWriter.findExistingSnapshot).toHaveBeenCalledWith(TRIP_ID);
     });
 
@@ -398,6 +408,68 @@ describe("PricingEngineService", () => {
       expect(context.route).toEqual({
         departure: "PSA Antwerp",
         destination: "Dourges",
+      });
+    });
+
+    /** The road as it is driven: a collection runs from the city to the terminal. */
+    it("reads a collection's route from the city to the terminal", async () => {
+      trips.findById.mockResolvedValue(
+        buildTrip({ direction: TripDirection.COLLECTION }),
+      );
+
+      const { context } = await engine.prepareCalculation(TRIP_ID);
+
+      expect(context.route).toEqual({
+        departure: ROUTE.destination,
+        destination: ROUTE.departure,
+      });
+    });
+
+    /** Stored on the snapshot, so a zero Tarief always says why it is zero. */
+    it("carries which configuration priced the Trip, and how it matched", async () => {
+      const matched = {
+        routePricingId: "route-9",
+        basePrice: "380.00",
+        departure: "ANTWERP",
+        destination: "ROTTERDAM",
+        kind: "NORMAL",
+        overSt: null,
+      };
+      const trace = {
+        routePricingId: "route-9",
+        method: "NORMALIZED",
+        combinationRouteGroupId: null,
+        legs: [
+          {
+            legPosition: null,
+            isPricedLeg: true,
+            routePricingId: "route-9",
+            departure: "ANTWERP",
+            destination: "ROTTERDAM",
+            method: "NORMALIZED",
+          },
+        ],
+      };
+      componentResolver.resolveRouteSelection.mockResolvedValue({
+        route: matched,
+        trace,
+      });
+
+      const { context } = await engine.prepareCalculation(TRIP_ID);
+
+      // The selection's own record, carried verbatim to the snapshot.
+      expect(context.routeMatch).toEqual(trace);
+      expect(routeCostResolver.resolve).toHaveBeenCalledWith(TRIP_ID, matched);
+    });
+
+    it("records an unmatched route as such, never as a configured one", async () => {
+      const { context } = await engine.prepareCalculation(TRIP_ID);
+
+      expect(context.routeMatch).toEqual({
+        routePricingId: null,
+        method: "NOT_FOUND",
+        combinationRouteGroupId: null,
+        legs: [],
       });
     });
 

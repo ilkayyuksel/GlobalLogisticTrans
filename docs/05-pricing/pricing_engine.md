@@ -207,6 +207,16 @@ Parser information is not modified.
 
 Planning information is not modified.
 
+`POST /trip-pricing/trip/{tripId}/reprocess` answers with the snapshot it just
+stored — `pricing` (incl. `routePricingId`, `routeMatchMethod`,
+`combinationRouteGroupId`), `items` and `routeMatch` (the route(s) matched, the
+selected Combination with both legs, and the Over ST applied) — in exactly the
+shape of `GET /trip-pricing/snapshots`. It is read back from storage in one
+consistent read (`TripPricingService.requireCurrentSnapshot`), never matched
+again for the response. A Trip reopened between the write and the read-back is
+refused with the usual 409; its stored snapshot is never answered as current.
+The Trip detail page shows this response directly, without a second request.
+
 ## Automatic recalculation after a Trip input changes
 
 Three writes change what a Trip is worth without touching its status, and each
@@ -468,6 +478,13 @@ Execution Duration
 Warnings
 
 Errors
+
+Route matching (`PricingComponentResolver`): the match method; a trusted typo
+(`FUZZY`) at info level; nothing reliable (`NOT_FOUND`, `AMBIGUOUS`) as a
+warning with the road, the layers tried and the nearest configurations with
+their edit scores; a Combination pair that is not identified, with its reason;
+and whether Over ST applies to a matched leg, with the reason when it does not.
+See `pricing_rules.md` — *How a road is matched*.
 
 Never log confidential information.
 

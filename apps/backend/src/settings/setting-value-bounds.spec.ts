@@ -11,6 +11,7 @@ describe("setting value bounds", () => {
     it.each([
       "FUEL_PERCENTAGE",
       "COMBINATION_SURCHARGE",
+      "OVER_ST_SURCHARGE",
       "DISTANCE_RATE_PER_KM",
       "WAITING_TIME_BLOCK_PRICE",
     ])("bounds PRICING.%s at zero", (key) => {
@@ -47,6 +48,7 @@ describe("setting value bounds", () => {
     const numericPricingSettings = [
       "FUEL_PERCENTAGE",
       "COMBINATION_SURCHARGE",
+      "OVER_ST_SURCHARGE",
       "DISTANCE_RATE_PER_KM",
       "WAITING_TIME_FREE_MINUTES",
       "WAITING_TIME_BLOCK_MINUTES",

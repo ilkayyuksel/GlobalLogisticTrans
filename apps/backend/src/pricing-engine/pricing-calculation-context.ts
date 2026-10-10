@@ -1,4 +1,5 @@
 import { TripStatus } from "@prisma/client";
+import type { RouteMatchMethod } from "../route-pricing/route-matcher";
 
 import { PricingStrategy } from "./pricing-settings";
 
@@ -27,6 +28,8 @@ export interface PricingRuleConfiguration {
   /** Percentage applied to the base price only, never to the other components. */
   readonly fuelPercentage: string;
   readonly combinationSurcharge: string;
+  /** Added once to Leg 2's Tarief when Over ST applies. */
+  readonly overStSurcharge: string;
   /**
    * The Custom Property the Engine applies without anyone assigning it — TAR.
    *
@@ -176,8 +179,18 @@ export interface PricingCalculationContext {
   /** Absent waiting time is zero waiting time, not an unknown. */
   readonly waitingTimeMinutes: number;
 
-  /** Always present, whichever strategy priced the Trip. */
+  /**
+   * The road the Trip drives, in its real direction, as the Trip spells it.
+   * Always present, whichever strategy priced the Trip.
+   */
   readonly route: PricingRouteIdentity;
+
+  /**
+   * Which route configuration priced the Trip, and how it was matched — stored
+   * on the snapshot so a zero Tarief from NOT_FOUND or AMBIGUOUS is never
+   * mistaken for a configured route priced at zero.
+   */
+  readonly routeMatch: PricingRouteMatchTrace;
 
   readonly baseSource: PricingBaseSource;
   readonly rules: PricingRuleConfiguration;
@@ -224,6 +237,30 @@ export interface PricingCalculationContext {
 
   readonly existingSnapshot: ExistingPricingSnapshot | null;
   readonly preparedAt: Date;
+}
+
+export interface PricingRouteMatchTrace {
+  /** Null when nothing reliable matched. */
+  readonly routePricingId: string | null;
+  readonly method: RouteMatchMethod;
+  /** The Combination whose pair priced the Trip, or null. */
+  readonly combinationRouteGroupId: string | null;
+  /**
+   * The configured road(s) matched, as they read now: one for an ordinary
+   * route, both legs of the pair for a Combination, none without a match.
+   */
+  readonly legs: readonly PricingRouteLegTrace[];
+}
+
+export interface PricingRouteLegTrace {
+  /** 1 or 2 for a Combination leg; null for an ordinary route. */
+  readonly legPosition: number | null;
+  /** True for the leg that prices THIS Trip. */
+  readonly isPricedLeg: boolean;
+  readonly routePricingId: string;
+  readonly departure: string;
+  readonly destination: string;
+  readonly method: RouteMatchMethod;
 }
 
 /** Over ST's three amounts as fixed-2 strings; an unstated one is "0.00". */

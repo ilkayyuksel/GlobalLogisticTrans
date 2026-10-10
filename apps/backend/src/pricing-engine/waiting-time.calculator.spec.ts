@@ -34,6 +34,7 @@ function buildContext(
     isCombination: false,
     waitingTimeMinutes,
     route: { departure: "DP World Antwerp Gateway", destination: "Bousbecque" },
+    routeMatch: { routePricingId: "route-1", method: "EXACT", combinationRouteGroupId: null, legs: [] },
     baseSource: {
       strategy: PricingStrategy.ROUTE_BASED,
       routePricingId: "route-1",
@@ -43,6 +44,7 @@ function buildContext(
       strategy: PricingStrategy.ROUTE_BASED,
       fuelPercentage: "15",
       combinationSurcharge: "75",
+      overStSurcharge: "70.00",
       automaticCustomPropertyId: "property-tar",
       waitingTimeFreeMinutes: overrides.free ?? FREE_MINUTES,
       waitingTimeThresholdMinutes: overrides.threshold ?? THRESHOLD_MINUTES,

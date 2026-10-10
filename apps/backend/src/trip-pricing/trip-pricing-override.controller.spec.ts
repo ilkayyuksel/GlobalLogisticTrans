@@ -136,15 +136,21 @@ describe("TripPricingOverrideController (integration)", () => {
         { provide: TripPricingOverrideRepository, useValue: overrides },
         { provide: TripPricingItemRepository, useValue: items },
         {
-          /*
-           * The snapshot the effective read resolves against. `findCurrentByTripIds`
-           * belongs to the batch read, which this controller never calls, so it
-           * is deliberately absent: a call would fail loudly rather than quietly
-           * return nothing.
-           */
+          // The snapshot the effective read resolves against: header, lines
+          // and route in the one consistent read.
           provide: TripPricingRepository,
           useValue: {
-            findCurrentByTripId: jest.fn().mockResolvedValue({ id: PRICING_ID }),
+            findCurrentByTripIds: jest.fn(async () => [
+              {
+                id: PRICING_ID,
+                tripId: TRIP_ID,
+                items: await items.findByTripPricingId(PRICING_ID),
+                routeMatch: null,
+                routePricingId: null,
+                combinationRouteGroupId: null,
+                routeLegs: [],
+              },
+            ]),
           },
         },
         {

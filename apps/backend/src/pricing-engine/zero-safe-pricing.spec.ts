@@ -80,6 +80,7 @@ const RULES = {
   strategy: PricingStrategy.ROUTE_BASED,
   fuelPercentage: "15",
   combinationSurcharge: "50.00",
+  overStSurcharge: "70.00",
   automaticCustomPropertyId: TAR_ID,
   waitingTimeFreeMinutes: 120,
   waitingTimeThresholdMinutes: 150,
@@ -90,12 +91,12 @@ const RULES = {
 
 /** No pair is configured unless a test says so: the road match then applies. */
 const combinationPricing = {
-  findConfiguredCombination: jest.fn().mockResolvedValue(null),
+  findAll: jest.fn().mockResolvedValue([]),
 };
 
 describe("a CLOSED Trip on an unconfigured route", () => {
   let trips: { findById: jest.Mock; findByGroupId: jest.Mock };
-  let routePricing: { findConfiguredRoute: jest.Mock };
+  let routePricing: { findAllOrdinary: jest.Mock };
   let routeCosts: { findActiveForRoute: jest.Mock };
   let assignments: { findByTripId: jest.Mock };
   let customProperties: { findById: jest.Mock };
@@ -126,7 +127,7 @@ describe("a CLOSED Trip on an unconfigured route", () => {
       findByGroupId: jest.fn().mockResolvedValue([]),
     };
     // The whole point: nothing is configured for this route.
-    routePricing = { findConfiguredRoute: jest.fn().mockResolvedValue(null) };
+    routePricing = { findAllOrdinary: jest.fn().mockResolvedValue([]) };
     routeCosts = { findActiveForRoute: jest.fn().mockResolvedValue([]) };
     assignments = { findByTripId: jest.fn().mockResolvedValue([]) };
     customProperties = {
@@ -214,8 +215,8 @@ describe("a CLOSED Trip on an unconfigured route", () => {
       await engine.calculate(TRIP_ID);
 
       expect(logger.warn).toHaveBeenCalledWith(
-        "No route pricing matched; the Trip prices at zero",
-        { tripId: TRIP_ID, hasTerminal: true, hasDestination: true },
+        "Route pricing not matched; route components priced at zero",
+        expect.objectContaining({ tripId: TRIP_ID, routeMatch: "NOT_FOUND" }),
       );
     });
   });
@@ -629,7 +630,7 @@ describe("the two legs of a Combination", () => {
       trips,
       ruleResolver,
       new PricingComponentResolver(
-        { findConfiguredRoute: jest.fn().mockResolvedValue(null) } as never,
+        { findAllOrdinary: jest.fn().mockResolvedValue([]) } as never,
         combinationPricing as unknown as CombinationRoutePricingService,
         { findByTripId: jest.fn().mockResolvedValue(options.assignments ?? []) } as never,
         {

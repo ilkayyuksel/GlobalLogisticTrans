@@ -1,4 +1,10 @@
-import { CostConfirmation, Prisma, Trip, TripStatus } from "@prisma/client";
+import {
+  CostConfirmation,
+  Prisma,
+  RouteMatchMethod,
+  Trip,
+  TripStatus,
+} from "@prisma/client";
 
 import { DomainEventBus } from "../common/events/domain-event-bus";
 import { CostConfirmationReadService } from "../cost-confirmations/cost-confirmation-read.service";
@@ -7,7 +13,6 @@ import { CustomPropertyService } from "../custom-properties/custom-property.serv
 import { DriverService } from "../drivers/driver.service";
 import { AppLoggerService } from "../logger/app-logger.service";
 import { CombinationRoutePricingService } from "../route-pricing/combination-route-pricing.service";
-import { RouteConfigurationKind } from "../route-pricing/route-pricing.repository";
 import { RoutePricingService } from "../route-pricing/route-pricing.service";
 import { TripCustomPropertyReadService } from "../trip-custom-properties/trip-custom-property-read.service";
 import { SettingsService } from "../settings/settings.service";
@@ -66,6 +71,7 @@ import { WaitingTimeCalculator } from "./waiting-time.calculator";
 
 export const CONFIGURED_TERMINAL = "PSA Quay 869";
 export const CONFIGURED_DESTINATION = "Ghlin";
+export const CONFIGURED_ROUTE_ID = "route-1";
 export const CONFIGURED_BASE_PRICE = "200.00";
 
 const TAR_ID = "b36469b0-37ec-40ba-81da-9bc272e05d60";
@@ -74,6 +80,7 @@ const RULES = {
   strategy: PricingStrategy.ROUTE_BASED,
   fuelPercentage: "15",
   combinationSurcharge: "50.00",
+  overStSurcharge: "70.00",
   automaticCustomPropertyId: TAR_ID,
   waitingTimeFreeMinutes: 120,
   waitingTimeThresholdMinutes: 150,
@@ -143,7 +150,7 @@ export function buildTrip(id: string, overrides: Partial<Trip> = {}): Trip {
   } as Trip;
 }
 
-interface StoredItem {
+export interface StoredItem {
   id: string;
   tripPricingId: string;
   pricingComponentId: string;
@@ -157,6 +164,32 @@ interface StoredItem {
 }
 
 const COMPONENT_PREFIX = "component-";
+
+export interface StoredRouteLeg {
+  tripPricingId: string;
+  legPosition: number | null;
+  isPricedLeg: boolean;
+  routePricingId: string;
+  departure: string;
+  destination: string;
+  matchMethod: RouteMatchMethod;
+}
+
+/** The fields of a configured route that pricing reads. */
+export interface ConfiguredRoute {
+  id: string;
+  departure: string;
+  destination: string;
+  basePrice: string;
+  combinationLegPosition?: number;
+}
+
+/** A configured Combination: two legs, outbound first, and its Over ST. */
+export interface ConfiguredCombination {
+  id: string;
+  legs: [ConfiguredRoute, ConfiguredRoute];
+  overSt: { tarief: string | null; toll: string | null; tunnel: string | null };
+}
 
 const silentLogger = () =>
   ({
@@ -179,8 +212,26 @@ export function buildPricingLifecycle() {
   const costConfirmations: CostConfirmation[] = [];
   const snapshots: Prisma.TripPricingGetPayload<object>[] = [];
   const items: StoredItem[] = [];
+  const routeLegs = new Map<string, StoredRouteLeg[]>();
+  const routeLegsOf = (tripPricingId: string) =>
+    [...(routeLegs.get(tripPricingId) ?? [])].sort(
+      (left, right) => (left.legPosition ?? 0) - (right.legPosition ?? 0),
+    );
   let groupCount = 0;
   const logger = silentLogger();
+  /*
+   * The route configuration, as the configuration screens would leave it. One
+   * ordinary route unless a test configures more; matched by the REAL matcher.
+   */
+  const ordinaryRoutes: ConfiguredRoute[] = [
+    {
+      id: CONFIGURED_ROUTE_ID,
+      departure: CONFIGURED_TERMINAL,
+      destination: CONFIGURED_DESTINATION,
+      basePrice: CONFIGURED_BASE_PRICE,
+    },
+  ];
+  const combinations: ConfiguredCombination[] = [];
 
   const requireTrip = (id: string) => trips.get(id) ?? null;
   const tripsInGroup = (groupId: string) =>
@@ -267,7 +318,11 @@ export function buildPricingLifecycle() {
       Promise.resolve(
         snapshots
           .filter((row) => tripIds.includes(row.tripId) && isCurrent(row.tripId))
-          .map((row) => ({ ...row, items: itemsOf(row.id) })),
+          .map((row) => ({
+            ...row,
+            items: itemsOf(row.id),
+            routeLegs: routeLegsOf(row.id),
+          })),
       ),
     ),
     findCurrentByTripId: jest.fn((tripId: string) =>
@@ -297,6 +352,15 @@ export function buildPricingLifecycle() {
         }
         Object.assign(row, data);
         return Promise.resolve(row);
+      },
+    ),
+    replaceRouteLegs: jest.fn(
+      (tripPricingId: string, legs: readonly Record<string, unknown>[]) => {
+        routeLegs.set(
+          tripPricingId,
+          legs.map((leg) => ({ ...leg, tripPricingId }) as StoredRouteLeg),
+        );
+        return Promise.resolve();
       },
     ),
     runInTransaction: jest.fn(),
@@ -352,7 +416,6 @@ export function buildPricingLifecycle() {
     logger,
   );
   const effectivePricing = new EffectivePricingService(
-    itemRepository as never,
     {
       findForTrip: () => Promise.resolve([]),
       findForTrips: () => Promise.resolve([]),
@@ -379,21 +442,11 @@ export function buildPricingLifecycle() {
   } as unknown as CustomPropertyService;
   const components = new PricingComponentResolver(
     {
-      findConfiguredRoute: (
-        departure: string,
-        destination: string,
-        kind: RouteConfigurationKind,
-      ) =>
-        Promise.resolve(
-          kind === RouteConfigurationKind.NORMAL &&
-            departure === CONFIGURED_TERMINAL &&
-            destination === CONFIGURED_DESTINATION
-            ? { id: "route-1", basePrice: CONFIGURED_BASE_PRICE }
-            : null,
-        ),
+      // Read afresh on every calculation, as the real table is.
+      findAllOrdinary: () => Promise.resolve(ordinaryRoutes.map((route) => ({ ...route }))),
     } as unknown as RoutePricingService,
     {
-      findConfiguredCombination: () => Promise.resolve(null),
+      findAll: () => Promise.resolve(combinations.map((group) => ({ ...group }))),
     } as unknown as CombinationRoutePricingService,
     new TripCustomPropertyReadService({
       findByTripId: (tripId: string) =>
@@ -540,6 +593,9 @@ export function buildPricingLifecycle() {
 
   return {
     trips,
+    /** Change these to change the configuration; nothing is repriced by it. */
+    ordinaryRoutes,
+    combinations,
     costConfirmations,
     snapshots,
     items,
@@ -563,10 +619,17 @@ export function buildPricingLifecycle() {
       trips.set(trip.id, trip);
       return trip;
     },
-    /** The stored snapshot of a Trip, with its items, or null. */
+    /** The stored snapshot of a Trip, with its items and route legs, or null. */
     storedSnapshot(tripId: string) {
       const snapshot = snapshots.find((row) => row.tripId === tripId);
-      return snapshot ? { ...snapshot, items: itemsOf(snapshot.id) } : null;
+      return snapshot
+        ? { ...snapshot, items: itemsOf(snapshot.id), routeLegs: routeLegsOf(snapshot.id) }
+        : null;
+    },
+    /** What GET /trip-pricing/snapshots answers for one Trip, or null. */
+    async snapshotResponse(tripId: string) {
+      const [response] = await tripPricing.findManyByTripIds([tripId]);
+      return response ?? null;
     },
     /** What GET /trips/:id would answer, read from the stored data. */
     readTrip: (tripId: string) => tripService.findById(tripId),

@@ -40,6 +40,7 @@ function contextFor(waitingTimeMinutes: number): PricingCalculationContext {
     isCombination: false,
     waitingTimeMinutes,
     route: { departure: "DP World Antwerp Gateway", destination: "Bousbecque" },
+    routeMatch: { routePricingId: "route-1", method: "EXACT", combinationRouteGroupId: null, legs: [] },
     baseSource: {
       strategy: PricingStrategy.ROUTE_BASED,
       routePricingId: "route-1",
@@ -49,6 +50,7 @@ function contextFor(waitingTimeMinutes: number): PricingCalculationContext {
       strategy: PricingStrategy.ROUTE_BASED,
       fuelPercentage: "15",
       combinationSurcharge: "75",
+      overStSurcharge: "70.00",
       automaticCustomPropertyId: "property-tar",
       waitingTimeFreeMinutes: CONFIGURED_RULE.freeMinutes,
       waitingTimeThresholdMinutes: CONFIGURED_RULE.thresholdMinutes,

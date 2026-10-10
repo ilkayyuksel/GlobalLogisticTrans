@@ -3,6 +3,7 @@ import {
   Prisma,
   TripPricing,
   TripStatus,
+  RouteMatchMethod,
 } from "@prisma/client";
 
 import { AppLoggerService } from "../logger/app-logger.service";
@@ -25,6 +26,9 @@ function buildTripPricing(overrides: Partial<TripPricing> = {}): TripPricing {
     pricingEngineVersion: "1.4.0",
     pricingRuleVersion: "2026.08",
     calculationStatus: PricingCalculationStatus.CALCULATED,
+    routePricingId: "route-1",
+    routeMatch: RouteMatchMethod.EXACT,
+    combinationRouteGroupId: null,
     notes: null,
     createdAt: new Date("2026-08-11T09:15:00.000Z"),
     updatedAt: new Date("2026-08-11T09:15:00.000Z"),

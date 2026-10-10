@@ -41,11 +41,11 @@ const COMBINATION_LEG_ID = "5a1f0c1e-2b3d-4e5f-8a9b-0c1d2e3f4a5b";
  * transports and priced as such.
  *
  * Both are legitimate and neither is a duplicate of the other. What decides
- * which applies is the rule that already existed: `combinationLegOf`, the same
- * one that decides which leg of a genuine Combination owes the TAR. A genuine
- * Combination leg — one document that printed an outbound delivery and a return
- * collection — takes the Combination configuration; every other Trip, including
- * a group an operator made by hand, takes the ordinary one.
+ * which applies is `combinationLegOf` — the same rule that decides which leg of
+ * a genuine Combination owes the TAR — and then the PAIR of roads: a genuine
+ * Combination leg takes the Combination configured for both its roads; every
+ * other Trip, a group an operator made by hand included, and a pair no
+ * Combination is configured for, takes the ordinary one.
  *
  * ── WHY THIS RUNS THE WHOLE CHAIN ───────────────────────────────────────────
  * The failure this guards against is not visible in any single unit: it is one
@@ -86,6 +86,7 @@ const RULES = {
   strategy: PricingStrategy.ROUTE_BASED,
   fuelPercentage: "15",
   combinationSurcharge: "50.00",
+  overStSurcharge: "70.00",
   automaticCustomPropertyId: "property-tar",
   waitingTimeFreeMinutes: 120,
   waitingTimeThresholdMinutes: 150,
@@ -118,6 +119,30 @@ const COMBINATION_LEG = {
   combinationGroupId: GROUP_ID,
   combinationLegPosition: 1,
 };
+
+/** Its return: a collection, configured city → terminal as it is driven. */
+function combinationOf(returnFrom: string) {
+  return {
+    id: GROUP_ID,
+    reviewed: false,
+    legs: [
+      COMBINATION_LEG,
+      {
+        ...NORMAL_ROUTE,
+        id: "return-leg",
+        routeName: `${returnFrom} - Antwerp`,
+        departure: returnFrom,
+        destination: "Antwerp",
+        basePrice: "90.00",
+        combinationGroupId: GROUP_ID,
+        combinationLegPosition: 2,
+      },
+    ],
+    overSt: { tarief: null, toll: null, tunnel: null },
+    createdAt: new Date("2026-09-26T00:00:00Z"),
+    updatedAt: new Date("2026-09-26T00:00:00Z"),
+  };
+}
 
 function tunnelCost(id: string, amount: string, routePricingId: string | null) {
   return routeCost(id, "TUNNEL", amount, routePricingId);
@@ -153,50 +178,33 @@ function routeCost(
   };
 }
 
-/** The outbound and the return of one document — a genuine Combination. */
-function genuinePair() {
+/**
+ * The outbound and the return of one document — a genuine Combination. The
+ * outbound delivers Antwerp → Kallo; the return collects Zwijndrecht → Antwerp.
+ */
+function genuinePair(): TripReadView[] {
   return [
-    {
-      id: TRIP_ID,
-      tripGroupId: GROUP_ID,
-      pdfDocumentId: DOCUMENT_ID,
-      direction: TripDirection.DELIVERY,
-    },
-    {
+    buildTrip({ tripGroupId: GROUP_ID, direction: TripDirection.DELIVERY }),
+    buildTrip({
       id: PARTNER_TRIP_ID,
       tripGroupId: GROUP_ID,
-      pdfDocumentId: DOCUMENT_ID,
       direction: TripDirection.COLLECTION,
-    },
+      destinationCity: "Zwijndrecht",
+    }),
   ];
 }
 
 /** Two Trips an operator put together, from different documents. */
-function manualGroup() {
-  return [
-    {
-      id: TRIP_ID,
-      tripGroupId: GROUP_ID,
-      pdfDocumentId: DOCUMENT_ID,
-      direction: TripDirection.DELIVERY,
-    },
-    {
-      id: PARTNER_TRIP_ID,
-      tripGroupId: GROUP_ID,
-      pdfDocumentId: "pdf-unrelated",
-      direction: TripDirection.COLLECTION,
-    },
-  ];
-}
+function manualGroup(): TripReadView[] {
+  const [outbound, partner] = genuinePair();
 
-/** No pair is configured unless a test says so: the road match then applies. */
-const combinationPricing = {
-  findConfiguredCombination: jest.fn().mockResolvedValue(null),
-};
+  return [outbound, { ...partner, pdfDocumentId: "pdf-unrelated" }];
+}
 
 describe("one road configured as an ordinary route and as a Combination leg", () => {
   let trips: { findById: jest.Mock; findByGroupId: jest.Mock };
-  let routePricing: { findConfiguredRoute: jest.Mock };
+  let routePricing: { findAllOrdinary: jest.Mock };
+  let combinationPricing: { findAll: jest.Mock };
   let routeCosts: {
     findActiveForRoute: jest.Mock;
     findActiveForRoutePricing: jest.Mock;
@@ -220,15 +228,11 @@ describe("one road configured as an ordinary route and as a Combination leg", ()
       findByGroupId: jest.fn().mockResolvedValue([]),
     };
 
-    /*
-     * Both configurations exist, and the lookup is answered by SCOPE — which is
-     * exactly how the two partial unique indexes let them coexist.
-     */
-    routePricing = {
-      findConfiguredRoute: jest.fn(
-        async (_departure: string, _destination: string, kind: string) =>
-          kind === "COMBINATION" ? COMBINATION_LEG : NORMAL_ROUTE,
-      ),
+    // Both configurations exist, each in its own scope — exactly how the two
+    // partial unique indexes let them coexist.
+    routePricing = { findAllOrdinary: jest.fn().mockResolvedValue([NORMAL_ROUTE]) };
+    combinationPricing = {
+      findAll: jest.fn().mockResolvedValue([combinationOf("Zwijndrecht")]),
     };
 
     routeCosts = {
@@ -378,18 +382,15 @@ describe("one road configured as an ordinary route and as a Combination leg", ()
   });
 
   /**
-   * ── A LEG WITH NO COMBINATION ROUTE FALLS BACK ─────────────────────────────
+   * ── A PAIR WITH NO COMBINATION FALLS BACK ──────────────────────────────────
    * Every Combination Trip priced before Combination routes existed was priced
    * against the ordinary configuration. Refusing to match would silently reprice
    * all of them to zero, so the fallback is what keeps existing pricing
-   * unchanged — and configuring a Combination route is what changes it.
+   * unchanged — and configuring the Combination of the pair is what changes it.
    */
-  describe("a genuine Combination leg whose road has no Combination route", () => {
+  describe("a genuine Combination leg whose pair has no Combination route", () => {
     beforeEach(() => {
-      routePricing.findConfiguredRoute.mockImplementation(
-        async (_departure: string, _destination: string, kind: string) =>
-          kind === "COMBINATION" ? null : NORMAL_ROUTE,
-      );
+      combinationPricing.findAll.mockResolvedValue([]);
       trips.findById.mockResolvedValue(
         buildTrip({
           tripGroupId: GROUP_ID,
@@ -409,6 +410,20 @@ describe("one road configured as an ordinary route and as a Combination leg", ()
 
     it("still carries its Backload", async () => {
       expect((await amountsOf()).COMBINATION).toBe("50.00");
+    });
+
+    /**
+     * The outbound alone IS a configured leg — but of a Combination whose
+     * return is another road. One road never picks a Combination.
+     */
+    it("is never priced on a Combination that shares only its outbound", async () => {
+      combinationPricing.findAll.mockResolvedValue([combinationOf("Beveren")]);
+
+      expect(await amountsOf()).toMatchObject({
+        BASE_PRICE: "380.00",
+        TOLL: "15.60",
+        TUNNEL: "12.50",
+      });
     });
   });
 
@@ -440,7 +455,7 @@ describe("one road configured as an ordinary route and as a Combination leg", ()
     });
 
     it("keeps its Backload when no Combination route is configured at all", async () => {
-      routePricing.findConfiguredRoute.mockResolvedValue(NORMAL_ROUTE);
+      combinationPricing.findAll.mockResolvedValue([]);
 
       expect((await amountsOf()).COMBINATION).toBe("50.00");
     });
@@ -453,10 +468,11 @@ describe("one road configured as an ordinary route and as a Combination leg", ()
    * once a road is configured twice, and the Trip would be priced with a mixture.
    */
   describe("how often the configuration is read", () => {
-    it("reads the ordinary configuration once for an ordinary Trip", async () => {
+    it("reads the ordinary configurations once for an ordinary Trip", async () => {
       await engine.calculate(TRIP_ID);
 
-      expect(routePricing.findConfiguredRoute).toHaveBeenCalledTimes(1);
+      expect(routePricing.findAllOrdinary).toHaveBeenCalledTimes(1);
+      expect(combinationPricing.findAll).not.toHaveBeenCalled();
     });
 
     it("asks the Combination scope first for a genuine leg, then stops", async () => {
@@ -470,9 +486,8 @@ describe("one road configured as an ordinary route and as a Combination leg", ()
 
       await engine.calculate(TRIP_ID);
 
-      expect(
-        routePricing.findConfiguredRoute.mock.calls.map(([, , kind]) => kind),
-      ).toEqual(["COMBINATION"]);
+      expect(combinationPricing.findAll).toHaveBeenCalledTimes(1);
+      expect(routePricing.findAllOrdinary).not.toHaveBeenCalled();
     });
   });
 });

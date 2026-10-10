@@ -1,5 +1,10 @@
 import { Injectable } from "@nestjs/common";
-import { PricingCalculationStatus, Prisma, TripPricing } from "@prisma/client";
+import {
+  PricingCalculationStatus,
+  Prisma,
+  RouteMatchMethod,
+  TripPricing,
+} from "@prisma/client";
 
 import { changedFieldNames } from "../common/changed-fields";
 import { AppLoggerService } from "../logger/app-logger.service";
@@ -14,8 +19,12 @@ import {
 import { UpdateTripPricingDto } from "./dto/update-trip-pricing.dto";
 import {
   DuplicateTripPricingException,
+  TripNotClosedException,
   TripPricingNotFoundException,
 } from "./exceptions/trip-pricing.exceptions";
+import { toRouteMatchDto } from "./dto/route-match.dto";
+import { toRouteMatchView } from "./route-match-view";
+import { PRICED_TRIP_STATUS } from "./current-pricing";
 import { TripPricingRepository } from "./trip-pricing.repository";
 
 /** Prisma's unique-constraint violation code. */
@@ -61,6 +70,17 @@ export interface PricingSnapshotItemData {
   readonly unitPrice: Prisma.Decimal | null;
 }
 
+/** One configured road a snapshot was priced against, as it read then. */
+export interface PricingSnapshotRouteLegData {
+  /** 1 or 2 for a Combination leg; null for an ordinary route. */
+  readonly legPosition: number | null;
+  readonly isPricedLeg: boolean;
+  readonly routePricingId: string;
+  readonly departure: string;
+  readonly destination: string;
+  readonly matchMethod: RouteMatchMethod;
+}
+
 /**
  * A complete snapshot to store, parent and breakdown together.
  *
@@ -75,6 +95,17 @@ export interface ReplacePricingSnapshotCommand {
   readonly pricingEngineVersion: string;
   readonly pricingRuleVersion: string;
   readonly calculationStatus: PricingCalculationStatus;
+  /**
+   * The route configuration that priced the Trip and how it was matched. No
+   * foreign key: a configuration deleted later must not erase the record of
+   * what priced the snapshot.
+   */
+  readonly routePricingId: string | null;
+  readonly routeMatch: RouteMatchMethod;
+  /** The Combination whose pair priced the Trip, or null. */
+  readonly combinationRouteGroupId: string | null;
+  /** The road(s) matched: none, one ordinary route, or both legs of a pair. */
+  readonly routeLegs: readonly PricingSnapshotRouteLegData[];
   readonly items: readonly PricingSnapshotItemData[];
 }
 
@@ -173,6 +204,37 @@ export class TripPricingService {
    * Nothing is calculated. These are the lines the Pricing Engine already
    * wrote.
    */
+  /**
+   * The Trip's CURRENT snapshot — header, lines and the route it was priced
+   * against — or the reason it has none.
+   *
+   * For a caller that has just stored one and must answer with what was
+   * stored: the same consistent read as `findManyByTripIds`, so the route and
+   * the amounts belong to one calculation, and nothing is matched again. A
+   * Trip that is no longer CLOSED has no current price — reopened between the
+   * write and this read — and is refused rather than shown its stored
+   * snapshot as current.
+   */
+  async requireCurrentSnapshot(tripId: string): Promise<PricingSnapshotDto> {
+    const [snapshot] = await this.findManyByTripIds([tripId]);
+
+    if (snapshot) {
+      return snapshot;
+    }
+
+    const trip = await this.trips.findById(tripId);
+
+    if (!trip) {
+      throw new TripNotFoundException(tripId);
+    }
+
+    if (trip.status !== PRICED_TRIP_STATUS) {
+      throw new TripNotClosedException(tripId, trip.status, PRICED_TRIP_STATUS);
+    }
+
+    throw new TripPricingNotFoundException(tripId);
+  }
+
   async findManyByTripIds(
     tripIds: readonly string[],
   ): Promise<PricingSnapshotDto[]> {
@@ -182,6 +244,7 @@ export class TripPricingService {
     return snapshots.map((snapshot) => ({
       pricing: toTripPricingResponse(snapshot),
       items: snapshot.items.map(toTripPricingItemResponse),
+      routeMatch: toRouteMatchDto(toRouteMatchView(snapshot)),
     }));
   }
 
@@ -276,8 +339,9 @@ export class TripPricingService {
    * edit straight after closing — and finish in either order. `calculatedAt`
    * is when the Engine STARTED reading the Trip, so a snapshot whose inputs were
    * read later is never replaced by one read earlier. The header update is
-   * conditional on exactly that, in one statement; the items follow only when
-   * it wrote.
+   * conditional on exactly that, in one statement; the items and the matched
+   * route legs follow only when it wrote — so the route a screen shows always
+   * belongs to the calculation whose amounts it shows.
    */
   private writeSnapshotOnce(
     command: ReplacePricingSnapshotCommand,
@@ -290,11 +354,15 @@ export class TripPricingService {
         pricingEngineVersion: command.pricingEngineVersion,
         pricingRuleVersion: command.pricingRuleVersion,
         calculationStatus: command.calculationStatus,
+        routePricingId: command.routePricingId,
+        routeMatch: command.routeMatch,
+        combinationRouteGroupId: command.combinationRouteGroupId,
       };
 
       if (!existing) {
         const parent = await pricing.create({ tripId: command.tripId, ...header });
         await items.createMany(toItemRows(parent.id, command.items));
+        await pricing.replaceRouteLegs(parent.id, command.routeLegs);
 
         return { parent, outcome: "CREATED" };
       }
@@ -307,6 +375,7 @@ export class TripPricingService {
 
       await items.deleteByTripPricingId(parent.id);
       await items.createMany(toItemRows(parent.id, command.items));
+      await pricing.replaceRouteLegs(parent.id, command.routeLegs);
 
       return { parent, outcome: "REPLACED" };
     });

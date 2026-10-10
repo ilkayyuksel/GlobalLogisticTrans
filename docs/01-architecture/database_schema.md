@@ -121,6 +121,7 @@ Native PostgreSQL enum types are used for stable business lifecycles. `TEXT` is 
 | `import_type` | `NEW`, `UPDATE`, `CANCEL` | `imported_email.import_type` |
 | `parser_result` | `SUCCESS`, `WARNING`, `FAILED`, `PARTIAL_SUCCESS` | `parser_run.result` |
 | `pricing_calculation_status` | `CALCULATED`, `FAILED`, `MANUAL_OVERRIDE` | `trip_pricing.calculation_status` |
+| `route_match_method` | `EXACT`, `NORMALIZED`, `FUZZY`, `NOT_FOUND`, `AMBIGUOUS` | `trip_pricing.route_match` |
 | `email_processing_status` | `RECEIVED`, `PROCESSING`, `PROCESSED`, `FAILED`, `IGNORED` | `imported_email.processing_status` |
 | `import_source` | `EMAIL`, `MANUAL_UPLOAD`, `API` | `pdf_document.import_source` |
 | `setting_value_type` | `STRING`, `INTEGER`, `DECIMAL`, `BOOLEAN`, `DATE`, `JSON` | `setting.value_type` |
@@ -170,6 +171,7 @@ Two exceptions:
 | 18 | `route_cost` | Pricing configuration |
 | 19 | `trip_pricing` | Pricing |
 | 20 | `trip_pricing_item` | Pricing |
+| 20a | `trip_pricing_route_leg` | Pricing |
 | 21 | `calendar_event` | Calendar |
 | 22 | `note` | Calendar |
 
@@ -1293,6 +1295,9 @@ The calculated pricing summary for one Trip. Exists only once the Trip reaches `
 | `pricing_engine_version` | `TEXT` | NO | — | |
 | `pricing_rule_version` | `TEXT` | NO | — | |
 | `calculation_status` | `pricing_calculation_status` | NO | — | |
+| `route_pricing_id` | `UUID` | YES | `NULL` | The `route_pricing` row (ordinary route or Combination leg) the Tarief, Toll and Tunnel came from. `NULL` when nothing reliable matched, and on snapshots older than the column. **No foreign key**: the snapshot stays the record of what was used after a configuration changes or is removed. |
+| `combination_route_group_id` | `UUID` | YES | `NULL` | The Combination whose pair of legs priced the Trip; `NULL` for an ordinary route, no match, or an older snapshot. **No foreign key**, as `route_pricing_id`. |
+| `route_match` | `route_match_method` | YES | `NULL` | How that route was matched. `NOT_FOUND` / `AMBIGUOUS` = route components zero because nothing reliable matched — distinct from a configured route priced at zero. `NULL` on snapshots older than the column (never backfilled). |
 | `notes` | `TEXT` | YES | `NULL` | |
 | `created_at` | `TIMESTAMPTZ` | NO | `now()` | |
 | `updated_at` | `TIMESTAMPTZ` | NO | `now()` | |
@@ -1379,6 +1384,52 @@ None beyond the foreign keys. `calculation_order` is not unique — the model re
 - Items are never shared between Trips.
 - Reprocessing replaces the whole item set together with its `trip_pricing` parent.
 - Fuel is calculated only on the base transport price and excludes the Combination Surcharge, Waiting Time, Toll, Tunnel, Manual Adjustments and Custom Properties.
+
+---
+
+## 9.3 `trip_pricing_route_leg`
+
+### Purpose
+
+The configured road(s) a snapshot was priced against, **as they were configured
+when it was calculated** — so a screen can say which route a stored price came
+from without matching it again against today's configuration. One row for an
+ordinary route; two for a Combination (both legs of the selected pair, the leg
+that priced this Trip marked); none when no route matched (`trip_pricing.route_match`
+then says why) or on a snapshot older than the table (not backfilled).
+
+Only what explains the match is copied — the road and how it matched — never a
+configured amount: those are the snapshot's own items.
+
+### Columns
+
+| Column | Type | Nullable | Default | Notes |
+|---|---|---|---|---|
+| `id` | `UUID` | NO | `gen_random_uuid()` | Primary key |
+| `trip_pricing_id` | `UUID` | NO | — | The snapshot |
+| `leg_position` | `SMALLINT` | YES | `NULL` | 1 or 2 for a Combination leg; `NULL` for an ordinary route |
+| `is_priced_leg` | `BOOLEAN` | NO | — | True for the leg that priced THIS Trip |
+| `route_pricing_id` | `UUID` | NO | — | The configuration matched. **No foreign key**: it may since have been changed or removed |
+| `departure` | `TEXT` | NO | — | The configured departure as it read then |
+| `destination` | `TEXT` | NO | — | The configured destination as it read then |
+| `match_method` | `route_match_method` | NO | — | How this road matched (`EXACT`, `NORMALIZED`, `FUZZY`) |
+| `created_at` | `TIMESTAMPTZ` | NO | `now()` | |
+
+### Constraints
+
+- `CHECK (leg_position IS NULL OR leg_position IN (1, 2))`
+- `UNIQUE (trip_pricing_id, leg_position)`
+- `trip_pricing_id` → `trip_pricing(id)` `ON DELETE CASCADE`
+
+### Application-enforced rules
+
+- Written and replaced only together with the snapshot header and its items,
+  in the same transaction, and only when the header write wins the
+  `calculated_at` ordering — an older calculation never replaces the route of a
+  newer one.
+- Read together with the header and items in one `REPEATABLE READ` transaction
+  (`TripPricingRepository.findCurrentByTripIds`), so a route is never shown
+  beside the amounts of another calculation.
 
 ---
 

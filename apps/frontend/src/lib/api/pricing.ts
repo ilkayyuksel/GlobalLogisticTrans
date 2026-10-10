@@ -1,5 +1,5 @@
 import { request } from "./client";
-import type { PricingSnapshot, TripPricing, TripPricingItem } from "./types";
+import type { PricingSnapshot } from "./types";
 
 /**
  * The pricing endpoints.
@@ -11,39 +11,11 @@ import type { PricingSnapshot, TripPricing, TripPricingItem } from "./types";
  */
 
 const PRICING_PATH = "/api/v1/trip-pricing";
-const PRICING_ITEMS_PATH = "/api/v1/trip-pricing-items";
 
 /**
- * The snapshot of a Trip, or null when it has none.
- *
- * Null is an ordinary state, not an error: a Trip that has never been closed
- * has never been priced. The backend returns null rather than a 404 precisely
- * so this distinction survives.
- */
-export function getTripPricing(
-  tripId: string,
-  signal?: AbortSignal,
-): Promise<TripPricing | null> {
-  return request<TripPricing | null>(`${PRICING_PATH}/trip/${tripId}`, {
-    signal,
-  });
-}
-
-/** The lines of a snapshot. The backend returns them in calculation order. */
-export async function listPricingItems(
-  tripPricingId: string,
-  signal?: AbortSignal,
-): Promise<TripPricingItem[]> {
-  const response = await request<{ items: TripPricingItem[] }>(
-    `${PRICING_ITEMS_PATH}/trip-pricing/${tripPricingId}`,
-    { signal },
-  );
-
-  return response.items;
-}
-
-/**
- * Recalculates a Trip's pricing and returns the newly stored snapshot.
+ * Recalculates a Trip's pricing and returns the newly stored snapshot — its
+ * header, lines and the route it was matched to, read back from storage in the
+ * same shape `getPricingSnapshot` returns.
  *
  * The Trip must be CLOSED; the backend enforces that and reports a conflict
  * otherwise. This also produces the FIRST snapshot for a CLOSED Trip that has
@@ -66,10 +38,9 @@ const MAX_SNAPSHOT_TRIP_IDS = 100;
  * The stored pricing of many Trips, for an export.
  *
  * ── WHY IN BATCHES ─────────────────────────────────────────────────────────
- * `getPricingSnapshot` costs two requests per Trip. An export of a month would
- * be hundreds of round trips for one file, so this asks the backend's bulk read
- * instead — one request per hundred Trips, each returning the snapshots WITH
- * their lines.
+ * One request per Trip would make an export of a month hundreds of round
+ * trips for one file, so this asks the backend's bulk read in batches — one
+ * request per hundred Trips, each returning the snapshots WITH their lines.
  *
  * Trips with no snapshot are simply absent from the answer, so the map returned
  * here has no entry for them. That is the honest shape: an unpriced Trip has no
@@ -105,21 +76,22 @@ export async function fetchPricingSnapshots(
 }
 
 /**
- * A Trip's complete pricing, in one call for the caller.
+ * The current snapshot of a Trip — header, lines and matched route — or null
+ * when it has none (never priced, or not CLOSED).
  *
- * The two requests are sequential because the second needs the snapshot's id.
- * When there is no snapshot there are no items to ask for, so nothing further
- * is fetched.
+ * ONE request, through the bulk read: the backend reads the three in one
+ * consistent read, so the route shown always belongs to the amounts shown. Two
+ * requests could straddle a recalculation and pair one calculation's route
+ * with another's lines.
  */
 export async function getPricingSnapshot(
   tripId: string,
   signal?: AbortSignal,
 ): Promise<PricingSnapshot | null> {
-  const pricing = await getTripPricing(tripId, signal);
+  const snapshots = await request<PricingSnapshot[]>(`${PRICING_PATH}/snapshots`, {
+    query: { tripIds: tripId },
+    signal,
+  });
 
-  if (!pricing) {
-    return null;
-  }
-
-  return { pricing, items: await listPricingItems(pricing.id, signal) };
+  return snapshots.find((snapshot) => snapshot.pricing.tripId === tripId) ?? null;
 }

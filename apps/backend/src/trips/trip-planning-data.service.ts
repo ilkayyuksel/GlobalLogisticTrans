@@ -7,7 +7,7 @@ import {
   EffectivePricingDto,
   toEffectivePricingDto,
 } from "../trip-pricing/dto/effective-pricing.dto";
-import type { EffectivePricing } from "../trip-pricing/effective-pricing";
+import type { CurrentTripPricing } from "../trip-pricing/effective-pricing.service";
 import { EffectivePricingService } from "../trip-pricing/effective-pricing.service";
 import {
   EffectiveDriverDto,
@@ -310,7 +310,7 @@ const EMPTY_PLANNING_DATA: TripPlanningData = {
  * them — one vocabulary for money, whichever door it came through.
  */
 function toPricingDto(
-  pricing: EffectivePricing | undefined,
+  pricing: CurrentTripPricing | undefined,
 ): EffectivePricingDto | null {
   return pricing ? toEffectivePricingDto(pricing) : null;
 }

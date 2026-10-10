@@ -117,6 +117,7 @@ describe("sequences of transport documents", () => {
       setStatus: jest.Mock;
       transitionStatus: jest.Mock;
       update: jest.Mock;
+      findById: jest.Mock;
       recordHistory: jest.Mock;
       runInTransaction: jest.Mock;
       runTripWriteTransaction: jest.Mock;
@@ -216,6 +217,10 @@ describe("sequences of transport documents", () => {
         Object.assign(trip, data);
         return Promise.resolve(trip);
       }),
+      // Read after a revision moved a date or road, for the Trip's status.
+      findById: jest.fn((id: string) =>
+        Promise.resolve(stored.find((candidate) => candidate.id === id) ?? null),
+      ),
       recordHistory: jest.fn(() => Promise.resolve()),
       runInTransaction: jest.fn((work: (repository: unknown) => unknown) =>
         work(repository),

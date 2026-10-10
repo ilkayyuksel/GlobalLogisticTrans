@@ -20,6 +20,27 @@ export function movesPlanningDate(
 }
 
 /**
+ * Whether a write changed the road a Trip is priced on: its terminal, its
+ * destination city or its direction — the three facts `toTripRoute` reads.
+ */
+export function movesRoad(
+  before: Pick<Trip, "terminal" | "destinationCity" | "direction">,
+  after: Pick<Trip, "terminal" | "destinationCity" | "direction">,
+): boolean {
+  return (
+    before.terminal !== after.terminal ||
+    before.destinationCity !== after.destinationCity ||
+    before.direction !== after.direction
+  );
+}
+
+/** Which of a Combination's pricing inputs a write changed. */
+export interface CombinationInputChange {
+  readonly planningDate: boolean;
+  readonly road: boolean;
+}
+
+/**
  * Reprices the CLOSED Trips whose price a planningDate change moved.
  *
  * ── WHY A DATE IS A PRICING INPUT AT ALL ────────────────────────────────────
@@ -40,13 +61,47 @@ export function movesPlanningDate(
  * `findTrip` reads the CURRENT status, because the affected Trip is often the
  * partner leg, which the caller never loaded.
  */
-export async function repriceAfterPlanningDateChange(
+export function repriceAfterPlanningDateChange(
   tripId: string,
   recalculation: PricingRecalculationService,
   findTrip: (id: string) => Promise<Pick<Trip, "status"> | null>,
   logger: AppLoggerService,
 ): Promise<Map<string, PricingRecalculationOutcome>> {
-  const affected = await recalculation.tripsAffectedByPlanningDate(tripId);
+  return repriceAfterCombinationInputChange(
+    tripId,
+    { planningDate: true, road: false },
+    recalculation,
+    findTrip,
+    logger,
+  );
+}
+
+/**
+ * Reprices the CLOSED Trips whose price a change of date OR road moved.
+ *
+ * ── AND THE ROAD ────────────────────────────────────────────────────────────
+ * A Trip's road decides its route, and for a leg of a Combination it decides
+ * which configured PAIR both legs are priced on: changing one leg's terminal,
+ * destination or direction can move its partner's Tarief, Toll, Tunnel and
+ * Over ST. So a road change reprices the Trip and its same-document group
+ * members (`tripsAffectedByRoadChange`). A Trip named by both questions is
+ * repriced once.
+ */
+export async function repriceAfterCombinationInputChange(
+  tripId: string,
+  changed: CombinationInputChange,
+  recalculation: PricingRecalculationService,
+  findTrip: (id: string) => Promise<Pick<Trip, "status"> | null>,
+  logger: AppLoggerService,
+): Promise<Map<string, PricingRecalculationOutcome>> {
+  const affected = [
+    ...new Set([
+      ...(changed.planningDate
+        ? await recalculation.tripsAffectedByPlanningDate(tripId)
+        : []),
+      ...(changed.road ? await recalculation.tripsAffectedByRoadChange(tripId) : []),
+    ]),
+  ];
   const outcomes = new Map<string, PricingRecalculationOutcome>();
 
   for (const affectedId of affected) {
@@ -58,8 +113,9 @@ export async function repriceAfterPlanningDateChange(
   }
 
   if (affected.length > 0) {
-    logger.log("planningDate change moved the pricing of Trips", {
+    logger.log("planningDate or road change moved the pricing of Trips", {
       tripId,
+      changed,
       affectedTripIds: affected,
       repricedTripIds: [...outcomes.keys()],
     });

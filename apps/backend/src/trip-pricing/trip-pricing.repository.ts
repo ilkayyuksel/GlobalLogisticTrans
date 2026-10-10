@@ -1,5 +1,5 @@
 import { Injectable } from "@nestjs/common";
-import { Prisma, TripPricing } from "@prisma/client";
+import { Prisma, TripPricing, TripPricingRouteLeg } from "@prisma/client";
 
 import { PrismaService } from "../prisma/prisma.service";
 import { PRICED_TRIP_STATUS } from "./current-pricing";
@@ -10,6 +10,26 @@ import type { TripPricingItemWithComponent } from "../trip-pricing-items/dto/tri
 export type TripPricingWithItems = TripPricing & {
   items: TripPricingItemWithComponent[];
 };
+
+/** A snapshot with its breakdown AND the route(s) it was priced against. */
+export type TripPricingWithItemsAndRoute = TripPricingWithItems & {
+  routeLegs: TripPricingRouteLeg[];
+};
+
+/** One matched road to store with a snapshot. */
+export type TripPricingRouteLegData = Omit<
+  Prisma.TripPricingRouteLegUncheckedCreateInput,
+  "id" | "tripPricingId" | "createdAt"
+>;
+
+/** The same lines, ordered, every read: by calculation order, then id. */
+const ITEMS_WITH_COMPONENT = {
+  include: { pricingComponent: { select: { code: true } } },
+  orderBy: [{ calculationOrder: "asc" as const }, { id: "asc" as const }],
+};
+
+/** Leg 1 before Leg 2; an ordinary route's single row has no position. */
+const ROUTE_LEGS_IN_ORDER = { orderBy: { legPosition: "asc" as const } };
 
 export type CreateTripPricingData = Prisma.TripPricingUncheckedCreateInput;
 export type UpdateTripPricingData = Prisma.TripPricingUncheckedUpdateInput;
@@ -88,19 +108,53 @@ export class TripPricingRepository {
    */
   findCurrentByTripIds(
     tripIds: readonly string[],
-  ): Promise<TripPricingWithItems[]> {
-    return this.prisma.tripPricing.findMany({
-      where: {
-        tripId: { in: [...tripIds] },
-        trip: { status: PRICED_TRIP_STATUS },
-      },
-      include: {
-        items: {
-          include: { pricingComponent: { select: { code: true } } },
-          orderBy: [{ calculationOrder: "asc" }, { id: "asc" }],
+  ): Promise<TripPricingWithItemsAndRoute[]> {
+    return this.readConsistently((client) =>
+      client.tripPricing.findMany({
+        where: {
+          tripId: { in: [...tripIds] },
+          trip: { status: PRICED_TRIP_STATUS },
         },
-      },
-    });
+        include: { items: ITEMS_WITH_COMPONENT, routeLegs: ROUTE_LEGS_IN_ORDER },
+      }),
+    );
+  }
+
+  /**
+   * ── ONE CALCULATION, NEVER TWO HALVES ─────────────────────────────────────
+   * A snapshot is read as a header, its items and its route legs — separate
+   * statements under Prisma's relation loading. A recalculation committing in
+   * between would pair one calculation's route with another's amounts. One
+   * REPEATABLE READ transaction sees all three as of the same moment, and a
+   * snapshot is only ever replaced as a whole inside one transaction, so the
+   * read always returns one calculation.
+   */
+  private readConsistently<TResult>(
+    read: (client: PrismaService) => Promise<TResult>,
+  ): Promise<TResult> {
+    return this.prisma.$transaction(
+      (transaction) => read(transaction as unknown as PrismaService),
+      { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
+    );
+  }
+
+  /**
+   * Replaces the road(s) a snapshot was priced against.
+   *
+   * One half of the atomic snapshot replacement, like the items': called only
+   * inside `runInTransaction`, after the header was written.
+   */
+  async replaceRouteLegs(
+    tripPricingId: string,
+    legs: readonly TripPricingRouteLegData[],
+  ): Promise<void> {
+    await this.prisma.tripPricingRouteLeg.deleteMany({ where: { tripPricingId } });
+
+    if (legs.length > 0) {
+      await this.prisma.tripPricingRouteLeg.createMany({
+        data: legs.map((leg) => ({ ...leg, tripPricingId })),
+      });
+    }
   }
 
   /**

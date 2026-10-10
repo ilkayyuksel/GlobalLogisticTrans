@@ -1,6 +1,8 @@
 import { ApiProperty, ApiPropertyOptional } from "@nestjs/swagger";
 
 import { MONEY_DECIMAL_PLACES } from "../../common/dto/money";
+import type { RouteMatchView } from "../route-match-view";
+import { RouteMatchDto, toRouteMatchDto } from "./route-match.dto";
 import {
   EffectivePricing,
   PricingAmountSource,
@@ -95,10 +97,22 @@ export class EffectivePricingDto {
 
   @ApiProperty({ type: [EffectivePricingComponentDto] })
   components!: EffectivePricingComponentDto[];
+
+  @ApiPropertyOptional({
+    type: RouteMatchDto,
+    nullable: true,
+    description:
+      "Which configured route the stored calculation behind these amounts was priced against — read from the same snapshot, never matched again. Null only where a caller has no snapshot to read it from.",
+  })
+  routeMatch!: RouteMatchDto | null;
 }
 
+/**
+ * `routeMatch` travels with the amounts when the read had the snapshot; a
+ * breakdown assembled without one (an export's own arithmetic) has none.
+ */
 export function toEffectivePricingDto(
-  pricing: EffectivePricing,
+  pricing: EffectivePricing & { readonly routeMatch?: RouteMatchView },
 ): EffectivePricingDto {
   return {
     tarief: pricing.tarief.toFixed(MONEY_DECIMAL_PLACES),
@@ -110,6 +124,7 @@ export function toEffectivePricingDto(
     ek: pricing.ek.toFixed(MONEY_DECIMAL_PLACES),
     totaal: pricing.totaal.toFixed(MONEY_DECIMAL_PLACES),
     components: pricing.components.map(toComponentDto),
+    routeMatch: pricing.routeMatch ? toRouteMatchDto(pricing.routeMatch) : null,
   };
 }
 

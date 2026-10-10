@@ -12,7 +12,7 @@ import {
   PricingComponentCode,
   PricingLine,
 } from "./pricing-line";
-import { overStLine } from "./combination-over-st";
+import { overStLine, overStSurchargeLine } from "./combination-over-st";
 import { PricingStrategy } from "./pricing-settings";
 
 /** pricing_rules.md numbers the Base Route Price first in the sequence. */
@@ -65,12 +65,20 @@ export class BasePriceCalculator implements PricingCalculationStep {
         ? this.fromConfiguredRoute(context.baseSource, context.route)
         : this.fromDistance(context.baseSource);
 
-    // Leg 2 of a Combination on another day than Leg 1 adds Over ST's Tarief.
-    const overSt = overStLine(
-      PricingComponentCode.BASE_PRICE,
-      context.overSt?.tarief,
-      line.calculationOrder,
-    );
+    // Leg 2 of a Combination on another day than Leg 1 adds Over ST's Tarief,
+    // and the fixed Over ST surcharge once — see `combination-over-st.ts`.
+    const overSt = [
+      ...overStLine(
+        PricingComponentCode.BASE_PRICE,
+        context.overSt?.tarief,
+        line.calculationOrder,
+      ),
+      ...overStSurchargeLine(
+        context.overSt,
+        context.rules.overStSurcharge,
+        line.calculationOrder,
+      ),
+    ];
 
     this.logger.log("Base price calculation completed", {
       tripId: context.tripId,
@@ -89,9 +97,10 @@ export class BasePriceCalculator implements PricingCalculationStep {
    * untouched. Quantity and unit price stay null — a flat route price is not
    * charged per unit of anything.
    *
-   * The description names the route from the context rather than from the
-   * configured row. The two are the same text: the configuration was looked up
-   * by matching departure and destination exactly.
+   * The description names the road the Trip drives, as the Trip spells it. The
+   * configuration that priced it may be spelled differently — a difference in
+   * letter case, or a trusted typo — and the snapshot records which one it was
+   * (`route_pricing_id`, `route_match`).
    */
   private fromConfiguredRoute(
     baseSource: Extract<

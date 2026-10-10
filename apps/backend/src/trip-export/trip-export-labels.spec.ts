@@ -356,7 +356,9 @@ describe("the live captures the browser's export tests read", () => {
       const snapshot = byTrip.get(tripId);
 
       return snapshot
-        ? toEffectivePricingDto(resolveEffectivePricing(snapshot.items.map(toEngineAmount), []))
+        ? amountsOnly(
+            toEffectivePricingDto(resolveEffectivePricing(snapshot.items.map(toEngineAmount), [])),
+          )
         : null;
     };
 
@@ -383,6 +385,18 @@ describe("the live captures the browser's export tests read", () => {
     }
   });
 });
+
+/**
+ * The amounts of a breakdown, without its route record: the captures predate
+ * `routeMatch`, and what they pin is the money. Writing `routeMatch: null` into
+ * them would claim the captured API said so; it said nothing.
+ */
+function amountsOnly(pricing: ReturnType<typeof toEffectivePricingDto>) {
+  const { routeMatch, ...amounts } = pricing;
+  void routeMatch;
+
+  return amounts;
+}
 
 /** A capture, as far as its Trips' pricing is concerned. */
 interface PricedCapture {

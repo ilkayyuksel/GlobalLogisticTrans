@@ -201,6 +201,30 @@ export class PricingRecalculationService {
   }
 
   /**
+   * The Trips whose price a change to this Trip's ROAD can move — its
+   * terminal, destination city or direction.
+   *
+   * The road decides the route this Trip is priced on, and — for a leg of a
+   * Combination — which configured pair BOTH legs are priced on. So it is this
+   * Trip and its same-document group members (`tripsPricedByRoadOf`). Asked
+   * after the write; never throws, as `tripsAffectedByPlanningDate`.
+   */
+  async tripsAffectedByRoadChange(tripId: string): Promise<string[]> {
+    try {
+      const trip = await this.trips.findById(tripId);
+
+      return trip ? await this.components.tripsPricedByRoadOf(trip) : [];
+    } catch (error) {
+      this.logger.error("Could not determine which Trips a road change reprices", {
+        tripId,
+        reason: error instanceof Error ? error.message : String(error),
+      });
+
+      return [];
+    }
+  }
+
+  /**
    * The stored breakdown with the operator's corrections applied.
    *
    * Null would mean the Engine stored nothing, which cannot happen on the

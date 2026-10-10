@@ -119,6 +119,7 @@ describe("TripRevisionService", () => {
     setStatus: jest.Mock;
     transitionStatus: jest.Mock;
     update: jest.Mock;
+    findById: jest.Mock;
     recordHistory: jest.Mock;
     runInTransaction: jest.Mock;
     runTripWriteTransaction: jest.Mock;
@@ -225,6 +226,10 @@ describe("TripRevisionService", () => {
         Object.assign(trip, data);
         return Promise.resolve(trip);
       }),
+      // Read after a revision moved a date or road, for the partner's status.
+      findById: jest.fn((id: string) =>
+        Promise.resolve(stored.find((candidate) => candidate.id === id) ?? null),
+      ),
       /** Append-only, like the real one: rows are collected, never replaced. */
       recordHistory: jest.fn((entries: unknown[]) => {
         history.push(...entries);
@@ -402,6 +407,21 @@ describe("TripRevisionService", () => {
         (id: string) => Promise.resolve(stored.find((trip) => trip.id === id) ?? null),
       );
       recalculation.tripsAffectedByPlanningDate.mockResolvedValue([PARTNER]);
+    });
+
+    /** The road decides which configured pair BOTH legs are priced on. */
+    it("reprices the CLOSED partner when the document changes the Trip's road", async () => {
+      // Same date as the document; its destination (Dourges → Lessines) moves.
+      stored.push(buildTrip());
+      stored.push(buildTrip({ id: PARTNER, bookingNumber: "OTHER", status: TripStatus.CLOSED }));
+      recalculation.tripsAffectedByPlanningDate.mockResolvedValue([]);
+      recalculation.tripsAffectedByRoadChange.mockResolvedValue([stored[0].id, PARTNER]);
+
+      await service.applyDocumentRevision(buildDocument());
+
+      expect(recalculation.tripsAffectedByRoadChange).toHaveBeenCalledWith(stored[0].id);
+      // Only the CLOSED partner: the revised Trip is OPEN and has no price.
+      expect(recalculation.recalculate.mock.calls).toEqual([[PARTNER]]);
     });
 
     it("reprices the CLOSED partner leg when the document dates the Trip", async () => {

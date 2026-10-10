@@ -74,6 +74,13 @@ export const PRICING_SETTING_CATALOG: readonly PricingSettingDefinition[] = [
     defaultValue: "50.00",
   },
   {
+    key: "OVER_ST_SURCHARGE",
+    valueType: SettingValueType.DECIMAL,
+    description:
+      "Added once to the Tarief of Leg 2 of a Combination when Over ST applies: the two legs are planned on different days and the Combination has Over ST configured. Never added otherwise.",
+    defaultValue: "70.00",
+  },
+  {
     /**
      * The one value that cannot be written down here.
      *

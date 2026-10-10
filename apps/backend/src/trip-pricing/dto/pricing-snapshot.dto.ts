@@ -1,6 +1,7 @@
 import { ApiProperty } from "@nestjs/swagger";
 
 import { TripPricingItemResponseDto } from "../../trip-pricing-items/dto/trip-pricing-item-response.dto";
+import { RouteMatchDto } from "./route-match.dto";
 import { TripPricingResponseDto } from "./trip-pricing-response.dto";
 
 /**
@@ -19,4 +20,11 @@ export class PricingSnapshotDto {
     description: "Every line of the snapshot, in calculation order.",
   })
   items!: TripPricingItemResponseDto[];
+
+  @ApiProperty({
+    type: RouteMatchDto,
+    description:
+      "Which configured route this calculation was priced against, as it recorded it. Read from the snapshot, never matched again.",
+  })
+  routeMatch!: RouteMatchDto;
 }

@@ -3,10 +3,7 @@ import { Injectable } from "@nestjs/common";
 import { AppLoggerService } from "../logger/app-logger.service";
 import { RouteCostService } from "../route-costs/route-cost.service";
 import { RouteConfigurationKind } from "../route-pricing/route-pricing.repository";
-import {
-  PricingRouteCostInput,
-  PricingRouteIdentity,
-} from "./pricing-calculation-context";
+import { PricingRouteCostInput } from "./pricing-calculation-context";
 import { MatchedRouteConfiguration } from "./pricing-component.resolver";
 
 /**
@@ -37,39 +34,39 @@ export class RouteCostResolver {
    * `matchedRoute` is the configuration this Trip was priced against.
    *
    * ── WHY THE COSTS FOLLOW THE MATCH ────────────────────────────────────────
-   * A Combination leg OWNS its costs: the road it runs may also be an ordinary
-   * configured route with a tunnel of its own, and charging the road's tunnel to
-   * the leg would mean one amount for two prices that are deliberately
-   * different. So a leg's costs are read by its identity, and every other Trip
-   * reads the road's, exactly as before.
+   * The Tarief, the Toll and the Tunnel of one Trip come from ONE matched
+   * configuration, never from three separate lookups:
+   *
+   *   a Combination leg OWNS its costs — the road it runs may also be an
+   *     ordinary route with a tunnel of its own — so they are read by its id;
+   *   an ordinary route's costs are read by the CONFIGURED road, as stored, so
+   *     a Trip matched despite a typo or a difference in letter case still finds
+   *     the costs of the route that priced its Tarief;
+   *   no match, no costs: nothing reliable was found, and the Toll and Tunnel
+   *     follow the Tarief to zero rather than come from a guess.
    */
   async resolve(
     tripId: string,
-    route: PricingRouteIdentity,
-    matchedRoute: MatchedRouteConfiguration | null = null,
+    matchedRoute: MatchedRouteConfiguration | null,
   ): Promise<PricingRouteCostInput[]> {
-    if (matchedRoute?.kind === RouteConfigurationKind.COMBINATION) {
-      return this.resolveOwnedBy(tripId, matchedRoute.routePricingId);
-    }
-
-    // `trip.terminal` is nullable, and route costs are matched on it. Without a
-    // departure there is no route identity to match, so nothing can be
-    // resolved — which is different from a route that resolved to nothing.
-    if (route.departure === null) {
-      this.logger.warn("Trip has no terminal, so no route cost can be matched", {
-        tripId,
-      });
+    if (!matchedRoute) {
+      this.logger.log("No route matched, so no route cost applies", { tripId });
 
       return [];
     }
 
+    if (matchedRoute.kind === RouteConfigurationKind.COMBINATION) {
+      return this.resolveOwnedBy(tripId, matchedRoute.routePricingId);
+    }
+
     const routeCosts = await this.routeCostService.findActiveForRoute(
-      route.departure,
-      route.destination,
+      matchedRoute.departure,
+      matchedRoute.destination,
     );
 
     this.logger.log("Route costs resolved", {
       tripId,
+      routePricingId: matchedRoute.routePricingId,
       routeCostCount: routeCosts.length,
       components: routeCosts.map((cost) => cost.pricingComponent.code),
     });

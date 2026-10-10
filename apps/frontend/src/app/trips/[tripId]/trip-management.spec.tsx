@@ -987,7 +987,7 @@ describe("Trip management", () => {
       getTripMock.mockResolvedValue(buildTrip({ status: "CLOSED" }));
     });
 
-    it("asks the backend to reprocess and then refetches", async () => {
+    it("asks the backend to reprocess and shows its answer without refetching", async () => {
       reprocessMock.mockResolvedValue(buildSnapshot());
 
       render(<TripDetailPage />);
@@ -996,9 +996,7 @@ describe("Trip management", () => {
       );
 
       await waitFor(() => expect(reprocessMock).toHaveBeenCalledWith("trip-1"));
-      await waitFor(() =>
-        expect(getPricingSnapshotMock.mock.calls.length).toBeGreaterThan(1),
-      );
+      expect(getPricingSnapshotMock).toHaveBeenCalledTimes(1);
     });
 
     it("reports the backend's refusal without inventing a message", async () => {

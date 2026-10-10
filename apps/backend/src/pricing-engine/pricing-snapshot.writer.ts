@@ -98,6 +98,17 @@ export class PricingSnapshotWriter {
       pricingEngineVersion: result.pricingEngineVersion,
       pricingRuleVersion: result.pricingRuleVersion,
       calculationStatus: result.calculationStatus,
+      routePricingId: result.context.routeMatch.routePricingId,
+      routeMatch: result.context.routeMatch.method,
+      combinationRouteGroupId: result.context.routeMatch.combinationRouteGroupId,
+      routeLegs: result.context.routeMatch.legs.map((leg) => ({
+        legPosition: leg.legPosition,
+        isPricedLeg: leg.isPricedLeg,
+        routePricingId: leg.routePricingId,
+        departure: leg.departure,
+        destination: leg.destination,
+        matchMethod: leg.method,
+      })),
       items,
     });
 

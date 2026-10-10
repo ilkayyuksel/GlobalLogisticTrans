@@ -1,6 +1,5 @@
 import { Prisma } from "@prisma/client";
 
-import { TripPricingItemRepository } from "../trip-pricing-items/trip-pricing-item.repository";
 import { EffectivePricingService } from "./effective-pricing.service";
 import { TripPricingOverrideRepository } from "./trip-pricing-override.repository";
 import { TripPricingRepository } from "./trip-pricing.repository";
@@ -26,6 +25,10 @@ function buildSnapshot(tripId: string) {
   return {
     id: `pricing-${tripId}`,
     tripId,
+    routeMatch: null,
+    routePricingId: null,
+    combinationRouteGroupId: null,
+    routeLegs: [],
     items: ENGINE_LINES.map((line) => ({
       pricingComponent: { code: line.code },
       amount: new Prisma.Decimal(line.amount),
@@ -53,7 +56,6 @@ describe("EffectivePricingService.findForTrips", () => {
     findOverridesForTrips = jest.fn().mockResolvedValue([]);
 
     service = new EffectivePricingService(
-      {} as unknown as TripPricingItemRepository,
       {
         findForTrips: findOverridesForTrips,
       } as unknown as TripPricingOverrideRepository,
