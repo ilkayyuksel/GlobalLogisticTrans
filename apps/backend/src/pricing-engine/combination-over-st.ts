@@ -1,7 +1,7 @@
-import { Prisma } from "@prisma/client";
+import { Prisma, TripDirection } from "@prisma/client";
 
 import type { CombinationOverStDto } from "../route-pricing/dto/route-pricing-response.dto";
-import type { RoadEndpoints } from "../route-pricing/route-identity";
+import type { TripRoad } from "../route-pricing/route-matcher";
 import {
   OVER_ST_DESCRIPTION,
   OVER_ST_SURCHARGE_DESCRIPTION,
@@ -45,12 +45,20 @@ import { toStorableAmount } from "./pricing-money";
  * same reading the Ritten list and the customer's price list use (`AALST ->
  * Quay 869`). A Trip with no direction reads terminal → city, as it always
  * did. Null without both ends: there is no road to match.
+ *
+ * It also says which END is the terminal — the destination of a collection,
+ * the departure otherwise — because confirmed terminal aliases apply there and
+ * only there (`route-matcher.ts`).
  */
-export function pricingRoadOf(trip: TripReadView): RoadEndpoints | null {
+export function pricingRoadOf(trip: TripReadView): TripRoad | null {
   const route = toTripRoute(trip);
 
   return route && route.from !== "" && route.to !== ""
-    ? { departure: route.from, destination: route.to }
+    ? {
+        departure: route.from,
+        destination: route.to,
+        terminalEnd: trip.direction === TripDirection.COLLECTION ? "destination" : "departure",
+      }
     : null;
 }
 

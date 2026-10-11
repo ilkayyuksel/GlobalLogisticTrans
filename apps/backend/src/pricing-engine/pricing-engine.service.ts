@@ -273,10 +273,9 @@ export class PricingEngineService {
      * working. See `resolveRouteBaseSource`.
      */
     const road = pricingRoadOf(trip);
-    const route: PricingRouteIdentity = road ?? {
-      departure: trip.terminal,
-      destination: trip.destinationCity ?? "",
-    };
+    const route: PricingRouteIdentity = road
+      ? { departure: road.departure, destination: road.destination }
+      : { departure: trip.terminal, destination: trip.destinationCity ?? "" };
 
     /*
      * The configured route, matched ONCE for this Trip and then read by three

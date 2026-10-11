@@ -1,4 +1,16 @@
 import { toCanonicalTerminal } from "../common/terminal";
+import {
+  cityEndOf,
+  roadForms,
+  type RoadForms,
+  type TerminalEnd,
+} from "./location-forms";
+import {
+  NAME_SIMILARITY_RULES,
+  editDistance,
+  isTrustedTypo,
+  similarity,
+} from "./name-similarity";
 import type { RoadEndpoints } from "./route-identity";
 
 /**
@@ -16,13 +28,23 @@ import type { RoadEndpoints } from "./route-identity";
  *               (`-`, `.`, `,`, `'`, `/`, brackets). Every real spelling
  *               variant seen in the documents and the customer's price list
  *               differs only in this way (`ZEMST` / `Zemst`).
- *   FUZZY       one end equal after normalisation, the other a typo of it —
- *               under the strict rule below.
+ *               At the CITY end also the confirmed city equivalents
+ *               (`common/city-aliases.ts`: `Antwerp` = `Antwerpen`, `St` =
+ *               `Saint`), and — only when the whole name matched nothing — a
+ *               qualifier in brackets given on ONE side only (`Melsele` =
+ *               `Melsele (Beveren)`); two different qualifiers never match.
+ *   FUZZY       one end equal, the other a typo by the calibrated similarity
+ *               scores (`name-similarity.ts`) — the city end when the terminal
+ *               end is known — with a clear margin over the runner-up.
  *
- * Nothing else is equivalent. There is no alias table: `Antwerp` and
- * `Antwerpen`, or `Kallo` and `Kallo (Beveren)`, are NOT matched — the
- * customer's own list prices `MECHELEN` and `MECHELEN (MUIZEN)` as two routes,
- * so a qualifier is information, not noise.
+ * Terminal ALIASES the owner confirmed (`common/terminal-aliases.ts` — `Quay`,
+ * `PSA Quay`, `Kaai` for `Quay 869`) are part of NORMALIZED and FUZZY, and only
+ * at the TERMINAL end of the Trip's road (`terminalEnd`): never at the city,
+ * never as a word inside a longer value, never for another quay number.
+ *
+ * Nothing else is equivalent: `Kallo` and `Kallo Noord`, a village and the
+ * town in whose brackets it stands (`Muizen` / `Mechelen (Muizen)`), `Sint`
+ * and `St` — none is an alias. How a road's ends are read: `location-forms.ts`.
  *
  * ── DIRECTION ───────────────────────────────────────────────────────────────
  * A road is compared as given: `X → Y` never matches `Y → X`. The caller
@@ -48,24 +70,13 @@ export type RouteMatchMethod =
   (typeof RouteMatchMethod)[keyof typeof RouteMatchMethod];
 
 /**
- * When a typo may still be priced. Calibrated on every real place name in the
- * documents, the captures and the customer's price list (81 names):
- *
- *   - the closest two DIFFERENT real places are two edits apart, and all such
- *     pairs are 7 letters or shorter (`avelgem`/`evergem`, `beerse`/`beernem`,
- *     `diest`/`tielt`); from 8 letters the closest pair is three apart
- *     (`coulogne`/`soumagne`);
- *   - so ONE edit on a name of at least EIGHT letters, with nothing else
- *     within THREE edits, cannot reach another real place.
- *
- * Digits never take part: a terminal or quay number is not misspelled into
- * another one. Both ends fuzzy at once is never trusted.
+ * When a typo may still be priced — see `name-similarity.ts` for the scores
+ * and their calibration on the real place names. A typo is trusted on ONE end
+ * only: the city end when the Trip's terminal end is known (the terminal must
+ * match exactly, through its confirmed aliases), either end otherwise. Both
+ * ends fuzzy at once is never trusted.
  */
-export const FUZZY_ROUTE_RULES = {
-  maxEdits: 1,
-  minLength: 8,
-  minRunnerUpEdits: 3,
-} as const;
+export const FUZZY_ROUTE_RULES = NAME_SIMILARITY_RULES;
 
 /** How one configured road scored against the Trip's road. */
 export interface ScoredCandidate<T> {
@@ -85,47 +96,101 @@ export interface RoadMatch<T> {
 }
 
 const NEAREST_REPORTED = 3;
-const PUNCTUATION = /[-_.,'’/()[\]]/g;
-const COMBINING_MARKS = /[̀-ͯ]/g;
-const WHITESPACE_RUN = /\s+/g;
-const DIGIT = /\d/;
 
-/** The canonical terminal rule, then safe normalisation. */
-export function normalizeLocation(location: string): string {
-  return (toCanonicalTerminal(location) ?? "")
-    .normalize("NFKD")
-    .replace(COMBINING_MARKS, "")
-    .toLowerCase()
-    .replace(PUNCTUATION, " ")
-    .replace(WHITESPACE_RUN, " ")
-    .trim();
+export { normalizeLocation } from "./location-forms";
+export { editDistance } from "./name-similarity";
+export type { TerminalEnd } from "./location-forms";
+
+/** A Trip's road as the matcher compares it: in its driving direction. */
+export interface TripRoad extends RoadEndpoints {
+  /**
+   * Which end is the terminal. Absent: neither end is known to be the
+   * terminal or the city, so no alias, qualifier or city rule applies.
+   */
+  readonly terminalEnd?: TerminalEnd;
 }
 
 /** The same road for every layer: what a configuration is identified by. */
-export function roadKey(road: RoadEndpoints): string {
-  return `${normalizeLocation(road.departure)}→${normalizeLocation(road.destination)}`;
+export function roadKey(road: RoadEndpoints, terminalEnd?: TerminalEnd): string {
+  const forms = roadForms(road, terminalEnd);
+
+  return `${forms.departure.full}→${forms.destination.full}`;
 }
 
 export function matchRoad<T extends RoadEndpoints>(
-  road: RoadEndpoints,
+  road: TripRoad,
   candidates: readonly T[],
+  options: { readonly everySpellingOfTheRoad?: boolean } = {},
 ): RoadMatch<T> {
+  const wanted = roadKey(road, road.terminalEnd);
+  const sameRoad = candidates.filter(
+    (candidate) => roadKey(candidate, road.terminalEnd) === wanted,
+  );
   const exact = candidates.filter((candidate) => isExactRoad(candidate, road));
 
   if (exact.length > 0) {
-    return decide(RouteMatchMethod.EXACT, exact, []);
+    /*
+     * For a Combination every configured spelling of the road is a candidate
+     * leg — the PAIR decides between them — so an exact spelling must not hide
+     * an aliased one that belongs to the right Combination.
+     */
+    return decide(
+      RouteMatchMethod.EXACT,
+      options.everySpellingOfTheRoad ? sameRoad : exact,
+      [],
+      road.terminalEnd,
+    );
   }
 
-  const wanted = roadKey(road);
-  const normalized = candidates.filter(
-    (candidate) => roadKey(candidate) === wanted,
-  );
+  if (sameRoad.length > 0) {
+    return decide(RouteMatchMethod.NORMALIZED, sameRoad, [], road.terminalEnd);
+  }
 
-  if (normalized.length > 0) {
-    return decide(RouteMatchMethod.NORMALIZED, normalized, []);
+  const qualified = matchByOptionalQualifier(road, candidates);
+
+  if (qualified.length > 0) {
+    return decide(RouteMatchMethod.NORMALIZED, qualified, [], road.terminalEnd);
   }
 
   return matchFuzzy(road, candidates);
+}
+
+/**
+ * ── A QUALIFIER IN BRACKETS IS OPTIONAL — UNLESS IT DECIDES ─────────────────
+ * Reached only when nothing matched the WHOLE city name, so a full match is
+ * always preferred. The terminal end must be equal; at the city end:
+ *   the same name, and the qualifier given on one side only — `Melsele` is
+ *     `Melsele (Beveren)`, and `Melsele (Beveren)` is `Melsele`;
+ *   two DIFFERENT qualifiers are two places — `Melsele (Beveren)` is never
+ *     `Melsele (X)`.
+ * Several compatible configurations that are different roads are AMBIGUOUS
+ * (`decide`): `Melsele` against `Melsele (Beveren)` and `Melsele (X)` picks
+ * neither.
+ */
+function matchByOptionalQualifier<T extends RoadEndpoints>(
+  road: TripRoad,
+  candidates: readonly T[],
+): T[] {
+  const cityEnd = cityEndOf(road.terminalEnd);
+
+  if (cityEnd === null || road.terminalEnd === undefined) {
+    return [];
+  }
+
+  const terminalSide = road.terminalEnd;
+  const wanted = roadForms(road, terminalSide);
+
+  return candidates.filter((candidate) => {
+    const forms = roadForms(candidate, terminalSide);
+    const city = forms[cityEnd];
+    const wantedCity = wanted[cityEnd];
+
+    return (
+      forms[terminalSide].full === wanted[terminalSide].full &&
+      city.base === wantedCity.base &&
+      (city.qualifier === null || wantedCity.qualifier === null)
+    );
+  });
 }
 
 function isExactRoad(left: RoadEndpoints, right: RoadEndpoints): boolean {
@@ -139,128 +204,102 @@ function decide<T extends RoadEndpoints>(
   method: RouteMatchMethod,
   found: readonly T[],
   nearest: readonly ScoredCandidate<T>[],
+  terminalEnd: TerminalEnd | undefined,
 ): RoadMatch<T> {
-  const roads = new Set(found.map(roadKey));
+  const roads = new Set(found.map((road) => roadKey(road, terminalEnd)));
 
   return roads.size === 1
     ? { method, matches: found, nearest }
     : { method: RouteMatchMethod.AMBIGUOUS, matches: [], nearest };
 }
 
+/** A candidate with the end that may be a typo, and its similarity there. */
+interface FuzzyCandidate<T> {
+  readonly scored: ScoredCandidate<T>;
+  /** The end that is not exact, when exactly one end is. */
+  readonly fuzzyEnd: TerminalEnd | null;
+  readonly similarity: number;
+  readonly trusted: boolean;
+}
+
 function matchFuzzy<T extends RoadEndpoints>(
-  road: RoadEndpoints,
+  road: TripRoad,
   candidates: readonly T[],
 ): RoadMatch<T> {
-  const scored = candidates
-    .map((route) => score(route, road))
-    .sort((left, right) => totalEdits(left) - totalEdits(right));
-  const nearest = scored.slice(0, NEAREST_REPORTED);
-  const accepted = scored.filter((candidate) => isTrustedTypo(candidate, road));
+  const given = roadForms(road, road.terminalEnd);
+  const allowedEnd = cityEndOf(road.terminalEnd);
+  const assessed = candidates
+    .map((route) => assess(route, road, given, allowedEnd))
+    .sort((left, right) => right.similarity - left.similarity);
+  const nearest = [...assessed]
+    .map((candidate) => candidate.scored)
+    .sort((left, right) => totalEdits(left) - totalEdits(right))
+    .slice(0, NEAREST_REPORTED);
+  const best = assessed.find((candidate) => candidate.trusted);
 
-  if (accepted.length === 0) {
+  if (!best) {
     return { method: RouteMatchMethod.NOT_FOUND, matches: [], nearest };
   }
 
-  const best = accepted[0];
-  const contested = scored.some(
+  // Another road on the same exact end that is nearly as close: neither.
+  const bestKey = roadKey(best.scored.route, road.terminalEnd);
+  const contested = assessed.some(
     (other) =>
-      roadKey(other.route) !== roadKey(best.route) &&
-      sharesAnchor(other, best) &&
-      totalEdits(other) < FUZZY_ROUTE_RULES.minRunnerUpEdits,
+      other.fuzzyEnd === best.fuzzyEnd &&
+      roadKey(other.scored.route, road.terminalEnd) !== bestKey &&
+      other.similarity > best.similarity - NAME_SIMILARITY_RULES.minRunnerUpGap,
   );
 
   if (contested) {
     return { method: RouteMatchMethod.AMBIGUOUS, matches: [], nearest };
   }
 
-  return decide(RouteMatchMethod.FUZZY, accepted.map((candidate) => candidate.route), nearest);
+  return decide(
+    RouteMatchMethod.FUZZY,
+    assessed
+      .filter((candidate) => candidate.trusted && roadKey(candidate.scored.route, road.terminalEnd) === bestKey)
+      .map((candidate) => candidate.scored.route),
+    nearest,
+    road.terminalEnd,
+  );
 }
 
-function score<T extends RoadEndpoints>(route: T, road: RoadEndpoints): ScoredCandidate<T> {
-  return {
+function assess<T extends RoadEndpoints>(
+  route: T,
+  road: TripRoad,
+  given: RoadForms,
+  allowedEnd: TerminalEnd | null,
+): FuzzyCandidate<T> {
+  const configured = roadForms(route, road.terminalEnd);
+  const scored: ScoredCandidate<T> = {
     route,
-    departureEdits: editDistance(
-      normalizeLocation(route.departure),
-      normalizeLocation(road.departure),
-    ),
-    destinationEdits: editDistance(
-      normalizeLocation(route.destination),
-      normalizeLocation(road.destination),
-    ),
+    departureEdits: editDistance(configured.departure.full, given.departure.full),
+    destinationEdits: editDistance(configured.destination.full, given.destination.full),
   };
-}
+  const fuzzyEnd: TerminalEnd | null =
+    scored.departureEdits === 0 && scored.destinationEdits > 0
+      ? "destination"
+      : scored.destinationEdits === 0 && scored.departureEdits > 0
+        ? "departure"
+        : null;
 
-/** One end equal, the other a single safe typo of it. */
-function isTrustedTypo<T extends RoadEndpoints>(
-  candidate: ScoredCandidate<T>,
-  road: RoadEndpoints,
-): boolean {
-  const departureExact = candidate.departureEdits === 0;
-  const destinationExact = candidate.destinationEdits === 0;
-
-  if (departureExact === destinationExact) {
-    return false;
+  if (fuzzyEnd === null || (allowedEnd !== null && fuzzyEnd !== allowedEnd)) {
+    return { scored, fuzzyEnd, similarity: 0, trusted: false };
   }
 
-  return departureExact
-    ? isSafeTypo(candidate.route.destination, road.destination, candidate.destinationEdits)
-    : isSafeTypo(candidate.route.departure, road.departure, candidate.departureEdits);
-}
+  const left = configured[fuzzyEnd].full;
+  const right = given[fuzzyEnd].full;
 
-function isSafeTypo(configured: string, given: string, edits: number): boolean {
-  const left = normalizeLocation(configured);
-  const right = normalizeLocation(given);
-
-  return (
-    edits <= FUZZY_ROUTE_RULES.maxEdits &&
-    !DIGIT.test(left) &&
-    !DIGIT.test(right) &&
-    Math.min(left.length, right.length) >= FUZZY_ROUTE_RULES.minLength
-  );
-}
-
-/** Whether two candidates agree exactly on the same end. */
-function sharesAnchor<T>(left: ScoredCandidate<T>, right: ScoredCandidate<T>): boolean {
-  return (
-    (left.departureEdits === 0 && right.departureEdits === 0) ||
-    (left.destinationEdits === 0 && right.destinationEdits === 0)
-  );
+  return {
+    scored,
+    fuzzyEnd,
+    similarity: similarity(left, right),
+    trusted: isTrustedTypo(left, right),
+  };
 }
 
 function totalEdits<T>(candidate: ScoredCandidate<T>): number {
   return candidate.departureEdits + candidate.destinationEdits;
-}
-
-/** Optimal string alignment: insertions, deletions, substitutions, swaps. */
-export function editDistance(left: string, right: string): number {
-  const rows = left.length + 1;
-  const columns = right.length + 1;
-  const distance: number[][] = Array.from({ length: rows }, (_, row) =>
-    Array.from({ length: columns }, (_, column) => (row === 0 ? column : column === 0 ? row : 0)),
-  );
-
-  for (let row = 1; row < rows; row += 1) {
-    for (let column = 1; column < columns; column += 1) {
-      const cost = left[row - 1] === right[column - 1] ? 0 : 1;
-
-      distance[row][column] = Math.min(
-        distance[row - 1][column] + 1,
-        distance[row][column - 1] + 1,
-        distance[row - 1][column - 1] + cost,
-      );
-
-      if (
-        row > 1 &&
-        column > 1 &&
-        left[row - 1] === right[column - 2] &&
-        left[row - 2] === right[column - 1]
-      ) {
-        distance[row][column] = Math.min(distance[row][column], distance[row - 2][column - 2] + 1);
-      }
-    }
-  }
-
-  return distance[rows - 1][columns - 1];
 }
 
 /**
@@ -305,11 +344,15 @@ export function matchCombinationPair<
   TGroup extends CombinationLegs<RoadEndpoints>,
   TLeg extends RoadEndpoints = TGroup["legs"][number],
 >(
-  roads: readonly [RoadEndpoints, RoadEndpoints],
+  roads: readonly [TripRoad, TripRoad],
   groups: readonly TGroup[],
 ): CombinationPairMatch<TGroup, TLeg> {
   const allLegs = groups.flatMap((group) => group.legs as readonly TLeg[]);
-  const matched = [matchRoad(roads[0], allLegs), matchRoad(roads[1], allLegs)] as const;
+  const everySpelling = { everySpellingOfTheRoad: true };
+  const matched = [
+    matchRoad(roads[0], allLegs, everySpelling),
+    matchRoad(roads[1], allLegs, everySpelling),
+  ] as const;
 
   if (matched.some((road) => road.matches.length === 0)) {
     return { kind: "LEG_NOT_IDENTIFIED", roads: matched };

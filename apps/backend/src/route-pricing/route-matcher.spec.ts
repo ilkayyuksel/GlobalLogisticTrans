@@ -1,7 +1,8 @@
+import { canonicalCityAlias } from "../common/city-aliases";
+import { isTrustedTypo, similarity } from "./name-similarity";
 import {
   FUZZY_ROUTE_RULES,
   RouteMatchMethod,
-  editDistance,
   matchCombinationPair,
   matchRoad,
   normalizeLocation,
@@ -226,7 +227,11 @@ describe("matchRoad: an ordinary route", () => {
   });
 
   it("documents its own thresholds", () => {
-    expect(FUZZY_ROUTE_RULES).toEqual({ maxEdits: 1, minLength: 8, minRunnerUpEdits: 3 });
+    expect(FUZZY_ROUTE_RULES).toEqual({
+      minSimilarity: 0.85,
+      minOrderedSimilarity: 0.85,
+      minRunnerUpGap: 0.1,
+    });
   });
 });
 
@@ -235,7 +240,9 @@ describe("matchRoad: an ordinary route", () => {
  * rule. If a place is ever added that does, this is where it shows.
  */
 describe("the calibration against real place names", () => {
-  const REAL_PLACES = [
+  // Read through the confirmed city aliases: `antwerp` and `antwerpen` are
+  // one place, not a close pair of two.
+  const REAL_PLACES_AS_LISTED = [
     "aalst", "aalter", "antwerp", "antwerpen", "arendonk", "aubel", "avelgem", "beernem",
     "beerse", "bergen op zoom", "bilzen", "bousbecque", "calais", "coulogne", "dendermonde",
     "diest", "dourges", "evergem", "fretin", "genk", "gondecourt", "grobbendonk", "helmond",
@@ -247,21 +254,54 @@ describe("the calibration against real place names", () => {
     "sittard", "soumagne", "st martin au laert", "tessenderlo", "tielt", "veghel", "waregem",
     "warneton", "westerlo oevel", "wetteren", "wevelgem gullegem", "willebroek", "wimille",
     "zaventem brucargo", "zele", "zemst", "zottegem", "zwijndrecht",
+    // Added October 2026: the planning sheets and the Ritten export.
+    "alken", "berlare", "dessel", "gent", "isnes", "kortemark", "lanaken veldwezelt",
+    "leuven heverlee", "lillers", "meer", "merksplas", "muizen", "nivelles", "roeselare",
+    "schoten", "st niklaas", "tongeren", "wanze", "wevelgem", "zeebrugge",
   ];
+  const REAL_PLACES = [...new Set(REAL_PLACES_AS_LISTED.map(canonicalCityAlias))];
 
   it("keeps every pair of different real places outside the fuzzy rule", () => {
     for (const [index, left] of REAL_PLACES.entries()) {
       for (const right of REAL_PLACES.slice(index + 1)) {
-        const edits = editDistance(left, right);
-        const longEnough = Math.min(left.length, right.length) >= FUZZY_ROUTE_RULES.minLength;
-
-        expect({ left, right, fuzzy: longEnough && edits <= FUZZY_ROUTE_RULES.maxEdits }).toEqual({
+        expect({ left, right, trusted: isTrustedTypo(left, right) }).toEqual({
           left,
           right,
-          fuzzy: false,
+          trusted: false,
         });
       }
     }
+  });
+
+  /** The margin, measured: the closest two different places stay below 0.76. */
+  it("keeps the closest different places well under the threshold", () => {
+    let closest = 0;
+
+    for (const [index, left] of REAL_PLACES.entries()) {
+      for (const right of REAL_PLACES.slice(index + 1)) {
+        closest = Math.max(closest, similarity(left, right));
+      }
+    }
+
+    expect(closest).toBeLessThanOrEqual(0.75);
+    // 0.85 − 0.75, within floating-point rounding.
+    expect(FUZZY_ROUTE_RULES.minSimilarity - closest).toBeGreaterThanOrEqual(0.1 - 1e-9);
+  });
+
+  it.each([
+    ["charelroi", "charleroi"],
+    ["roterdam", "rotterdam"],
+    ["dendermonda", "dendermonde"],
+    ["lokren", "lokeren"],
+    ["grobendonk", "grobbendonk"],
+    ["wilebroek", "willebroek"],
+    ["herentlas", "herentals"],
+    ["sint gilis waas", "sint gillis waas"],
+    ["zwijndrect", "zwijndrecht"],
+    ["tessendrlo", "tessenderlo"],
+    ["meerhuot", "meerhout"],
+  ])("trusts the known typo %s for %s", (given, configured) => {
+    expect(isTrustedTypo(configured, given)).toBe(true);
   });
 });
 
@@ -376,5 +416,323 @@ describe("matchCombinationPair", () => {
     expect(
       matchCombinationPair([road("t1", QUAY, "zemst"), road("t2", "zemst", QUAY)], [ZEMST_COMBO, twin]),
     ).toMatchObject({ kind: "AMBIGUOUS" });
+  });
+});
+
+/**
+ * ── CONFIRMED TERMINAL ALIASES (OCTOBER 2026) ───────────────────────────────
+ * `Quay`, `PSA Quay`, `PSA Quay 869` and `Kaai` name `Quay 869` — at the
+ * TERMINAL end of the Trip's road only, as whole values, never another quay.
+ */
+describe("terminal aliases", () => {
+  const delivery = (terminal: string, city = "Ghlin") => ({
+    id: "trip",
+    departure: terminal,
+    destination: city,
+    terminalEnd: "departure" as const,
+  });
+  const collection = (city: string, terminal: string) => ({
+    id: "trip",
+    departure: city,
+    destination: terminal,
+    terminalEnd: "destination" as const,
+  });
+  const GHLIN = [road("ghlin", QUAY, "Ghlin")];
+
+  it.each([
+    ["Quay", RouteMatchMethod.NORMALIZED],
+    ["PSA Quay", RouteMatchMethod.NORMALIZED],
+    ["PSA Quay 869", RouteMatchMethod.EXACT],
+    ["Kaai", RouteMatchMethod.NORMALIZED],
+    ["KAAI", RouteMatchMethod.NORMALIZED],
+    ["  kaai  ", RouteMatchMethod.NORMALIZED],
+    ["psa   QUAY", RouteMatchMethod.NORMALIZED],
+    ["Kaai.", RouteMatchMethod.NORMALIZED],
+  ])("1-7. a delivery from %s matches Quay 869 → Ghlin (%s)", (terminal, method) => {
+    const match = matchRoad(delivery(terminal), GHLIN);
+
+    expect(match.method).toBe(method);
+    expect(ids(match)).toEqual(["ghlin"]);
+  });
+
+  it("8. a collection TO an alias matches the configured return", () => {
+    const routes = [road("mons-back", "Mons", QUAY)];
+
+    expect(ids(matchRoad(collection("Mons", "KAAI"), routes))).toEqual(["mons-back"]);
+  });
+
+  it("9. never matches the road the other way round", () => {
+    expect(matchRoad(collection("Ghlin", "Kaai"), GHLIN).method).toBe(RouteMatchMethod.NOT_FOUND);
+  });
+
+  it.each(["Quay 170", "Quay 868", "PSA Quay 1742", "Kaaistraat", "Quay 869 Noord"])(
+    "10. %s is no alias of Quay 869",
+    (terminal) => {
+      expect(matchRoad(delivery(terminal), GHLIN).method).toBe(RouteMatchMethod.NOT_FOUND);
+    },
+  );
+
+  it("10. an alias never reaches another configured quay", () => {
+    expect(matchRoad(delivery("Kaai"), [road("other", "Quay 170", "Ghlin")]).method).toBe(
+      RouteMatchMethod.NOT_FOUND,
+    );
+  });
+
+  it("11. an alias spelling at the CITY end is a city, not the terminal", () => {
+    const routes = [road("lier", "Lier", QUAY)];
+
+    // A delivery from Lier to a place called "Kaai": the terminal end is Lier.
+    expect(matchRoad(delivery("Lier", "Kaai"), routes).method).toBe(RouteMatchMethod.NOT_FOUND);
+  });
+
+  it("12. two configurations that are one road through an alias are both returned, never one chosen", () => {
+    const routes = [road("quay", QUAY, "Ghlin"), road("kaai", "Kaai", "Ghlin")];
+
+    const match = matchRoad(delivery("PSA Quay"), routes);
+
+    // The caller refuses to choose between them (resolver: AMBIGUOUS).
+    expect(match.method).toBe(RouteMatchMethod.NORMALIZED);
+    expect(ids(match).sort()).toEqual(["kaai", "quay"]);
+  });
+
+  it("applies no alias when the terminal end is unknown", () => {
+    expect(matchRoad({ departure: "Kaai", destination: "Ghlin" }, GHLIN).method).toBe(
+      RouteMatchMethod.NOT_FOUND,
+    );
+  });
+
+  describe("13. both legs of a Combination", () => {
+    type Leg = Road & { readonly position: 1 | 2 };
+    const leg = (id: string, position: 1 | 2, departure: string, destination: string): Leg => ({
+      ...road(id, departure, destination),
+      position,
+    });
+
+    it("identifies the pair through aliases at each leg's terminal", () => {
+      const groups = [{ id: "ghlin-mons", legs: [leg("l1", 1, QUAY, "Ghlin"), leg("l2", 2, "Mons", QUAY)] }];
+
+      expect(
+        matchCombinationPair([delivery("Kaai"), collection("Mons", "PSA Quay")], groups),
+      ).toMatchObject({ kind: "MATCHED", group: { id: "ghlin-mons" }, methods: ["NORMALIZED", "NORMALIZED"] });
+    });
+
+    /** An exact spelling in one Combination must not hide the aliased leg of the right one. */
+    it("considers every configured spelling of a leg, so the pair can decide", () => {
+      const groups = [
+        { id: "charleroi", legs: [leg("c1", 1, QUAY, "Ghlin"), leg("c2", 2, "Charleroi", QUAY)] },
+        { id: "mons", legs: [leg("m1", 1, "Kaai", "Ghlin"), leg("m2", 2, "Mons", "Kaai")] },
+      ];
+
+      expect(
+        matchCombinationPair([delivery(QUAY), collection("Mons", QUAY)], groups),
+      ).toMatchObject({ kind: "MATCHED", group: { id: "mons" } });
+    });
+  });
+});
+
+/**
+ * ── CITY NAMES (OCTOBER 2026) ───────────────────────────────────────────────
+ * At the CITY end of a Trip's road only: `Antwerp` = `Antwerpen`, `St` =
+ * `Saint`, a qualifier in brackets optional unless it decides, and a typo
+ * trusted only by the calibrated similarity scores.
+ */
+describe("city names", () => {
+  const delivery = (city: string, terminal = QUAY) => ({
+    id: "trip",
+    departure: terminal,
+    destination: city,
+    terminalEnd: "departure" as const,
+  });
+  const collection = (city: string, terminal = QUAY) => ({
+    id: "trip",
+    departure: city,
+    destination: terminal,
+    terminalEnd: "destination" as const,
+  });
+  const to = (id: string, city: string, terminal = QUAY) => road(id, terminal, city);
+  const from = (id: string, city: string, terminal = QUAY) => road(id, city, terminal);
+
+  describe("confirmed equivalents", () => {
+    it.each([
+      ["Antwerp", "ANTWERPEN"],
+      ["Antwerpen", "Antwerp"],
+    ])("1. %s matches %s", (given, configured) => {
+      expect(matchRoad(delivery(given), [to("a", configured)])).toMatchObject({
+        method: RouteMatchMethod.NORMALIZED,
+        matches: [{ id: "a" }],
+      });
+    });
+
+    it.each([
+      ["St Martin au Laert", "SAINT-MARTIN-AU-LAERT"],
+      ["Saint Laurent Blangy", "ST LAURENT BLANGY"],
+      ["St. Martin au Laert", "Saint Martin au Laert"],
+    ])("2. %s matches %s", (given, configured) => {
+      expect(ids(matchRoad(delivery(given), [to("a", configured)]))).toEqual(["a"]);
+    });
+
+    it("2. St is a word rule, not a licence to ignore the rest of the name", () => {
+      expect(matchRoad(delivery("St Martin"), [to("a", "Saint Laurent Blangy")]).method).toBe(
+        RouteMatchMethod.NOT_FOUND,
+      );
+      /*
+       * `Sint` is not `St`: no alias. `St Niklaas` reads `saint niklaas`, one
+       * letter from `sint niklaas` (similarity 0.923), so it is a scored FUZZY
+       * match — never NORMALIZED — and only while no other road competes.
+       */
+      expect(matchRoad(delivery("St Niklaas"), [to("a", "Sint-Niklaas")]).method).toBe(
+        RouteMatchMethod.FUZZY,
+      );
+      // With its qualifier, as the price list writes it, it is not even close.
+      expect(
+        matchRoad(delivery("St Niklaas"), [to("a", "SINT-NIKLAAS (NIEUWKERKEN-WAAS)")]).method,
+      ).toBe(RouteMatchMethod.NOT_FOUND);
+    });
+
+    it("7. letter case, spaces and punctuation", () => {
+      expect(ids(matchRoad(delivery("  lanaken   veldwezelt "), [to("a", "Lanaken-Veldwezelt")]))).toEqual([
+        "a",
+      ]);
+    });
+  });
+
+  describe("a qualifier in brackets", () => {
+    it("3. Melsele is Melsele (Beveren) when that is the only candidate", () => {
+      expect(matchRoad(delivery("Melsele"), [to("mb", "Melsele (Beveren)")])).toMatchObject({
+        method: RouteMatchMethod.NORMALIZED,
+        matches: [{ id: "mb" }],
+      });
+    });
+
+    it("3. and the other way round", () => {
+      expect(ids(matchRoad(collection("Kallo (Beveren)"), [from("k", "KALLO")]))).toEqual(["k"]);
+    });
+
+    it("4. Melsele against two different qualifiers is AMBIGUOUS", () => {
+      const routes = [to("mb", "Melsele (Beveren)"), to("mx", "Melsele (X)")];
+
+      expect(matchRoad(delivery("Melsele"), routes).method).toBe(RouteMatchMethod.AMBIGUOUS);
+    });
+
+    it("5. a given qualifier selects its own candidate among several", () => {
+      const routes = [to("mb", "Melsele (Beveren)"), to("mx", "Melsele (X)"), to("m", "Melsele")];
+
+      expect(ids(matchRoad(delivery("MELSELE (BEVEREN)"), routes))).toEqual(["mb"]);
+    });
+
+    it("6. two different qualifiers are never the same place", () => {
+      expect(matchRoad(delivery("Melsele (X)"), [to("mb", "Melsele (Beveren)")]).method).toBe(
+        RouteMatchMethod.NOT_FOUND,
+      );
+    });
+
+    it("prefers the whole name over the name before the brackets", () => {
+      const routes = [to("m", "Mechelen"), to("mm", "Mechelen (Muizen)")];
+
+      expect(ids(matchRoad(delivery("MECHELEN"), routes))).toEqual(["m"]);
+    });
+
+    it("never takes a village for the town in whose brackets it stands", () => {
+      expect(matchRoad(delivery("Muizen"), [to("mm", "Mechelen (Muizen)")]).method).toBe(
+        RouteMatchMethod.NOT_FOUND,
+      );
+    });
+  });
+
+  describe("similarity", () => {
+    it("8. a small typo with one clear best candidate", () => {
+      expect(matchRoad(delivery("Lokren"), [to("l", "LOKEREN"), to("t", "TONGEREN")])).toMatchObject({
+        method: RouteMatchMethod.FUZZY,
+        matches: [{ id: "l" }],
+      });
+    });
+
+    it.each([
+      ["9. a low score", "Wevelgem", "Evergem"],
+      ["9. a short name", "Gent", "Genk"],
+      ["11. letters in the same order, but another place", "Beerse", "Beernem"],
+      ["12. only part of the name", "Kallo", "Kalmthout"],
+      ["12. a longer name containing it", "Zele", "Zeebrugge"],
+    ])("%s never matches (%s / %s)", (_name, given, configured) => {
+      expect(matchRoad(delivery(given), [to("x", configured)]).method).toBe(RouteMatchMethod.NOT_FOUND);
+    });
+
+    it("10. two nearly equal candidates are AMBIGUOUS", () => {
+      const routes = [to("a", "Westerhoven"), to("b", "Westerhoeve")];
+
+      expect(matchRoad(delivery("Westerhovem"), routes).method).toBe(RouteMatchMethod.AMBIGUOUS);
+    });
+
+    it("13. digits are never fuzzed away", () => {
+      expect(matchRoad(delivery("Zone 12 Industrie"), [to("z", "Zone 13 Industrie")]).method).toBe(
+        RouteMatchMethod.NOT_FOUND,
+      );
+    });
+  });
+
+  describe("whole routes", () => {
+    it("14. the right city at the wrong terminal is no match", () => {
+      expect(matchRoad(delivery("Lokeren", "Quay 1742"), [to("l", "Lokeren")]).method).toBe(
+        RouteMatchMethod.NOT_FOUND,
+      );
+    });
+
+    it("14. a city typo never makes up for a wrong terminal", () => {
+      expect(matchRoad(delivery("Lokren", "Quay 1742"), [to("l", "Lokeren")]).method).toBe(
+        RouteMatchMethod.NOT_FOUND,
+      );
+    });
+
+    it("15. the right terminal and the wrong city only through the safe rules", () => {
+      expect(matchRoad(delivery("Tongeren"), [to("l", "Lokeren")]).method).toBe(RouteMatchMethod.NOT_FOUND);
+    });
+
+    it("16. never the road the other way round", () => {
+      expect(matchRoad(collection("Antwerp"), [to("a", "Antwerpen")]).method).toBe(
+        RouteMatchMethod.NOT_FOUND,
+      );
+    });
+
+    it("17. delivery and collection each through the alias at their own city end", () => {
+      const routes = [to("out", "Antwerpen"), from("back", "Antwerpen")];
+
+      expect(ids(matchRoad(delivery("Antwerp"), routes))).toEqual(["out"]);
+      expect(ids(matchRoad(collection("Antwerp"), routes))).toEqual(["back"]);
+    });
+
+    it("18. one city on several routes: the terminal decides", () => {
+      const routes = [to("q869", "Lokeren"), to("q1742", "Lokeren", "Quay 1742")];
+
+      expect(ids(matchRoad(delivery("Lokren", "Kaai"), routes))).toEqual(["q869"]);
+    });
+  });
+
+  describe("Combinations", () => {
+    type Leg = Road & { readonly position: 1 | 2 };
+    const leg = (id: string, position: 1 | 2, departure: string, destination: string): Leg => ({
+      ...road(id, departure, destination),
+      position,
+    });
+
+    it("19. both legs through city equivalents", () => {
+      const groups = [
+        { id: "c", legs: [leg("l1", 1, QUAY, "Antwerpen"), leg("l2", 2, "Melsele (Beveren)", QUAY)] },
+      ];
+
+      expect(
+        matchCombinationPair([delivery("Antwerp"), collection("Melsele")], groups),
+      ).toMatchObject({ kind: "MATCHED", group: { id: "c" } });
+    });
+
+    it("20. one ambiguous leg leaves the pair unidentified", () => {
+      const groups = [
+        { id: "b", legs: [leg("b1", 1, QUAY, "Antwerpen"), leg("b2", 2, "Melsele (Beveren)", QUAY)] },
+        { id: "x", legs: [leg("x1", 1, QUAY, "Antwerpen"), leg("x2", 2, "Melsele (X)", QUAY)] },
+      ];
+
+      expect(
+        matchCombinationPair([delivery("Antwerp"), collection("Melsele")], groups).kind,
+      ).toBe("LEG_NOT_IDENTIFIED");
+    });
   });
 });

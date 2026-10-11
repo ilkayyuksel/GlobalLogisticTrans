@@ -424,20 +424,41 @@ The layers, in order — the first that answers wins:
 |---|---|---|
 | Exact | `EXACT` | both ends equal, the terminal compared canonically (the PSA-before-Quay rule — the only configured equivalent) |
 | Safe normalisation | `NORMALIZED` | equal after: canonical terminal, accents removed, lower case, `- _ . , ' / ( ) [ ]` read as a space, whitespace collapsed |
-| One trusted typo | `FUZZY` | one end equal after normalisation; the other **one** edit away (a letter added, removed, changed, or two neighbours swapped), both spellings **8+ letters**, no digits; and no other configured road sharing that equal end fewer than **3** edits away (else `AMBIGUOUS`) |
+| Optional qualifier | `NORMALIZED` | only when the whole city name matched nothing: the same name with a qualifier in brackets on ONE side only (`Melsele` = `Melsele (Beveren)`); two different qualifiers never match; several compatible roads are `AMBIGUOUS` |
+| One trusted typo | `FUZZY` | the terminal end equal (through its aliases); at the city end a typo by **both** calibrated scores ≥ **0.85** — similarity `1 − edits ÷ longer length` and ordered similarity `2 × LCS ÷ both lengths` — the same first letter, no digits; and no other road on the same terminal within **0.10** similarity of it (else `AMBIGUOUS`) |
 | Nothing reliable | `NOT_FOUND` | the route components are priced at zero |
 | More than one | `AMBIGUOUS` | never chosen between; the route components are priced at zero |
 
-Why those thresholds: across every real place name in the documents, the
-captures and the customer's price list, the closest two *different* places are
-two edits apart and all such pairs are 7 letters or shorter (Gent/Genk,
-Evergem/Avelgem); from 8 letters on, the closest pair is three apart. One edit
-on 8+ letters therefore never reaches another real place, and the runner-up
-margin refuses a typo that could belong to two roads.
+Why those thresholds (`route-pricing/name-similarity.ts`): across the 90
+different real place names in the customer's price list, the planning sheets,
+the Ritten export, the captures and the documents, the two closest DIFFERENT
+places score 0.750 (`evergem`/`wevelgem`, `genk`/`gent`), the next 0.714; known
+one-letter typos score 0.857 (`lokren`) to 0.938 (`sint gilis waas`). 0.85
+keeps 0.10 between the closest real pair and a trusted typo: one edit is
+trusted from seven letters, two only from fourteen. The calibration test
+re-checks every pair of real names.
 
-**No aliases are invented.** `Kallo` and `Kallo (Beveren)`, `Antwerp` and
-`Antwerpen`, `Saint` and `St` are different spellings to the matcher; making them
-equal is a business decision, to be configured, never guessed.
+**Confirmed city equivalents** (`common/city-aliases.ts`, owner-confirmed
+October 2026), at the CITY end only: `Antwerp` = `Antwerpen` (whole value);
+`St` = `Saint` (a word inside a city name — `St Martin au Laert`); a qualifier
+in brackets optional as above.
+
+**Confirmed terminal aliases** (`common/terminal-aliases.ts`, owner-confirmed
+October 2026): `Quay`, `PSA Quay`, `PSA Quay 869` and `Kaai` name **`Quay 869`**.
+Compared as WHOLE values after safe normalisation (case, spaces, harmless
+punctuation), and only at the TERMINAL end of the Trip's road — the departure
+of a delivery, the destination of a collection — never at the city end, never
+as a word inside a longer value (`Kaaistraat`, `Quay 869 Noord`), never for
+another quay (`Quay 170`, `Quay 1742`). A match through an alias is recorded as
+`NORMALIZED` (`PSA Quay 869` was already `EXACT` through the canonical-terminal
+rule). Two configurations that are one road through an alias are AMBIGUOUS —
+neither is chosen. A new alias is added to that one list, only once confirmed.
+
+**No other aliases are invented.** `Sint` and `St`, a village and the town in
+whose brackets it stands (`Muizen` / `Mechelen (Muizen)`), `MPET 1742` and
+`Quay 1742` are different spellings to the matcher (a scored typo aside —
+`St Niklaas` is one letter from `Sint Niklaas` and so may be `FUZZY`); making
+them equal is a business decision, to be confirmed, never guessed.
 
 **No match is not a zero price.** Every snapshot records which configuration
 priced it and how — `trip_pricing.route_pricing_id` and `trip_pricing.route_match`
