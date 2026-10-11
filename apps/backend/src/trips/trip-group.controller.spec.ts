@@ -23,6 +23,8 @@ import { TripRepository } from "./trip.repository";
 import { TripService } from "./trip.service";
 import { PricingRecalculationService } from "../pricing-engine/pricing-recalculation.service";
 import { stubPricingRecalculation } from "../pricing-engine/pricing-recalculation.double";
+import { TripDriverPinningService } from "./trip-driver-pinning.service";
+import { noDriverPinning } from "./trip-driver-pinning.double";
 
 const TRIP_A = "3f2504e0-4f89-41d3-9a0c-0305e82c3301";
 const TRIP_B = "9c858901-8a57-4791-81fe-4c455b099bc9";
@@ -139,6 +141,7 @@ describe("TripGroupController (integration)", () => {
         { provide: TripRepository, useValue: repository },
         { provide: VehicleService, useValue: { findById: jest.fn() } },
         { provide: DriverService, useValue: { findById: jest.fn() } },
+        { provide: TripDriverPinningService, useValue: noDriverPinning() },
         {
           provide: TripPlanningDataService,
           useValue: {

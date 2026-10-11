@@ -2,6 +2,8 @@ import { Injectable } from "@nestjs/common";
 import { Driver, VehicleAssignment } from "@prisma/client";
 
 import { assignmentInEffect } from "./assignment-period";
+import { cutOffAssignment, isVoidAssignment } from "./assignment-cutoff";
+import { translateActiveAssignmentRace } from "./active-assignment-race";
 
 import { changedFieldNames } from "../common/changed-fields";
 import { addDays, toIsoDate, toUtcDate, todayUtc } from "../common/dates";
@@ -190,8 +192,8 @@ export class VehicleAssignmentService {
 
     this.assertPeriodOrdered(validFrom, validTo);
 
-    const created = await this.repository.runInTransaction(
-      async (repository) => {
+    const created = await translateActiveAssignmentRace(() =>
+      this.repository.runInTransaction(async (repository) => {
         const supersededIds = dto.validTo
           ? []
           : await this.closeSupersededAssignments(
@@ -216,7 +218,7 @@ export class VehicleAssignmentService {
           validTo,
           notes: dto.notes ?? null,
         });
-      },
+      }),
     );
 
     this.logger.log("Vehicle assignment created", {
@@ -234,26 +236,34 @@ export class VehicleAssignmentService {
     dto: UpdateVehicleAssignmentDto,
   ): Promise<VehicleAssignmentResponseDto> {
     const assignment = await this.requireAssignment(id);
+    const validTo =
+      dto.validTo === undefined ? undefined : toNullableDate(dto.validTo);
 
-    if (dto.validTo !== undefined) {
+    if (validTo !== undefined) {
       this.assertNotAlreadyEnded(assignment);
-
-      const validTo = dto.validTo ? toUtcDate(dto.validTo) : null;
       this.assertPeriodOrdered(assignment.validFrom, validTo);
-
-      await this.assertNoOverlap(this.repository, {
-        vehicleId: assignment.vehicleId,
-        driverId: assignment.driverId,
-        validFrom: assignment.validFrom,
-        validTo,
-        ignoreAssignmentIds: [id],
-      });
     }
 
-    const updated = await this.repository.update(id, {
-      validTo: dto.validTo === undefined ? undefined : toNullableDate(dto.validTo),
-      notes: dto.notes,
-    });
+    const updated = await translateActiveAssignmentRace(() =>
+      this.repository.runInTransaction(async (repository) => {
+        if (validTo !== undefined) {
+          await this.assertNoOverlap(repository, {
+            vehicleId: assignment.vehicleId,
+            driverId: assignment.driverId,
+            validFrom: assignment.validFrom,
+            validTo,
+            ignoreAssignmentIds: [id],
+          });
+        }
+
+        // A shortened period first hands its Trips the driver they showed.
+        if (validTo) {
+          await cutOffAssignment(repository, assignment, addDays(validTo, 1));
+        }
+
+        return repository.update(id, { validTo, notes: dto.notes });
+      }),
+    );
 
     this.logger.log("Vehicle assignment updated", {
       assignmentId: id,
@@ -264,8 +274,17 @@ export class VehicleAssignmentService {
   }
 
   /**
-   * Ends an open assignment. Runs in a transaction so the overlap re-check and
-   * the write cannot be separated by a concurrent change.
+   * Ends an assignment.
+   *
+   * Without a date it is no longer in effect from TODAY: it keeps yesterday as
+   * its last day, or — begun today or later — is ended before it began and
+   * kept as history (`isVoidAssignment`). "Today" is `todayUtc`, the
+   * convention every assignment lookup uses, read once so the whole operation
+   * agrees on it across midnight.
+   *
+   * Trips that showed this driver on the days given up keep that driver
+   * (`cutOffAssignment`). One transaction, so the overlap re-check, the Trips
+   * and the end date are written together or not at all.
    */
   async end(
     id: string,
@@ -275,25 +294,38 @@ export class VehicleAssignmentService {
 
     this.assertNotAlreadyEnded(assignment);
 
-    const validTo = dto.validTo ? toUtcDate(dto.validTo) : todayUtc();
-    this.assertPeriodOrdered(assignment.validFrom, validTo);
+    let firstDayWithout = todayUtc();
 
-    const ended = await this.repository.runInTransaction(async (repository) => {
-      await this.assertNoOverlap(repository, {
-        vehicleId: assignment.vehicleId,
-        driverId: assignment.driverId,
-        validFrom: assignment.validFrom,
-        validTo,
-        ignoreAssignmentIds: [id],
-      });
+    if (dto.validTo) {
+      const validTo = toUtcDate(dto.validTo);
+      this.assertPeriodOrdered(assignment.validFrom, validTo);
+      firstDayWithout = addDays(validTo, 1);
+    }
 
-      return repository.setValidTo(id, validTo);
-    });
+    const { ended, lastDay, neverInEffect, pinnedTrips } =
+      await this.repository.runInTransaction(
+      async (repository) => {
+        const cutoff = await cutOffAssignment(repository, assignment, firstDayWithout);
+
+        await this.assertNoOverlap(repository, {
+          vehicleId: assignment.vehicleId,
+          driverId: assignment.driverId,
+          validFrom: assignment.validFrom,
+          validTo: cutoff.lastDay,
+          ignoreAssignmentIds: [id],
+        });
+
+        return cutoff;
+      },
+    );
 
     this.logger.log("Vehicle assignment ended", {
       assignmentId: id,
       vehicleId: assignment.vehicleId,
       driverId: assignment.driverId,
+      endedOn: toIsoDate(lastDay),
+      neverInEffect,
+      pinnedTrips,
     });
 
     return toVehicleAssignmentResponse(ended);
@@ -316,9 +348,12 @@ export class VehicleAssignmentService {
    * Returns the ids that were closed so the subsequent overlap check ignores
    * them: they no longer reach into the new period.
    *
-   * An open-ended assignment that starts on or after the new one cannot be
-   * closed this way — the end date would precede its own start — so that case
-   * is left to the overlap check, which reports it as a genuine conflict.
+   * One that starts on the SAME day is ended before it began and kept as
+   * history (`isVoidAssignment`) — the owner's rule for a same-day replace.
+   * One that starts LATER cannot be superseded by an earlier start, so it is
+   * left to the overlap check, which reports it as a genuine conflict.
+   *
+   * Trips that showed the superseded driver on the days given up keep them.
    */
   private async closeSupersededAssignments(
     repository: VehicleAssignmentRepository,
@@ -332,24 +367,29 @@ export class VehicleAssignmentService {
     ]);
 
     const closedIds: string[] = [];
-    const dayBefore = addDays(validFrom, -1);
 
     for (const candidate of candidates) {
       if (!candidate || closedIds.includes(candidate.id)) {
         continue;
       }
 
-      if (candidate.validFrom.getTime() > dayBefore.getTime()) {
+      if (candidate.validFrom.getTime() > validFrom.getTime()) {
         continue;
       }
 
-      await repository.setValidTo(candidate.id, dayBefore);
+      const { lastDay, neverInEffect, pinnedTrips } = await cutOffAssignment(
+        repository,
+        candidate,
+        validFrom,
+      );
       closedIds.push(candidate.id);
 
       this.logger.log("Vehicle assignment automatically closed", {
         assignmentId: candidate.id,
         supersededBy: "new open-ended assignment",
-        endedOn: toIsoDate(dayBefore),
+        endedOn: toIsoDate(lastDay),
+        neverInEffect,
+        pinnedTrips,
       });
     }
 
@@ -383,8 +423,11 @@ export class VehicleAssignmentService {
         validTo: candidate.validTo,
       });
 
+      // A void row covers no day, so it can block nothing.
       const blocking = conflicts.find(
-        (conflict) => !candidate.ignoreAssignmentIds.includes(conflict.id),
+        (conflict) =>
+          !candidate.ignoreAssignmentIds.includes(conflict.id) &&
+          !isVoidAssignment(conflict),
       );
 
       if (blocking) {

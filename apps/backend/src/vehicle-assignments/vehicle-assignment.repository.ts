@@ -232,6 +232,41 @@ export class VehicleAssignmentRepository {
     });
   }
 
+  /**
+   * Stores `driverId` on every Trip of the vehicle planned in [from, to] that
+   * stores no driver yet; returns how many were written.
+   *
+   * A write to the trip table from here, deliberately: it must share the
+   * assignment's transaction, and the Trip module already depends on this one,
+   * so the reverse dependency would be a cycle. `driverId: null` in the filter
+   * is what guarantees a stored driver is never replaced.
+   */
+  async pinDriverOnUnpinnedTrips(query: {
+    vehicleId: string;
+    driverId: string;
+    from: Date;
+    /** Null means every later day. */
+    to: Date | null;
+  }): Promise<number> {
+    if (query.to !== null && query.to.getTime() < query.from.getTime()) {
+      return 0;
+    }
+
+    const { count } = await this.prisma.trip.updateMany({
+      where: {
+        vehicleId: query.vehicleId,
+        driverId: null,
+        planningDate: {
+          gte: query.from,
+          ...(query.to === null ? {} : { lte: query.to }),
+        },
+      },
+      data: { driverId: query.driverId },
+    });
+
+    return count;
+  }
+
   private inEffectOn(
     onDate: Date,
     subject: Pick<Prisma.VehicleAssignmentWhereInput, "vehicleId" | "driverId">,

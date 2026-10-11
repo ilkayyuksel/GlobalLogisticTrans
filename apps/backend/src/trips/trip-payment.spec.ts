@@ -10,6 +10,7 @@ import { TripNotFoundException } from "./exceptions/trip.exceptions";
 import { TripPlanningDataService } from "./trip-planning-data.service";
 import { TripRepository } from "./trip.repository";
 import { TripService } from "./trip.service";
+import { noDriverPinning } from "./trip-driver-pinning.double";
 
 const TRIP_ID = "3f2504e0-4f89-41d3-9a0c-0305e82c3301";
 const OTHER_TRIP_ID = "9c858901-8a57-4791-81fe-4c455b099bc9";
@@ -103,6 +104,7 @@ describe("a Trip's payment state", () => {
             ),
           ),
       } as unknown as TripPlanningDataService,
+      noDriverPinning(),
       {} as unknown as AutomaticFlatPropertyService,
       // Payment touches no pricing, which the assertions below check by
       // counting calls on this.
@@ -242,6 +244,7 @@ describe("a Trip's payment state", () => {
           resolveOne: () =>
             Promise.resolve({ vehicle: null, effectiveDriver: null }),
         } as unknown as TripPlanningDataService,
+        noDriverPinning(),
         {} as unknown as AutomaticFlatPropertyService,
         stubPricingRecalculation(),
         eventBus as unknown as DomainEventBus,
@@ -266,6 +269,7 @@ describe("a Trip's payment state", () => {
         resolveOne: () =>
           Promise.resolve({ vehicle: null, effectiveDriver: null }),
       } as unknown as TripPlanningDataService,
+      noDriverPinning(),
       {} as unknown as AutomaticFlatPropertyService,
       recalculation,
       { publish: jest.fn() } as unknown as DomainEventBus,
@@ -325,6 +329,7 @@ describe("the payment filter", () => {
       {
         resolveMany: () => Promise.resolve(new Map()),
       } as unknown as TripPlanningDataService,
+      noDriverPinning(),
       {} as unknown as AutomaticFlatPropertyService,
       stubPricingRecalculation(),
       { publish: jest.fn() } as unknown as DomainEventBus,

@@ -85,7 +85,7 @@ export function DriverStatisticsWidget() {
         {/* The rule is the backend's; the widget credits it rather than restating it. */}
         <p className="text-[11px] text-muted">{t("dashboard.drivers.note")}</p>
         <p className="mt-3">
-          <WidgetLink href="/drivers" labelKey="dashboard.drivers.link" />
+          <WidgetLink href="/vehicles#chauffeurs" labelKey="dashboard.drivers.link" />
         </p>
       </CardBody>
     </Card>

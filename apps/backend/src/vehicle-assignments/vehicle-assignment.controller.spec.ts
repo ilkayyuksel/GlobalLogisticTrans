@@ -18,6 +18,7 @@ import { VehicleService } from "../vehicles/vehicle.service";
 import { VehicleAssignmentController } from "./vehicle-assignment.controller";
 import { VehicleAssignmentRepository } from "./vehicle-assignment.repository";
 import { VehicleAssignmentService } from "./vehicle-assignment.service";
+import { VehicleDriverLinkService } from "./vehicle-driver-link.service";
 
 const ASSIGNMENT_ID = "3f2504e0-4f89-41d3-9a0c-0305e82c3301";
 const OTHER_ASSIGNMENT_ID = "9c858901-8a57-4791-81fe-4c455b099bc9";
@@ -64,6 +65,7 @@ describe("VehicleAssignmentController (integration)", () => {
       create: jest.fn().mockResolvedValue(buildAssignment()),
       update: jest.fn().mockResolvedValue(buildAssignment()),
       setValidTo: jest.fn().mockResolvedValue(buildAssignment()),
+      pinDriverOnUnpinnedTrips: jest.fn().mockResolvedValue(0),
       runInTransaction: jest.fn(),
     } as unknown as jest.Mocked<VehicleAssignmentRepository>;
 
@@ -88,6 +90,7 @@ describe("VehicleAssignmentController (integration)", () => {
       controllers: [VehicleAssignmentController],
       providers: [
         VehicleAssignmentService,
+        VehicleDriverLinkService,
         { provide: VehicleAssignmentRepository, useValue: repository },
         { provide: VehicleService, useValue: vehicleService },
         { provide: DriverService, useValue: driverService },

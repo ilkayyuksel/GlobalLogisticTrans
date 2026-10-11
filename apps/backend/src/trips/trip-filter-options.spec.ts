@@ -9,6 +9,7 @@ import { TripPlanningDataService } from "./trip-planning-data.service";
 import { TripRepository } from "./trip.repository";
 import { TripService } from "./trip.service";
 import { stubPricingRecalculation } from "../pricing-engine/pricing-recalculation.double";
+import { noDriverPinning } from "./trip-driver-pinning.double";
 
 /**
  * The two things the Ritten filters need from the backend: which terminals
@@ -63,6 +64,7 @@ describe("Trip filter options", () => {
             ),
           ),
       } as unknown as TripPlanningDataService,
+      noDriverPinning(),
       {
         applyToNewTrip: jest.fn(),
         synchronise: jest.fn(),

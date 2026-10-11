@@ -16,6 +16,7 @@ import { TripGroupController } from "./trip-group.controller";
 import { TripDocumentsService } from "./trip-documents.service";
 import { TripPlanningDataService } from "./trip-planning-data.service";
 import { TripRepository } from "./trip.repository";
+import { TripDriverPinningService } from "./trip-driver-pinning.service";
 import { TripRevisionService } from "./trip-revision.service";
 import { TripService } from "./trip.service";
 
@@ -90,6 +91,7 @@ import { TripService } from "./trip.service";
     DocumentTripPresenceService,
     TripRepository,
     TripPlanningDataService,
+    TripDriverPinningService,
     TripDocumentsService,
   ],
   // TripRevisionService is exported for the import boundary: a cancellation or

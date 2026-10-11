@@ -14,6 +14,7 @@ import { TripPlanningDataService } from "./trip-planning-data.service";
 import { TripRepository } from "./trip.repository";
 import { TripService } from "./trip.service";
 import { stubPricingRecalculation } from "../pricing-engine/pricing-recalculation.double";
+import { noDriverPinning } from "./trip-driver-pinning.double";
 
 /**
  * The pricing the Ritten list carries.
@@ -181,6 +182,7 @@ describe("the Ritten list carries the effective pricing of each Trip", () => {
       {} as unknown as VehicleService,
       {} as unknown as DriverService,
       planningData,
+      noDriverPinning(),
       {} as unknown as AutomaticFlatPropertyService,
       stubPricingRecalculation(),
       {} as unknown as DomainEventBus,

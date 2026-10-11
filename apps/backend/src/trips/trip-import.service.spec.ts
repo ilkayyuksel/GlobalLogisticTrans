@@ -13,6 +13,7 @@ import { TripCustomPropertyRepository } from "../trip-custom-properties/trip-cus
 import { AutomaticFlatPropertyService } from "./automatic-flat.service";
 import { TripPlanningDataService } from "./trip-planning-data.service";
 import { stubPricingRecalculation } from "../pricing-engine/pricing-recalculation.double";
+import { noDriverPinning } from "./trip-driver-pinning.double";
 
 /**
  * The internal import path.
@@ -167,6 +168,7 @@ describe("TripService.importTrips", () => {
             ),
           ),
       } as unknown as TripPlanningDataService,
+      noDriverPinning(),
       {
         applyToNewTrip: jest.fn(),
         synchronise: jest.fn(),

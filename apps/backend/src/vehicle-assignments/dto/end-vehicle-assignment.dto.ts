@@ -6,7 +6,7 @@ import { IsCalendarDateString } from "../../common/validators/is-calendar-date-s
 export class EndVehicleAssignmentDto {
   @ApiPropertyOptional({
     description:
-      "Last day the assignment applies, inclusive. Defaults to today when omitted.",
+      "Last day the assignment applies, inclusive. Omit it to end the assignment as of today: it is no longer in effect today.",
     example: "2026-06-30",
   })
   @IsOptional()

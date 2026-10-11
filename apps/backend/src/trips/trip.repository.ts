@@ -825,6 +825,21 @@ export class TripRepository {
     return count === 1;
   }
 
+  /**
+   * Stores `driverId` on the Trip ONLY while it stores none; true when written.
+   *
+   * A compare-and-set, so pinning can never replace a driver somebody chose —
+   * not even one chosen between our read and this write.
+   */
+  async pinDriver(id: string, driverId: string): Promise<boolean> {
+    const { count } = await this.prisma.trip.updateMany({
+      where: { id, driverId: null },
+      data: { driverId },
+    });
+
+    return count === 1;
+  }
+
   /** Used by the status endpoint, by soft delete and by restore. */
   setStatus(id: string, status: TripStatus): Promise<Trip> {
     return this.prisma.trip.update({ where: { id }, data: { status } });

@@ -11,6 +11,7 @@ import { TripRepository } from "./trip.repository";
 import { TripService } from "./trip.service";
 import { VehicleService } from "../vehicles/vehicle.service";
 import { stubPricingRecalculation } from "../pricing-engine/pricing-recalculation.double";
+import { noDriverPinning } from "./trip-driver-pinning.double";
 
 const GROUP_ID = "97777777-7777-4777-8777-777777777777";
 
@@ -115,6 +116,7 @@ describe("grouping Trips from different days", () => {
             ),
           ),
       } as unknown as TripPlanningDataService,
+      noDriverPinning(),
       {
         applyToNewTrip: jest.fn(),
         synchronise: jest.fn(),

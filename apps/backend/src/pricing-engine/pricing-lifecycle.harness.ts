@@ -44,6 +44,7 @@ import { TollCalculator } from "./toll.calculator";
 import { TripClosedPricingListener } from "./trip-closed-pricing.listener";
 import { TunnelCalculator } from "./tunnel.calculator";
 import { WaitingTimeCalculator } from "./waiting-time.calculator";
+import { noDriverPinning } from "../trips/trip-driver-pinning.double";
 
 /**
  * The whole pricing lifecycle of a Trip, wired from the real services.
@@ -547,6 +548,7 @@ export function buildPricingLifecycle() {
     {} as unknown as VehicleService,
     {} as unknown as DriverService,
     planningData,
+    noDriverPinning(),
     { synchronise: jest.fn() } as unknown as AutomaticFlatPropertyService,
     recalculation,
     eventBus,

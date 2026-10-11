@@ -5,6 +5,7 @@ import { VehicleModule } from "../vehicles/vehicle.module";
 import { CurrentAssignmentModule } from "./current-assignment.module";
 import { VehicleAssignmentController } from "./vehicle-assignment.controller";
 import { VehicleAssignmentService } from "./vehicle-assignment.service";
+import { VehicleDriverLinkService } from "./vehicle-driver-link.service";
 
 /**
  * PrismaModule and LoggerModule are global, so only the two collaborators are
@@ -23,7 +24,7 @@ import { VehicleAssignmentService } from "./vehicle-assignment.service";
   // nor Driver, so nothing here becomes circular.
   imports: [VehicleModule, DriverModule, CurrentAssignmentModule],
   controllers: [VehicleAssignmentController],
-  providers: [VehicleAssignmentService],
+  providers: [VehicleAssignmentService, VehicleDriverLinkService],
   exports: [VehicleAssignmentService],
 })
 export class VehicleAssignmentModule {}

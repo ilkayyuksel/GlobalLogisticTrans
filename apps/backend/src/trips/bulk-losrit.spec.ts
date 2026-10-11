@@ -14,6 +14,7 @@ import { TripRepository } from "./trip.repository";
 import { TripService } from "./trip.service";
 import { VehicleService } from "../vehicles/vehicle.service";
 import { stubPricingRecalculation } from "../pricing-engine/pricing-recalculation.double";
+import { noDriverPinning } from "./trip-driver-pinning.double";
 
 /**
  * Marking several Trips as LOSRIT at once.
@@ -131,6 +132,7 @@ describe("marking several Trips as LOSRIT", () => {
             ),
           ),
       } as unknown as TripPlanningDataService,
+      noDriverPinning(),
       {
         applyToNewTrip: jest.fn(),
         synchronise: jest.fn(),

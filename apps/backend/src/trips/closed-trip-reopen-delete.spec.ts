@@ -3,6 +3,7 @@ import { Trip, TripStatus } from "@prisma/client";
 import { AppLoggerService } from "../logger/app-logger.service";
 import { TripRepository } from "./trip.repository";
 import { TripService } from "./trip.service";
+import { noDriverPinning } from "./trip-driver-pinning.double";
 
 /**
  * A CLOSED Trip can be reopened, and it can be deleted.
@@ -98,6 +99,7 @@ function buildService(stored: Trip[]) {
       resolveOne: jest.fn().mockResolvedValue({}),
       resolveMany: jest.fn().mockResolvedValue(new Map()),
     } as never,
+    noDriverPinning(),
     { applyToNewTrip: jest.fn(), applyToUpdatedTrip: jest.fn() } as never,
     recalculation as never,
     eventBus as never,

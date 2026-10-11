@@ -176,13 +176,13 @@ describe("the driver statistics widget", () => {
     expect(await screen.findByRole("alert")).toBeInTheDocument();
   });
 
-  it("links to the drivers page", async () => {
+  it("links to the drivers on the fleet page", async () => {
     renderWidget();
     await screen.findByText("Piet Janssens");
 
     expect(
       screen.getByRole("link", { name: "Beheer chauffeurs" }),
-    ).toHaveAttribute("href", "/drivers");
+    ).toHaveAttribute("href", "/vehicles#chauffeurs");
   });
 
   describe("presentation", () => {

@@ -15,6 +15,7 @@ import { TripPlanningDataService } from "./trip-planning-data.service";
 import { TripRevisionService } from "./trip-revision.service";
 import { TripRepository } from "./trip.repository";
 import { TripService } from "./trip.service";
+import { noDriverPinning } from "./trip-driver-pinning.double";
 
 /**
  * Manually managed Trip data disappears only through an explicit manual action.
@@ -258,6 +259,7 @@ describe("manually managed Trip data", () => {
       tripTable as unknown as TripRepository,
       automaticFlat,
       recalculation,
+      noDriverPinning(),
       logger,
     );
     trips = new TripService(
@@ -279,6 +281,7 @@ describe("manually managed Trip data", () => {
         }),
         resolveMany: jest.fn().mockResolvedValue(new Map()),
       } as unknown as TripPlanningDataService,
+      noDriverPinning(),
       automaticFlat,
       recalculation,
       { publish: jest.fn() } as unknown as DomainEventBus,

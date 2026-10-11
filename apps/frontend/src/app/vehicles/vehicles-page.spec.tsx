@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
-import VehiclesPage from "./page";
+import { VehiclesSection } from "@/components/vehicles/vehicles-section";
 import { ApiError, request } from "@/lib/api/client";
 import type { Paginated, Vehicle } from "@/lib/api/types";
 import { LanguageProvider } from "@/lib/i18n/language-provider";
@@ -83,7 +83,7 @@ function renderVehicles() {
   return render(
     <ThemeProvider>
       <LanguageProvider>
-        <VehiclesPage />
+        <VehiclesSection version={0} onChanged={jest.fn()} />
       </LanguageProvider>
     </ThemeProvider>,
   );
@@ -713,7 +713,7 @@ describe("Vehicles page", () => {
       renderVehicles();
 
       expect(
-        await screen.findByRole("heading", { name: "Araçlar", level: 1 }),
+        await screen.findByRole("heading", { name: "Araçlar", level: 2 }),
       ).toBeInTheDocument();
       expect(screen.getByLabelText("Ara")).toBeInTheDocument();
       // "Aktif" is both a filter and a status badge; the row's is the one here.

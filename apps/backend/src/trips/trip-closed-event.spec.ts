@@ -13,6 +13,7 @@ import { TripService } from "./trip.service";
 import { AutomaticFlatPropertyService } from "./automatic-flat.service";
 import { TripPlanningDataService } from "./trip-planning-data.service";
 import { stubPricingRecalculation } from "../pricing-engine/pricing-recalculation.double";
+import { noDriverPinning } from "./trip-driver-pinning.double";
 
 const TRIP_ID = "3f2504e0-4f89-41d3-9a0c-0305e82c3301";
 
@@ -111,6 +112,7 @@ describe("TripService — TripClosed event", () => {
             ),
           ),
       } as unknown as TripPlanningDataService,
+      noDriverPinning(),
       {
         applyToNewTrip: jest.fn(),
         synchronise: jest.fn(),

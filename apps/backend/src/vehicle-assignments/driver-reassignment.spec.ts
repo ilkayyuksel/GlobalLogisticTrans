@@ -1,4 +1,4 @@
-import { Driver, Trip, VehicleAssignment } from "@prisma/client";
+import { Driver, Trip } from "@prisma/client";
 
 import { CostConfirmationService } from "../cost-confirmations/cost-confirmation.service";
 import { EffectivePricingService } from "../trip-pricing/effective-pricing.service";
@@ -11,6 +11,7 @@ import { TripRepository } from "../trips/trip.repository";
 import { UpdateVehicleAssignmentDto } from "./dto/update-vehicle-assignment.dto";
 import { VehicleAssignmentOverlapException } from "./exceptions/vehicle-assignment.exceptions";
 import { VehicleAssignmentRepository } from "./vehicle-assignment.repository";
+import { InMemoryAssignmentRepository } from "./vehicle-assignment.repository.double";
 import { VehicleAssignmentService } from "./vehicle-assignment.service";
 import { VehicleService } from "../vehicles/vehicle.service";
 
@@ -74,149 +75,6 @@ function trip(id: string, planningDate: string, overrideDriverId?: string): Trip
   } as unknown as Trip;
 }
 
-/**
- * The assignment table, in memory.
- *
- * Faithful to the queries the real repository issues — in particular the
- * overlap predicate, since "does this period collide" is the rule that decides
- * whether a reassignment is allowed at all. It stores rows and answers
- * questions; every decision stays in the service, where it belongs.
- */
-class InMemoryAssignmentRepository {
-  readonly rows: VehicleAssignment[] = [];
-  private sequence = 0;
-
-  runInTransaction<TResult>(
-    work: (repository: VehicleAssignmentRepository) => Promise<TResult>,
-  ): Promise<TResult> {
-    return work(this as unknown as VehicleAssignmentRepository);
-  }
-
-  findById(id: string): Promise<VehicleAssignment | null> {
-    return Promise.resolve(this.rows.find((row) => row.id === id) ?? null);
-  }
-
-  findOpenEndedForVehicle(vehicleId: string): Promise<VehicleAssignment | null> {
-    return Promise.resolve(
-      this.rows.find(
-        (row) => row.vehicleId === vehicleId && row.validTo === null,
-      ) ?? null,
-    );
-  }
-
-  findOpenEndedForDriver(driverId: string): Promise<VehicleAssignment | null> {
-    return Promise.resolve(
-      this.rows.find((row) => row.driverId === driverId && row.validTo === null) ??
-        null,
-    );
-  }
-
-  /** Two periods overlap unless one ends before the other starts. */
-  findOverlapping(query: {
-    vehicleId?: string;
-    driverId?: string;
-    validFrom: Date;
-    validTo: Date | null;
-    excludeAssignmentId?: string;
-  }): Promise<VehicleAssignment[]> {
-    return Promise.resolve(
-      this.rows.filter((row) => {
-        if (query.vehicleId && row.vehicleId !== query.vehicleId) return false;
-        if (query.driverId && row.driverId !== query.driverId) return false;
-        if (query.excludeAssignmentId === row.id) return false;
-
-        const startsAfterCandidateEnds =
-          query.validTo !== null &&
-          row.validFrom.getTime() > query.validTo.getTime();
-        const endsBeforeCandidateStarts =
-          row.validTo !== null &&
-          row.validTo.getTime() < query.validFrom.getTime();
-
-        return !startsAfterCandidateEnds && !endsBeforeCandidateStarts;
-      }),
-    );
-  }
-
-  findCoveringVehicles(
-    vehicleIds: readonly string[],
-    from: Date,
-    to: Date,
-  ): Promise<(VehicleAssignment & { driver: Driver })[]> {
-    return Promise.resolve(
-      this.rows
-        .filter(
-          (row) =>
-            vehicleIds.includes(row.vehicleId) &&
-            row.validFrom.getTime() <= to.getTime() &&
-            (row.validTo === null || row.validTo.getTime() >= from.getTime()),
-        )
-        .map((row) => ({ ...row, driver: driver(row.driverId) })),
-    );
-  }
-
-  create(data: {
-    vehicleId: string;
-    driverId: string;
-    validFrom: Date;
-    validTo: Date | null;
-    notes: string | null;
-  }): Promise<VehicleAssignment> {
-    this.sequence += 1;
-
-    const row = {
-      id: `assignment-${this.sequence}`,
-      ...data,
-      createdAt: day(TODAY),
-      updatedAt: day(TODAY),
-    } as VehicleAssignment;
-
-    this.rows.push(row);
-
-    return Promise.resolve(row);
-  }
-
-  update(
-    id: string,
-    data: { validTo?: Date | null; notes?: string | null },
-  ): Promise<VehicleAssignment> {
-    const row = this.require(id);
-
-    if (data.validTo !== undefined) row.validTo = data.validTo;
-    if (data.notes !== undefined) row.notes = data.notes;
-
-    return Promise.resolve(row);
-  }
-
-  setValidTo(id: string, validTo: Date | null): Promise<VehicleAssignment> {
-    const row = this.require(id);
-    row.validTo = validTo;
-
-    return Promise.resolve(row);
-  }
-
-  findPage(): Promise<{ items: VehicleAssignment[]; totalItems: number }> {
-    return Promise.resolve({ items: [...this.rows], totalItems: this.rows.length });
-  }
-
-  findCurrentForVehicle(): Promise<VehicleAssignment | null> {
-    return Promise.resolve(null);
-  }
-
-  findCurrentForDriver(): Promise<VehicleAssignment | null> {
-    return Promise.resolve(null);
-  }
-
-  private require(id: string): VehicleAssignment {
-    const row = this.rows.find((candidate) => candidate.id === id);
-
-    if (!row) {
-      throw new Error(`No assignment ${id}`);
-    }
-
-    return row;
-  }
-}
-
 describe("changing the driver of a vehicle", () => {
   let repository: InMemoryAssignmentRepository;
   let assignments: VehicleAssignmentService;
@@ -229,7 +87,7 @@ describe("changing the driver of a vehicle", () => {
   beforeEach(() => {
     jest.useFakeTimers().setSystemTime(new Date(`${TODAY}T09:30:00.000Z`));
 
-    repository = new InMemoryAssignmentRepository();
+    repository = new InMemoryAssignmentRepository(driver);
     windowTrips = [];
 
     logger = {
@@ -400,10 +258,10 @@ describe("changing the driver of a vehicle", () => {
     });
 
     /**
-     * The Trip rows are not touched. Resolution reads the assignment table on
-     * every request, so nothing has to be — and nothing may be, since a Trip
-     * that stored its driver would freeze an answer that is still being
-     * corrected elsewhere.
+     * RESOLVING never writes: it reads the assignment table on every request.
+     * A driver is stored on a Trip only at the moments its answer would move
+     * (`TripDriverPinningService`, `cutOffAssignment`) — and these Trips are
+     * not in the table the reassignment pins.
      */
     it("does not write the resolved driver back onto the Trip", async () => {
       await planningData.resolveMany([before, after]);

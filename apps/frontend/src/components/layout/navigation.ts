@@ -24,8 +24,9 @@ export interface NavigationItem {
 export const MAIN_NAVIGATION: readonly NavigationItem[] = [
   { href: "/dashboard", labelKey: "navigation.dashboard" },
   { href: "/trips", labelKey: "navigation.trips" },
-  { href: "/vehicles", labelKey: "navigation.vehicles" },
-  { href: "/drivers", labelKey: "navigation.drivers" },
+  // Vehicles, drivers and the links between them: one page. `/drivers`
+  // redirects there.
+  { href: "/vehicles", labelKey: "navigation.fleet" },
   { href: "/maintenance", labelKey: "navigation.maintenance" },
   { href: "/calendar", labelKey: "navigation.calendar" },
   { href: "/notes", labelKey: "navigation.notes" },

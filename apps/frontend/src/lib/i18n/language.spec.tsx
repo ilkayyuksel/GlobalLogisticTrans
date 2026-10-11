@@ -88,7 +88,7 @@ describe("language", () => {
       const shared = (
         [
           "navigation.trips",
-          "navigation.vehicles",
+          "navigation.fleet",
           "navigation.notes",
           "common.save",
         ] as TranslationKey[]
@@ -122,7 +122,7 @@ describe("language", () => {
       await userEvent.selectOptions(languageSelect(), "tr");
 
       expect(await screen.findByRole("link", { name: "Seferler" })).toBeInTheDocument();
-      expect(screen.getByRole("link", { name: "Araçlar" })).toBeInTheDocument();
+      expect(screen.getByRole("link", { name: "Araçlar ve şoförler" })).toBeInTheDocument();
       expect(screen.queryByRole("link", { name: "Ritten" })).not.toBeInTheDocument();
     });
 

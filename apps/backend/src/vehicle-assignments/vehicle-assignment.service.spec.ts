@@ -1,6 +1,6 @@
 import { VehicleAssignment } from "@prisma/client";
 
-import { toIsoDate, toUtcDate, todayUtc } from "../common/dates";
+import { addDays, toIsoDate, toUtcDate, todayUtc } from "../common/dates";
 import { DriverService } from "../drivers/driver.service";
 import { AppLoggerService } from "../logger/app-logger.service";
 import { VehicleService } from "../vehicles/vehicle.service";
@@ -54,6 +54,7 @@ describe("VehicleAssignmentService", () => {
       create: jest.fn().mockResolvedValue(buildAssignment()),
       update: jest.fn().mockResolvedValue(buildAssignment()),
       setValidTo: jest.fn().mockResolvedValue(buildAssignment()),
+      pinDriverOnUnpinnedTrips: jest.fn().mockResolvedValue(0),
       // Runs the callback against the same mock, so transactional behaviour is
       // exercised without a database.
       runInTransaction: jest.fn(),
@@ -357,12 +358,28 @@ describe("VehicleAssignmentService", () => {
       expect(repository.setValidTo).not.toHaveBeenCalled();
     });
 
-    it("does not auto-close a predecessor that starts on or after the new period", async () => {
-      // Closing it would set an end date before its own start.
+    it("ends a predecessor starting the same day before it began, kept as history", async () => {
       repository.findOpenEndedForVehicle.mockResolvedValue(
         buildAssignment({
           id: OTHER_ASSIGNMENT_ID,
           validFrom: toUtcDate("2026-03-01"),
+        }),
+      );
+
+      await service.create(openEndedDto);
+
+      expect(repository.setValidTo).toHaveBeenCalledWith(
+        OTHER_ASSIGNMENT_ID,
+        toUtcDate("2026-02-28"),
+      );
+    });
+
+    it("does not auto-close a predecessor that starts after the new period", async () => {
+      // An earlier start cannot supersede a later one: that is a real conflict.
+      repository.findOpenEndedForVehicle.mockResolvedValue(
+        buildAssignment({
+          id: OTHER_ASSIGNMENT_ID,
+          validFrom: toUtcDate("2026-03-02"),
         }),
       );
       repository.findOverlapping.mockResolvedValue([
@@ -540,14 +557,14 @@ describe("VehicleAssignmentService", () => {
       );
     });
 
-    it("defaults to today when no date is given", async () => {
+    it("without a date, is no longer in effect today: yesterday is its last day", async () => {
       repository.findById.mockResolvedValue(buildAssignment());
 
       await service.end(ASSIGNMENT_ID, {});
 
       expect(repository.setValidTo).toHaveBeenCalledWith(
         ASSIGNMENT_ID,
-        todayUtc(),
+        addDays(todayUtc(), -1),
       );
     });
 

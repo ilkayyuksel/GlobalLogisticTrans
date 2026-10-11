@@ -4,6 +4,7 @@ import { AppLoggerService } from "../logger/app-logger.service";
 import { stubPricingRecalculation } from "../pricing-engine/pricing-recalculation.double";
 import { TripRepository } from "./trip.repository";
 import { TripService } from "./trip.service";
+import { noDriverPinning } from "./trip-driver-pinning.double";
 
 /**
  * A TAR-nummer belongs to ONE Trip.
@@ -132,6 +133,7 @@ function buildService(stored: Row[]) {
       resolveOne: jest.fn().mockResolvedValue({}),
       resolveMany: jest.fn().mockResolvedValue(new Map()),
     } as never,
+    noDriverPinning(),
     { applyToNewTrip: jest.fn(), applyToUpdatedTrip: jest.fn() } as never,
     recalculation as never,
     { publish: jest.fn() } as never,

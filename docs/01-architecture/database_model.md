@@ -1248,7 +1248,49 @@ The previous assignment keeps its own Driver and its own period.
 Because the Driver of a Trip is resolved against the Trip's planning date, every
 Trip planned before the handover keeps the Driver who actually performed it.
 
-No Trip row is modified by a reassignment.
+## Linking from the management page (October 2026)
+
+The Vehicles & Drivers page links a Driver to a Vehicle in one step
+(`POST /vehicle-assignments/links`): from today, open-ended. The Backend first
+ends whatever stands in the way — the Vehicle's other Driver, the Driver's
+other Vehicle, or both, and any assignment of either planned to start later —
+and then creates the link, all in one transaction. Linking the pair that is
+already linked changes nothing (`ALREADY_LINKED`).
+
+"Toewijzing beëindigen" ends an assignment as of TODAY: yesterday becomes its
+last day. "Today" is `todayUtc`, the convention every assignment lookup uses.
+
+An assignment ended or replaced on the day it starts is kept with
+`valid_to = valid_from − 1`: history, in effect on no day. Nothing is deleted.
+
+The database refuses a second open-ended assignment for a Vehicle AND for a
+Driver (two partial unique indexes), so two concurrent links cannot both win;
+the loser gets a 409 and its transaction rolls back.
+
+## A Trip keeps the Driver it was planned with
+
+Three different things:
+
+- the CURRENT Driver of a Vehicle — the assignment in effect today;
+- the Driver OF A TRIP — `trip.driver_id`;
+- the ASSIGNMENT HISTORY — every `vehicle_assignment` row.
+
+A Trip storing no Driver shows its Vehicle's Driver on its planning date, but
+that answer would move with the assignment or the date. So the Driver is
+stored on the Trip (`TripDriverPinningService`, `cutOffAssignment`):
+
+- a Trip created with a Vehicle and a date stores that Vehicle's Driver on
+  that date;
+- a Trip whose Vehicle or planning date changes — by hand, by a PDF revision or
+  an import — and that stores no Driver yet first stores the Driver it showed
+  until then;
+- before an assignment is ended, shortened or replaced, every Trip of that
+  Vehicle on the days it gives up that stores no Driver stores it.
+
+A stored Driver is never replaced by any of this: every write is a
+compare-and-set on `driver_id IS NULL`. Only an explicit change of the Trip's own
+Driver changes it. Trips are not backfilled in bulk; a past Trip storing no
+Driver keeps resolving through the history, which is never rewritten.
 
 An existing VehicleAssignment therefore exposes only its end date and its notes
 for editing. Its Vehicle, its Driver and its start date define which period the

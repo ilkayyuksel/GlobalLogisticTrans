@@ -21,6 +21,8 @@ import { TripRepository } from "./trip.repository";
 import { TripDocumentsService } from "./trip-documents.service";
 import { TripService } from "./trip.service";
 import { PricingRecalculationService } from "../pricing-engine/pricing-recalculation.service";
+import { TripDriverPinningService } from "./trip-driver-pinning.service";
+import { noDriverPinning } from "./trip-driver-pinning.double";
 
 /**
  * What a Trip response actually carries over HTTP.
@@ -138,6 +140,7 @@ describe("Trip responses carry planning data", () => {
         { provide: TripRepository, useValue: repository },
         { provide: VehicleService, useValue: { findById: jest.fn() } },
         { provide: DriverService, useValue: { findById: jest.fn() } },
+        { provide: TripDriverPinningService, useValue: noDriverPinning() },
         { provide: TripPlanningDataService, useValue: planningData },
         { provide: DomainEventBus, useValue: { publish: jest.fn() } },
         {

@@ -1,7 +1,7 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
-import VehiclesPage from "./page";
+import { VehiclesSection } from "@/components/vehicles/vehicles-section";
 import { request } from "@/lib/api/client";
 import type { Driver, Paginated, Vehicle } from "@/lib/api/types";
 import { LanguageProvider } from "@/lib/i18n/language-provider";
@@ -98,7 +98,7 @@ function renderVehicles() {
   return render(
     <ThemeProvider>
       <LanguageProvider>
-        <VehiclesPage />
+        <VehiclesSection version={0} onChanged={jest.fn()} />
       </LanguageProvider>
     </ThemeProvider>,
   );

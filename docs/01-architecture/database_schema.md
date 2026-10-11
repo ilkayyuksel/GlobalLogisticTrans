@@ -773,8 +773,9 @@ Historized link between a Driver and a Vehicle. Allows the Driver of a historica
 
 ### Constraints
 
-- `CHECK` — `valid_to`, when present, must be greater than or equal to `valid_from`.
+- `CHECK` — `valid_to`, when present, must be greater than or equal to `valid_from − 1`. Exactly `valid_from − 1` marks an assignment ended on the day it started: kept as history, in effect on no day.
 - Partial `UNIQUE (vehicle_id)` where `valid_to IS NULL` — a Vehicle has at most one active assignment.
+- Partial `UNIQUE (driver_id)` where `valid_to IS NULL` — a Driver has at most one active assignment.
 
 ### Foreign Keys
 
@@ -789,6 +790,7 @@ Historized link between a Driver and a Vehicle. Allows the Driver of a historica
 |---|---|---|---|
 | PK | `id` | Primary key | |
 | Unique (partial) | `vehicle_id` where `valid_to IS NULL` | Unique | One active assignment per Vehicle |
+| Unique (partial) | `driver_id` where `valid_to IS NULL` | Unique | One active assignment per Driver |
 | Lookup | `vehicle_id`, `valid_from` | B-tree | **Driver resolution for a Trip's planning date** |
 | Lookup | `driver_id` | B-tree | Vehicles driven by a Driver over time |
 

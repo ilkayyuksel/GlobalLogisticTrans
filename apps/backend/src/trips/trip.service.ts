@@ -59,6 +59,7 @@ import {
   canTransition,
 } from "./trip-status.rules";
 import { TripPlanningDataService } from "./trip-planning-data.service";
+import { TripDriverPinningService } from "./trip-driver-pinning.service";
 import { TripIdentity, TripRepository } from "./trip.repository";
 
 /**
@@ -98,6 +99,7 @@ export class TripService {
     private readonly vehicleService: VehicleService,
     private readonly driverService: DriverService,
     private readonly planningData: TripPlanningDataService,
+    private readonly driverPinning: TripDriverPinningService,
     private readonly automaticFlat: AutomaticFlatPropertyService,
     private readonly recalculation: PricingRecalculationService,
     private readonly eventBus: DomainEventBus,
@@ -294,6 +296,16 @@ export class TripService {
       dto.originalPlanningDate === undefined || dto.originalPlanningDate === null
         ? planningDate
         : toUtcDate(dto.originalPlanningDate);
+    const vehicleId = dto.vehicleId ?? null;
+    // Planned with a truck and a day: it keeps that truck's driver for good.
+    const driverId =
+      dto.driverId ??
+      (await this.driverPinning.driverToPin(null, {
+        vehicleId,
+        planningDate,
+        driverId: null,
+      })) ??
+      null;
 
     const created = await this.repository.runTripWriteTransaction(
       async ({ trips: repository, customProperties }) => {
@@ -323,8 +335,8 @@ export class TripService {
           startTime,
           endTime,
           executionDatetime: toNullableDateTime(dto.executionDatetime),
-          vehicleId: dto.vehicleId ?? null,
-          driverId: dto.driverId ?? null,
+          vehicleId,
+          driverId,
           /*
            * The two times win when they are given: the duration is derived
            * from them so the three columns cannot disagree. A Trip created
@@ -400,7 +412,7 @@ export class TripService {
      * are left alone — they are stored data now, and rewriting history would
      * be a second automatic decision about numbers an operator can see.
      */
-    const updated = await this.repository.update(id, this.toUpdateData(dto));
+    const updated = await this.writeUpdate(existing, dto);
 
     this.logger.log("Trip updated", {
       tripId: id,
@@ -1373,6 +1385,47 @@ export class TripService {
    * Fields the caller omitted stay `undefined`, which Prisma reads as "leave
    * alone", while an explicit null clears the column — exactly PATCH semantics.
    */
+  /**
+   * The update, plus the driver the Trip keeps when its vehicle or date moves.
+   *
+   * An explicit driver in the request — a choice or a clear — always wins and
+   * nothing is pinned. Otherwise a Trip storing no driver keeps the one it
+   * showed until now (`TripDriverPinningService`), stored by compare-and-set
+   * in the same transaction so a concurrent choice is never replaced.
+   */
+  private async writeUpdate(existing: Trip, dto: UpdateTripDto): Promise<Trip> {
+    const pinnedDriverId =
+      dto.driverId === undefined
+        ? await this.driverPinning.driverToPin(existing, {
+            vehicleId: dto.vehicleId === undefined ? existing.vehicleId : dto.vehicleId,
+            planningDate:
+              dto.planningDate === undefined
+                ? existing.planningDate
+                : toUtcDate(dto.planningDate),
+            driverId: existing.driverId,
+          })
+        : undefined;
+
+    if (pinnedDriverId === undefined) {
+      return this.repository.update(existing.id, this.toUpdateData(dto));
+    }
+
+    return this.repository.runTripWriteTransaction(async ({ trips }) => {
+      const updated = await trips.update(existing.id, this.toUpdateData(dto));
+
+      if (!(await trips.pinDriver(existing.id, pinnedDriverId))) {
+        return updated;
+      }
+
+      this.logger.log("Driver kept through a vehicle or date change", {
+        tripId: existing.id,
+        driverId: pinnedDriverId,
+      });
+
+      return { ...updated, driverId: pinnedDriverId };
+    });
+  }
+
   private toUpdateData(dto: UpdateTripDto): Prisma.TripUncheckedUpdateInput {
     return {
       containerNumber:

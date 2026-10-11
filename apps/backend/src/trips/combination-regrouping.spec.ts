@@ -13,6 +13,7 @@ import { AutomaticFlatPropertyService } from "./automatic-flat.service";
 import { TripPlanningDataService } from "./trip-planning-data.service";
 import { TripRepository } from "./trip.repository";
 import { TripService } from "./trip.service";
+import { noDriverPinning } from "./trip-driver-pinning.double";
 
 /**
  * Grouping and ungrouping reprice the Trips whose group they changed.
@@ -230,6 +231,7 @@ function harness(
           new Map(trips.map((trip) => [trip.id, planningOf(trip)])),
         ),
     } as unknown as TripPlanningDataService,
+    noDriverPinning(),
     { synchronise: jest.fn() } as unknown as AutomaticFlatPropertyService,
     recalculation,
     { publish: jest.fn() } as unknown as DomainEventBus,

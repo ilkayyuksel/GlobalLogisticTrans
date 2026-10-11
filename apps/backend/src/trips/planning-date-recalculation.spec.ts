@@ -9,6 +9,7 @@ import { AutomaticFlatPropertyService } from "./automatic-flat.service";
 import { TripPlanningDataService } from "./trip-planning-data.service";
 import { TripRepository } from "./trip.repository";
 import { TripService } from "./trip.service";
+import { noDriverPinning } from "./trip-driver-pinning.double";
 
 const LEG1 = "11111111-1111-4111-8111-111111111111";
 const LEG2 = "22222222-2222-4222-8222-222222222222";
@@ -127,6 +128,7 @@ describe("a planningDate change reprices the Combination's Leg 2", () => {
           }),
         resolveMany: () => Promise.resolve(new Map()),
       } as unknown as TripPlanningDataService,
+      noDriverPinning(),
       { synchronise: jest.fn() } as unknown as AutomaticFlatPropertyService,
       recalculation,
       { publish: jest.fn() } as unknown as DomainEventBus,

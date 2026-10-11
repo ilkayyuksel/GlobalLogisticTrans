@@ -14,6 +14,7 @@ import { TripPlanningDataService } from "./trip-planning-data.service";
 import { TripRepository } from "./trip.repository";
 import { TripService } from "./trip.service";
 import { stubTripWriteTransaction } from "./trip-write-transaction.double";
+import { noDriverPinning } from "./trip-driver-pinning.double";
 
 const TRIP_ID = "3f2504e0-4f89-41d3-9a0c-0305e82c3301";
 
@@ -130,6 +131,7 @@ describe("a waiting-time change reprices the Trip", () => {
           }),
         resolveMany: () => Promise.resolve(new Map()),
       } as unknown as TripPlanningDataService,
+      noDriverPinning(),
       { synchronise: jest.fn() } as unknown as AutomaticFlatPropertyService,
       recalculation,
       { publish: jest.fn() } as unknown as DomainEventBus,

@@ -11,6 +11,7 @@ import {
   BOOKING_NUMBER_HOLDING_STATUSES,
   canTransition,
 } from "./trip-status.rules";
+import { noDriverPinning } from "./trip-driver-pinning.double";
 
 /**
  * WHOLE SEQUENCES of transport documents, in the order a mailbox delivers them.
@@ -238,6 +239,7 @@ describe("sequences of transport documents", () => {
         synchronise: jest.fn(),
       } as unknown as AutomaticFlatPropertyService,
       stubPricingRecalculation(),
+      noDriverPinning(),
       {
         setContext: jest.fn(),
         log: jest.fn(),

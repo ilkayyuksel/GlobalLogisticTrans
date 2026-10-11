@@ -21,6 +21,7 @@ import {
 
 import { CreateVehicleAssignmentDto } from "./dto/create-vehicle-assignment.dto";
 import { EndVehicleAssignmentDto } from "./dto/end-vehicle-assignment.dto";
+import { LinkVehicleDriverDto } from "./dto/link-vehicle-driver.dto";
 import { ListVehicleAssignmentsQueryDto } from "./dto/list-vehicle-assignments-query.dto";
 import { UpdateVehicleAssignmentDto } from "./dto/update-vehicle-assignment.dto";
 import {
@@ -32,7 +33,9 @@ import {
   PaginatedVehicleAssignmentsDto,
   VehicleAssignmentResponseDto,
 } from "./dto/vehicle-assignment-response.dto";
+import { VehicleDriverLinkResponseDto } from "./dto/vehicle-driver-link-response.dto";
 import { VehicleAssignmentService } from "./vehicle-assignment.service";
+import { VehicleDriverLinkService } from "./vehicle-driver-link.service";
 
 /**
  * Returns plain data; ResponseInterceptor applies the envelope and
@@ -48,7 +51,10 @@ import { VehicleAssignmentService } from "./vehicle-assignment.service";
 @ApiTags("Vehicle assignments")
 @Controller("vehicle-assignments")
 export class VehicleAssignmentController {
-  constructor(private readonly assignmentService: VehicleAssignmentService) {}
+  constructor(
+    private readonly assignmentService: VehicleAssignmentService,
+    private readonly linkService: VehicleDriverLinkService,
+  ) {}
 
   @Get()
   @ApiOperation({
@@ -127,6 +133,23 @@ export class VehicleAssignmentController {
     return this.assignmentService.create(dto);
   }
 
+  @Post("links")
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: "Link a driver to a vehicle from today",
+    description:
+      "Ends the vehicle's other driver and the driver's other vehicle, keeping them as history, then links the two open-ended from today. Trips keep the driver they showed. ALREADY_LINKED changes nothing. Runs in a single transaction.",
+  })
+  @ApiOkResponse({ type: VehicleDriverLinkResponseDto })
+  @ApiBadRequestResponse({ description: "Invalid UUID." })
+  @ApiNotFoundResponse({ description: "No such vehicle or driver." })
+  @ApiConflictResponse({
+    description: "A concurrent change to the same vehicle or driver won.",
+  })
+  link(@Body() dto: LinkVehicleDriverDto): Promise<VehicleDriverLinkResponseDto> {
+    return this.linkService.link(dto);
+  }
+
   @Patch(":id")
   @ApiOperation({
     summary: "Update a vehicle assignment",
@@ -156,7 +179,7 @@ export class VehicleAssignmentController {
   @ApiOperation({
     summary: "End a vehicle assignment",
     description:
-      "Closes the period, defaulting to today. The record is retained so historical Trips keep resolving their driver. Runs in a single transaction.",
+      "Without a date the assignment is no longer in effect from today (yesterday is its last day; one that began today is kept as history, in effect on no day). Trips that showed this driver keep that driver. The record is retained so historical Trips keep resolving their driver. Runs in a single transaction.",
   })
   @ApiOkResponse({ type: VehicleAssignmentResponseDto })
   @ApiBadRequestResponse({

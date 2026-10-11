@@ -54,8 +54,7 @@ describe("AppShell navigation", () => {
       expect(labels).toEqual([
         "Dashboard",
         "Ritten",
-        "Voertuigen",
-        "Chauffeurs",
+        "Wagens & chauffeurs",
         "Onderhoud",
         "Agenda",
         "Notities",
@@ -75,8 +74,7 @@ describe("AppShell navigation", () => {
     it.each([
       ["Dashboard", "/dashboard"],
       ["Ritten", "/trips"],
-      ["Voertuigen", "/vehicles"],
-      ["Chauffeurs", "/drivers"],
+      ["Wagens & chauffeurs", "/vehicles"],
       ["Onderhoud", "/maintenance"],
       ["Agenda", "/calendar"],
       ["Notities", "/notes"],
@@ -151,7 +149,7 @@ describe("AppShell navigation", () => {
         .getAllByRole("link")
         .filter((link) => link.getAttribute("aria-current") === "page");
 
-      expect(current.map((link) => link.textContent)).toEqual(["Voertuigen"]);
+      expect(current.map((link) => link.textContent)).toEqual(["Wagens & chauffeurs"]);
     });
 
     /** A detail page belongs to its section. */

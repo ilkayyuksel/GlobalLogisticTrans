@@ -20,6 +20,8 @@ import { TripRepository } from "./trip.repository";
 import { TripDocumentsService } from "./trip-documents.service";
 import { TripService } from "./trip.service";
 import { PricingRecalculationService } from "../pricing-engine/pricing-recalculation.service";
+import { TripDriverPinningService } from "./trip-driver-pinning.service";
+import { noDriverPinning } from "./trip-driver-pinning.double";
 
 /**
  * Creating a Trip by hand, with nothing filled in.
@@ -167,6 +169,7 @@ describe("Manual Trip creation", () => {
             findManyByIds: jest.fn().mockResolvedValue(new Map()),
           },
         },
+        { provide: TripDriverPinningService, useValue: noDriverPinning() },
         {
           provide: TripPlanningDataService,
           useValue: {

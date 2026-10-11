@@ -25,6 +25,7 @@ import { VehicleService } from "../vehicles/vehicle.service";
 import { CostConfirmationMatchingService } from "./cost-confirmation-matching.service";
 import { PdfTripImporter } from "./pdf-trip-importer.service";
 import { stubPricingRecalculation } from "../pricing-engine/pricing-recalculation.double";
+import { noDriverPinning } from "../trips/trip-driver-pinning.double";
 
 /**
  * The real import graph, with the DATABASE replaced and nothing else.
@@ -459,6 +460,7 @@ export function buildHarness(storageDirectory: string) {
     {} as unknown as VehicleService,
     {} as unknown as DriverService,
     planningData,
+    noDriverPinning(),
     automaticFlat,
     stubPricingRecalculation(),
     {
@@ -534,6 +536,7 @@ export function buildHarness(storageDirectory: string) {
         tripRepository,
         automaticFlat,
         stubPricingRecalculation(),
+        noDriverPinning(),
         logger,
       ),
       pdfDocumentService,

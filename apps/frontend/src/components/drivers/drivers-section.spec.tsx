@@ -1,7 +1,7 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
-import DriversPage from "./page";
+import { DriversSection } from "./drivers-section";
 import { ApiError, request } from "@/lib/api/client";
 import type { Driver, Paginated } from "@/lib/api/types";
 import { LanguageProvider } from "@/lib/i18n/language-provider";
@@ -15,7 +15,7 @@ jest.mock("@/lib/api/client", () => ({
 const requestMock = request as jest.MockedFunction<typeof request>;
 
 /**
- * The drivers list.
+ * The drivers list — section B of the fleet page.
  *
  * Searching and filtering are asserted through the REQUEST, because that is
  * where they happen: a filter that only narrowed the loaded page would look
@@ -93,7 +93,7 @@ function renderDrivers() {
   return render(
     <ThemeProvider>
       <LanguageProvider>
-        <DriversPage />
+        <DriversSection version={0} onChanged={jest.fn()} />
       </LanguageProvider>
     </ThemeProvider>,
   );
@@ -106,7 +106,7 @@ beforeEach(() => {
   respondWith(buildPage([buildDriver()]));
 });
 
-describe("DriversPage", () => {
+describe("DriversSection", () => {
   describe("the list", () => {
     it("shows the drivers the backend returned", async () => {
       renderDrivers();
@@ -352,7 +352,7 @@ describe("DriversPage", () => {
       renderDrivers();
 
       expect(
-        await screen.findByRole("heading", { name: "Şoförler", level: 1 }),
+        await screen.findByRole("heading", { name: "Şoförler", level: 2 }),
       ).toBeInTheDocument();
       expect(screen.getByLabelText("Ara")).toBeInTheDocument();
       expect(
