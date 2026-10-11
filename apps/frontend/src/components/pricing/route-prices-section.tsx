@@ -627,10 +627,8 @@ export function RoutePricesSection({
 
       {isImporting ? (
         <BulkRouteImportDialog
-          onImported={() => {
-            setIsImporting(false);
-            onSaved();
-          }}
+          // The dialog stays open on its result: what was imported and skipped.
+          onImported={onSaved}
           onClose={() => setIsImporting(false)}
         />
       ) : null}

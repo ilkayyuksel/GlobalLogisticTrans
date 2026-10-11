@@ -76,9 +76,7 @@ each field.
 | `NORMAL` | one route: `departure`, `destination`, `tarief`, `toll`, `tunnel` |
 | `COMBINATION` | `legs`: exactly two, each a full route price with its own five fields |
 
-At most 500 entries per document. The bound exists because the whole import runs
-in one transaction, and its size decides how long that transaction holds its
-locks.
+At most 500 entries per document — refused rather than truncated.
 
 ## Toll is an amount; no distance, and no active flag
 
@@ -105,25 +103,71 @@ leg positions per group.
 > A Combination here is route **configuration**. It has nothing to do with a
 > TripGroup in the Rittenlijst, which is what decides the €50 Backload.
 
-## All or nothing
+## Invalid entries are skipped; the rest is imported (October 2026)
 
-Twenty valid routes and one invalid one produce **no** database change.
+This **replaces** the earlier all-or-nothing rule, under which two Combinations
+whose legs were the same road refused an entire price list.
 
-The whole document is validated before anything is written, so the refusal lists
-every problem at once rather than stopping at the first — an operator who pasted
-eighty routes fixes them in one pass. The writing then happens in a single
-transaction, which keeps the promise even against a failure the validation could
-not foresee, such as a concurrent import taking one of the roads in between.
+Every entry is judged on its own, by exactly the same rules as before — none was
+relaxed. An entry that breaks one is **skipped** and reported with its number,
+the road(s) it names and every reason; all other entries are imported. Only a
+document that cannot be read at all (not an object, no `routes` array, empty, more
+than 500 entries) is refused as a whole with `400`, creating nothing.
 
-## Duplicates are refused, never merged
+| `code` of a reason | Skipped because |
+|---|---|
+| `INVALID` | a field or the shape of the entry breaks a rule (missing `tarief`, negative toll, three legs…) |
+| `SAME_ROUTE_LEGS` | both legs of a Combination are the same road |
+| `DUPLICATE_IN_IMPORT` | an earlier entry of this document configures the same route or Combination |
+| `ALREADY_CONFIGURED` | it is already configured — found while checking, or refused by the database while writing |
 
-An entry whose route is already configured is an import **error**. Nothing is
-overwritten, nothing is skipped and nothing is upserted: the existing
-uniqueness rules decide, through the same lookup the manual create uses, so the
-canonical terminal rule applies and `PSA Quay 869` collides with `Quay 869`.
+Each entry is written in **its own transaction**: a route with its toll and
+tunnel costs, a Combination with its group, both legs and their costs — all of
+its rows or none. Nested transactions the configuration services open (the
+Combination's own, a route-cost page read) run inside that same transaction
+(`transactionBound` in `RouteConfigurationUnitOfWork`). One entry's failure
+cannot undo another's success.
 
-The same road used twice **within** one document is refused as well, reported on
-the later entry.
+A failure while writing that is **not** "already configured" is not treated as a
+bad entry: the import **stops** there (`outcome: "ABORTED"`), logs the error
+with its stack, and reports where it stopped and how many entries after it were
+not attempted. The entries before it stay imported.
+
+```json
+{
+  "outcome": "PARTIAL",
+  "imported": { "normalRoutes": 24, "combinationGroups": 0, "combinationLegs": 0, "totalRoutes": 24 },
+  "skipped": [
+    {
+      "routeNumber": 15,
+      "type": "COMBINATION",
+      "route": "Antwerp to Kallo and Antwerp to Kallo",
+      "reasons": [
+        { "routeNumber": 15, "legNumber": null, "field": "legs",
+          "message": "the two legs of a Combination must be different routes", "code": "SAME_ROUTE_LEGS" }
+      ]
+    }
+  ],
+  "stoppedAt": null,
+  "notAttempted": 0
+}
+```
+
+`outcome` is `COMPLETED` (nothing skipped), `PARTIAL` (some imported, some
+skipped), `NOTHING_IMPORTED` (every entry skipped) or `ABORTED`.
+
+## Duplicates are skipped, never merged
+
+Nothing is overwritten and nothing is upserted: the existing uniqueness rules
+decide, through the same lookup the manual create uses, so the canonical
+terminal rule applies and `PSA Quay 869` collides with `Quay 869`. An entry whose
+route or Combination pair is already configured is skipped.
+
+Within one document the **first** occurrence is kept and every later entry
+configuring the same route (or the same Combination pair, in either leg order)
+is skipped, naming the entry it repeats. Amounts play no part in identity: the
+same road with another Tarief is still the same route, and two conflicting
+versions are never both imported.
 
 An ordinary route and a Combination leg may describe the same road. That is not a
 duplicate — they are read in different pricing contexts and neither overwrites the
@@ -132,7 +176,8 @@ other — so the two scopes are checked apart.
 ## Checking before importing
 
 `bulk/check` answers what the import would do and writes nothing. It returns the
-counts and every reason the document would be refused:
+counts of what would be created, the entries that would be skipped (`skipped`,
+shaped as above) and every reason as a flat list:
 
 ```json
 {
@@ -144,17 +189,17 @@ counts and every reason the document would be refused:
     "totalRoutes": 20
   },
   "errors": [
-    { "routeNumber": 4, "legNumber": null, "field": "toll", "message": "toll is required" },
-    { "routeNumber": 9, "legNumber": null, "field": "legs", "message": "a Combination must have exactly 2 legs" },
-    { "routeNumber": 11, "legNumber": 2, "field": "tarief", "message": "tarief must not be less than 0" }
-  ]
+    { "routeNumber": 4, "legNumber": null, "field": "toll", "message": "toll is required", "code": "INVALID" },
+    { "routeNumber": 9, "legNumber": null, "field": "legs", "message": "a Combination must have exactly 2 legs", "code": "INVALID" },
+    { "routeNumber": 11, "legNumber": 2, "field": "tarief", "message": "tarief must not be less than 0", "code": "INVALID" }
+  ],
+  "skipped": [ "…" ]
 }
 ```
 
-A refused document is an ordinary `200` answer here rather than a failure: the
-caller asked what *would* happen, and "nothing, for these three reasons" is the
-answer to that question. `POST /bulk` refuses with `400` instead, carrying the same
-lines in `error.details`.
+`isValid` is true when nothing would be skipped. Skipped entries are an ordinary
+`200` answer on both endpoints; only an unreadable document makes `POST /bulk`
+answer `400`, with its lines in `error.details`.
 
 `routeNumber` counts from 1 and is `null` when the problem is the document itself,
 such as a missing `routes` array. It is a field rather than part of the sentence so

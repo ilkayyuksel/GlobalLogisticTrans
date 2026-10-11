@@ -157,6 +157,26 @@ export class BulkCombinationRouteImportDto {
  * say "Route 4" in the operator's own language and a report can be sorted or
  * grouped by entry.
  */
+/**
+ * Why an entry was skipped, as a code a screen can translate.
+ *
+ *   INVALID              a field or the shape of the entry breaks a rule;
+ *   SAME_ROUTE_LEGS      both legs of a Combination are the same road;
+ *   DUPLICATE_IN_IMPORT  an earlier entry of this document configures the same;
+ *   ALREADY_CONFIGURED   the route or Combination exists already — found while
+ *                        checking, or refused by the database while writing.
+ *
+ * Null for a problem with the document itself, which skips nothing: it refuses
+ * the whole import.
+ */
+export const BULK_ROUTE_IMPORT_PROBLEM_CODES = [
+  "INVALID",
+  "SAME_ROUTE_LEGS",
+  "DUPLICATE_IN_IMPORT",
+  "ALREADY_CONFIGURED",
+] as const;
+export type BulkRouteImportProblemCode = (typeof BULK_ROUTE_IMPORT_PROBLEM_CODES)[number];
+
 export class BulkRouteImportErrorDto {
   @ApiPropertyOptional({
     description:
@@ -187,6 +207,36 @@ export class BulkRouteImportErrorDto {
 
   @ApiProperty({ example: "toll must be a number" })
   message!: string;
+
+  @ApiPropertyOptional({
+    enum: BULK_ROUTE_IMPORT_PROBLEM_CODES,
+    nullable: true,
+    description: "Why the entry is skipped; null for a problem with the document itself.",
+  })
+  code!: BulkRouteImportProblemCode | null;
+}
+
+/** One entry that is not imported, with every reason why. */
+export class BulkRouteImportSkippedDto {
+  @ApiProperty({ description: "Which entry of `routes`, counting from 1.", example: 15 })
+  routeNumber!: number;
+
+  @ApiPropertyOptional({
+    enum: ["NORMAL", "COMBINATION"],
+    nullable: true,
+    description: "The type the entry declares, or null when it declares none.",
+  })
+  type!: "NORMAL" | "COMBINATION" | null;
+
+  @ApiPropertyOptional({
+    nullable: true,
+    description: "The road or pair of roads the entry names, when it names them.",
+    example: "Antwerp to Kallo and Antwerp to Kallo",
+  })
+  route!: string | null;
+
+  @ApiProperty({ type: () => [BulkRouteImportErrorDto] })
+  reasons!: BulkRouteImportErrorDto[];
 }
 
 /** What an import would create, or did. */
@@ -220,17 +270,63 @@ export class BulkRouteImportSummaryDto {
  */
 export class BulkRouteImportCheckDto {
   @ApiProperty({
-    description: "True when every entry is valid and nothing already exists.",
+    description: "True when every entry is valid and nothing already exists: nothing would be skipped.",
   })
   isValid!: boolean;
 
   @ApiProperty({
     type: BulkRouteImportSummaryDto,
-    description:
-      "What the import would create. Counted from the entries that could be read, so it is still useful beside a list of errors.",
+    description: "What the import would create: the entries that would NOT be skipped.",
   })
   summary!: BulkRouteImportSummaryDto;
 
-  @ApiProperty({ type: [BulkRouteImportErrorDto] })
+  @ApiProperty({
+    type: [BulkRouteImportErrorDto],
+    description: "Every problem, in document order: the document's own, or each skipped entry's.",
+  })
   errors!: BulkRouteImportErrorDto[];
+
+  @ApiProperty({ type: [BulkRouteImportSkippedDto] })
+  skipped!: BulkRouteImportSkippedDto[];
+}
+
+export const BULK_ROUTE_IMPORT_OUTCOMES = [
+  "COMPLETED",
+  "PARTIAL",
+  "NOTHING_IMPORTED",
+  "ABORTED",
+] as const;
+export type BulkRouteImportOutcome = (typeof BULK_ROUTE_IMPORT_OUTCOMES)[number];
+
+/** Where an unexpected failure stopped an import. */
+export class BulkRouteImportStopDto {
+  @ApiProperty({ example: 12 })
+  routeNumber!: number;
+
+  @ApiProperty({
+    example:
+      "An unexpected error stopped the import at this route. Nothing of this route was saved.",
+  })
+  message!: string;
+}
+
+export class BulkRouteImportResultDto {
+  @ApiProperty({
+    enum: BULK_ROUTE_IMPORT_OUTCOMES,
+    description:
+      "COMPLETED: every entry imported. PARTIAL: some imported, some skipped. NOTHING_IMPORTED: every entry skipped. ABORTED: an unexpected failure stopped the import — the entries before it are imported, the rest were not attempted.",
+  })
+  outcome!: BulkRouteImportOutcome;
+
+  @ApiProperty({ type: BulkRouteImportSummaryDto, description: "What was created." })
+  imported!: BulkRouteImportSummaryDto;
+
+  @ApiProperty({ type: [BulkRouteImportSkippedDto] })
+  skipped!: BulkRouteImportSkippedDto[];
+
+  @ApiPropertyOptional({ type: BulkRouteImportStopDto, nullable: true })
+  stoppedAt!: BulkRouteImportStopDto | null;
+
+  @ApiProperty({ description: "Entries after the stop, never attempted.", example: 0 })
+  notAttempted!: number;
 }

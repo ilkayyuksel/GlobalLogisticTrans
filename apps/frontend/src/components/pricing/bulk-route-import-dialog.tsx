@@ -2,14 +2,29 @@
 
 import { useState } from "react";
 
+import {
+  BulkRouteImportCounts,
+  BulkRouteImportDocumentErrors,
+  BulkRouteImportSkippedList,
+} from "@/components/pricing/bulk-route-import-report";
 import { RittenDialog } from "@/components/ritten/ritten-dialog";
 import { userFacingMessage } from "@/lib/api/client";
 import {
   checkBulkRouteImport,
   runBulkRouteImport,
   type BulkRouteImportCheck,
+  type BulkRouteImportOutcome,
+  type BulkRouteImportResult,
 } from "@/lib/api/route-configuration";
 import { useTranslation } from "@/lib/i18n/language-provider";
+import type { TranslationKey } from "@/lib/i18n/translations";
+
+const OUTCOME_KEYS: Record<BulkRouteImportOutcome, TranslationKey> = {
+  COMPLETED: "settings.pricing.routes.bulk.outcome.completed",
+  PARTIAL: "settings.pricing.routes.bulk.outcome.partial",
+  NOTHING_IMPORTED: "settings.pricing.routes.bulk.outcome.nothingImported",
+  ABORTED: "settings.pricing.routes.bulk.outcome.aborted",
+};
 
 /** The shape of a document, shown in the empty editor as a starting point. */
 const EXAMPLE_DOCUMENT = `{
@@ -55,9 +70,10 @@ const EXAMPLE_DOCUMENT = `{
  * screen are the backend's answer rendered, never a second opinion.
  *
  * ── AND WHY IT ASKS TWICE ───────────────────────────────────────────────────
- * `Controleren` shows what would happen and writes nothing; `Importeren` then
- * performs it. An operator pasting eighty routes gets to see the damage before
- * it is done, and the import re-validates on its own so the two cannot disagree.
+ * `Controleren` shows what would be imported and what skipped, and writes
+ * nothing; `Importeren` then performs it and the dialog shows what happened —
+ * imported, skipped and why, or where an unexpected failure stopped it. A few
+ * broken entries no longer block the rest: they are skipped and listed.
  *
  * ── JSON IS THE INPUT FORMAT, NOTHING MORE ──────────────────────────────────
  * Nothing about this document is stored as JSON. Each entry becomes exactly the
@@ -69,13 +85,14 @@ export function BulkRouteImportDialog({
   onImported,
   onClose,
 }: {
-  /** Called once the backend accepted the import, so the list can reload. */
-  onImported: (summary: string) => void;
+  /** Called once an import has run, so the list can reload. */
+  onImported: () => void;
   onClose: () => void;
 }) {
   const t = useTranslation();
   const [json, setJson] = useState("");
   const [check, setCheck] = useState<BulkRouteImportCheck | null>(null);
+  const [result, setResult] = useState<BulkRouteImportResult | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
   const [isBusy, setIsBusy] = useState(false);
 
@@ -144,6 +161,7 @@ export function BulkRouteImportDialog({
               setJson(event.target.value);
               // The preview belongs to the text it was made from.
               setCheck(null);
+              setResult(null);
               setFailure(null);
             }}
             className="w-full rounded-md border border-border bg-card px-3 py-2 font-mono text-xs text-foreground"
@@ -159,45 +177,37 @@ export function BulkRouteImportDialog({
           </p>
         ) : null}
 
-        {check && summary ? (
+        {check && summary && !result ? (
           <section
             aria-label={t("settings.pricing.routes.bulk.previewTitle")}
             className="rounded-md border border-border p-3"
           >
             <h3 className="text-sm font-semibold text-foreground">
-              {check.isValid
+              {summary.totalRoutes > 0
                 ? t("settings.pricing.routes.bulk.previewTitle")
                 : t("settings.pricing.routes.bulk.refused")}
             </h3>
+            <BulkRouteImportCounts summary={summary} />
+            <BulkRouteImportDocumentErrors errors={check.errors} />
+            <BulkRouteImportSkippedList skipped={check.skipped} />
+          </section>
+        ) : null}
 
-            <ul className="mt-2 space-y-0.5 text-sm text-secondary">
-              <li>{`${summary.normalRoutes} ${t("settings.pricing.routes.bulk.normalRoutes")}`}</li>
-              <li>{`${summary.combinationGroups} ${t("settings.pricing.routes.bulk.combinationGroups")}`}</li>
-              <li>{`${summary.combinationLegs} ${t("settings.pricing.routes.bulk.combinationLegs")}`}</li>
-              <li className="font-medium text-foreground">
-                {`${t("settings.pricing.routes.bulk.total")}: ${summary.totalRoutes}`}
-              </li>
-            </ul>
-
-            {check.errors.length > 0 ? (
-              <ul className="mt-3 space-y-1 text-sm text-danger">
-                {check.errors.map((error, index) => (
-                  <li key={`${error.routeNumber}-${error.field ?? index}-${index}`}>
-                    {/*
-                      A problem with the document itself belongs to no entry, so
-                      it is labelled as the document rather than as route 0.
-                    */}
-                    {error.routeNumber === null
-                      ? t("settings.pricing.routes.bulk.document")
-                      : `${t("settings.pricing.routes.bulk.route")} ${error.routeNumber}`}
-                    {error.legNumber === null
-                      ? ""
-                      : `, ${t("settings.pricing.routes.combinations.leg")} ${error.legNumber}`}
-                    {`: ${error.message}`}
-                  </li>
-                ))}
-              </ul>
+        {result ? (
+          <section
+            aria-label={t("settings.pricing.routes.bulk.resultTitle")}
+            className="rounded-md border border-border p-3"
+          >
+            <h3 className="text-sm font-semibold text-foreground">{t(OUTCOME_KEYS[result.outcome])}</h3>
+            {result.stoppedAt ? (
+              <p role="alert" className="mt-1 text-sm text-danger">
+                {`${t("settings.pricing.routes.bulk.route")} ${result.stoppedAt.routeNumber}: ${t(
+                  "settings.pricing.routes.bulk.stopped",
+                ).replace("{count}", String(result.notAttempted))}`}
+              </p>
             ) : null}
+            <BulkRouteImportCounts summary={result.imported} />
+            <BulkRouteImportSkippedList skipped={result.skipped} />
           </section>
         ) : null}
 
@@ -216,20 +226,17 @@ export function BulkRouteImportDialog({
           </button>
 
           {/*
-            Enabled only once the backend has said the document is valid. It is
-            not a second validation — the import validates again itself — but a
-            refused document is not something to invite an operator to send.
+            Enabled once the backend has said something CAN be imported — the
+            skipped entries are listed beside it. Not a second validation: the
+            import validates again itself. Run once per preview.
           */}
           <button
             type="button"
-            disabled={isBusy || check === null || !check.isValid}
+            disabled={isBusy || check === null || check.summary.totalRoutes === 0 || result !== null}
             onClick={() =>
               void run(async (document) => {
-                const imported = await runBulkRouteImport(document);
-
-                onImported(
-                  `${imported.totalRoutes} ${t("settings.pricing.routes.bulk.total").toLowerCase()}`,
-                );
+                setResult(await runBulkRouteImport(document));
+                onImported();
               })
             }
             className="rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-white hover:bg-primary-hover disabled:opacity-50"
@@ -245,7 +252,7 @@ export function BulkRouteImportDialog({
             onClick={onClose}
             className="rounded-md border border-border px-3 py-1.5 text-sm font-medium text-foreground hover:bg-hover disabled:opacity-50"
           >
-            {t("settings.pricing.cancel")}
+            {result ? t("settings.pricing.routes.bulk.close") : t("settings.pricing.cancel")}
           </button>
         </div>
       </div>

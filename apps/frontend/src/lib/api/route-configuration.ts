@@ -262,18 +262,49 @@ export interface BulkRouteImportSummary {
   totalRoutes: number;
 }
 
-/** What is wrong with one entry, and which entry it is. */
+/** Why an entry is skipped; null for a problem with the document itself. */
+export type BulkRouteImportProblemCode =
+  | "INVALID"
+  | "SAME_ROUTE_LEGS"
+  | "DUPLICATE_IN_IMPORT"
+  | "ALREADY_CONFIGURED";
+
+/** What is wrong with one entry — or with the document, when routeNumber is null. */
 export interface BulkRouteImportError {
-  routeNumber: number;
+  routeNumber: number | null;
   legNumber: number | null;
   field: string | null;
   message: string;
+  code: BulkRouteImportProblemCode | null;
+}
+
+/** One entry that is not imported, with every reason why. */
+export interface BulkRouteImportSkipped {
+  routeNumber: number;
+  type: "NORMAL" | "COMBINATION" | null;
+  /** The road, or pair of roads, the entry names — when it names them. */
+  route: string | null;
+  reasons: BulkRouteImportError[];
 }
 
 export interface BulkRouteImportCheck {
+  /** True when nothing would be skipped. */
   isValid: boolean;
+  /** What the import would create: the entries NOT skipped. */
   summary: BulkRouteImportSummary;
   errors: BulkRouteImportError[];
+  skipped: BulkRouteImportSkipped[];
+}
+
+export type BulkRouteImportOutcome = "COMPLETED" | "PARTIAL" | "NOTHING_IMPORTED" | "ABORTED";
+
+/** What an import did: created, skipped, and where an unexpected failure stopped it. */
+export interface BulkRouteImportResult {
+  outcome: BulkRouteImportOutcome;
+  imported: BulkRouteImportSummary;
+  skipped: BulkRouteImportSkipped[];
+  stoppedAt: { routeNumber: number; message: string } | null;
+  notAttempted: number;
 }
 
 /**
@@ -294,16 +325,16 @@ export function checkBulkRouteImport(
 }
 
 /**
- * Performs the import, or nothing at all.
+ * Imports every valid entry and reports every skipped one.
  *
- * The backend validates the document again and writes it in one transaction, so
- * twenty valid routes and one broken one leave the configuration untouched.
+ * The backend validates the document again; each entry is written in its own
+ * transaction. Only a document it cannot read at all is refused as an error.
  */
 export function runBulkRouteImport(
   document: unknown,
   signal?: AbortSignal,
-): Promise<BulkRouteImportSummary> {
-  return request<BulkRouteImportSummary>(BULK_PATH, {
+): Promise<BulkRouteImportResult> {
+  return request<BulkRouteImportResult>(BULK_PATH, {
     method: "POST",
     body: document,
     signal,

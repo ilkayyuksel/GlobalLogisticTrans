@@ -29,11 +29,14 @@ const requestMock = request as unknown as jest.MockedFunction<
  *     text cannot be sent anywhere — and asks the backend everything else:
  *     whether each route is valid, what would be created, what already exists;
  *   the preview is asked for before the import, and writes nothing;
- *   a refused document cannot be imported by pressing the button anyway;
- *   the counts and the per-entry errors on screen are the backend's answer
+ *   a few broken entries no longer block the rest: they are listed as skipped,
+ *     with their number and reason, and the valid ones can still be imported;
+ *   a document with nothing importable cannot be imported by pressing the
+ *     button anyway;
+ *   the counts and the per-entry reasons on screen are the backend's answer
  *     rendered, never a second opinion computed here;
- *   and after a successful import the list is reloaded, so the new routes and
- *     Combinations appear without a manual refresh.
+ *   and after an import the dialog shows what happened — imported, skipped,
+ *     or where it stopped — while the list behind it reloads.
  * ────────────────────────────────────────────────────────────────────────────
  */
 
@@ -86,39 +89,69 @@ function validCheck() {
       totalRoutes: 20,
     },
     errors: [],
+    skipped: [],
   };
 }
 
+const reason = (
+  routeNumber: number,
+  legNumber: number | null,
+  field: string | null,
+  message: string,
+  code: string,
+) => ({ routeNumber, legNumber, field, message, code });
+
+/** Some entries importable, some skipped — the owner's real case. */
+function partialCheck() {
+  const skipped = [
+    {
+      routeNumber: 4,
+      type: "NORMAL",
+      route: "Gent to Lille",
+      reasons: [reason(4, null, "toll", "toll is required", "INVALID")],
+    },
+    {
+      routeNumber: 11,
+      type: "COMBINATION",
+      route: null,
+      reasons: [reason(11, 2, "tarief", "tarief must not be less than 0", "INVALID")],
+    },
+    {
+      routeNumber: 15,
+      type: "COMBINATION",
+      route: "Antwerp to Kallo and Antwerp to Kallo",
+      reasons: [
+        reason(15, null, "legs", "the two legs of a Combination must be different routes", "SAME_ROUTE_LEGS"),
+      ],
+    },
+  ];
+
+  return {
+    isValid: false,
+    summary: { normalRoutes: 2, combinationGroups: 0, combinationLegs: 0, totalRoutes: 2 },
+    errors: skipped.flatMap((entry) => entry.reasons),
+    skipped,
+  };
+}
+
+/** A document that cannot be read: nothing importable at all. */
 function refusedCheck() {
   return {
     isValid: false,
-    summary: {
-      normalRoutes: 2,
-      combinationGroups: 0,
-      combinationLegs: 0,
-      totalRoutes: 2,
-    },
-    errors: [
-      { routeNumber: 4, legNumber: null, field: "toll", message: "toll is required" },
-      {
-        routeNumber: 9,
-        legNumber: null,
-        field: "legs",
-        message: "a Combination must have exactly 2 legs",
-      },
-      {
-        routeNumber: 11,
-        legNumber: 2,
-        field: "tarief",
-        message: "tarief must not be less than 0",
-      },
-      {
-        routeNumber: null,
-        legNumber: null,
-        field: "routes",
-        message: "routes must not be empty",
-      },
-    ],
+    summary: { normalRoutes: 0, combinationGroups: 0, combinationLegs: 0, totalRoutes: 0 },
+    errors: [reason(null as unknown as number, null, "routes", "routes must not be empty", null as unknown as string)],
+    skipped: [],
+  };
+}
+
+function importResult(overrides: Record<string, unknown> = {}) {
+  return {
+    outcome: "COMPLETED",
+    imported: { normalRoutes: 12, combinationGroups: 4, combinationLegs: 8, totalRoutes: 20 },
+    skipped: [],
+    stoppedAt: null,
+    notAttempted: 0,
+    ...overrides,
   };
 }
 
@@ -126,6 +159,7 @@ interface Responses {
   routes?: unknown[];
   combinations?: unknown[];
   check?: unknown;
+  imported?: unknown;
   importFailsWith?: Error;
 }
 
@@ -149,12 +183,7 @@ function respondWith(responses: Responses = {}): void {
         return Promise.reject(responses.importFailsWith);
       }
 
-      return Promise.resolve({
-        normalRoutes: 12,
-        combinationGroups: 4,
-        combinationLegs: 8,
-        totalRoutes: 20,
-      });
+      return Promise.resolve(responses.imported ?? importResult());
     }
 
     if (path === BOOTSTRAP_PATH) {
@@ -330,52 +359,62 @@ describe("checking a document", () => {
     expect(screen.queryByText("1 normale routes")).not.toBeInTheDocument();
   });
 
-  describe("a refused document", () => {
+  describe("a document with entries to skip", () => {
+    beforeEach(() => {
+      respondWith({ check: partialCheck() });
+    });
+
+    async function checked(): Promise<void> {
+      await openDialog();
+      await paste(DOCUMENT);
+      await userEvent.click(screen.getByRole("button", { name: "Controleren" }));
+      await screen.findByText("Overgeslagen (3)");
+    }
+
+    it("shows what would be imported beside what would be skipped", async () => {
+      await checked();
+
+      expect(screen.getByText("Wordt toegevoegd")).toBeInTheDocument();
+      expect(screen.getByText("2 normale routes")).toBeInTheDocument();
+    });
+
+    /** Every reason, each naming the entry — and the route — it belongs to. */
+    it("lists each skipped entry with its route number, route and reason", async () => {
+      await checked();
+
+      expect(screen.getByText("Route 4 (Gent to Lille) — toll is required")).toBeInTheDocument();
+      expect(
+        screen.getByText(
+          "Route 15 (Antwerp to Kallo and Antwerp to Kallo) — beide legs van de combinatie zijn dezelfde route",
+        ),
+      ).toBeInTheDocument();
+    });
+
+    it("names the leg of a Combination it objects to", async () => {
+      await checked();
+
+      expect(screen.getByText("Route 11, Leg 2 — tarief must not be less than 0")).toBeInTheDocument();
+    });
+
+    it("still offers the import of the valid entries", async () => {
+      await checked();
+
+      expect(screen.getByRole("button", { name: "Importeren" })).toBeEnabled();
+    });
+  });
+
+  describe("a document that cannot be read", () => {
     beforeEach(() => {
       respondWith({ check: refusedCheck() });
     });
 
-    it("says it was refused", async () => {
+    it("says it was refused, labelling the problem as the document's", async () => {
       await openDialog();
       await paste(DOCUMENT);
       await userEvent.click(screen.getByRole("button", { name: "Controleren" }));
 
       expect(await screen.findByText("Import geweigerd")).toBeInTheDocument();
-    });
-
-    /** Every reason, each naming the entry it belongs to. */
-    it("lists each problem with its route number", async () => {
-      await openDialog();
-      await paste(DOCUMENT);
-      await userEvent.click(screen.getByRole("button", { name: "Controleren" }));
-
-      expect(
-        await screen.findByText("Route 4: toll is required"),
-      ).toBeInTheDocument();
-      expect(
-        screen.getByText("Route 9: a Combination must have exactly 2 legs"),
-      ).toBeInTheDocument();
-    });
-
-    it("names the leg of a Combination it objects to", async () => {
-      await openDialog();
-      await paste(DOCUMENT);
-      await userEvent.click(screen.getByRole("button", { name: "Controleren" }));
-
-      expect(
-        await screen.findByText("Route 11, Leg 2: tarief must not be less than 0"),
-      ).toBeInTheDocument();
-    });
-
-    /** A problem with the document belongs to no entry, and is labelled so. */
-    it("labels a document-level problem as the document", async () => {
-      await openDialog();
-      await paste(DOCUMENT);
-      await userEvent.click(screen.getByRole("button", { name: "Controleren" }));
-
-      expect(
-        await screen.findByText("Document: routes must not be empty"),
-      ).toBeInTheDocument();
+      expect(screen.getByText("Document: routes must not be empty")).toBeInTheDocument();
       expect(screen.queryByText(/Route 0/)).not.toBeInTheDocument();
     });
 
@@ -456,12 +495,63 @@ describe("importing", () => {
     expect(writes()[1].body).toEqual(JSON.parse(DOCUMENT));
   });
 
-  it("closes the dialog when the backend accepted it", async () => {
+  it("shows that everything was imported", async () => {
     await checkedAndImported();
 
-    await waitFor(() =>
-      expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+    expect(
+      await screen.findByText("Import voltooid: alle routes zijn toegevoegd"),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+  });
+
+  /** 13/14. The owner's case: imported AND skipped, both on screen. */
+  it("shows a partial import with the imported counts and every skipped route", async () => {
+    respondWith({
+      imported: importResult({
+        outcome: "PARTIAL",
+        imported: { normalRoutes: 24, combinationGroups: 0, combinationLegs: 0, totalRoutes: 24 },
+        skipped: partialCheck().skipped.slice(2),
+      }),
+    });
+
+    await checkedAndImported();
+
+    expect(
+      await screen.findByText("Import gedeeltelijk gelukt: geldige routes toegevoegd, de rest overgeslagen"),
+    ).toBeInTheDocument();
+    expect(screen.getByText("24 normale routes")).toBeInTheDocument();
+    expect(screen.getByText("Overgeslagen (1)")).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "Route 15 (Antwerp to Kallo and Antwerp to Kallo) — beide legs van de combinatie zijn dezelfde route",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("does not present an import that stopped as a success", async () => {
+    respondWith({
+      imported: importResult({
+        outcome: "ABORTED",
+        imported: { normalRoutes: 3, combinationGroups: 0, combinationLegs: 0, totalRoutes: 3 },
+        stoppedAt: { routeNumber: 4, message: "An unexpected error stopped the import at this route." },
+        notAttempted: 6,
+      }),
+    });
+
+    await checkedAndImported();
+
+    expect(await screen.findByText("Import gestopt door een onverwachte fout")).toBeInTheDocument();
+    expect(within(screen.getByRole("dialog")).getByRole("alert")).toHaveTextContent(
+      "Route 4: onverwachte fout, deze route is niet opgeslagen. Routes ervoor zijn toegevoegd; 6 route(s) erna zijn niet geprobeerd.",
     );
+  });
+
+  it("is run once per preview", async () => {
+    await checkedAndImported();
+    await screen.findByText("Import voltooid: alle routes zijn toegevoegd");
+
+    expect(screen.getByRole("button", { name: "Importeren" })).toBeDisabled();
+    expect(screen.getAllByRole("button", { name: "Sluiten" }).every((button) => !(button as HTMLButtonElement).disabled)).toBe(true);
   });
 
   /** So the imported routes and Combinations appear without a refresh. */
@@ -487,10 +577,9 @@ describe("importing", () => {
   });
 
   /**
-   * The import validates again on the backend, so it can refuse a document the
-   * preview accepted — a route configured by somebody else in between. The
-   * refusal is shown rather than swallowed, and the dialog stays open with the
-   * text still in it.
+   * 15. A document the backend cannot read is refused as a whole. The refusal
+   * is shown rather than swallowed, and the dialog stays open with the text
+   * still in it.
    */
   it("shows a refusal from the import itself and keeps the document", async () => {
     respondWith({

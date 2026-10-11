@@ -4,22 +4,32 @@ import { ValidationError, validate } from "class-validator";
 
 import { AppLoggerService } from "../logger/app-logger.service";
 import { CombinationRoutePricingService } from "../route-pricing/combination-route-pricing.service";
-import {
-  RoadEndpoints,
-  describeCombination,
-  isSameCombination,
-  isSameRoad,
-} from "../route-pricing/route-identity";
+import { isSameRoad } from "../route-pricing/route-identity";
 import { RouteConfigurationKind } from "../route-pricing/route-pricing.repository";
 import { RoutePricingService } from "../route-pricing/route-pricing.service";
+import {
+  ImportedRoute,
+  byEntry,
+  declaredType,
+  describeEntry,
+  describeRawEntry,
+  duplicatesWithinDocument,
+  problem,
+  roadsOf,
+  skippedEntry,
+  summaryOf,
+} from "./bulk-route-import.entries";
 import {
   BulkCombinationRouteImportDto,
   BulkNormalRouteImportDto,
   BulkRouteImportCheckDto,
   BulkRouteImportErrorDto,
+  BulkRouteImportSkippedDto,
   MAX_IMPORT_ROUTES,
 } from "./dto/bulk-route-import.dto";
 import { RouteConfigurationType } from "./dto/route-configuration.dto";
+
+export type { ImportedRoute } from "./bulk-route-import.entries";
 
 /**
  * The same options the application's global ValidationPipe uses.
@@ -34,60 +44,38 @@ const VALIDATION_OPTIONS = {
   forbidNonWhitelisted: true,
 } as const;
 
-/** One entry of an import, read and understood. */
-export type ImportedRoute =
-  | { readonly kind: "NORMAL"; readonly route: BulkNormalRouteImportDto }
-  | {
-      readonly kind: "COMBINATION";
-      readonly combination: BulkCombinationRouteImportDto;
-    };
-
 export interface BulkRouteImportPlan extends BulkRouteImportCheckDto {
   /**
-   * The entries to create, in the order they were given — empty whenever the
-   * document was refused, because a refused import creates nothing at all.
+   * Problems with the document ITSELF — no routes array, too many entries.
+   * Any of them refuses the whole import; nothing can be read, so nothing is
+   * imported or skipped.
    */
+  readonly documentErrors: readonly BulkRouteImportErrorDto[];
+  /** The entries to create, in the order they were given. */
   readonly routes: readonly ImportedRoute[];
 }
 
-/** One road of the document, and where in it that road was named. */
-interface Road extends RoadEndpoints {
-  readonly routeNumber: number;
-  readonly legNumber: number | null;
-}
+type EntryReading =
+  | { readonly route: ImportedRoute; readonly skipped: null }
+  | { readonly route: null; readonly skipped: BulkRouteImportSkippedDto };
 
 /**
- * One Combination entry, as the uniqueness rule compares them.
+ * Reads a bulk import and decides, entry by entry, what may be created —
+ * without creating any of it.
  *
- * The rule is about the PAIR, so the entry travels as its two roads together.
- * See `isSameCombination`: one road may be a leg of many Combinations, and only
- * the same pair twice is a duplicate.
- */
-interface Configuration {
-  readonly routeNumber: number;
-  readonly roads: readonly RoadEndpoints[];
-}
-
-/**
- * Reads a bulk import and decides whether it may be performed — without
- * performing any part of it.
- *
- * ── WHY VALIDATION IS A PHASE OF ITS OWN ────────────────────────────────────
- * Twenty valid routes and one broken one must produce NO database change. The
- * only way to promise that and still report every problem at once is to judge the
- * whole document before writing anything: a transaction that aborted on entry
- * twenty-one would roll back correctly but would have found only the FIRST
- * problem, leaving an operator to fix eighty routes one error at a time.
- *
- * It is also what makes a preview possible, since the preview and the import ask
- * this same class the same question.
+ * ── ONE ENTRY'S PROBLEM IS THAT ENTRY'S ─────────────────────────────────────
+ * The import used to be all or nothing: two Combinations whose legs were the
+ * same road refused eighty valid routes. Now every entry is judged on its own
+ * and a broken one is SKIPPED with its reasons, while the rest go ahead. No rule
+ * is relaxed for it: a skipped entry is one that breaks a rule, reported as it
+ * always was. Only a problem with the document itself refuses everything.
  *
  * ── THE RULES ARE NOT RESTATED HERE ─────────────────────────────────────────
  * Field validation runs class-validator over the very DTO classes the manual
  * endpoints use, with the same options as the global pipe. Duplicate detection
- * calls the same lookup the manual create calls, which applies the canonical
- * terminal rule. Nothing in this file decides what a valid route is; it decides
- * only how to say which entry was wrong.
+ * calls the same lookups the manual create calls, which apply the canonical
+ * terminal rule. Nothing here decides what a valid route is; it decides only
+ * which entry broke which rule.
  */
 @Injectable()
 export class BulkRouteImportValidator {
@@ -111,6 +99,8 @@ export class BulkRouteImportValidator {
         isValid: false,
         summary: summaryOf([]),
         errors: envelope.errors,
+        skipped: [],
+        documentErrors: envelope.errors,
         routes: [],
       };
     }
@@ -118,49 +108,62 @@ export class BulkRouteImportValidator {
     return this.checkEntries(envelope.entries);
   }
 
-  private async checkEntries(
-    entries: readonly unknown[],
-  ): Promise<BulkRouteImportPlan> {
-    const errors: BulkRouteImportErrorDto[] = [];
-    const routes: ImportedRoute[] = [];
+  private async checkEntries(entries: readonly unknown[]): Promise<BulkRouteImportPlan> {
+    const skipped: BulkRouteImportSkippedDto[] = [];
+    let routes: ImportedRoute[] = [];
 
     for (const [index, entry] of entries.entries()) {
-      const routeNumber = index + 1;
-      const read = await this.readEntry(entry, routeNumber);
+      const reading = await this.readEntry(entry, index + 1);
 
-      errors.push(...read.errors);
-
-      if (read.route) {
-        routes.push(read.route);
+      if (reading.route) {
+        routes.push(reading.route);
+      } else {
+        skipped.push(reading.skipped);
       }
     }
 
-    errors.push(...this.collidingWithinDocument(routes));
-    errors.push(...(await this.collidingWithStoredRoutes(routes)));
+    // Within the document first: the first occurrence is the one kept.
+    const duplicates = duplicatesWithinDocument(routes);
+    routes = this.withoutSkipped(routes, duplicates, skipped);
 
-    const isValid = errors.length === 0;
+    const stored = await this.alreadyConfigured(routes);
+    routes = this.withoutSkipped(routes, stored, skipped);
 
-    /*
-     * Reported in the order an operator reads the document. The duplicate checks
-     * run last and would otherwise put "route 1 is already configured" below
-     * route 20's missing field, in a list meant to be worked through top to
-     * bottom.
-     */
-    errors.sort(byEntry);
+    skipped.sort((left, right) => left.routeNumber - right.routeNumber);
+    const errors = skipped.flatMap((entry) => entry.reasons).sort(byEntry);
 
     this.logger.log("Bulk route import checked", {
       entryCount: entries.length,
-      errorCount: errors.length,
-      isValid,
+      importableCount: routes.length,
+      skippedCount: skipped.length,
+      skippedRouteNumbers: skipped.map((entry) => entry.routeNumber),
     });
 
     return {
-      isValid,
+      isValid: skipped.length === 0,
       summary: summaryOf(routes),
       errors,
-      // A refused document creates nothing, so it offers nothing to create.
-      routes: isValid ? routes : [],
+      skipped,
+      documentErrors: [],
+      routes,
     };
+  }
+
+  /** `routes` minus the entries `problems` names, which join `skipped`. */
+  private withoutSkipped(
+    routes: readonly ImportedRoute[],
+    problems: ReadonlyMap<number, BulkRouteImportErrorDto>,
+    skipped: BulkRouteImportSkippedDto[],
+  ): ImportedRoute[] {
+    return routes.filter((entry) => {
+      const reason = problems.get(entry.routeNumber);
+
+      if (reason) {
+        skipped.push(skippedEntry(entry.routeNumber, entry.kind, describeEntry(entry), [reason]));
+      }
+
+      return reason === undefined;
+    });
   }
 
   /**
@@ -168,79 +171,53 @@ export class BulkRouteImportValidator {
    *
    * The declared type decides which DTO validates it, so a NORMAL entry is held
    * to the manual create's rules exactly and a COMBINATION to the two-leg rule.
-   * An entry that declares neither cannot be validated as either, and says so.
    */
-  private async readEntry(
-    entry: unknown,
-    routeNumber: number,
-  ): Promise<{
-    route: ImportedRoute | null;
-    errors: BulkRouteImportErrorDto[];
-  }> {
+  private async readEntry(entry: unknown, routeNumber: number): Promise<EntryReading> {
+    const skip = (reasons: BulkRouteImportErrorDto[]): EntryReading => ({
+      route: null,
+      skipped: skippedEntry(routeNumber, declaredType(entry), describeRawEntry(entry), reasons),
+    });
+
     if (typeof entry !== "object" || entry === null || Array.isArray(entry)) {
-      return {
-        route: null,
-        errors: [
-          failure(routeNumber, null, null, "each route must be an object"),
-        ],
-      };
+      return skip([problem(routeNumber, null, null, "each route must be an object", "INVALID")]);
     }
 
     const declared = (entry as Record<string, unknown>).type;
 
     if (declared === RouteConfigurationType.NORMAL) {
-      return this.readNormal(entry, routeNumber);
+      const route = plainToInstance(BulkNormalRouteImportDto, entry);
+      const failures = await validate(route, VALIDATION_OPTIONS);
+
+      return failures.length > 0
+        ? skip(flatten(failures, routeNumber, null))
+        : { route: { kind: "NORMAL", route, routeNumber }, skipped: null };
     }
 
     if (declared === RouteConfigurationType.COMBINATION) {
-      return this.readCombination(entry, routeNumber);
+      return this.readCombination(entry, routeNumber, skip);
     }
 
-    return {
-      route: null,
-      errors: [
-        failure(
-          routeNumber,
-          null,
-          "type",
-          `type must be ${RouteConfigurationType.NORMAL} or ${RouteConfigurationType.COMBINATION}`,
-        ),
-      ],
-    };
-  }
-
-  private async readNormal(
-    entry: object,
-    routeNumber: number,
-  ): Promise<{
-    route: ImportedRoute | null;
-    errors: BulkRouteImportErrorDto[];
-  }> {
-    const route = plainToInstance(BulkNormalRouteImportDto, entry);
-    const failures = await validate(route, VALIDATION_OPTIONS);
-
-    if (failures.length > 0) {
-      return { route: null, errors: flatten(failures, routeNumber, null) };
-    }
-
-    return { route: { kind: "NORMAL", route }, errors: [] };
+    return skip([
+      problem(
+        routeNumber,
+        null,
+        "type",
+        `type must be ${RouteConfigurationType.NORMAL} or ${RouteConfigurationType.COMBINATION}`,
+        "INVALID",
+      ),
+    ]);
   }
 
   private async readCombination(
     entry: object,
     routeNumber: number,
-  ): Promise<{
-    route: ImportedRoute | null;
-    errors: BulkRouteImportErrorDto[];
-  }> {
+    skip: (reasons: BulkRouteImportErrorDto[]) => EntryReading,
+  ): Promise<EntryReading> {
     const combination = plainToInstance(BulkCombinationRouteImportDto, entry);
     const failures = await validate(combination, VALIDATION_OPTIONS);
 
     if (failures.length > 0) {
-      return {
-        route: null,
-        errors: flatten(failures, routeNumber, null),
-      };
+      return skip(flatten(failures, routeNumber, null));
     }
 
     /*
@@ -251,47 +228,18 @@ export class BulkRouteImportValidator {
     const [outbound, back] = combination.legs;
 
     if (isSameRoad(outbound, back)) {
-      return {
-        route: null,
-        errors: [
-          failure(
-            routeNumber,
-            null,
-            "legs",
-            "the two legs of a Combination must be different routes",
-          ),
-        ],
-      };
+      return skip([
+        problem(
+          routeNumber,
+          null,
+          "legs",
+          "the two legs of a Combination must be different routes",
+          "SAME_ROUTE_LEGS",
+        ),
+      ]);
     }
 
-    return { route: { kind: "COMBINATION", combination }, errors: [] };
-  }
-
-  /**
-   * Entries of this same document that configure the same thing twice.
-   *
-   * Checked separately from the stored records, because neither exists yet: two
-   * identical entries would pass every per-entry rule and then collide with each
-   * other halfway through the transaction, reported as a database conflict on an
-   * entry the operator never thought was the problem.
-   *
-   * ── EACH KIND BY ITS OWN IDENTITY ─────────────────────────────────────────
-   * An ordinary route is its road, and one road may hold one ordinary
-   * configuration. A Combination is its PAIR of roads: the same leg may be used
-   * by as many Combinations as an operator has returns for it, so a document
-   * naming `Quay 869 → Lessines` as Leg 1 of ten Combinations is ten
-   * configurations and not one collision. What is refused is the same pair twice.
-   *
-   * A Combination leg and an ordinary route on one road are not a collision
-   * either, exactly as the partial unique indexes have it.
-   */
-  private collidingWithinDocument(
-    routes: readonly ImportedRoute[],
-  ): BulkRouteImportErrorDto[] {
-    return [
-      ...duplicatesAmong(ordinaryRoads(routes), "route"),
-      ...duplicateCombinationsAmong(combinationConfigurations(routes)),
-    ];
+    return { route: { kind: "COMBINATION", combination, routeNumber }, skipped: null };
   }
 
   /**
@@ -299,60 +247,44 @@ export class BulkRouteImportValidator {
    *
    * Through the same lookups the manual create uses, so the canonical terminal
    * rule applies: an import naming `PSA Quay 869` collides with a route
-   * configured as `Quay 869`. Nothing is overwritten and nothing is skipped — the
-   * import is refused and says which entry is already there.
+   * configured as `Quay 869`. Nothing is overwritten: the entry is skipped.
    *
    * An ordinary route is compared by its road; a Combination by its pair, which
    * is the only thing that identifies one. A leg whose road is already used by
    * some OTHER Combination is not a collision.
    */
-  private async collidingWithStoredRoutes(
+  private async alreadyConfigured(
     routes: readonly ImportedRoute[],
-  ): Promise<BulkRouteImportErrorDto[]> {
-    const errors: BulkRouteImportErrorDto[] = [];
+  ): Promise<Map<number, BulkRouteImportErrorDto>> {
+    const configured = new Map<number, BulkRouteImportErrorDto>();
 
-    for (const road of ordinaryRoads(routes)) {
-      if (await this.isConfigured(road, RouteConfigurationKind.NORMAL)) {
-        errors.push(alreadyConfigured(road, "route"));
-      }
-    }
+    for (const entry of routes) {
+      const exists =
+        entry.kind === "NORMAL"
+          ? await this.routePricing.findConfiguredRoute(
+              entry.route.departure,
+              entry.route.destination,
+              RouteConfigurationKind.NORMAL,
+            )
+          : await this.combinationPricing.findConfiguredCombination(roadsOf(entry));
 
-    for (const configuration of combinationConfigurations(routes)) {
-      if (await this.isConfiguredCombination(configuration.roads)) {
-        errors.push(
-          failure(
-            configuration.routeNumber,
+      if (exists !== null) {
+        const subject = entry.kind === "NORMAL" ? "route" : "Combination";
+
+        configured.set(
+          entry.routeNumber,
+          problem(
+            entry.routeNumber,
             null,
             null,
-            `this Combination is already configured: ${describeCombination(configuration.roads)}`,
+            `this ${subject} is already configured: ${describeEntry(entry)}`,
+            "ALREADY_CONFIGURED",
           ),
         );
       }
     }
 
-    return errors;
-  }
-
-  private async isConfigured(
-    road: Road,
-    kind: RouteConfigurationKind,
-  ): Promise<boolean> {
-    const configured = await this.routePricing.findConfiguredRoute(
-      road.departure,
-      road.destination,
-      kind,
-    );
-
-    return configured !== null;
-  }
-
-  private async isConfiguredCombination(
-    roads: readonly RoadEndpoints[],
-  ): Promise<boolean> {
-    const configured =
-      await this.combinationPricing.findConfiguredCombination(roads);
-
-    return configured !== null;
+    return configured;
   }
 }
 
@@ -369,156 +301,38 @@ function readEnvelope(document: unknown): {
   entries: readonly unknown[] | null;
   errors: BulkRouteImportErrorDto[];
 } {
+  const refuse = (field: string | null, message: string) => ({
+    entries: null,
+    errors: [problem(null, null, field, message, null)],
+  });
+
   if (typeof document !== "object" || document === null || Array.isArray(document)) {
-    return {
-      entries: null,
-      errors: [
-        failure(null, null, null, "the document must be an object with a routes array"),
-      ],
-    };
+    return refuse(null, "the document must be an object with a routes array");
   }
 
   const routes = (document as { routes?: unknown }).routes;
 
   if (!Array.isArray(routes)) {
-    return {
-      entries: null,
-      errors: [failure(null, null, "routes", "routes must be an array")],
-    };
+    return refuse("routes", "routes must be an array");
   }
 
   if (routes.length === 0) {
-    return {
-      entries: null,
-      errors: [failure(null, null, "routes", "routes must not be empty")],
-    };
+    return refuse("routes", "routes must not be empty");
   }
 
   /*
-   * A bound, because the whole import runs in ONE transaction and its size
-   * decides how long that transaction holds its locks. Refused rather than
-   * truncated: importing the first five hundred of six hundred routes silently
-   * would be the worst of both answers.
+   * A bound on one request's work. Refused rather than truncated: importing
+   * the first five hundred of six hundred routes silently would be the worst
+   * of both answers.
    */
   if (routes.length > MAX_IMPORT_ROUTES) {
-    return {
-      entries: null,
-      errors: [
-        failure(
-          null,
-          null,
-          "routes",
-          `routes must contain at most ${MAX_IMPORT_ROUTES} entries, not ${routes.length}`,
-        ),
-      ],
-    };
+    return refuse(
+      "routes",
+      `routes must contain at most ${MAX_IMPORT_ROUTES} entries, not ${routes.length}`,
+    );
   }
 
   return { entries: routes, errors: [] };
-}
-
-/** The roads the ordinary entries describe. */
-function ordinaryRoads(routes: readonly ImportedRoute[]): Road[] {
-  return routes.flatMap((entry, index) =>
-    entry.kind === "NORMAL"
-      ? [
-          {
-            departure: entry.route.departure,
-            destination: entry.route.destination,
-            routeNumber: index + 1,
-            legNumber: null,
-          },
-        ]
-      : [],
-  );
-}
-
-/** The Combination entries, each as its own pair of roads. */
-function combinationConfigurations(
-  routes: readonly ImportedRoute[],
-): Configuration[] {
-  return routes.flatMap((entry, index) =>
-    entry.kind === "COMBINATION"
-      ? [
-          {
-            routeNumber: index + 1,
-            roads: entry.combination.legs.map((leg) => ({
-              departure: leg.departure,
-              destination: leg.destination,
-            })),
-          },
-        ]
-      : [],
-  );
-}
-
-/**
- * Every Combination configured twice in one document, reported on the LATER
- * entry.
- *
- * Only an identical PAIR counts, in either leg order — see `isSameCombination`.
- * Two Combinations sharing one leg are two configurations, and this is the check
- * that used to refuse them.
- */
-function duplicateCombinationsAmong(
-  configurations: readonly Configuration[],
-): BulkRouteImportErrorDto[] {
-  return configurations.flatMap((configuration, index) => {
-    const earlier = configurations
-      .slice(0, index)
-      .find((candidate) => isSameCombination(candidate.roads, configuration.roads));
-
-    return earlier
-      ? [
-          failure(
-            configuration.routeNumber,
-            null,
-            null,
-            `this Combination is already configured by route ${earlier.routeNumber} of this import: ${describeCombination(configuration.roads)}`,
-          ),
-        ]
-      : [];
-  });
-}
-
-/**
- * Every road named more than once in one scope, reported on the LATER entry.
- *
- * The later one is the duplicate: the first occurrence is the route the operator
- * meant to configure, and naming it as the problem would be confusing.
- */
-function duplicatesAmong(
-  roads: readonly Road[],
-  subject: "route" | "leg",
-): BulkRouteImportErrorDto[] {
-  return roads.flatMap((road, index) => {
-    const earlier = roads
-      .slice(0, index)
-      .find((candidate) => isSameRoad(candidate, road));
-
-    return earlier
-      ? [
-          failure(
-            road.routeNumber,
-            road.legNumber,
-            null,
-            `this ${subject} is already configured by route ${earlier.routeNumber} of this import: ${road.departure} to ${road.destination}`,
-          ),
-        ]
-      : [];
-  });
-}
-
-function alreadyConfigured(
-  road: Road,
-  subject: "route" | "leg",
-): BulkRouteImportErrorDto {
-  return failure(
-    road.routeNumber,
-    road.legNumber,
-    null,
-    `this ${subject} is already configured: ${road.departure} to ${road.destination}`,
-  );
 }
 
 /**
@@ -541,15 +355,14 @@ function flatten(
      * ── ONE LINE FOR A MISSING FIELD ────────────────────────────────────────
      * A field that is absent fails every rule it has, so `toll` missing
      * produced three lines: not a number, not at least zero, not at most the
-     * money ceiling. All three say the same thing, and an operator reading eighty
-     * routes has to read past two of them. A present value that is wrong still
-     * reports each rule it broke, because those are different facts.
+     * money ceiling. All three say the same thing. A present value that is
+     * wrong still reports each rule it broke, because those are different facts.
      */
     const own =
       error.value === undefined || error.value === null
-        ? [failure(routeNumber, legNumber, error.property, `${error.property} is required`)]
+        ? [problem(routeNumber, legNumber, error.property, `${error.property} is required`, "INVALID")]
         : Object.values(error.constraints ?? {}).map((message) =>
-            failure(routeNumber, legNumber, error.property, message),
+            problem(routeNumber, legNumber, error.property, message, "INVALID"),
           );
 
     const nested = (error.children ?? []).flatMap((child) =>
@@ -558,42 +371,4 @@ function flatten(
 
     return [...own, ...nested];
   });
-}
-
-/** The order the document is read in: entry, then leg. */
-function byEntry(
-  left: BulkRouteImportErrorDto,
-  right: BulkRouteImportErrorDto,
-): number {
-  return (
-    (left.routeNumber ?? 0) - (right.routeNumber ?? 0) ||
-    (left.legNumber ?? 0) - (right.legNumber ?? 0)
-  );
-}
-
-function failure(
-  routeNumber: number | null,
-  legNumber: number | null,
-  field: string | null,
-  message: string,
-): BulkRouteImportErrorDto {
-  return { routeNumber, legNumber, field, message };
-}
-
-/** What the readable entries would create. */
-function summaryOf(routes: readonly ImportedRoute[]) {
-  const normalRoutes = routes.filter((entry) => entry.kind === "NORMAL").length;
-  const combinationGroups = routes.length - normalRoutes;
-  const combinationLegs = routes.reduce(
-    (total, entry) =>
-      entry.kind === "COMBINATION" ? total + entry.combination.legs.length : total,
-    0,
-  );
-
-  return {
-    normalRoutes,
-    combinationGroups,
-    combinationLegs,
-    totalRoutes: normalRoutes + combinationLegs,
-  };
 }

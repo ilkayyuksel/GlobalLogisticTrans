@@ -1,10 +1,13 @@
 import { AppLoggerService } from "../logger/app-logger.service";
+import { DuplicateActiveRouteException } from "../route-pricing/exceptions/route-pricing.exceptions";
 import { CombinationRoutePricingService } from "../route-pricing/combination-route-pricing.service";
 import { RoutePricingService } from "../route-pricing/route-pricing.service";
 import {
   BulkRouteImportRefusedException,
   BulkRouteImportService,
+  describeImportProblem,
 } from "./bulk-route-import.service";
+import { byEntry } from "./bulk-route-import.entries";
 import { BulkRouteImportValidator } from "./bulk-route-import.validator";
 import { MAX_IMPORT_ROUTES } from "./dto/bulk-route-import.dto";
 import type { RouteConfigurationUnitOfWork } from "./route-configuration.unit-of-work";
@@ -21,9 +24,10 @@ import type { RouteConfigurationUnitOfWork } from "./route-configuration.unit-of
  * as the amounts given, as they are for any route.
  *
  * ── THE PROMISE THESE TESTS GUARD ───────────────────────────────────────────
- * Twenty valid routes and one broken one change NOTHING. That is checked twice
- * over: the document is judged before anything is written, and the writing
- * happens in one transaction.
+ * Twenty valid routes and one broken one: the twenty are imported and the broken
+ * one is SKIPPED, with its number and every reason. No rule is relaxed for it.
+ * Each entry is written in its own transaction, so a Combination is never half
+ * saved. Only a document that cannot be read refuses everything.
  *
  * ── AND WHAT IS DELIBERATELY NOT TESTED HERE ────────────────────────────────
  * What a valid route is. The rules come from the manual endpoints' own DTOs and
@@ -88,7 +92,7 @@ describe("bulk route import", () => {
     combinations: { create: jest.Mock };
   };
   let unitOfWork: { run: jest.Mock };
-  let logger: { setContext: jest.Mock; log: jest.Mock; warn: jest.Mock };
+  let logger: { setContext: jest.Mock; log: jest.Mock; warn: jest.Mock; error: jest.Mock };
   let validator: BulkRouteImportValidator;
   let service: BulkRouteImportService;
 
@@ -122,7 +126,7 @@ describe("bulk route import", () => {
       }),
     };
 
-    logger = { setContext: jest.fn(), log: jest.fn(), warn: jest.fn() };
+    logger = { setContext: jest.fn(), log: jest.fn(), warn: jest.fn(), error: jest.fn() };
 
     validator = new BulkRouteImportValidator(
       routePricing as unknown as RoutePricingService,
@@ -142,13 +146,25 @@ describe("bulk route import", () => {
    * Most tests are about the entries, so they hand over entries; the tests about
    * the DOCUMENT call the service directly with whatever they mean to send.
    */
-  const importRoutes = (routes: unknown[]) => service.import({ routes });
+  const importResult = (routes: unknown[]) => service.import({ routes });
+  /** What an import created. */
+  const importRoutes = async (routes: unknown[]) => (await importResult(routes)).imported;
   const checkRoutes = (routes: unknown[]) => service.check({ routes });
 
-  /** The reasons an import was refused, as readable lines. */
+  /**
+   * Why an import did not take entries, as readable lines: the document's own
+   * refusal, or the reasons of every skipped entry in document order.
+   */
   async function refusalOf(routes: unknown[]): Promise<string[]> {
     try {
-      await importRoutes(routes);
+      const { skipped } = await importResult(routes);
+      const lines = skipped.flatMap((entry) => entry.reasons).sort(byEntry).map(describeImportProblem);
+
+      if (lines.length === 0) {
+        throw new Error("nothing was skipped");
+      }
+
+      return lines;
     } catch (error: unknown) {
       if (error instanceof BulkRouteImportRefusedException) {
         const payload = error.getResponse() as { details: string[] };
@@ -158,8 +174,6 @@ describe("bulk route import", () => {
 
       throw error;
     }
-
-    throw new Error("the import was not refused");
   }
 
   describe("ordinary routes", () => {
@@ -664,43 +678,83 @@ describe("bulk route import", () => {
     });
   });
 
-  describe("all or nothing", () => {
+  describe("skipping what is invalid, importing the rest", () => {
     /**
      * ── THE HEADLINE PROMISE ───────────────────────────────────────────────
-     * Twenty valid routes and one broken one produce no database change at all.
-     * Proved by the strongest available assertion: the transaction is never even
-     * opened, so there is nothing to roll back.
+     * One broken entry no longer blocks twenty valid ones.
      */
-    it("creates nothing when one entry of twenty-one is invalid", async () => {
-      const routes = [
-        ...Array.from({ length: 20 }, (_value, index) =>
-          normalRoute({ destination: `Kallo ${index}` }),
-        ),
+    it("2/14. imports the twenty valid entries and skips the invalid one", async () => {
+      const result = await importResult([
+        ...Array.from({ length: 20 }, (_value, index) => normalRoute({ destination: `Kallo ${index}` })),
         normalRoute({ departure: "Gent", destination: "Lille", tarief: -1 }),
-      ];
+      ]);
 
-      await expect(service.import(routes)).rejects.toBeInstanceOf(
-        BulkRouteImportRefusedException,
+      expect(result.outcome).toBe("PARTIAL");
+      expect(result.imported.normalRoutes).toBe(20);
+      expect(result.skipped).toEqual([
+        expect.objectContaining({ routeNumber: 21, type: "NORMAL", route: "Gent to Lille" }),
+      ]);
+      expect(configurationServices.routes.create).toHaveBeenCalledTimes(20);
+    });
+
+    it("1. a document of valid entries only is COMPLETED", async () => {
+      const result = await importResult([normalRoute(), combinationRoute()]);
+
+      expect(result).toMatchObject({ outcome: "COMPLETED", skipped: [], stoppedAt: null, notAttempted: 0 });
+      expect(result.imported.totalRoutes).toBe(3);
+    });
+
+    /** The two Combinations the owner's file was refused for. */
+    it("3/4. skips routes 15 and 29, whose legs are one road, and imports the rest", async () => {
+      const sameRoadTwice = combinationRoute({ legs: [leg(), leg({ tarief: 80 })] });
+      const document = Array.from({ length: 30 }, (_v, index) =>
+        index === 14 || index === 28 ? sameRoadTwice : normalRoute({ destination: `Kallo ${index}` }),
       );
 
-      expect(transactions).toBe(0);
-      expect(configurationServices.routes.create).not.toHaveBeenCalled();
+      const result = await importResult(document);
+
+      expect(result.outcome).toBe("PARTIAL");
+      expect(result.imported.normalRoutes).toBe(28);
+      expect(result.skipped.map((entry) => [entry.routeNumber, entry.reasons[0].code])).toEqual([
+        [15, "SAME_ROUTE_LEGS"],
+        [29, "SAME_ROUTE_LEGS"],
+      ]);
+      expect(result.skipped[0].reasons[0].message).toBe(
+        "the two legs of a Combination must be different routes",
+      );
       expect(configurationServices.combinations.create).not.toHaveBeenCalled();
     });
 
-    it("creates nothing when one Combination of a mixed document is invalid", async () => {
-      await expect(
-        importRoutes([
-          normalRoute(),
-          combinationRoute({ legs: [leg({ departure: "Gent" })] }),
-        ]),
-      ).rejects.toBeInstanceOf(BulkRouteImportRefusedException);
+    it("5. imports a Combination of two different roads beside a skipped one", async () => {
+      const result = await importResult([
+        combinationRoute({ legs: [leg(), leg()] }),
+        combinationRoute(),
+      ]);
 
-      expect(configurationServices.routes.create).not.toHaveBeenCalled();
+      expect(result.imported.combinationGroups).toBe(1);
+      expect(configurationServices.combinations.create).toHaveBeenCalledTimes(1);
     });
 
-    /** And a valid document is written inside ONE transaction, not many. */
-    it("writes a valid document in a single transaction", async () => {
+    it("9. skips an entry with a missing required field and keeps the others", async () => {
+      const { tarief: _missing, ...withoutTarief } = normalRoute({ destination: "Lille" });
+      const result = await importResult([normalRoute(), withoutTarief]);
+
+      expect(result.imported.normalRoutes).toBe(1);
+      expect(result.skipped[0]).toMatchObject({
+        routeNumber: 2,
+        reasons: [expect.objectContaining({ field: "tarief", message: "tarief is required", code: "INVALID" })],
+      });
+    });
+
+    it("says NOTHING_IMPORTED when every entry is skipped", async () => {
+      const result = await importResult([normalRoute({ tarief: -1 })]);
+
+      expect(result.outcome).toBe("NOTHING_IMPORTED");
+      expect(transactions).toBe(0);
+    });
+
+    /** Each entry its own transaction: one failure cannot undo another. */
+    it("writes every entry in its own transaction", async () => {
       await importRoutes([
         normalRoute(),
         normalRoute({ departure: "Gent", destination: "Lille" }),
@@ -712,27 +766,177 @@ describe("bulk route import", () => {
         }),
       ]);
 
-      expect(transactions).toBe(1);
-      expect(unitOfWork.run).toHaveBeenCalledTimes(1);
+      expect(transactions).toBe(3);
     });
 
     /**
-     * The refusal says the one thing that matters before the list of reasons.
-     * A caller that shows a single line shows this one.
+     * Taken between the check and the write: the database refuses it as a
+     * duplicate. That entry is skipped — the others still go in.
      */
-    it("says in so many words that nothing was created", async () => {
-      await expect(
-        importRoutes([normalRoute({ tarief: -1 })]),
-      ).rejects.toThrow(/nothing was created/);
+    it("skips an entry the database refuses as already configured while importing", async () => {
+      configurationServices.routes.create.mockImplementation(async (route: { destination: string }) => {
+        if (route.destination === "Lille") {
+          throw new DuplicateActiveRouteException("Gent", "Lille");
+        }
+        return {};
+      });
+
+      const result = await importResult([
+        normalRoute(),
+        normalRoute({ departure: "Gent", destination: "Lille" }),
+        normalRoute({ departure: "Gent", destination: "Brugge" }),
+      ]);
+
+      expect(result.outcome).toBe("PARTIAL");
+      expect(result.imported.normalRoutes).toBe(2);
+      expect(result.skipped).toEqual([
+        expect.objectContaining({
+          routeNumber: 2,
+          reasons: [expect.objectContaining({ code: "ALREADY_CONFIGURED" })],
+        }),
+      ]);
     });
 
-    it("counts the problems in that sentence", async () => {
-      await expect(
-        importRoutes([
-          normalRoute({ tarief: -1 }),
-          normalRoute({ departure: "Gent", destination: "Lille", tarief: -1 }),
-        ]),
-      ).rejects.toThrow(/2 problems found/);
+    /**
+     * ── 11. AN UNEXPLAINED FAILURE IS NOT A BAD ROUTE ───────────────────────
+     * It stops the import there and says so; it is not reported as one more
+     * skipped entry, and nothing after it is attempted.
+     */
+    it("11. stops at an unexpected database failure instead of skipping past it", async () => {
+      configurationServices.routes.create.mockImplementation(async (route: { destination: string }) => {
+        if (route.destination === "Lille") {
+          throw new Error("connection terminated unexpectedly");
+        }
+        return {};
+      });
+
+      const result = await importResult([
+        normalRoute(),
+        normalRoute({ departure: "Gent", destination: "Lille" }),
+        normalRoute({ departure: "Gent", destination: "Brugge" }),
+      ]);
+
+      expect(result).toMatchObject({
+        outcome: "ABORTED",
+        stoppedAt: { routeNumber: 2 },
+        notAttempted: 1,
+        skipped: [],
+      });
+      expect(result.imported.normalRoutes).toBe(1);
+      expect(configurationServices.routes.create).toHaveBeenCalledTimes(2);
+      expect(logger.error).toHaveBeenCalledWith(
+        "Bulk route import stopped by an unexpected error",
+        expect.objectContaining({ routeNumber: 2, error: "connection terminated unexpectedly" }),
+      );
+    });
+
+    it("15. still refuses a document it cannot read, creating nothing", async () => {
+      await expect(service.import({ prices: [] })).rejects.toThrow(/nothing was created/);
+
+      expect(transactions).toBe(0);
+    });
+
+    it("6. keeps the FIRST of two identical routes in one document and skips the later", async () => {
+      const result = await importResult([
+        normalRoute({ tarief: 100 }),
+        normalRoute({ departure: "Gent", destination: "Lille" }),
+        // Same road, other amounts: still the same route, never imported twice.
+        normalRoute({ tarief: 140 }),
+      ]);
+
+      expect(result.imported.normalRoutes).toBe(2);
+      expect(result.skipped).toEqual([
+        expect.objectContaining({
+          routeNumber: 3,
+          reasons: [
+            expect.objectContaining({
+              code: "DUPLICATE_IN_IMPORT",
+              message: "this route is already configured by route 1 of this import: Antwerp to Kallo",
+            }),
+          ],
+        }),
+      ]);
+      expect(configurationServices.routes.create.mock.calls.map(([route]) => route.tarief)).toEqual([100, 0 + 100]);
+    });
+
+    it("7. skips a route that is already configured and imports the rest", async () => {
+      routePricing.findConfiguredRoute.mockImplementation(async (departure: string) =>
+        departure === "Antwerp" ? { id: "stored" } : null,
+      );
+
+      const result = await importResult([normalRoute(), normalRoute({ departure: "Gent", destination: "Lille" })]);
+
+      expect(result.imported.normalRoutes).toBe(1);
+      expect(result.skipped[0].reasons[0]).toMatchObject({
+        code: "ALREADY_CONFIGURED",
+        message: "this route is already configured: Antwerp to Kallo",
+      });
+      expect(configurationServices.routes.create).toHaveBeenCalledTimes(1);
+    });
+
+    it("8. skips a Combination whose pair is already configured and keeps the others", async () => {
+      combinationPricing.findConfiguredCombination.mockImplementation(
+        async (roads: { departure: string }[]) => (roads[0].departure === "Antwerp" ? { id: "stored" } : null),
+      );
+
+      const result = await importResult([
+        combinationRoute(),
+        combinationRoute({
+          legs: [
+            leg({ departure: "Gent", destination: "Zeebrugge" }),
+            leg({ departure: "Zeebrugge", destination: "Gent" }),
+          ],
+        }),
+      ]);
+
+      expect(result.imported.combinationGroups).toBe(1);
+      expect(result.skipped[0]).toMatchObject({
+        routeNumber: 1,
+        type: "COMBINATION",
+        route: "Antwerp to Kallo and Kallo to Antwerp",
+        reasons: [expect.objectContaining({ code: "ALREADY_CONFIGURED" })],
+      });
+    });
+
+    it("12. reports counts, entry numbers, identities and reasons together", async () => {
+      const result = await importResult([
+        normalRoute(),
+        combinationRoute({ legs: [leg(), leg()] }),
+        { type: "NORMAL", departure: "Gent", destination: "Lille", tarief: "veel", toll: 0, tunnel: 0 },
+      ]);
+
+      expect(result).toEqual({
+        outcome: "PARTIAL",
+        imported: { normalRoutes: 1, combinationGroups: 0, combinationLegs: 0, totalRoutes: 1 },
+        skipped: [
+          expect.objectContaining({ routeNumber: 2, type: "COMBINATION", route: "Antwerp to Kallo and Antwerp to Kallo" }),
+          expect.objectContaining({ routeNumber: 3, type: "NORMAL", route: "Gent to Lille" }),
+        ],
+        stoppedAt: null,
+        notAttempted: 0,
+      });
+      expect(result.skipped[1].reasons[0]).toMatchObject({ field: "tarief", code: "INVALID" });
+    });
+
+    it("previews the same split before anything is written", async () => {
+      const check = await checkRoutes([normalRoute(), combinationRoute({ legs: [leg(), leg()] })]);
+
+      expect(check).toMatchObject({ isValid: false, summary: { normalRoutes: 1, totalRoutes: 1 } });
+      expect(check.skipped.map((entry) => entry.routeNumber)).toEqual([2]);
+      expect(transactions).toBe(0);
+    });
+
+    it("numbers skipped entries by their place in the document, not among the valid ones", async () => {
+      routePricing.findConfiguredRoute.mockImplementation(async (_departure: string, destination: string) =>
+        destination === "Lille" ? { id: "stored" } : null,
+      );
+
+      const result = await importResult([
+        normalRoute({ tarief: -1 }),
+        normalRoute({ departure: "Gent", destination: "Lille" }),
+      ]);
+
+      expect(result.skipped.map((entry) => entry.routeNumber)).toEqual([1, 2]);
     });
   });
 
@@ -865,7 +1069,7 @@ describe("bulk route import", () => {
     });
 
     /** What the operator actually has: many Combinations out of few terminals. */
-    it("imports 209 Combinations sharing legs in one transaction", async () => {
+    it("imports 209 Combinations sharing legs", async () => {
       const document = Array.from({ length: 209 }, (_, index) =>
         combinationRoute({
           legs: [
@@ -887,22 +1091,21 @@ describe("bulk route import", () => {
         combinationGroups: 209,
         combinationLegs: 418,
       });
-      expect(transactions).toBe(1);
+      expect(transactions).toBe(209);
       expect(configurationServices.combinations.create).toHaveBeenCalledTimes(
         209,
       );
     });
 
-    /** One broken entry among shared legs still changes nothing at all. */
-    it("writes nothing when one of the shared-leg Combinations is invalid", async () => {
+    /** One broken entry among shared legs is skipped; its sibling goes in. */
+    it("imports the valid shared-leg Combination beside an invalid one", async () => {
       const [valid, second] = sharingLegOne(2);
 
-      await expect(
-        importRoutes([valid, { ...second, legs: [second.legs[0]] }]),
-      ).rejects.toThrow(/nothing was created/);
+      const result = await importResult([valid, { ...second, legs: [second.legs[0]] }]);
 
-      expect(transactions).toBe(0);
-      expect(configurationServices.combinations.create).not.toHaveBeenCalled();
+      expect(result.imported.combinationGroups).toBe(1);
+      expect(result.skipped.map((entry) => entry.routeNumber)).toEqual([2]);
+      expect(configurationServices.combinations.create).toHaveBeenCalledTimes(1);
     });
 
     /** A mixed document: ordinary routes beside Combinations that share legs. */
@@ -1138,17 +1341,18 @@ describe("bulk route import", () => {
 
       const logged = JSON.stringify(logger.log.mock.calls);
 
-      expect(logged).toContain("Bulk route import completed");
+      expect(logged).toContain("Bulk route import finished");
       expect(logged).not.toContain("1234.56");
     });
 
-    it("says how many entries were refused, without the amounts", async () => {
+    it("says which entries were skipped, without the amounts", async () => {
       await refusalOf([normalRoute({ tarief: -9999.99 })]);
 
-      expect(logger.warn).toHaveBeenCalledWith("Bulk route import refused", {
-        errorCount: 1,
-      });
-      expect(JSON.stringify(logger.warn.mock.calls)).not.toContain("9999.99");
+      expect(logger.log).toHaveBeenCalledWith(
+        "Bulk route import finished",
+        expect.objectContaining({ skippedRouteNumbers: [1] }),
+      );
+      expect(JSON.stringify(logger.log.mock.calls)).not.toContain("9999.99");
     });
   });
 
@@ -1298,9 +1502,8 @@ describe("bulk route import", () => {
   });
 
   /**
-   * The bound exists because the whole import runs in one transaction, so its size
-   * decides how long that transaction holds its locks. It is enforced by the
-   * envelope DTO, which the ValidationPipe applies before this service is reached.
+   * A bound on how much work one request may carry, enforced when the document
+   * is read.
    */
   it("bounds how many routes one import may carry", () => {
     expect(MAX_IMPORT_ROUTES).toBe(500);

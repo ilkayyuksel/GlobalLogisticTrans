@@ -26,7 +26,7 @@ import { CombinationRouteConfigurationService } from "./combination-route-config
 import {
   BulkImportRouteConfigurationDto,
   BulkRouteImportCheckDto,
-  BulkRouteImportSummaryDto,
+  BulkRouteImportResultDto,
 } from "./dto/bulk-route-import.dto";
 import { CombinationRouteGroupIdParamDto } from "./dto/combination-route-group-id-param.dto";
 import { ReviewRouteConfigurationDto } from "./dto/review-route-configuration.dto";
@@ -203,8 +203,8 @@ export class RouteConfigurationController {
    *
    * Two endpoints because an operator pasting eighty routes needs to see what will
    * happen before it does: `bulk/check` answers that and writes nothing, `bulk`
-   * performs it in one transaction. Both ask the same validator the same question,
-   * so the preview cannot disagree with the import about what is valid.
+   * performs it. Both ask the same validator the same question, so the preview
+   * cannot disagree with the import about what is imported and what is skipped.
    *
    * Both take the document RAW rather than through a validated DTO. The global
    * pipe strips properties that carry no validation metadata, which emptied every
@@ -217,7 +217,7 @@ export class RouteConfigurationController {
   @ApiOperation({
     summary: "Check a bulk import without performing it",
     description:
-      "Validates the whole document and reports what it would create and every reason it would be refused — including routes that are already configured. Writes nothing: a refused document is an ordinary answer here, not an HTTP failure, because the caller asked what WOULD happen.",
+      "Validates the whole document and reports what it would create and which entries it would skip, with every reason — including routes that are already configured. Writes nothing.",
   })
   @ApiOkResponse({ type: BulkRouteImportCheckDto })
   @ApiBadRequestResponse({
@@ -232,15 +232,15 @@ export class RouteConfigurationController {
   @ApiOperation({
     summary: "Import many route configurations at once",
     description:
-      "Creates every entry through the same services the single-route endpoints use, inside ONE transaction. Twenty valid routes and one invalid one change nothing: the whole document is validated first, and the refusal lists every problem with the number of the entry it belongs to. Nothing is ever overwritten — an entry whose route is already configured is a refusal, not an update.",
+      "Creates every valid entry through the same services the single-route endpoints use, each entry in its own transaction. An entry that breaks a rule, repeats an earlier entry or is already configured is skipped and reported with its number and reasons; the rest are imported. Nothing is ever overwritten. An unexpected failure stops the import (outcome ABORTED) and says where.",
   })
-  @ApiCreatedResponse({ type: BulkRouteImportSummaryDto })
+  @ApiCreatedResponse({ type: BulkRouteImportResultDto })
   @ApiBadRequestResponse({
     description:
-      "One or more entries were refused. No record was created; `details` lists the reasons per entry.",
+      "The document itself cannot be read — no routes array, or too many entries. Nothing was created.",
   })
   @ApiBody({ type: BulkImportRouteConfigurationDto })
-  runBulkImport(@Body() document: unknown): Promise<BulkRouteImportSummaryDto> {
+  runBulkImport(@Body() document: unknown): Promise<BulkRouteImportResultDto> {
     return this.bulkImport.import(document);
   }
 

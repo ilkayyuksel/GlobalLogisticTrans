@@ -12,12 +12,11 @@ import { RouteConfigurationService } from "./route-configuration.service";
 import { RouteComponentCostService } from "./route-component-cost.service";
 
 /**
- * How long one import may hold its transaction.
+ * How long one unit of work may hold its transaction.
  *
- * Prisma's default of five seconds is comfortable for the two or three writes an
- * ordinary request makes and much too short for a few hundred routes. The bound
- * is explicit rather than inherited, so a large import fails on its own merits
- * instead of on a timeout nobody chose.
+ * The bulk import now runs one per entry, which needs far less; the bound stays
+ * explicit rather than inherited, so a slow write fails on a timeout somebody
+ * chose.
  */
 const IMPORT_TRANSACTION_TIMEOUT_MS = 60_000;
 
@@ -34,11 +33,11 @@ export interface RouteConfigurationServices {
  * Runs work against the configuration services inside ONE database transaction.
  *
  * ── WHY THIS EXISTS ─────────────────────────────────────────────────────────
- * A bulk import must be all or nothing, and configuring one route is already
- * several writes across two tables — a `route_pricing` row and a tunnel
- * `route_cost`. A transaction that covered only one of them would leave a route
- * priced without its tunnel, and a loop of ordinary service calls would leave
- * nineteen routes behind when the twentieth failed.
+ * Configuring one route is already several writes across two tables — a
+ * `route_pricing` row (two, and a group, for a Combination) and its toll and
+ * tunnel `route_cost` rows. A transaction that covered only some of them would
+ * leave a route priced without its tunnel, or half a Combination. The bulk
+ * import runs one of these per entry; leg sync and bulk removal one per action.
  *
  * ── AND WHY IT BUILDS THE SERVICES RATHER THAN BYPASSING THEM ────────────────
  * The alternative was to write the rows directly from the importer, which would
@@ -80,7 +79,7 @@ export class RouteConfigurationUnitOfWork {
    * precisely the failure this class exists to prevent.
    */
   private servicesFor(transaction: unknown): RouteConfigurationServices {
-    const client = transaction as PrismaService;
+    const client = transactionBound(transaction as PrismaService);
 
     const routePricingRepository = new RoutePricingRepository(client);
     const routeCostRepository = new RouteCostRepository(client);
@@ -104,4 +103,30 @@ export class RouteConfigurationUnitOfWork {
       ),
     };
   }
+}
+
+/**
+ * The transaction's client, with nested `$transaction` calls kept INSIDE it.
+ *
+ * ── WHY ─────────────────────────────────────────────────────────────────────
+ * The services open transactions of their own: a Combination writes its group
+ * and both legs through `RoutePricingRepository.runInTransaction`, and a route
+ * cost page is read through a batch `$transaction([...])`. Called on a
+ * transaction's client, Prisma starts a SEPARATE transaction for each — so a
+ * Combination committed on its own, and a failure writing its tolls afterwards
+ * left it stored without them. Here both forms simply run in the unit of work's
+ * own transaction: one entry is all its rows or none of them.
+ * ────────────────────────────────────────────────────────────────────────────
+ */
+function transactionBound(transaction: PrismaService): PrismaService {
+  type Nested = readonly Promise<unknown>[] | ((client: PrismaService) => Promise<unknown>);
+
+  const bound: PrismaService = new Proxy(transaction, {
+    get: (target, property) =>
+      property === "$transaction"
+        ? (nested: Nested) => (typeof nested === "function" ? nested(bound) : Promise.all(nested))
+        : Reflect.get(target, property, target),
+  });
+
+  return bound;
 }
