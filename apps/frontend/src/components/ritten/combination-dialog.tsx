@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useCallback } from "react";
 
+import { GroupMemberPricing } from "@/components/ritten/group-member-pricing";
 import { TripStatusBadge } from "@/components/trips/trip-status-badge";
 import { ErrorState, LoadingState } from "@/components/ui/states";
 import { useAsync } from "@/hooks/use-async";
@@ -190,6 +191,9 @@ function Member({
             : t("ritten.value.noDriver")}
         </Detail>
       </dl>
+
+      {/* Which Combination priced this leg — as its stored price recorded it. */}
+      <GroupMemberPricing trip={trip} />
     </>
   );
 }

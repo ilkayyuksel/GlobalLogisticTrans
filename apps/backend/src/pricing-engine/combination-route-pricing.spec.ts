@@ -443,7 +443,37 @@ describe("one road configured as an ordinary route and as a Combination leg", ()
       trips.findByGroupId.mockResolvedValue(manualGroup());
     });
 
-    it("is priced against the ordinary configuration", async () => {
+    /**
+     * October 2026: a group of exactly two is a pricing pair whatever its
+     * documents — its two roads name the configured Combination, so it is
+     * priced on that Combination's leg.
+     */
+    it("is priced on the Combination its two roads name", async () => {
+      expect(await amountsOf()).toMatchObject({
+        BASE_PRICE: "100.00",
+        TOLL: "9.75",
+        TUNNEL: "3.75",
+      });
+    });
+
+    it("is priced against the ordinary configuration when its pair is no Combination", async () => {
+      combinationPricing.findAll.mockResolvedValue([combinationOf("Beveren")]);
+
+      expect(await amountsOf()).toMatchObject({
+        BASE_PRICE: "380.00",
+        TUNNEL: "12.50",
+      });
+    });
+
+    /** Three or more Trips with no genuine pair: which would be the other leg is not guessed. */
+    it("is priced against the ordinary configuration in a larger group", async () => {
+      const [outbound, partner] = manualGroup();
+      trips.findByGroupId.mockResolvedValue([
+        outbound,
+        partner,
+        { ...partner, id: "third-trip", pdfDocumentId: "pdf-third" },
+      ]);
+
       expect(await amountsOf()).toMatchObject({
         BASE_PRICE: "380.00",
         TUNNEL: "12.50",

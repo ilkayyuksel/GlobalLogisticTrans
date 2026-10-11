@@ -53,6 +53,7 @@ function asMember(trip: Record<string, unknown>) {
     tripGroupId: (trip.tripGroupId ?? null) as string | null,
     pdfDocumentId: (trip.pdfDocumentId ?? null) as string | null,
     direction: (trip.direction ?? null) as never,
+    status: "OPEN" as const,
   };
 }
 

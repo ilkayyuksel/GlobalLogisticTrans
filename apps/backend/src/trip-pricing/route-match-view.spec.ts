@@ -28,6 +28,7 @@ function stored(overrides: Partial<StoredRouteMatch> = {}): StoredRouteMatch {
     routeMatch: "EXACT",
     routePricingId: "route-1",
     combinationRouteGroupId: null,
+    combinationMatch: null,
     routeLegs: [ORDINARY_LEG],
     items: [line("BASE_PRICE", "Quay 869 - Ghlin", "200.00")],
     ...overrides,
@@ -40,6 +41,7 @@ describe("the route a stored price was matched to", () => {
       method: "EXACT",
       routePricingId: "route-1",
       combinationRouteGroupId: null,
+      combinationMatch: null,
       legs: [
         {
           legPosition: null,

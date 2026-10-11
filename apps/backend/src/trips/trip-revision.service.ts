@@ -27,6 +27,7 @@ import {
   repriceAfterCombinationInputChange,
   type CombinationInputChange,
 } from "./planning-date-change";
+import { repriceAfterPartnerStatusChange } from "./partner-status-change";
 import { TripIdentity, TripRepository } from "./trip.repository";
 
 /**
@@ -245,6 +246,7 @@ export class TripRevisionService {
     document?: DocumentReference,
   ): Promise<CancellationOutcome> {
     let matchMethod: MatchMethod | null = null;
+    let cancelled: Trip | null = null;
 
     const outcome = await this.repository.runInTransaction(
       async (repository): Promise<CancellationOutcome> => {
@@ -305,6 +307,7 @@ export class TripRevisionService {
             newValue: { status: TripStatus.CANCELLED },
             description: "Cancelled by a transport document.",
           });
+          cancelled = { ...match.trip, status: TripStatus.CANCELLED };
 
           return "CANCELLED";
         }
@@ -349,6 +352,11 @@ export class TripRevisionService {
       outcome,
       matchMethod,
     });
+
+    // After the commit: a cancelled Trip leaves its pricing pair.
+    if (cancelled) {
+      await this.repricePartnersAfterStatusChange(cancelled, TripStatus.OPEN);
+    }
 
     return outcome;
   }
@@ -500,6 +508,7 @@ export class TripRevisionService {
     });
 
     await this.repriceIfCombinationInputChanged(changed, result);
+    await this.repricePartnersIfReopened(result);
 
     return result;
   }
@@ -616,6 +625,7 @@ export class TripRevisionService {
     });
 
     await this.repriceIfCombinationInputChanged(changed, result);
+    await this.repricePartnersIfReopened(result);
 
     return result;
   }
@@ -645,6 +655,31 @@ export class TripRevisionService {
       changed,
       this.recalculation,
       (tripId) => this.repository.findById(tripId),
+      this.logger,
+    );
+  }
+
+  /**
+   * A Trip a document brought back from CANCELLED may rejoin a pricing pair:
+   * its CLOSED partners are repriced — see `repriceAfterPartnerStatusChange`.
+   */
+  private async repricePartnersIfReopened(result: RevisionResult): Promise<void> {
+    if (result.outcome !== "REOPENED" || !result.trip) {
+      return;
+    }
+
+    await this.repricePartnersAfterStatusChange(result.trip, TripStatus.CANCELLED);
+  }
+
+  private async repricePartnersAfterStatusChange(
+    changed: Trip,
+    previousStatus: TripStatus,
+  ): Promise<void> {
+    await repriceAfterPartnerStatusChange(
+      changed,
+      previousStatus,
+      this.recalculation,
+      (tripGroupId) => this.repository.findManyByGroupId(tripGroupId),
       this.logger,
     );
   }

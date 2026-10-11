@@ -101,6 +101,7 @@ export class PricingSnapshotWriter {
       routePricingId: result.context.routeMatch.routePricingId,
       routeMatch: result.context.routeMatch.method,
       combinationRouteGroupId: result.context.routeMatch.combinationRouteGroupId,
+      combinationMatch: result.context.routeMatch.combinationMatch,
       routeLegs: result.context.routeMatch.legs.map((leg) => ({
         legPosition: leg.legPosition,
         isPricedLeg: leg.isPricedLeg,

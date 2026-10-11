@@ -90,12 +90,16 @@ describe("which route a stored price came from, through every trigger", () => {
     });
   }
 
-  /** Leg 2 priced on its own: the ordinary road Mons → Quay 869, not configured. */
-  async function expectUnmatched(tripId: string) {
+  /**
+   * Leg 2 priced on its own: the ordinary road Mons → Quay 869, not configured
+   * — and, for a grouped Trip, why its pair was no Combination.
+   */
+  async function expectUnmatched(tripId: string, combinationMatch: string | null) {
     expect(await apiRoute(tripId)).toEqual({
       method: "NOT_FOUND",
       routePricingId: null,
       combinationRouteGroupId: null,
+      combinationMatch,
       legs: [],
       overSt: null,
     });
@@ -111,6 +115,8 @@ describe("which route a stored price came from, through every trigger", () => {
         method: "NORMALIZED",
         routePricingId: "route-1",
         combinationRouteGroupId: null,
+        // In no group: no Combination pair to speak of.
+        combinationMatch: null,
         legs: [
           {
             legPosition: null,
@@ -168,7 +174,7 @@ describe("which route a stored price came from, through every trigger", () => {
       await actions.close(LEG1);
       await actions.close(LEG2);
       // Apart, each is an ordinary Trip: Leg 2's road is no ordinary route.
-      await expectUnmatched(LEG2);
+      await expectUnmatched(LEG2, null);
 
       await world.tripService.createGroup([LEG1, LEG2]);
 
@@ -183,7 +189,7 @@ describe("which route a stored price came from, through every trigger", () => {
       await world.tripService.removeFromGroup(LEG1);
 
       // Leg 2 is no longer half of a pair: no Combination, no Over ST, no €70.
-      await expectUnmatched(LEG2);
+      await expectUnmatched(LEG2, "NO_PAIR");
       expect(actions.surcharges(LEG2)).toEqual([]);
       // Leg 1, out of the group, prices on its ordinary road.
       expect((await apiRoute(LEG1))?.legs).toEqual([
@@ -297,7 +303,7 @@ describe("which route a stored price came from, through every trigger", () => {
 
       // Leg 2's pair is no configured Combination any more: its own ordinary
       // road (Mons → Quay 869) is not configured either — and no Over ST.
-      await expectUnmatched(LEG2);
+      await expectUnmatched(LEG2, "LEG_NOT_IDENTIFIED");
       expect(actions.surcharges(LEG2)).toEqual([]);
 
       await world.tripService.update(LEG1, { destinationCity: "Ghlin" });
@@ -357,6 +363,7 @@ describe("which route a stored price came from, through every trigger", () => {
         routePricingId: older.context.routeMatch.routePricingId,
         routeMatch: older.context.routeMatch.method,
         combinationRouteGroupId: null,
+        combinationMatch: older.context.routeMatch.combinationMatch,
         routeLegs: older.context.routeMatch.legs.map((leg) => ({
           legPosition: leg.legPosition,
           isPricedLeg: leg.isPricedLeg,

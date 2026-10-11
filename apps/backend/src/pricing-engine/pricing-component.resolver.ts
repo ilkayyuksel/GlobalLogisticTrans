@@ -22,7 +22,12 @@ import { meaningfulTarNummer } from "../trips/tar-nummer";
 import { toUtcDate } from "../common/dates";
 import { TarChargeReadRepository } from "./tar-charge-read.repository";
 import { TripReadService, TripReadView } from "../trips/trip-read.service";
-import { CombinationLeg, combinationLegOf } from "./combination-leg";
+import {
+  CombinationLeg,
+  combinationLegOf,
+  pricingPartnerOf,
+  type PricingPairBasis,
+} from "./combination-leg";
 import { MissingTripPricingInputException } from "./exceptions/pricing-engine.exceptions";
 import {
   PricingBaseSource,
@@ -75,9 +80,13 @@ export interface MatchedRouteConfiguration {
   readonly overSt: PricingOverStInput | null;
 }
 import { PricingRuleResolver } from "./pricing-rule.resolver";
-import { decideOverSt, partnerOf, pricingRoadOf } from "./combination-over-st";
+import { decideOverSt, pricingRoadOf } from "./combination-over-st";
 import type { PricingRouteMatchTrace } from "./pricing-calculation-context";
-import { combinationTrace, ordinaryRouteTrace } from "./route-match-trace";
+import {
+  CombinationMatchOutcome,
+  combinationTrace,
+  ordinaryRouteTrace,
+} from "./route-match-trace";
 
 /** Which configured route a Trip prices against, and how it was matched. */
 export interface RouteSelection {
@@ -87,13 +96,16 @@ export interface RouteSelection {
   readonly trace: PricingRouteMatchTrace;
 }
 
+type PairMatch = CombinationPairMatch<CombinationRoutePricingDto, RoutePricingResponseDto>;
+
 /** A Combination pair as pricing looks it up: a partner, then the pair. */
 type PairLookup =
   | { readonly kind: "NO_PARTNER" }
   | {
       readonly kind: "LOOKED_UP";
       readonly partner: TripReadView;
-      readonly match: CombinationPairMatch<CombinationRoutePricingDto, RoutePricingResponseDto>;
+      readonly basis: PricingPairBasis;
+      readonly match: PairMatch;
     };
 
 /**
@@ -373,9 +385,12 @@ export class PricingComponentResolver {
    * single trusted typo — never an alias, never a reversed road.
    *
    * ── WHICH CONFIGURATION ───────────────────────────────────────────────────
-   *   a leg of a GENUINE Combination (`combinationLegOf`) whose PAIR of roads
-   *     is one configured Combination → that Combination's leg, with its Over ST;
-   *   anything else, or a pair that is not identified → the ordinary route.
+   *   a grouped Trip with a pricing partner (`pricingPartnerOf`: the other leg
+   *     of its document, or the other member of a group of two) whose PAIR of
+   *     roads is one configured Combination → that Combination's leg, with its
+   *     Over ST;
+   *   anything else, or a pair that is not identified → the ordinary route, and
+   *     the snapshot records why (`combinationMatch`).
    *
    * A road alone never picks a Combination: one road may be a leg of many, and
    * the first of them is not an answer. That fallback is gone.
@@ -398,23 +413,38 @@ export class PricingComponentResolver {
         result: "route components priced at zero",
       });
 
-      return { route: null, trace: ordinaryRouteTrace(null, RouteMatchMethod.NOT_FOUND) };
+      return {
+        route: null,
+        trace: ordinaryRouteTrace(
+          null,
+          RouteMatchMethod.NOT_FOUND,
+          // A grouped Trip without a road is a leg that cannot be identified.
+          trip.tripGroupId === null ? null : CombinationMatchOutcome.LEG_NOT_IDENTIFIED,
+        ),
+      };
     }
 
-    if (await this.isGenuineCombinationLeg(trip)) {
-      const combination = await this.selectCombinationLeg(trip, road);
-
-      if (combination) {
-        return combination;
-      }
+    if (trip.tripGroupId === null) {
+      return this.selectOrdinaryRoute(trip, road, null);
     }
 
-    return this.selectOrdinaryRoute(trip, road);
+    const lookup = await this.findCombinationPair(trip, road);
+
+    if (lookup.kind === "LOOKED_UP" && lookup.match.kind === "MATCHED") {
+      return this.selectCombinationLeg(trip, lookup.partner, lookup.match);
+    }
+
+    const outcome =
+      lookup.kind === "NO_PARTNER" ? CombinationMatchOutcome.NO_PAIR : lookup.match.kind;
+    this.reportPairNotIdentified(trip, road, lookup, outcome);
+
+    return this.selectOrdinaryRoute(trip, road, outcome);
   }
 
   private async selectOrdinaryRoute(
     trip: TripReadView,
     road: RoadEndpoints,
+    combinationMatch: CombinationMatchOutcome | null,
   ): Promise<RouteSelection> {
     const match = matchRoad(road, await this.routePricingService.findAllOrdinary());
     /*
@@ -430,46 +460,55 @@ export class PricingComponentResolver {
 
     return {
       route: route ? this.toMatch(route, RouteConfigurationKind.NORMAL) : null,
-      trace: ordinaryRouteTrace(route, method),
+      trace: ordinaryRouteTrace(route, method, combinationMatch),
     };
   }
 
   /**
-   * The leg of the Combination configured for this Trip's PAIR of roads, or
-   * null when the pair is not identified — the caller then prices the ordinary
-   * route, and the reason is logged.
+   * A grouped Trip whose pair is no configured Combination: why, at the level
+   * it deserves. A group with no pricing pair (three or more Trips, or a
+   * partner without a road) is ordinary; a pair whose roads name no single
+   * Combination is worth a warning — someone may expect a Combination price.
    */
-  private async selectCombinationLeg(
+  private reportPairNotIdentified(
     trip: TripReadView,
     road: RoadEndpoints,
-  ): Promise<RouteSelection | null> {
-    const lookup = await this.findCombinationPair(trip, road);
+    lookup: PairLookup,
+    outcome: CombinationMatchOutcome,
+  ): void {
+    const context = {
+      tripId: trip.id,
+      tripGroupId: trip.tripGroupId,
+      combinationMatch: outcome,
+      departure: road.departure,
+      destination: road.destination,
+      ...(lookup.kind === "LOOKED_UP" && lookup.match.kind !== "MATCHED"
+        ? {
+            partnerTripId: lookup.partner.id,
+            pairBasis: lookup.basis,
+            legMethods: lookup.match.roads.map((each) => each.method),
+          }
+        : {}),
+    };
 
-    if (lookup.kind === "NO_PARTNER" || lookup.match.kind !== "MATCHED") {
-      this.logger.warn("Combination pair not identified; pricing the ordinary route", {
-        tripId: trip.id,
-        reason: lookup.kind === "NO_PARTNER" ? "NO_PARTNER" : lookup.match.kind,
-        departure: road.departure,
-        destination: road.destination,
-        ...(lookup.kind === "LOOKED_UP" && lookup.match.kind !== "MATCHED"
-          ? {
-              partnerTripId: lookup.partner.id,
-              legMethods: lookup.match.roads.map((each) => each.method),
-            }
-          : {}),
-      });
+    if (lookup.kind === "NO_PARTNER") {
+      this.logger.log("Grouped Trip has no pricing pair; pricing the ordinary route", context);
 
-      return null;
+      return;
     }
 
-    const { group, legs, method, methods } = lookup.match;
+    this.logger.warn("Combination pair not identified; pricing the ordinary route", context);
+  }
+
+  /** This Trip's leg of the Combination configured for its PAIR of roads. */
+  private selectCombinationLeg(
+    trip: TripReadView,
+    partner: TripReadView,
+    match: Extract<PairMatch, { kind: "MATCHED" }>,
+  ): RouteSelection {
+    const { group, legs, method, methods } = match;
     const ownLeg = legs[0];
-    const overSt = decideOverSt(
-      ownLeg.combinationLegPosition,
-      trip,
-      lookup.partner,
-      group.overSt,
-    );
+    const overSt = decideOverSt(ownLeg.combinationLegPosition, trip, partner, group.overSt);
 
     this.logger.log("Combination matched by its pair of roads", {
       tripId: trip.id,
@@ -558,7 +597,7 @@ export class PricingComponentResolver {
   async legsPricedByPlanningDate(trip: TripReadView): Promise<string[]> {
     const road = pricingRoadOf(trip);
 
-    if (!road || !(await this.isGenuineCombinationLeg(trip))) {
+    if (!road || trip.tripGroupId === null) {
       return [];
     }
 
@@ -580,8 +619,8 @@ export class PricingComponentResolver {
 
   /**
    * The Trips whose pricing reads this Trip's road (terminal, destination or
-   * direction): this Trip and every member of its group from the same
-   * document — the candidates for its genuine pair.
+   * direction): this Trip, every member of its group from the same document,
+   * and its pricing partner — every candidate for a pair it belongs to.
    *
    * Deliberately wider than the pair as it stands now: a changed direction can
    * make a genuine pair malformed (or the reverse), and the partner's price
@@ -589,16 +628,21 @@ export class PricingComponentResolver {
    * same answer again; missing one leaves a stale price.
    */
   async tripsPricedByRoadOf(trip: TripReadView): Promise<string[]> {
-    if (trip.tripGroupId === null || trip.pdfDocumentId === null) {
+    if (trip.tripGroupId === null) {
       return [trip.id];
     }
 
     const members = await this.groupMembers(trip);
     const sameDocument = members
-      .filter((member) => member.pdfDocumentId === trip.pdfDocumentId)
+      .filter(
+        (member) =>
+          trip.pdfDocumentId !== null && member.pdfDocumentId === trip.pdfDocumentId,
+      )
       .map((member) => member.id);
+    const pairing = pricingPartnerOf(trip, members);
+    const partner = pairing.kind === "PAIRED" ? [pairing.partner.id] : [];
 
-    return [...new Set([trip.id, ...sameDocument])];
+    return [...new Set([trip.id, ...sameDocument, ...partner])];
   }
 
   /**
@@ -611,35 +655,22 @@ export class PricingComponentResolver {
     trip: TripReadView,
     road: RoadEndpoints,
   ): Promise<PairLookup> {
-    const partner = partnerOf(trip, await this.groupMembers(trip));
-    const partnerRoad = partner ? pricingRoadOf(partner) : null;
+    const pairing = pricingPartnerOf(trip, await this.groupMembers(trip));
+    const partnerRoad = pairing.kind === "PAIRED" ? pricingRoadOf(pairing.partner) : null;
 
-    if (!partner || !partnerRoad) {
+    if (pairing.kind === "UNPAIRED" || !partnerRoad) {
       return { kind: "NO_PARTNER" };
     }
 
     return {
       kind: "LOOKED_UP",
-      partner,
+      partner: pairing.partner,
+      basis: pairing.basis,
       match: matchCombinationPair(
         [road, partnerRoad],
         await this.combinationPricing.findAll(),
       ),
     };
-  }
-
-  /**
-   * Whether this Trip is a leg of a genuine Combination.
-   *
-   * The same question `resolveCombinationLeg` answers, asked for a different
-   * purpose — which route configuration applies, rather than which leg owes the
-   * TAR — and deliberately answered by the same rule. A Trip in no group returns
-   * without a query at all, so only a grouped Trip reads its group.
-   */
-  private async isGenuineCombinationLeg(trip: TripReadView): Promise<boolean> {
-    const leg = await this.resolveCombinationLeg(trip);
-
-    return leg === CombinationLeg.DELIVERY || leg === CombinationLeg.COLLECTION;
   }
 
   private toMatch(

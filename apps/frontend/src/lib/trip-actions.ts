@@ -141,6 +141,11 @@ export function canComplete(trip: Trip): boolean {
   return statusActionsFor(trip).some((action) => action.target === "CLOSED");
 }
 
+/** Only a finished Trip has a price to calculate again. */
+export function canReprice(trip: Trip): boolean {
+  return trip.status === "CLOSED";
+}
+
 export function canRestore(trip: Trip): boolean {
   return trip.status === "DELETED";
 }

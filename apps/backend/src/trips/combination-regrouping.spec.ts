@@ -477,13 +477,17 @@ describe("ungrouping reprices the Trip taken out", () => {
     expect(removed.pricing?.backload).toBe("0.00");
   });
 
-  it("reprices the pair, not the stranger, when a leg leaves a three-Trip group", async () => {
+  /**
+   * The two left behind now form a group of two — a pricing pair — so the
+   * stranger is repriced as well (October 2026).
+   */
+  it("reprices the pair and the stranger when a leg leaves a three-Trip group", async () => {
     const withStranger = [...PAIR, { ...STRANGER, tripGroupId: GROUP_ID }];
     const { service, recalculated } = harness(withStranger);
 
     await service.removeFromGroup(COLLECTION.id);
 
-    expect(recalculated().sort()).toEqual([COLLECTION.id, DELIVERY.id]);
+    expect(recalculated().sort()).toEqual([COLLECTION.id, DELIVERY.id, STRANGER.id].sort());
   });
 
   it("leaves an OPEN partner to its own close", async () => {
@@ -495,7 +499,7 @@ describe("ungrouping reprices the Trip taken out", () => {
     expect(recalculated()).toEqual([DELIVERY.id]);
   });
 
-  it("reprices the Trip that leaves a manual group, and not the one left behind", async () => {
+  it("reprices the Trip that leaves a manual group of two, and the one left behind", async () => {
     const manual = [
       { ...DELIVERY, tripGroupId: GROUP_ID },
       { ...STRANGER, tripGroupId: GROUP_ID },
@@ -504,7 +508,8 @@ describe("ungrouping reprices the Trip taken out", () => {
 
     const removed = await service.removeFromGroup(DELIVERY.id);
 
-    expect(recalculated()).toEqual([DELIVERY.id]);
+    // The one left behind lost its pricing pair; it keeps its Backload.
+    expect(recalculated().sort()).toEqual([DELIVERY.id, STRANGER.id].sort());
     expect(removed.pricing?.backload).toBe("0.00");
   });
 

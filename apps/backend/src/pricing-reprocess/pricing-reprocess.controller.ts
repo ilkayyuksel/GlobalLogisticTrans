@@ -1,4 +1,4 @@
-import { Controller, HttpCode, HttpStatus, Param, Post, UseFilters } from "@nestjs/common";
+import { Body, Controller, HttpCode, HttpStatus, Param, Post, UseFilters } from "@nestjs/common";
 import {
   ApiBadRequestResponse,
   ApiConflictResponse,
@@ -11,6 +11,8 @@ import {
 import { PricingEngineExceptionFilter } from "../pricing-engine/exceptions/pricing-engine-exception.filter";
 import { PricingEngineService } from "../pricing-engine/pricing-engine.service";
 import { PricingSnapshotDto } from "../trip-pricing/dto/pricing-snapshot.dto";
+import { BulkPricingReprocessService } from "./bulk-pricing-reprocess.service";
+import { BulkReprocessResultDto, ReprocessTripsDto } from "./dto/reprocess-trips.dto";
 import { TripIdParamDto } from "../trip-pricing/dto/trip-pricing-params.dto";
 import { TripPricingService } from "../trip-pricing/trip-pricing.service";
 
@@ -40,7 +42,28 @@ export class PricingReprocessController {
   constructor(
     private readonly pricingEngine: PricingEngineService,
     private readonly tripPricingService: TripPricingService,
+    private readonly bulkReprocess: BulkPricingReprocessService,
   ) {}
+
+  /**
+   * "Prijs herberekenen" for a selection: each finished Trip matched and priced
+   * again, every other one skipped — each with its own reported outcome. See
+   * `BulkPricingReprocessService`.
+   */
+  @Post("reprocessions")
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: "Reprocess the pricing of several selected Trips",
+    description:
+      "For each named Trip: when it is CLOSED (checked now, not as the caller last saw it), match its route again and calculate its whole price, exactly as the single-Trip reprocess does, and store it with its matched route as one snapshot. OPEN, CANCELLED and DELETED Trips are skipped (NOT_CLOSED), unknown ones too (NOT_FOUND); a Trip the Engine cannot price FAILS with the Engine's own reason and keeps its previous snapshot. Per Trip, not all-or-nothing: every Trip is reported. Only pricing is written — no Trip field, group, Custom Value or Cost Confirmation.",
+  })
+  @ApiOkResponse({ type: BulkReprocessResultDto })
+  @ApiBadRequestResponse({
+    description: "An empty list, duplicate ids, or a malformed UUID.",
+  })
+  reprocessMany(@Body() dto: ReprocessTripsDto): Promise<BulkReprocessResultDto> {
+    return this.bulkReprocess.reprocessMany(dto.tripIds);
+  }
 
   @Post("trip/:tripId/reprocess")
   @HttpCode(HttpStatus.OK)

@@ -120,6 +120,7 @@ describe("TripRevisionService", () => {
     transitionStatus: jest.Mock;
     update: jest.Mock;
     findById: jest.Mock;
+    findManyByGroupId: jest.Mock;
     recordHistory: jest.Mock;
     runInTransaction: jest.Mock;
     runTripWriteTransaction: jest.Mock;
@@ -230,6 +231,10 @@ describe("TripRevisionService", () => {
       findById: jest.fn((id: string) =>
         Promise.resolve(stored.find((candidate) => candidate.id === id) ?? null),
       ),
+      // Read when a Trip leaves or rejoins a pricing pair by its status.
+      findManyByGroupId: jest.fn((tripGroupId: string) =>
+        Promise.resolve(stored.filter((candidate) => candidate.tripGroupId === tripGroupId)),
+      ),
       /** Append-only, like the real one: rows are collected, never replaced. */
       recordHistory: jest.fn((entries: unknown[]) => {
         history.push(...entries);
@@ -259,6 +264,61 @@ describe("TripRevisionService", () => {
         error: jest.fn(),
       } as unknown as AppLoggerService,
     );
+  });
+
+  /**
+   * Only OPEN and CLOSED Trips are pricing partners: a document that cancels a
+   * grouped Trip, or brings one back, moves its CLOSED partner's pair.
+   */
+  describe("a document that moves a Trip in or out of a pricing pair", () => {
+    const GROUP = "group-1";
+    const PARTNER = "partner-1";
+
+    function closedPartner() {
+      return buildTrip({
+        id: PARTNER,
+        bookingNumber: "OTHER",
+        tripGroupId: GROUP,
+        pdfDocumentId: "pdf-partner",
+        status: TripStatus.CLOSED,
+      });
+    }
+
+    it("reprices the CLOSED partner of a Trip it cancels", async () => {
+      stored.push(buildTrip({ tripGroupId: GROUP }), closedPartner());
+
+      expect(await service.cancelByIdentity(identity())).toBe("CANCELLED");
+
+      expect(recalculation.recalculate.mock.calls).toEqual([[PARTNER]]);
+    });
+
+    it("reprices no one for a cancelled Trip in no group", async () => {
+      stored.push(buildTrip(), closedPartner());
+
+      await service.cancelByIdentity(identity());
+
+      expect(recalculation.recalculate).not.toHaveBeenCalled();
+    });
+
+    it("reprices no one when the cancellation is refused", async () => {
+      stored.push(buildTrip({ tripGroupId: GROUP, status: TripStatus.CLOSED }), closedPartner());
+
+      await service.cancelByIdentity(identity());
+
+      expect(recalculation.recalculate).not.toHaveBeenCalled();
+    });
+
+    it("reprices the CLOSED partner of a Trip a revision reopens", async () => {
+      stored.push(
+        buildTrip({ tripGroupId: GROUP, status: TripStatus.CANCELLED }),
+        closedPartner(),
+      );
+
+      const result = await service.applyDocumentRevision(buildDocument());
+
+      expect(result.outcome).toBe("REOPENED");
+      expect(recalculation.recalculate.mock.calls).toEqual([[PARTNER]]);
+    });
   });
 
   describe("cancelling", () => {

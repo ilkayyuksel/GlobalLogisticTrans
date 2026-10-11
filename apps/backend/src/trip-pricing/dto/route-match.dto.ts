@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from "@nestjs/swagger";
-import { RouteMatchMethod } from "@prisma/client";
+import { CombinationMatchOutcome, RouteMatchMethod } from "@prisma/client";
 
 import { MONEY_DECIMAL_PLACES } from "../../common/dto/money";
 import type { RouteMatchView } from "../route-match-view";
@@ -76,6 +76,15 @@ export class RouteMatchDto {
   })
   combinationRouteGroupId!: string | null;
 
+  @ApiPropertyOptional({
+    enum: CombinationMatchOutcome,
+    enumName: "CombinationMatchOutcome",
+    nullable: true,
+    description:
+      "For a Trip in a group: MATCHED when its pair of roads named one configured Combination, otherwise why it was priced on ordinary routes (NO_PAIR, LEG_NOT_IDENTIFIED, PAIR_NOT_CONFIGURED, AMBIGUOUS). Null for a Trip in no group, or a calculation that did not record it.",
+  })
+  combinationMatch!: CombinationMatchOutcome | null;
+
   @ApiProperty({
     type: [RouteMatchLegDto],
     description:
@@ -96,6 +105,7 @@ export function toRouteMatchDto(view: RouteMatchView): RouteMatchDto {
     method: view.method,
     routePricingId: view.routePricingId,
     combinationRouteGroupId: view.combinationRouteGroupId,
+    combinationMatch: view.combinationMatch,
     legs: view.legs.map((leg) => ({ ...leg })),
     overSt: view.overSt
       ? {

@@ -117,6 +117,8 @@ describe("Flat through a Trip's revisions", () => {
         trip = { ...trip, status };
         return Promise.resolve(trip);
       }),
+      // A Trip reopened from CANCELLED may rejoin a pricing pair.
+      findManyByGroupId: jest.fn(() => Promise.resolve([trip])),
       recordHistory: jest.fn().mockResolvedValue(undefined),
       runTripWriteTransaction: jest.fn(
         (work: (repositories: unknown) => Promise<unknown>) =>

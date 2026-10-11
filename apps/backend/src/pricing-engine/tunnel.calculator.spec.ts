@@ -66,7 +66,7 @@ function buildContext(
     isCombination: false,
     waitingTimeMinutes: 0,
     route: { departure: "MSC PSA European Terminal", destination: "Rotterdam" },
-    routeMatch: { routePricingId: "route-1", method: "EXACT", combinationRouteGroupId: null, legs: [] },
+    routeMatch: { routePricingId: "route-1", method: "EXACT", combinationRouteGroupId: null, combinationMatch: null, legs: [] },
     baseSource: {
       strategy: PricingStrategy.ROUTE_BASED,
       routePricingId: "route-1",

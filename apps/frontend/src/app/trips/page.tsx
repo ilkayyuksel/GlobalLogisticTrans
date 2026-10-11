@@ -49,7 +49,8 @@ import {
   sendTripPdfOverWhatsApp,
   type WhatsAppStatus,
 } from "@/lib/api/whatsapp";
-import { canComplete } from "@/lib/trip-actions";
+import { reprocessTrips } from "@/lib/api/pricing";
+import { canComplete, canReprice } from "@/lib/trip-actions";
 import {
   changeTripStatus,
   completeTrips,
@@ -71,6 +72,7 @@ import type {
   CostConfirmation,
   EffectivePricing,
   Trip,
+  TripReprocessResult,
 } from "@/lib/api/types";
 import { downloadBlob } from "@/lib/download";
 import { useTranslation } from "@/lib/i18n/language-provider";
@@ -268,6 +270,8 @@ function RittenList() {
   const [isCreating, setIsCreating] = useState(false);
 
   const [busyTripId, setBusyTripId] = useState<string | null>(null);
+  /** "Prijs herberekenen" is running for the selection: it cannot start twice. */
+  const [isRepricing, setIsRepricing] = useState(false);
   const [feedback, setFeedback] = useState<Feedback | null>(null);
 
   const [sort, setSort] = useUrlState(RITTEN_SORT_PARAMS);
@@ -661,6 +665,10 @@ function RittenList() {
   const canCompleteSelection =
     selectedTripIds.size > 0 &&
     (!isSelectionFullyVisible || selectedVisibleTrips.some(canComplete));
+  // The same guard for repricing: only finished Trips have a price to redo.
+  const canRepriceSelection =
+    selectedTripIds.size > 0 &&
+    (!isSelectionFullyVisible || selectedVisibleTrips.some(canReprice));
 
   function toggleSelection(tripId: string): void {
     setSelectedTripIds((current) => {
@@ -759,6 +767,72 @@ function RittenList() {
         isError: true,
       });
     }
+  }
+
+  /**
+   * "Prijs herberekenen" for the selection.
+   *
+   * ONE request with every selected id, days and pages included. The backend
+   * checks each status itself, matches and prices every CLOSED Trip again and
+   * skips the rest — each with its own outcome — so nothing here decides which
+   * Trips qualify. Only prices change: the list is refetched, and every row
+   * then shows its stored price and route match as the backend now holds them.
+   *
+   * The summary says how many were done, skipped and failed, and names every
+   * Trip that was not done and why. A failure of the request itself reports
+   * that, and claims nothing.
+   */
+  async function repriceSelected(): Promise<void> {
+    if (isRepricing) {
+      return;
+    }
+
+    setFeedback(null);
+    setIsRepricing(true);
+
+    try {
+      const result = await reprocessTrips(selectedIds);
+
+      trips.reload();
+      setSelectedTripIds(new Set());
+      setFeedback({
+        messageKey: "ritten.feedback.repriceSummary",
+        values: {
+          reprocessed: String(result.reprocessedCount),
+          skipped: String(result.skippedCount),
+          failed: String(result.failedCount),
+        },
+        detail: describeNotRepriced(result.results) || undefined,
+        isError: result.failedCount > 0,
+      });
+    } catch (error: unknown) {
+      setFeedback({
+        messageKey: "ritten.feedback.repriceFailed",
+        detail: userFacingMessage(error),
+        isError: true,
+      });
+    } finally {
+      setIsRepricing(false);
+    }
+  }
+
+  /** "ANRDUB2602247: niet afgewerkt, overgeslagen; …" for every Trip not done. */
+  function describeNotRepriced(results: readonly TripReprocessResult[]): string {
+    const bookingOf = new Map(visibleTrips.map((trip) => [trip.id, trip.bookingNumber]));
+
+    return results
+      .filter((result) => result.outcome !== "REPROCESSED")
+      .map((result) => {
+        const reason =
+          result.outcome === "FAILED"
+            ? `${t("ritten.reprice.reason.FAILED")}${result.message ? ` (${result.message})` : ""}`
+            : result.reasonCode === "NOT_FOUND"
+              ? t("ritten.reprice.reason.NOT_FOUND")
+              : t("ritten.reprice.reason.NOT_CLOSED");
+
+        return `${bookingOf.get(result.tripId) ?? result.tripId}: ${reason}`;
+      })
+      .join("; ");
   }
 
   /**
@@ -1081,6 +1155,9 @@ function RittenList() {
           )}
           canGroup={selectedIds.length >= MINIMUM_TRIPS_PER_GROUP}
           canComplete={canCompleteSelection}
+          canReprice={canRepriceSelection}
+          isRepricing={isRepricing}
+          onReprice={() => void repriceSelected()}
           isBusy={busyTripId !== null}
           onSelectAllVisible={() =>
             // Added to what is already selected, never replacing it: five

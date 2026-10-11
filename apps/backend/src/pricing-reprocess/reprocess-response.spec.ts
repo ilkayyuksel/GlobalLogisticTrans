@@ -32,7 +32,7 @@ describe("the reprocess response", () => {
   beforeEach(() => {
     world = buildPricingLifecycle();
     actions = routeMatchActions(world);
-    controller = new PricingReprocessController(world.engine, world.tripPricing);
+    controller = new PricingReprocessController(world.engine, world.tripPricing, {} as never);
   });
 
   const reprocess = (tripId: string) => controller.reprocess({ tripId });
@@ -70,11 +70,13 @@ describe("the reprocess response", () => {
       routePricingId: "route-1",
       routeMatchMethod: "EXACT",
       combinationRouteGroupId: null,
+      combinationMatch: null,
     });
     expect(response.routeMatch).toEqual({
       method: "EXACT",
       routePricingId: "route-1",
       combinationRouteGroupId: null,
+      combinationMatch: null,
       legs: [
         {
           legPosition: null,
@@ -132,6 +134,7 @@ describe("the reprocess response", () => {
       method: "NOT_FOUND",
       routePricingId: null,
       combinationRouteGroupId: null,
+      combinationMatch: null,
       legs: [],
       overSt: null,
     });

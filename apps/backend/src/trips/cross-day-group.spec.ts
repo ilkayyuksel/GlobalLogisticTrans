@@ -261,12 +261,14 @@ describe("grouping Trips from different days", () => {
         tripGroupId: GROUP_ID,
         pdfDocumentId: "pdf-1",
         direction: "DELIVERY" as const,
+        status: "CLOSED" as const,
       },
       {
         id: "trip-collection",
         tripGroupId: GROUP_ID,
         pdfDocumentId: "pdf-1",
         direction: "COLLECTION" as const,
+        status: "CLOSED" as const,
       },
     ];
 

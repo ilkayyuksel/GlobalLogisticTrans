@@ -78,6 +78,7 @@ describeWithDatabase("the matched route of a snapshot, against a real database",
       routePricingId: "22222222-2222-4222-8222-222222222222",
       routeMatch: "EXACT",
       combinationRouteGroupId: "33333333-3333-4333-8333-333333333333",
+      combinationMatch: "MATCHED",
       routeLegs: [leg(1, false), leg(2, true)],
       items: [],
       ...overrides,
@@ -91,6 +92,7 @@ describeWithDatabase("the matched route of a snapshot, against a real database",
     const [snapshot] = await repository.findCurrentByTripIds([tripId]);
 
     expect(snapshot.combinationRouteGroupId).toBe("33333333-3333-4333-8333-333333333333");
+    expect(snapshot.combinationMatch).toBe("MATCHED");
     expect(toRouteMatchView(snapshot).legs.map((each) => [each.legPosition, each.isPricedLeg])).toEqual([
       [1, false],
       [2, true],
@@ -106,12 +108,18 @@ describeWithDatabase("the matched route of a snapshot, against a real database",
         routePricingId: null,
         routeMatch: "NOT_FOUND",
         combinationRouteGroupId: null,
+        combinationMatch: null,
         routeLegs: [],
       }),
     );
     const [snapshot] = await repository.findCurrentByTripIds([tripId]);
 
-    expect(snapshot).toMatchObject({ routeMatch: "NOT_FOUND", routePricingId: null, routeLegs: [] });
+    expect(snapshot).toMatchObject({
+      routeMatch: "NOT_FOUND",
+      routePricingId: null,
+      combinationMatch: null,
+      routeLegs: [],
+    });
   });
 
   it("keeps the newer legs when an older calculation stores last", async () => {

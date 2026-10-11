@@ -305,8 +305,20 @@ describe("PricingRecalculationService", () => {
    */
   describe("which Trips a regrouping affects", () => {
     const before = [
-      { id: "a", tripGroupId: null, pdfDocumentId: "d", direction: "DELIVERY" as const },
-      { id: "b", tripGroupId: null, pdfDocumentId: "d", direction: "COLLECTION" as const },
+      {
+        id: "a",
+        tripGroupId: null,
+        pdfDocumentId: "d",
+        direction: "DELIVERY" as const,
+        status: "CLOSED" as const,
+      },
+      {
+        id: "b",
+        tripGroupId: null,
+        pdfDocumentId: "d",
+        direction: "COLLECTION" as const,
+        status: "CLOSED" as const,
+      },
     ];
     const after = before.map((trip) => ({ ...trip, tripGroupId: "g" }));
 

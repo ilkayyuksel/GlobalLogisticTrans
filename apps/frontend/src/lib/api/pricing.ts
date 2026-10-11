@@ -1,5 +1,5 @@
 import { request } from "./client";
-import type { PricingSnapshot } from "./types";
+import type { BulkReprocessResult, PricingSnapshot } from "./types";
 
 /**
  * The pricing endpoints.
@@ -27,6 +27,23 @@ export function reprocessTripPricing(
 ): Promise<PricingSnapshot> {
   return request<PricingSnapshot>(`${PRICING_PATH}/trip/${tripId}/reprocess`, {
     method: "POST",
+    signal,
+  });
+}
+
+/**
+ * "Prijs herberekenen" for a selection: every CLOSED Trip matched and priced
+ * again by the backend, every other one skipped — each with its own outcome.
+ * The backend checks the status itself; nothing here decides which Trips
+ * qualify.
+ */
+export function reprocessTrips(
+  tripIds: readonly string[],
+  signal?: AbortSignal,
+): Promise<BulkReprocessResult> {
+  return request<BulkReprocessResult>(`${PRICING_PATH}/reprocessions`, {
+    method: "POST",
+    body: { tripIds },
     signal,
   });
 }

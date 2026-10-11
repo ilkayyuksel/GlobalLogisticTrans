@@ -33,6 +33,7 @@ function buildSnapshot(overrides: Partial<TripPricing> = {}): TripPricing {
     routePricingId: "route-1",
     routeMatch: RouteMatchMethod.EXACT,
     combinationRouteGroupId: null,
+    combinationMatch: null,
     notes: null,
     createdAt: new Date("2026-08-01T00:00:00Z"),
     updatedAt: new Date("2026-08-17T09:00:00.000Z"),
@@ -53,6 +54,7 @@ function buildCommand(
     routePricingId: "route-1",
     routeMatch: RouteMatchMethod.EXACT,
     combinationRouteGroupId: null,
+    combinationMatch: null,
     routeLegs: [
       {
         legPosition: null,
@@ -204,6 +206,7 @@ describe("TripPricingService — atomic snapshot write", () => {
         routePricingId: "route-1",
         routeMatch: RouteMatchMethod.EXACT,
     combinationRouteGroupId: null,
+    combinationMatch: null,
       });
     });
 
@@ -294,6 +297,7 @@ describe("TripPricingService — atomic snapshot write", () => {
           routePricingId: "route-1",
           routeMatch: RouteMatchMethod.EXACT,
           combinationRouteGroupId: null,
+          combinationMatch: null,
         }),
       );
     });
@@ -326,6 +330,7 @@ describe("TripPricingService — atomic snapshot write", () => {
         routePricingId: "route-1",
         routeMatch: RouteMatchMethod.EXACT,
     combinationRouteGroupId: null,
+    combinationMatch: null,
       });
     });
 

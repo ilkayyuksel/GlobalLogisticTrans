@@ -1,4 +1,8 @@
-import { Prisma, type RouteMatchMethod } from "@prisma/client";
+import {
+  Prisma,
+  type CombinationMatchOutcome,
+  type RouteMatchMethod,
+} from "@prisma/client";
 
 import {
   OVER_ST_DESCRIPTION,
@@ -42,6 +46,8 @@ export interface RouteMatchView {
   readonly method: RouteMatchMethod | null;
   readonly routePricingId: string | null;
   readonly combinationRouteGroupId: string | null;
+  /** For a grouped Trip, what became of its pair; null otherwise or unrecorded. */
+  readonly combinationMatch: CombinationMatchOutcome | null;
   readonly legs: readonly RouteMatchLegView[];
   /** Null unless a Combination priced the Trip. */
   readonly overSt: AppliedOverStView | null;
@@ -52,6 +58,7 @@ export interface StoredRouteMatch {
   readonly routeMatch: RouteMatchMethod | null;
   readonly routePricingId: string | null;
   readonly combinationRouteGroupId: string | null;
+  readonly combinationMatch: CombinationMatchOutcome | null;
   readonly routeLegs: readonly {
     readonly legPosition: number | null;
     readonly isPricedLeg: boolean;
@@ -74,6 +81,7 @@ export function toRouteMatchView(snapshot: StoredRouteMatch): RouteMatchView {
     method: snapshot.routeMatch,
     routePricingId: snapshot.routePricingId,
     combinationRouteGroupId: snapshot.combinationRouteGroupId,
+    combinationMatch: snapshot.combinationMatch,
     legs: [...snapshot.routeLegs]
       .sort((left, right) => (left.legPosition ?? 0) - (right.legPosition ?? 0))
       .map((leg) => ({

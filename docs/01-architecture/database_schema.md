@@ -122,6 +122,7 @@ Native PostgreSQL enum types are used for stable business lifecycles. `TEXT` is 
 | `parser_result` | `SUCCESS`, `WARNING`, `FAILED`, `PARTIAL_SUCCESS` | `parser_run.result` |
 | `pricing_calculation_status` | `CALCULATED`, `FAILED`, `MANUAL_OVERRIDE` | `trip_pricing.calculation_status` |
 | `route_match_method` | `EXACT`, `NORMALIZED`, `FUZZY`, `NOT_FOUND`, `AMBIGUOUS` | `trip_pricing.route_match` |
+| `combination_match_outcome` | `MATCHED`, `NO_PAIR`, `LEG_NOT_IDENTIFIED`, `PAIR_NOT_CONFIGURED`, `AMBIGUOUS` | `trip_pricing.combination_match` |
 | `email_processing_status` | `RECEIVED`, `PROCESSING`, `PROCESSED`, `FAILED`, `IGNORED` | `imported_email.processing_status` |
 | `import_source` | `EMAIL`, `MANUAL_UPLOAD`, `API` | `pdf_document.import_source` |
 | `setting_value_type` | `STRING`, `INTEGER`, `DECIMAL`, `BOOLEAN`, `DATE`, `JSON` | `setting.value_type` |
@@ -1296,6 +1297,7 @@ The calculated pricing summary for one Trip. Exists only once the Trip reaches `
 | `pricing_rule_version` | `TEXT` | NO | — | |
 | `calculation_status` | `pricing_calculation_status` | NO | — | |
 | `route_pricing_id` | `UUID` | YES | `NULL` | The `route_pricing` row (ordinary route or Combination leg) the Tarief, Toll and Tunnel came from. `NULL` when nothing reliable matched, and on snapshots older than the column. **No foreign key**: the snapshot stays the record of what was used after a configuration changes or is removed. |
+| `combination_match` | `combination_match_outcome` | YES | `NULL` | For a Trip in a group: `MATCHED`, or why its pair was priced on ordinary routes (`NO_PAIR`, `LEG_NOT_IDENTIFIED`, `PAIR_NOT_CONFIGURED`, `AMBIGUOUS`). `NULL` for a Trip in no group or an older snapshot. |
 | `combination_route_group_id` | `UUID` | YES | `NULL` | The Combination whose pair of legs priced the Trip; `NULL` for an ordinary route, no match, or an older snapshot. **No foreign key**, as `route_pricing_id`. |
 | `route_match` | `route_match_method` | YES | `NULL` | How that route was matched. `NOT_FOUND` / `AMBIGUOUS` = route components zero because nothing reliable matched — distinct from a configured route priced at zero. `NULL` on snapshots older than the column (never backfilled). |
 | `notes` | `TEXT` | YES | `NULL` | |

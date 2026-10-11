@@ -17,7 +17,14 @@ function member(
   id: string,
   overrides: Partial<CombinationMember> = {},
 ): CombinationMember {
-  return { id, tripGroupId: null, pdfDocumentId: DOCUMENT, direction: null, ...overrides };
+  return {
+    id,
+    tripGroupId: null,
+    pdfDocumentId: DOCUMENT,
+    direction: null,
+    status: "CLOSED",
+    ...overrides,
+  };
 }
 
 const DELIVERY = member("delivery", { direction: TripDirection.DELIVERY });

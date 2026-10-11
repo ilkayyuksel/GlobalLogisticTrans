@@ -38,7 +38,7 @@ function buildResult(
   return {
     tripId: TRIP_ID,
     context: {
-      routeMatch: { routePricingId: "route-1", method: "EXACT", combinationRouteGroupId: null, legs: [] },
+      routeMatch: { routePricingId: "route-1", method: "EXACT", combinationRouteGroupId: null, combinationMatch: null, legs: [] },
     } as unknown as PricingCalculationResult["context"],
     isReprocess: false,
     preparedAt: new Date("2026-08-17T09:00:00.000Z"),

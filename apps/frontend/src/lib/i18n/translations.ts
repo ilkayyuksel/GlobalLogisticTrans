@@ -616,6 +616,14 @@ const nl = {
   "ritten.select.allVisible": "Selecteer alle zichtbare ritten",
   "ritten.select.clear": "Selectie wissen",
   "ritten.select.complete": "Afwerken",
+  "ritten.select.reprice": "Prijs herberekenen",
+  "ritten.select.repricing": "Bezig met herberekenen…",
+  "ritten.feedback.repriceSummary":
+    "Prijs herberekend: {reprocessed} herberekend, {skipped} overgeslagen, {failed} mislukt",
+  "ritten.feedback.repriceFailed": "Herberekenen is niet gelukt",
+  "ritten.reprice.reason.NOT_CLOSED": "niet afgewerkt, overgeslagen",
+  "ritten.reprice.reason.NOT_FOUND": "niet gevonden, overgeslagen",
+  "ritten.reprice.reason.FAILED": "mislukt",
   "ritten.select.count": "geselecteerd",
   "ritten.group.create": "Groepeer geselecteerde ritten",
   "ritten.group.confirmTitle": "Ritten groeperen",
@@ -1031,6 +1039,18 @@ const nl = {
   "pricing.route.overSt.toll": "Tol",
   "pricing.route.overSt.tunnel": "Tunnel",
   "pricing.route.overSt.surcharge": "Over ST-toeslag",
+  "pricing.route.combinationMatch.MATCHED": "Combinatieprijs",
+  "pricing.route.combinationMatch.NO_PAIR":
+    "Geen combinatieprijs: de groep heeft geen eenduidig paar (geen groep van twee ritten en geen paar uit één document) — gewone routeprijzen",
+  "pricing.route.combinationMatch.LEG_NOT_IDENTIFIED":
+    "Geen combinatieprijs: een route van het paar is geen geconfigureerde combinatie-leg — gewone routeprijzen",
+  "pricing.route.combinationMatch.PAIR_NOT_CONFIGURED":
+    "Geen combinatieprijs: beide routes zijn legs, maar van verschillende combinaties — gewone routeprijzen",
+  "pricing.route.combinationMatch.AMBIGUOUS":
+    "Geen combinatieprijs: meerdere combinaties bevatten dit paar, geen gekozen — gewone routeprijzen",
+  "ritten.group.pricing.notCurrent":
+    "Geen actuele prijs: alleen een afgewerkte rit heeft een prijs.",
+  "ritten.group.pricing.none": "Nog geen prijs berekend.",
   "ritten.route.label": "Route-match",
   "tripDetail.heading": "Rit",
   "tripDetail.backToTrips": "Terug naar ritten",
@@ -1724,6 +1744,14 @@ const tr: Translations = {
   "ritten.select.allVisible": "Görünen tüm seferleri seç",
   "ritten.select.clear": "Seçimi temizle",
   "ritten.select.complete": "Tamamla",
+  "ritten.select.reprice": "Fiyatı yeniden hesapla",
+  "ritten.select.repricing": "Yeniden hesaplanıyor…",
+  "ritten.feedback.repriceSummary":
+    "Fiyat yeniden hesaplandı: {reprocessed} hesaplandı, {skipped} atlandı, {failed} başarısız",
+  "ritten.feedback.repriceFailed": "Yeniden hesaplama başarısız oldu",
+  "ritten.reprice.reason.NOT_CLOSED": "tamamlanmamış, atlandı",
+  "ritten.reprice.reason.NOT_FOUND": "bulunamadı, atlandı",
+  "ritten.reprice.reason.FAILED": "başarısız",
   "ritten.select.count": "seçildi",
   "ritten.group.create": "Seçili seferleri grupla",
   "ritten.group.confirmTitle": "Seferleri grupla",
@@ -2132,6 +2160,18 @@ const tr: Translations = {
   "pricing.route.overSt.toll": "Geçiş ücreti",
   "pricing.route.overSt.tunnel": "Tünel",
   "pricing.route.overSt.surcharge": "Over ST ek ücreti",
+  "pricing.route.combinationMatch.MATCHED": "Kombinasyon fiyatı",
+  "pricing.route.combinationMatch.NO_PAIR":
+    "Kombinasyon fiyatı yok: grubun net bir çifti yok (iki seferlik bir grup veya tek belgeden bir çift değil) — normal rota fiyatları",
+  "pricing.route.combinationMatch.LEG_NOT_IDENTIFIED":
+    "Kombinasyon fiyatı yok: çiftin bir rotası yapılandırılmış bir kombinasyon ayağı değil — normal rota fiyatları",
+  "pricing.route.combinationMatch.PAIR_NOT_CONFIGURED":
+    "Kombinasyon fiyatı yok: iki rota da ayak, ancak farklı kombinasyonların — normal rota fiyatları",
+  "pricing.route.combinationMatch.AMBIGUOUS":
+    "Kombinasyon fiyatı yok: bu çift birden fazla kombinasyonda var, hiçbiri seçilmedi — normal rota fiyatları",
+  "ritten.group.pricing.notCurrent":
+    "Güncel fiyat yok: yalnızca tamamlanmış bir seferin fiyatı vardır.",
+  "ritten.group.pricing.none": "Henüz fiyat hesaplanmadı.",
   "ritten.route.label": "Rota eşleşmesi",
   "tripDetail.heading": "Sefer",
   "tripDetail.backToTrips": "Seferlere dön",

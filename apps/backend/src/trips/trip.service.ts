@@ -34,6 +34,7 @@ import {
   movesRoad,
   repriceAfterCombinationInputChange,
 } from "./planning-date-change";
+import { repriceAfterPartnerStatusChange } from "./partner-status-change";
 import {
   AssignmentSubject,
   DeletedTripCannotBeLooseException,
@@ -571,6 +572,7 @@ export class TripService {
     });
 
     await this.announceIfClosed(changed);
+    await this.repricePartnersAfterStatusChange(changed, trip.status);
 
     return this.toResponse(changed);
   }
@@ -1124,6 +1126,8 @@ export class TripService {
 
     this.logger.log("Trip deleted", { tripId: id, fromStatus: trip.status });
 
+    await this.repricePartnersAfterStatusChange(deleted, trip.status);
+
     return this.toResponse(deleted);
   }
 
@@ -1154,7 +1158,27 @@ export class TripService {
       toStatus: restored.status,
     });
 
+    await this.repricePartnersAfterStatusChange(restored, trip.status);
+
     return this.toResponse(restored);
+  }
+
+  /**
+   * A Trip cancelled, deleted, reopened or restored may leave or rejoin a
+   * pricing pair; its CLOSED partners are repriced — see
+   * `repriceAfterPartnerStatusChange`.
+   */
+  private async repricePartnersAfterStatusChange(
+    changed: Trip,
+    previousStatus: TripStatus,
+  ): Promise<void> {
+    await repriceAfterPartnerStatusChange(
+      changed,
+      previousStatus,
+      this.recalculation,
+      (tripGroupId) => this.repository.findManyByGroupId(tripGroupId),
+      this.logger,
+    );
   }
 
   private async requireTrip(id: string): Promise<Trip> {

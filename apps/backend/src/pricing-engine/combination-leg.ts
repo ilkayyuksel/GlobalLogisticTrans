@@ -1,4 +1,4 @@
-import { TripDirection } from "@prisma/client";
+import { TripDirection, TripStatus } from "@prisma/client";
 
 /**
  * Two questions a Trip's group answers, kept apart on purpose.
@@ -33,6 +33,8 @@ export interface CombinationMember {
   readonly tripGroupId: string | null;
   readonly pdfDocumentId: string | null;
   readonly direction: TripDirection | null;
+  /** Read only for the pricing partner: see `isPricingPartnerStatus`. */
+  readonly status: TripStatus;
 }
 
 /** A Combination is one leg out and one leg back — never more, never fewer. */
@@ -174,11 +176,116 @@ export function tripsRepricedByRegrouping(
 ): string[] {
   const groupBefore = new Map(before.map((trip) => [trip.id, trip.tripGroupId]));
   const legChanged = new Set(tripsWhoseLegChanged(before, after));
+  const partnerBefore = new Map(
+    before.map((trip) => [trip.id, partnerIdOf(trip, before)]),
+  );
 
   return after
     .filter(
       (trip) =>
-        legChanged.has(trip.id) || groupBefore.get(trip.id) !== trip.tripGroupId,
+        legChanged.has(trip.id) ||
+        groupBefore.get(trip.id) !== trip.tripGroupId ||
+        // The pair its route price is matched on changed: a member left alone
+        // in a two-Trip group is no longer half of a priced pair.
+        partnerBefore.get(trip.id) !== partnerIdOf(trip, after),
     )
     .map((trip) => trip.id);
+}
+
+/**
+ * The statuses a Trip may be a pricing partner in: OPEN and CLOSED. An OPEN
+ * partner has no price of its own yet, but its road and date are real and the
+ * CLOSED leg is priced on the pair. CANCELLED and DELETED work is not carried
+ * out, so it pairs with nothing.
+ */
+export const PRICING_PARTNER_STATUSES: readonly TripStatus[] = [
+  TripStatus.OPEN,
+  TripStatus.CLOSED,
+];
+
+export function isPricingPartnerStatus(status: TripStatus): boolean {
+  return PRICING_PARTNER_STATUSES.includes(status);
+}
+
+/** How a Trip came to have a pricing partner. */
+export const PricingPairBasis = {
+  /** One document, one DELIVERY and one COLLECTION: `combinationLegOf`. */
+  SAME_DOCUMENT: "SAME_DOCUMENT",
+  /** The only other member of a group of exactly two, whatever its document. */
+  TWO_TRIP_GROUP: "TWO_TRIP_GROUP",
+} as const;
+
+export type PricingPairBasis = (typeof PricingPairBasis)[keyof typeof PricingPairBasis];
+
+export type PricingPartner<T extends CombinationMember> =
+  | { readonly kind: "PAIRED"; readonly partner: T; readonly basis: PricingPairBasis }
+  | { readonly kind: "UNPAIRED"; readonly reason: "NOT_GROUPED" | "NO_UNAMBIGUOUS_PARTNER" };
+
+/**
+ * The Trip whose road, together with this Trip's, may select a configured
+ * Combination route price — or why there is none.
+ *
+ * ── WHICH PAIRS, AS THE BUSINESS DECIDED (OCTOBER 2026) ─────────────────────
+ *   a genuine pair from one document (`combinationLegOf`) — the other leg of
+ *     that document, in a group of any size, as before;
+ *   otherwise, a group of EXACTLY two Trips — the other member, whatever its
+ *     document or direction: an operator's group of two is a candidate pair;
+ *   anything else — no group, or a larger group with no genuine pair in it —
+ *     has no pricing partner: which of several members would be the other leg
+ *     is not something to guess.
+ *
+ * A partner is only a candidate. Whether the pair IS a configured Combination
+ * is the central pair match's answer (`matchCombinationPair`), in each road's
+ * real driving direction. TAR allocation does not read this: it keeps the
+ * genuine same-document rule.
+ */
+export function pricingPartnerOf<T extends CombinationMember>(
+  trip: T,
+  members: readonly T[],
+): PricingPartner<T> {
+  if (trip.tripGroupId === null) {
+    return { kind: "UNPAIRED", reason: "NOT_GROUPED" };
+  }
+
+  /*
+   * CANCELLED and DELETED Trips are filtered out FIRST, before any rule below
+   * reads the group: an excluded Trip is never a candidate, so no fallback can
+   * pick it, and a group counts its ACTIVE members (a group of three with one
+   * cancelled is a group of two). The owner's rules, October 2026.
+   */
+  const group = members.filter(
+    (member) =>
+      member.tripGroupId === trip.tripGroupId &&
+      (member.id === trip.id || isPricingPartnerStatus(member.status)),
+  );
+  const leg = combinationLegOf(trip, group);
+
+  if (leg === CombinationLeg.DELIVERY || leg === CombinationLeg.COLLECTION) {
+    const partner = group.find(
+      (member) => member.id !== trip.id && member.pdfDocumentId === trip.pdfDocumentId,
+    );
+
+    if (partner) {
+      return { kind: "PAIRED", partner, basis: PricingPairBasis.SAME_DOCUMENT };
+    }
+  }
+
+  // Whether or not the caller's list includes the Trip itself, one other
+  // member means a group of exactly two.
+  const others = group.filter((member) => member.id !== trip.id);
+
+  if (others.length === 1) {
+    return { kind: "PAIRED", partner: others[0], basis: PricingPairBasis.TWO_TRIP_GROUP };
+  }
+
+  return { kind: "UNPAIRED", reason: "NO_UNAMBIGUOUS_PARTNER" };
+}
+
+function partnerIdOf(
+  trip: CombinationMember,
+  members: readonly CombinationMember[],
+): string | null {
+  const pairing = pricingPartnerOf(trip, members);
+
+  return pairing.kind === "PAIRED" ? pairing.partner.id : null;
 }

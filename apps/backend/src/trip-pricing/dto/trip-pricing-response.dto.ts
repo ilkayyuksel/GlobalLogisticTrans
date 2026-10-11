@@ -1,5 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from "@nestjs/swagger";
 import {
+  CombinationMatchOutcome,
   PricingCalculationStatus,
   RouteMatchMethod,
   TripPricing,
@@ -75,6 +76,15 @@ export class TripPricingResponseDto {
   @ApiPropertyOptional({ format: "uuid", nullable: true })
   combinationRouteGroupId!: string | null;
 
+  @ApiPropertyOptional({
+    enum: CombinationMatchOutcome,
+    enumName: "CombinationMatchOutcome",
+    nullable: true,
+    description:
+      "For a Trip in a group: MATCHED, or why its pair was priced on ordinary routes. Null for a Trip in no group or an older snapshot.",
+  })
+  combinationMatch!: CombinationMatchOutcome | null;
+
   @ApiProperty({ format: "date-time" })
   createdAt!: Date;
 
@@ -98,6 +108,7 @@ export function toTripPricingResponse(
     routePricingId: tripPricing.routePricingId,
     routeMatchMethod: tripPricing.routeMatch,
     combinationRouteGroupId: tripPricing.combinationRouteGroupId,
+    combinationMatch: tripPricing.combinationMatch,
     createdAt: tripPricing.createdAt,
     updatedAt: tripPricing.updatedAt,
   };

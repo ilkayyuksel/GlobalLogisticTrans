@@ -54,21 +54,6 @@ export function pricingRoadOf(trip: TripReadView): RoadEndpoints | null {
     : null;
 }
 
-/** The other Trip of this Trip's genuine Combination, or null. */
-export function partnerOf(
-  trip: TripReadView,
-  members: readonly TripReadView[],
-): TripReadView | null {
-  return (
-    members.find(
-      (member) =>
-        member.id !== trip.id &&
-        member.tripGroupId === trip.tripGroupId &&
-        member.pdfDocumentId === trip.pdfDocumentId,
-    ) ?? null
-  );
-}
-
 /** Why Over ST does or does not apply — what a log can say about it. */
 export type OverStDecision =
   | { readonly applies: true; readonly amounts: PricingOverStInput }

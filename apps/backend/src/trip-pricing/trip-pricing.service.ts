@@ -1,5 +1,6 @@
 import { Injectable } from "@nestjs/common";
 import {
+  CombinationMatchOutcome,
   PricingCalculationStatus,
   Prisma,
   RouteMatchMethod,
@@ -104,6 +105,8 @@ export interface ReplacePricingSnapshotCommand {
   readonly routeMatch: RouteMatchMethod;
   /** The Combination whose pair priced the Trip, or null. */
   readonly combinationRouteGroupId: string | null;
+  /** For a grouped Trip, what became of its pair; null for one in no group. */
+  readonly combinationMatch: CombinationMatchOutcome | null;
   /** The road(s) matched: none, one ordinary route, or both legs of a pair. */
   readonly routeLegs: readonly PricingSnapshotRouteLegData[];
   readonly items: readonly PricingSnapshotItemData[];
@@ -357,6 +360,7 @@ export class TripPricingService {
         routePricingId: command.routePricingId,
         routeMatch: command.routeMatch,
         combinationRouteGroupId: command.combinationRouteGroupId,
+        combinationMatch: command.combinationMatch,
       };
 
       if (!existing) {

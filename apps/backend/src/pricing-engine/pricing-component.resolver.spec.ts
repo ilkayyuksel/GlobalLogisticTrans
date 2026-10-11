@@ -296,6 +296,7 @@ describe("PricingComponentResolver", () => {
           routePricingId: ROUTE_ID,
           method: "EXACT",
           combinationRouteGroupId: null,
+          combinationMatch: null,
           legs: [
             {
               legPosition: null,
@@ -350,6 +351,7 @@ describe("PricingComponentResolver", () => {
             routePricingId: null,
             method: "NOT_FOUND",
             combinationRouteGroupId: null,
+            combinationMatch: null,
             legs: [],
           },
       });
@@ -390,6 +392,7 @@ describe("PricingComponentResolver", () => {
             routePricingId: null,
             method: "AMBIGUOUS",
             combinationRouteGroupId: null,
+            combinationMatch: null,
             legs: [],
           },
       });
@@ -444,6 +447,7 @@ describe("PricingComponentResolver", () => {
             routePricingId: null,
             method: "NOT_FOUND",
             combinationRouteGroupId: null,
+            combinationMatch: null,
             legs: [],
           },
       });
@@ -562,6 +566,7 @@ describe("PricingComponentResolver", () => {
           routePricingId: LEG_ID,
           method: "EXACT",
           combinationRouteGroupId: "combo-1",
+          combinationMatch: "MATCHED",
           legs: [
             {
               legPosition: 1,
@@ -631,21 +636,46 @@ describe("PricingComponentResolver", () => {
       expect(await resolver.resolveRouteSelection(first)).toMatchObject({
         route: { routePricingId: ROUTE_ID, kind: RouteConfigurationKind.NORMAL },
         // Never a Combination recorded for a pair that was not identified.
-        trace: { method: "EXACT", combinationRouteGroupId: null, legs: [{ legPosition: null }] },
+        trace: {
+          method: "EXACT",
+          combinationRouteGroupId: null,
+          combinationMatch: reason,
+          legs: [{ legPosition: null }],
+        },
       });
       expect(logger.warn).toHaveBeenCalledWith(
         "Combination pair not identified; pricing the ordinary route",
-        expect.objectContaining({ tripId: TRIP_ID, reason }),
+        expect.objectContaining({ tripId: TRIP_ID, combinationMatch: reason }),
       );
     });
 
-    /** A group an operator made by hand claims nothing about pairing. */
-    it("matches the ordinary configuration for a manual group", async () => {
+    /**
+     * October 2026: a group of exactly two is a pricing pair whatever its
+     * documents. Its two roads name the Combination, so it is priced on it.
+     */
+    it("matches the Combination for a manual group of two whose roads name it", async () => {
       const [first] = pair({}, { pdfDocumentId: "a-different-document" });
       combinationPricing.findAll.mockResolvedValue([combination("combo-1", "Gent")]);
 
       expect(await resolver.resolveRouteSelection(first)).toMatchObject({
+        route: { routePricingId: LEG_ID, kind: RouteConfigurationKind.COMBINATION },
+        trace: { combinationRouteGroupId: "combo-1", combinationMatch: "MATCHED" },
+      });
+    });
+
+    /** Three Trips and no genuine pair: which would be the other leg is not guessed. */
+    it("matches the ordinary configuration for a larger manual group, and says why", async () => {
+      const [first, second] = pair({}, { pdfDocumentId: "a-different-document" });
+      trips.findByGroupId.mockResolvedValue([
+        first,
+        second,
+        { ...second, id: "third-trip", pdfDocumentId: "a-third-document" },
+      ]);
+      combinationPricing.findAll.mockResolvedValue([combination("combo-1", "Gent")]);
+
+      expect(await resolver.resolveRouteSelection(first)).toMatchObject({
         route: { routePricingId: ROUTE_ID, kind: RouteConfigurationKind.NORMAL },
+        trace: { combinationRouteGroupId: null, combinationMatch: "NO_PAIR" },
       });
       expect(combinationPricing.findAll).not.toHaveBeenCalled();
     });
@@ -748,8 +778,20 @@ describe("PricingComponentResolver", () => {
         expect(await resolver.tripsPricedByRoadOf(first)).toEqual([TRIP_ID, OTHER_TRIP_ID]);
       });
 
-      it("leaves out a member of another document", async () => {
+      /** In a group of two the other member is the pricing partner, whatever its document. */
+      it("names the other member of a group of two from another document", async () => {
         const [first] = pair({}, { pdfDocumentId: "another-document" });
+
+        expect(await resolver.tripsPricedByRoadOf(first)).toEqual([TRIP_ID, OTHER_TRIP_ID]);
+      });
+
+      it("leaves out a member of another document in a larger group", async () => {
+        const [first, second] = pair({}, { pdfDocumentId: "another-document" });
+        trips.findByGroupId.mockResolvedValue([
+          first,
+          second,
+          { ...second, id: "third-trip", pdfDocumentId: "a-third-document" },
+        ]);
 
         expect(await resolver.tripsPricedByRoadOf(first)).toEqual([TRIP_ID]);
       });

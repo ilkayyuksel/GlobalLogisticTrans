@@ -217,6 +217,15 @@ again for the response. A Trip reopened between the write and the read-back is
 refused with the usual 409; its stored snapshot is never answered as current.
 The Trip detail page shows this response directly, without a second request.
 
+**For a selection** — "Prijs herberekenen" in the Rittenlijst —
+`POST /trip-pricing/reprocessions` with `{ tripIds }` runs that same reprocess
+and read-back once per selected Trip (`BulkPricingReprocessService`), one at a
+time and per Trip, not all-or-nothing. Each result is `REPROCESSED` (with the
+stored snapshot), `SKIPPED` (`NOT_CLOSED` — OPEN, CANCELLED, DELETED, or reopened
+before the read-back — or `NOT_FOUND`) or `FAILED` (the Engine's own error code;
+the previous snapshot stays). Only the price is written: no Trip field, group,
+Custom Value or Cost Confirmation. The list is then refetched.
+
 ## Automatic recalculation after a Trip input changes
 
 Three writes change what a Trip is worth without touching its status, and each

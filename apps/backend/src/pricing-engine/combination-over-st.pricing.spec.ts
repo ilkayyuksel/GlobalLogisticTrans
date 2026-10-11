@@ -456,6 +456,7 @@ describe("Over ST on Leg 2 of a Combination", () => {
         routePricingId: LEG2_ROW,
         method: "EXACT",
         combinationRouteGroupId: "combination-1",
+        combinationMatch: "MATCHED",
         legs: [
           expect.objectContaining({ legPosition: 1, isPricedLeg: false, routePricingId: LEG1_ROW }),
           expect.objectContaining({ legPosition: 2, isPricedLeg: true, routePricingId: LEG2_ROW }),

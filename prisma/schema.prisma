@@ -149,6 +149,17 @@ enum PricingCalculationStatus {
 ///   FUZZY       one end a single trusted typo of a configured route
 ///   NOT_FOUND   no configured route; route components priced at zero
 ///   AMBIGUOUS   several configured routes fit; none chosen, priced at zero
+/// What became of a grouped Trip's Combination pair when it was priced.
+enum CombinationMatchOutcome {
+  MATCHED
+  NO_PAIR
+  LEG_NOT_IDENTIFIED
+  PAIR_NOT_CONFIGURED
+  AMBIGUOUS
+
+  @@map("combination_match_outcome")
+}
+
 enum RouteMatchMethod {
   EXACT
   NORMALIZED
@@ -1302,6 +1313,11 @@ model TripPricing {
   /// pair of legs priced this Trip, or NULL when it was priced on an ordinary
   /// route or on none. No foreign key, for the same reason as above.
   combinationRouteGroupId String? @map("combination_route_group_id") @db.Uuid
+
+  /// For a Trip in a group: what became of its Combination pair — MATCHED,
+  /// or why it was priced on ordinary routes. NULL for a Trip in no group and
+  /// on snapshots written before this was recorded.
+  combinationMatch CombinationMatchOutcome? @map("combination_match")
 
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)

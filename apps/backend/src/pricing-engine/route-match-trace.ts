@@ -13,6 +13,30 @@ import type {
  * Trip without matching it again against today's configuration.
  */
 
+/**
+ * What became of a grouped Trip's Combination pair — recorded so a group
+ * priced on ordinary routes says why, and is never shown as a Combination.
+ *
+ *   MATCHED              its pair is one configured Combination;
+ *   NO_PAIR              no pricing partner: a group of three or more with no
+ *                        genuine pair in it, or a partner with no road;
+ *   LEG_NOT_IDENTIFIED   a road of the pair is no configured leg;
+ *   PAIR_NOT_CONFIGURED  both roads are legs, but of different Combinations;
+ *   AMBIGUOUS            more than one Combination holds the pair.
+ *
+ * Null for a Trip in no group.
+ */
+export const CombinationMatchOutcome = {
+  MATCHED: "MATCHED",
+  NO_PAIR: "NO_PAIR",
+  LEG_NOT_IDENTIFIED: "LEG_NOT_IDENTIFIED",
+  PAIR_NOT_CONFIGURED: "PAIR_NOT_CONFIGURED",
+  AMBIGUOUS: "AMBIGUOUS",
+} as const;
+
+export type CombinationMatchOutcome =
+  (typeof CombinationMatchOutcome)[keyof typeof CombinationMatchOutcome];
+
 /** A configured road as the matcher returned it. */
 type ConfiguredRoad = RoadEndpoints & { readonly id: string };
 
@@ -20,11 +44,13 @@ type ConfiguredRoad = RoadEndpoints & { readonly id: string };
 export function ordinaryRouteTrace(
   route: ConfiguredRoad | null,
   method: RouteMatchMethod,
+  combinationMatch: CombinationMatchOutcome | null = null,
 ): PricingRouteMatchTrace {
   return {
     routePricingId: route?.id ?? null,
     method,
     combinationRouteGroupId: null,
+    combinationMatch,
     legs: route ? [legTrace(route, null, true, method)] : [],
   };
 }
@@ -54,6 +80,7 @@ export function combinationTrace(
     routePricingId: own.leg.id,
     method,
     combinationRouteGroupId,
+    combinationMatch: CombinationMatchOutcome.MATCHED,
     legs,
   };
 }

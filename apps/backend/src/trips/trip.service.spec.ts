@@ -95,6 +95,8 @@ describe("TripService", () => {
       create: jest.fn().mockResolvedValue(buildTrip()),
       update: jest.fn().mockResolvedValue(buildTrip()),
       setStatus: jest.fn().mockResolvedValue(buildTrip()),
+      // Read when a grouped Trip leaves or rejoins a pricing pair.
+      findManyByGroupId: jest.fn().mockResolvedValue([]),
       // Present so "not called" assertions have something real to check: an
       // absent member would make every such expectation vacuously pass.
       assignToGroup: jest.fn().mockResolvedValue(0),

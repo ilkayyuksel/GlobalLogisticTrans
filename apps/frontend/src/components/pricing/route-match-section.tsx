@@ -33,8 +33,35 @@ export function RouteMatchSection({ routeMatch }: { routeMatch: RouteMatch }) {
       </div>
       <p className="mt-0.5 text-xs text-muted">{t("pricing.route.source")}</p>
 
+      <CombinationOutcome routeMatch={routeMatch} />
       <RouteMatchBody routeMatch={routeMatch} tone={tone} />
     </section>
+  );
+}
+
+/**
+ * For a grouped Trip: whether its group was priced as a Combination, and if
+ * not, why — so a group on ordinary routes never reads as a Combination.
+ */
+function CombinationOutcome({ routeMatch }: { routeMatch: RouteMatch }) {
+  const t = useTranslation();
+  const outcome = routeMatch.combinationMatch ?? null;
+
+  if (outcome === null) {
+    return null;
+  }
+
+  return (
+    <p
+      data-combination-match={outcome}
+      className={
+        outcome === "MATCHED"
+          ? "mt-2 text-xs font-medium uppercase tracking-wide text-muted"
+          : "mt-2 font-medium text-warning"
+      }
+    >
+      {t(`pricing.route.combinationMatch.${outcome}`)}
+    </p>
   );
 }
 

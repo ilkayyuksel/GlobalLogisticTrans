@@ -296,6 +296,10 @@ export function buildHarness(storageDirectory: string) {
     findById: jest.fn((id: string) =>
       Promise.resolve(trips.find((trip) => trip.id === id) ?? null),
     ),
+    // Read when a cancelled or reopened Trip leaves or rejoins a pricing pair.
+    findManyByGroupId: jest.fn((tripGroupId: string) =>
+      Promise.resolve(trips.filter((trip) => trip.tripGroupId === tripGroupId)),
+    ),
     /** The real one is a compare-and-set: it moves the Trip only from `from`. */
     transitionStatus: jest.fn((id: string, from: TripStatus, to: TripStatus) => {
       const trip = trips.find((candidate) => candidate.id === id) as

@@ -1,5 +1,6 @@
 import { TripStatus } from "@prisma/client";
 import type { RouteMatchMethod } from "../route-pricing/route-matcher";
+import type { CombinationMatchOutcome } from "./route-match-trace";
 
 import { PricingStrategy } from "./pricing-settings";
 
@@ -245,6 +246,8 @@ export interface PricingRouteMatchTrace {
   readonly method: RouteMatchMethod;
   /** The Combination whose pair priced the Trip, or null. */
   readonly combinationRouteGroupId: string | null;
+  /** For a grouped Trip, what became of its pair; null for one in no group. */
+  readonly combinationMatch: CombinationMatchOutcome | null;
   /**
    * The configured road(s) matched, as they read now: one for an ordinary
    * route, both legs of the pair for a Combination, none without a match.

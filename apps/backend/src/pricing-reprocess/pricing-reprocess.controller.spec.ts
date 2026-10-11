@@ -16,6 +16,7 @@ import {
 import { PricingEngineService } from "../pricing-engine/pricing-engine.service";
 import { TripNotClosedException } from "../trip-pricing/exceptions/trip-pricing.exceptions";
 import { TripPricingService } from "../trip-pricing/trip-pricing.service";
+import { BulkPricingReprocessService } from "./bulk-pricing-reprocess.service";
 import { PricingReprocessController } from "./pricing-reprocess.controller";
 
 const TRIP_ID = "1b9d6bcd-bbfd-4b2d-9b5d-ab8dfbbd4bed";
@@ -99,9 +100,18 @@ describe("PricingReprocessController (integration)", () => {
   let app: INestApplication;
   let pricingEngine: { reprocess: jest.Mock };
   let tripPricingService: { requireCurrentSnapshot: jest.Mock };
+  let bulkReprocess: { reprocessMany: jest.Mock };
 
   beforeEach(async () => {
     pricingEngine = { reprocess: jest.fn().mockResolvedValue({}) };
+    bulkReprocess = {
+      reprocessMany: jest.fn().mockResolvedValue({
+        reprocessedCount: 1,
+        skippedCount: 1,
+        failedCount: 0,
+        results: [],
+      }),
+    };
     tripPricingService = {
       requireCurrentSnapshot: jest.fn().mockResolvedValue({
         pricing: STORED_PRICING,
@@ -124,6 +134,7 @@ describe("PricingReprocessController (integration)", () => {
       providers: [
         { provide: PricingEngineService, useValue: pricingEngine },
         { provide: TripPricingService, useValue: tripPricingService },
+        { provide: BulkPricingReprocessService, useValue: bulkReprocess },
         { provide: AppLoggerService, useValue: logger },
         { provide: APP_FILTER, useClass: AllExceptionsFilter },
         { provide: APP_INTERCEPTOR, useClass: ResponseInterceptor },
@@ -354,6 +365,32 @@ describe("PricingReprocessController (integration)", () => {
       await request(app.getHttpServer()).post(ROUTE).expect(409);
 
       expect(tripPricingService.requireCurrentSnapshot).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("reprocessing a selection", () => {
+    const BULK = "/api/v1/trip-pricing/reprocessions";
+    const OTHER_TRIP = "6ba7b810-9dad-41d1-80b4-00c04fd430c8";
+
+    it("returns 200 with one result per Trip and the counts", async () => {
+      const { body } = await request(app.getHttpServer())
+        .post(BULK)
+        .send({ tripIds: [TRIP_ID, OTHER_TRIP] })
+        .expect(200);
+
+      expect(bulkReprocess.reprocessMany).toHaveBeenCalledWith([TRIP_ID, OTHER_TRIP]);
+      expect(body.data).toMatchObject({ reprocessedCount: 1, skippedCount: 1, failedCount: 0 });
+    });
+
+    it.each([
+      ["an empty selection", { tripIds: [] }],
+      ["the same Trip twice", { tripIds: [TRIP_ID, TRIP_ID] }],
+      ["a malformed id", { tripIds: ["not-a-uuid"] }],
+      ["no list at all", {}],
+    ])("refuses %s with 400 and reprocesses nothing", async (_name, body) => {
+      await request(app.getHttpServer()).post(BULK).send(body).expect(400);
+
+      expect(bulkReprocess.reprocessMany).not.toHaveBeenCalled();
     });
   });
 

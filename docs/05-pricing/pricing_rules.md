@@ -463,34 +463,71 @@ calculation applied, read from its own lines.
 Combination changes no stored price; it is read by the next calculation of a
 Trip (an edit while CLOSED, closing again, or an explicit reprocess).
 
-## The rule that decides
+## Two kinds of group
 
-Which kind of configuration applies is decided by the rule that already existed —
-the same answer the TAR allocation uses, `combinationLegOf`, described under
-*What counts as a genuine Combination* below — and then by the **pair**:
+- **Operational group** — `trip_group`, referenced by `trip.trip_group_id`. Made
+  by the importer from one transport-order document, or by an operator by hand
+  (`POST /trip-groups`, `PATCH /trips/:id/group`). Membership decides the €50
+  Backload of every member.
+- **Combination configuration** — `combination_route_group` with its two legs
+  (`route_pricing.combination_group_id`, `combination_leg_position` 1 or 2) and
+  its Over ST. Route-price configuration only; it has no relation to any Trip or
+  `trip_group`.
 
-| The Trip's leg | Configuration it prices against |
+The two meet only through the pair match below, and the snapshot records the
+outcome. Nothing links them in the database.
+
+## The rule that decides (October 2026)
+
+A Trip in an operational group may be priced as a leg of a Combination. Only
+**OPEN and CLOSED** Trips are pricing partners: CANCELLED and DELETED members
+are filtered out of the group FIRST, before any rule below reads it — so no
+rule or fallback can pick one, and a group counts its ACTIVE members (three
+with one cancelled is a group of two). An OPEN partner has no price of its own,
+but the CLOSED leg is priced on the pair. Its **pricing partner**
+(`pricingPartnerOf`, `combination-leg.ts`) is:
+
+| The group | Pricing partner |
 |---|---|
-| DELIVERY or COLLECTION of a genuine Combination | the leg of the **Combination configured for both roads of the pair** — each road matched as above, then the one Combination holding both |
-| NONE — an ordinary Trip, or a group an operator made by hand | the **ordinary** configuration |
-| INVALID — the Trips of one document are grouped but are not one delivery and one collection | the **ordinary** configuration |
+| a genuine pair from one document (`combinationLegOf`: one DELIVERY and one COLLECTION), in a group of any size | the other leg of that document |
+| otherwise, a group of **exactly two** Trips — imported or made by hand, any documents, any directions | the other member |
+| anything else — three or more Trips with no genuine pair among them, or a Trip alone in its group | none |
 
-An INVALID group is reported rather than priced on a guess, so it takes the
-ordinary configuration rather than a Combination one.
+With a partner, both roads — each in its own driving direction — are matched
+against every configured leg (`matchCombinationPair`). When exactly **one**
+Combination holds both, each Trip prices on its own leg of it; the leg
+POSITION (1 or 2) is the configuration's, and decides Over ST. Otherwise both
+price against their ordinary routes. A single road never picks a Combination.
 
-### A genuine leg falls back
+The outcome is stored on every grouped Trip's snapshot as
+`trip_pricing.combination_match`:
 
-A genuine Combination leg whose **pair** is not identified prices against the
-ordinary configuration of its own road. Not identified means: either road is no
-configured leg at all, both roads are legs but of different Combinations, or
-more than one Combination holds the pair (`AMBIGUOUS`). The reason is logged as a
-warning. Every Combination Trip priced before Combination routes existed was
-priced against the ordinary route; the fallback keeps that, and configuring the
-Combination of the pair is what changes it.
+| Outcome | Meaning |
+|---|---|
+| `MATCHED` | the pair is one configured Combination (`combination_route_group_id`, both legs in `trip_pricing_route_leg`) |
+| `NO_PAIR` | no pricing partner (larger group, Trip left alone, partner without a road) |
+| `LEG_NOT_IDENTIFIED` | a road of the pair is no configured leg |
+| `PAIR_NOT_CONFIGURED` | both roads are legs, but of different Combinations |
+| `AMBIGUOUS` | more than one Combination holds the pair — none is chosen |
 
-A **single road never picks a Combination.** One road may be a leg of many
-Combinations — a shared outbound with different returns — and choosing the first
-of them was arbitrary. That fallback was removed.
+`NULL` for a Trip in no group, and on snapshots written before it was recorded.
+
+The **TAR** allocation does not read this: a genuine same-document pair still
+owes TAR once, on the COLLECTION; every other group member pays as before.
+
+### What reprices when the pair changes
+
+| Change | Repriced (CLOSED only) |
+|---|---|
+| grouping (`createGroup`) | every Trip that joins |
+| ungrouping (`removeFromGroup`) | the Trip taken out, and every member whose TAR leg **or pricing partner** changed — e.g. the member left alone in a group of two, or the two left behind when a third leaves |
+| a leg's terminal, destination or direction | the Trip, its same-document group members and its pricing partner |
+| either leg's `planningDate` | Leg 2 of the matched pair (Over ST) |
+| reopen → close again | the Trip, on the group, roads and dates it has then |
+| a member cancelled or deleted, or reopened / restored (`changeStatus`, `softDelete`, `restore`, a CANCEL document, a NEW/UPDATE document reopening it) | every CLOSED member whose pricing partner changed (`repriceAfterPartnerStatusChange`) — nothing when the change keeps the Trip on the same side (OPEN ↔ CLOSED) |
+
+A Combination configuration changed or removed reprices nothing by itself; the
+next pricing of a leg reads the configuration as it is then.
 
 ## One match, read three times
 
@@ -647,8 +684,8 @@ change reprices Leg 2 by itself, without "Prijs opnieuw berekenen":
 A leg's road — terminal, destination city or direction — decides which
 configured PAIR both legs are priced on. So a real change of it (an edit of a
 CLOSED Trip, or a document revising an OPEN leg whose partner is CLOSED)
-reprices the Trip and every CLOSED member of its group from the same document
-(`PricingRecalculationService.tripsAffectedByRoadChange` →
+reprices the Trip, every CLOSED member of its group from the same document and
+its pricing partner (`PricingRecalculationService.tripsAffectedByRoadChange` →
 `PricingComponentResolver.tripsPricedByRoadOf`), deliberately whether or not
 the pair is genuine right now: a direction change can make it malformed, and
 the partner's price moves either way. A date and a road changed by one write

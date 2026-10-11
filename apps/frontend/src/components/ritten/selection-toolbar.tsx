@@ -20,17 +20,24 @@ import { useTranslation } from "@/lib/i18n/language-provider";
  * dialog in front of a routine action is one people learn to dismiss without
  * reading — which is worse than none at all. Cancelling and deleting still ask,
  * because those are not routine.
+ *
+ * "Prijs herberekenen" asks nothing either: it only calculates the stored price
+ * of finished Trips again, writes no Trip data, and reports per Trip what it
+ * did. It cannot be started twice — the button waits for the answer.
  */
 export function SelectionToolbar({
   selectedCount,
   canSelectAllVisible,
   canGroup,
   canComplete,
+  canReprice,
+  isRepricing,
   isBusy,
   onSelectAllVisible,
   onClear,
   onGroup,
   onComplete,
+  onReprice,
   onMarkLoose,
 }: {
   /** Everything selected, including Trips on days that are not on screen. */
@@ -41,11 +48,16 @@ export function SelectionToolbar({
   canGroup: boolean;
   /** False when nothing in the selection is in a state that can be closed. */
   canComplete: boolean;
+  /** False when nothing in the selection is a finished Trip. */
+  canReprice: boolean;
+  /** True while "Prijs herberekenen" runs for the selection. */
+  isRepricing: boolean;
   isBusy: boolean;
   onSelectAllVisible: () => void;
   onClear: () => void;
   onGroup: () => void;
   onComplete: () => void;
+  onReprice: () => void;
   /**
    * Classifies the whole selection as LOSRIT.
    *
@@ -97,6 +109,16 @@ export function SelectionToolbar({
         className="rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-white hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-50"
       >
         {t("ritten.select.complete")}
+      </button>
+
+      <button
+        type="button"
+        onClick={onReprice}
+        disabled={!canReprice || isBusy || isRepricing}
+        aria-busy={isRepricing}
+        className="rounded-md border border-border bg-card px-3 py-1.5 text-sm font-medium text-foreground hover:bg-hover disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        {isRepricing ? t("ritten.select.repricing") : t("ritten.select.reprice")}
       </button>
 
       {/*

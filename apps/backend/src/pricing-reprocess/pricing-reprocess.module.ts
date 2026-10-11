@@ -2,6 +2,7 @@ import { Module } from "@nestjs/common";
 
 import { PricingEngineModule } from "../pricing-engine/pricing-engine.module";
 import { TripPricingModule } from "../trip-pricing/trip-pricing.module";
+import { BulkPricingReprocessService } from "./bulk-pricing-reprocess.service";
 import { PricingReprocessController } from "./pricing-reprocess.controller";
 
 /**
@@ -17,11 +18,12 @@ import { PricingReprocessController } from "./pricing-reprocess.controller";
  * mapping, the response shape — and the Engine stays free of it, which is what
  * lets a queue worker or a scheduled job drive the same operation later.
  *
- * Nothing is provided or exported. This module contributes one route and
- * borrows every service it needs.
+ * It provides only the bulk reprocess, which loops the single-Trip reprocess;
+ * every other service it needs is borrowed.
  */
 @Module({
   imports: [PricingEngineModule, TripPricingModule],
   controllers: [PricingReprocessController],
+  providers: [BulkPricingReprocessService],
 })
 export class PricingReprocessModule {}

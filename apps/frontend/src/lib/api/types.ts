@@ -330,6 +330,7 @@ export interface TripPricing {
   routePricingId?: string | null;
   routeMatchMethod?: RouteMatchMethod | null;
   combinationRouteGroupId?: string | null;
+  combinationMatch?: CombinationMatchOutcome | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -343,6 +344,17 @@ export type RouteMatchMethod =
   | "NORMALIZED"
   | "FUZZY"
   | "NOT_FOUND"
+  | "AMBIGUOUS";
+
+/**
+ * For a Trip in a group: MATCHED when its pair of roads named one configured
+ * Combination, otherwise why it was priced on ordinary routes.
+ */
+export type CombinationMatchOutcome =
+  | "MATCHED"
+  | "NO_PAIR"
+  | "LEG_NOT_IDENTIFIED"
+  | "PAIR_NOT_CONFIGURED"
   | "AMBIGUOUS";
 
 /** One configured road a stored price came from, as it was configured then. */
@@ -375,6 +387,11 @@ export interface RouteMatch {
   method: RouteMatchMethod | null;
   routePricingId: string | null;
   combinationRouteGroupId: string | null;
+  /**
+   * Null for a Trip in no group, or a calculation that did not record it.
+   * Optional: absent from responses of backends older than the field.
+   */
+  combinationMatch?: CombinationMatchOutcome | null;
   legs: RouteMatchLeg[];
   /** Null unless a Combination priced the Trip. */
   overSt: AppliedOverSt | null;
@@ -458,6 +475,28 @@ export interface EffectivePricing {
    * Optional: absent from responses of backends older than the field.
    */
   routeMatch?: RouteMatch | null;
+}
+
+/** What became of one selected Trip in "Prijs herberekenen". */
+export type TripReprocessOutcome = "REPROCESSED" | "SKIPPED" | "FAILED";
+
+export interface TripReprocessResult {
+  tripId: string;
+  outcome: TripReprocessOutcome;
+  /** NOT_CLOSED or NOT_FOUND when skipped; the backend's code when it failed. */
+  reasonCode: string | null;
+  /** The reason in the backend's words; null when reprocessed. */
+  message: string | null;
+  /** The snapshot just stored; null unless reprocessed. */
+  snapshot: PricingSnapshot | null;
+}
+
+/** The answer of "Prijs herberekenen" for a selection: one result per Trip. */
+export interface BulkReprocessResult {
+  reprocessedCount: number;
+  skippedCount: number;
+  failedCount: number;
+  results: TripReprocessResult[];
 }
 
 /** What the reprocess endpoint returns, and what the detail page displays. */
