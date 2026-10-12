@@ -384,13 +384,16 @@ export class PricingComponentResolver {
    * comparison is `route-matcher.ts`: exact, then safe normalisation, then a
    * single trusted typo — never an alias, never a reversed road.
    *
-   * ── WHICH CONFIGURATION ───────────────────────────────────────────────────
-   *   a grouped Trip with a pricing partner (`pricingPartnerOf`: the other leg
-   *     of its document, or the other member of a group of two) whose PAIR of
-   *     roads is one configured Combination → that Combination's leg, with its
-   *     Over ST;
-   *   anything else, or a pair that is not identified → the ordinary route, and
-   *     the snapshot records why (`combinationMatch`).
+   * ── WHICH CONFIGURATION — A HARD LINE (owner's rule, October 2026) ────────
+   *   a Trip in NO group → the ordinary route configuration;
+   *   a Trip in a group → ONLY a Combination: its pricing partner
+   *     (`pricingPartnerOf`: the other leg of its document, or the other member
+   *     of a group of two) and it must name, by their PAIR of roads, exactly one
+   *     configured Combination → that Combination's leg, with its Over ST.
+   *     Anything else — no partner, a leg not recognised, a pair not
+   *     configured, several candidates — prices NO route: zero route
+   *     components, a warning, and `combinationMatch` saying why. Never the
+   *     ordinary route, which used to be the fallback here.
    *
    * A road alone never picks a Combination: one road may be a leg of many, and
    * the first of them is not an answer. That fallback is gone.
@@ -438,7 +441,16 @@ export class PricingComponentResolver {
       lookup.kind === "NO_PARTNER" ? CombinationMatchOutcome.NO_PAIR : lookup.match.kind;
     this.reportPairNotIdentified(trip, road, lookup, outcome);
 
-    return this.selectOrdinaryRoute(trip, road, outcome);
+    return {
+      route: null,
+      trace: ordinaryRouteTrace(
+        null,
+        outcome === CombinationMatchOutcome.AMBIGUOUS
+          ? RouteMatchMethod.AMBIGUOUS
+          : RouteMatchMethod.NOT_FOUND,
+        outcome,
+      ),
+    };
   }
 
   private async selectOrdinaryRoute(
@@ -465,10 +477,9 @@ export class PricingComponentResolver {
   }
 
   /**
-   * A grouped Trip whose pair is no configured Combination: why, at the level
-   * it deserves. A group with no pricing pair (three or more Trips, or a
-   * partner without a road) is ordinary; a pair whose roads name no single
-   * Combination is worth a warning — someone may expect a Combination price.
+   * A grouped Trip whose pair is no configured Combination: a WARNING, always —
+   * it now prices no route at all, and someone has to configure the
+   * Combination or fix the group. Route names and outcome, never amounts.
    */
   private reportPairNotIdentified(
     trip: TripReadView,
@@ -491,13 +502,12 @@ export class PricingComponentResolver {
         : {}),
     };
 
-    if (lookup.kind === "NO_PARTNER") {
-      this.logger.log("Grouped Trip has no pricing pair; pricing the ordinary route", context);
-
-      return;
-    }
-
-    this.logger.warn("Combination pair not identified; pricing the ordinary route", context);
+    this.logger.warn(
+      lookup.kind === "NO_PARTNER"
+        ? "Grouped Trip has no pricing pair; no route priced, route components zero"
+        : "Combination pair not identified; no route priced, route components zero",
+      context,
+    );
   }
 
   /** This Trip's leg of the Combination configured for its PAIR of roads. */

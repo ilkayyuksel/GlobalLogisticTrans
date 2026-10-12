@@ -41,7 +41,7 @@ export function RouteMatchSection({ routeMatch }: { routeMatch: RouteMatch }) {
 
 /**
  * For a grouped Trip: whether its group was priced as a Combination, and if
- * not, why — so a group on ordinary routes never reads as a Combination.
+ * not, why — so a group priced on no route never reads as a Combination.
  */
 function CombinationOutcome({ routeMatch }: { routeMatch: RouteMatch }) {
   const t = useTranslation();

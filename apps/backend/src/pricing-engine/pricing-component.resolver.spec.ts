@@ -467,7 +467,8 @@ describe("PricingComponentResolver", () => {
    * ── A COMBINATION IS IDENTIFIED BY ITS PAIR ──────────────────────────────
    * One road may be a leg of several Combinations. Only BOTH roads of the
    * genuine pair name one, so a single road never picks a Combination — and a
-   * pair that names none, or more than one, falls back to the ordinary route.
+   * grouped Trip whose pair names none, or more than one, prices NO route: it
+   * never falls back to the ordinary configuration (owner's rule, Oct 2026).
    * ──────────────────────────────────────────────────────────────────────────
    */
   describe("a genuine Combination", () => {
@@ -629,22 +630,25 @@ describe("PricingComponentResolver", () => {
         ],
         "AMBIGUOUS",
       ],
-    ])("falls back to the ordinary route with %s", async (_name, groups, reason) => {
+    ])("4/5. prices no route — never the ordinary one — with %s", async (_name, groups, reason) => {
       const [first] = pair();
       combinationPricing.findAll.mockResolvedValue(groups);
 
-      expect(await resolver.resolveRouteSelection(first)).toMatchObject({
-        route: { routePricingId: ROUTE_ID, kind: RouteConfigurationKind.NORMAL },
-        // Never a Combination recorded for a pair that was not identified.
+      expect(await resolver.resolveRouteSelection(first)).toEqual({
+        route: null,
+        // Neither a Combination nor an ordinary route recorded for this pair.
         trace: {
-          method: "EXACT",
+          routePricingId: null,
+          method: reason === "AMBIGUOUS" ? "AMBIGUOUS" : "NOT_FOUND",
           combinationRouteGroupId: null,
           combinationMatch: reason,
-          legs: [{ legPosition: null }],
+          legs: [],
         },
       });
+      // The ordinary road IS configured (ROUTE_ID): it is not even looked up.
+      expect(routePricingService.findAllOrdinary).not.toHaveBeenCalled();
       expect(logger.warn).toHaveBeenCalledWith(
-        "Combination pair not identified; pricing the ordinary route",
+        "Combination pair not identified; no route priced, route components zero",
         expect.objectContaining({ tripId: TRIP_ID, combinationMatch: reason }),
       );
     });
@@ -663,8 +667,8 @@ describe("PricingComponentResolver", () => {
       });
     });
 
-    /** Three Trips and no genuine pair: which would be the other leg is not guessed. */
-    it("matches the ordinary configuration for a larger manual group, and says why", async () => {
+    /** 3/7. Three Trips and no genuine pair: the other leg is not guessed, and no ordinary route either. */
+    it("prices no route for a larger manual group with no pair, and says why", async () => {
       const [first, second] = pair({}, { pdfDocumentId: "a-different-document" });
       trips.findByGroupId.mockResolvedValue([
         first,
@@ -674,19 +678,37 @@ describe("PricingComponentResolver", () => {
       combinationPricing.findAll.mockResolvedValue([combination("combo-1", "Gent")]);
 
       expect(await resolver.resolveRouteSelection(first)).toMatchObject({
-        route: { routePricingId: ROUTE_ID, kind: RouteConfigurationKind.NORMAL },
-        trace: { combinationRouteGroupId: null, combinationMatch: "NO_PAIR" },
+        route: null,
+        trace: { routePricingId: null, combinationRouteGroupId: null, combinationMatch: "NO_PAIR" },
       });
       expect(combinationPricing.findAll).not.toHaveBeenCalled();
+      expect(routePricingService.findAllOrdinary).not.toHaveBeenCalled();
+      expect(logger.warn).toHaveBeenCalledWith(
+        "Grouped Trip has no pricing pair; no route priced, route components zero",
+        expect.objectContaining({ tripId: TRIP_ID, combinationMatch: "NO_PAIR" }),
+      );
     });
 
-    /** A malformed pair is reported elsewhere and never priced on a guess. */
-    it("matches the ordinary configuration for a malformed pair", async () => {
+    /**
+     * 6. The wrong direction: both Trips DELIVERY, so the second road runs
+     * terminal → city where the Combination's return runs city → terminal. A
+     * reversed road is never a match — and the ordinary route is no answer.
+     */
+    it("prices no route for a pair in the wrong direction", async () => {
       const [first] = pair({}, { direction: TripDirection.DELIVERY });
       combinationPricing.findAll.mockResolvedValue([combination("combo-1", "Gent")]);
 
       expect(await resolver.resolveRouteSelection(first)).toMatchObject({
+        route: null,
+        trace: { routePricingId: null, combinationRouteGroupId: null },
+      });
+      expect(routePricingService.findAllOrdinary).not.toHaveBeenCalled();
+    });
+
+    it("1. still prices a Trip in no group on its ordinary route", async () => {
+      expect(await resolver.resolveRouteSelection(buildTrip())).toMatchObject({
         route: { routePricingId: ROUTE_ID, kind: RouteConfigurationKind.NORMAL },
+        trace: { combinationMatch: null },
       });
     });
 

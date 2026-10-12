@@ -167,7 +167,7 @@ describe("operational groups priced as Combinations", () => {
       expect((await stored(OTHER)).pricing.tarief).toBe("130.00");
     });
 
-    it("3. both roads are legs, but of different Combinations: ordinary routes, and why", async () => {
+    it("3. both roads are legs, but of different Combinations: no route at all, and why", async () => {
       await closedTrips();
       world.combinations.splice(0, 2, {
         ...GHLIN_MONS(),
@@ -176,13 +176,15 @@ describe("operational groups priced as Combinations", () => {
 
       await world.tripService.createGroup([OUT, BACK]);
 
+      // OUT's road IS an ordinary route (route-1): it is never used for a grouped Trip.
       const out = await stored(OUT);
       expect(out.route).toMatchObject({
+        routePricingId: null,
         combinationRouteGroupId: null,
         combinationMatch: "PAIR_NOT_CONFIGURED",
-        legs: [{ legPosition: null, routePricingId: "route-1" }],
+        legs: [],
       });
-      expect(out.pricing.tarief).toBe("200.00");
+      expect(out.pricing.tarief).toBe("0.00");
       expect((await stored(BACK)).route).toMatchObject({
         method: "NOT_FOUND",
         combinationMatch: "PAIR_NOT_CONFIGURED",

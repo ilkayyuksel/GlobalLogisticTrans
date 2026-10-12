@@ -595,6 +595,8 @@ export function buildPricingLifecycle() {
 
   return {
     trips,
+    /** The one logger every service shares, for asserting warnings. */
+    logger: logger as unknown as { warn: jest.Mock; log: jest.Mock },
     /** Change these to change the configuration; nothing is repriced by it. */
     ordinaryRoutes,
     combinations,

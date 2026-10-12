@@ -312,7 +312,9 @@ describe("the pricing lifecycle of a Trip", () => {
       const responses = await world.tripService.createGroup([TRIP, PARTNER]);
 
       for (const response of responses) {
-        expect(response.pricing).toMatchObject({ backload: "50.00", totaal: "280.00" });
+        // No Combination is configured for this pair: no route is priced — the
+        // ordinary one is never borrowed — and the Backload stays.
+        expect(response.pricing).toMatchObject({ backload: "50.00", tarief: "0.00", totaal: "50.00" });
       }
       for (const tripId of [TRIP, PARTNER]) {
         expect(storedComponents(tripId).COMBINATION).toBe("50.00");
@@ -364,11 +366,12 @@ describe("the pricing lifecycle of a Trip", () => {
 
       await world.tripService.createGroup([TRIP, PARTNER]);
 
+      // No Combination for this pair, so no route: 50 + 35 + 25.
       expect(await apiPricing(TRIP)).toMatchObject({
         backload: "50.00",
         others: "35.00",
         ek: "25.00",
-        totaal: "340.00",
+        totaal: "110.00",
       });
       await expectConsistent(TRIP);
     });
@@ -522,7 +525,8 @@ describe("the pricing lifecycle of a Trip", () => {
 
       await close(TRIP);
 
-      expect(await apiPricing(TRIP)).toMatchObject({ backload: "50.00", totaal: "280.00" });
+      // Grouped with no Combination configured for the pair: Backload only.
+      expect(await apiPricing(TRIP)).toMatchObject({ backload: "50.00", tarief: "0.00", totaal: "50.00" });
       expect(storedComponents(TRIP).COMBINATION).toBe("50.00");
     });
 

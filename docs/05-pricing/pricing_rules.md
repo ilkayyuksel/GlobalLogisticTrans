@@ -517,8 +517,19 @@ but the CLOSED leg is priced on the pair. Its **pricing partner**
 With a partner, both roads — each in its own driving direction — are matched
 against every configured leg (`matchCombinationPair`). When exactly **one**
 Combination holds both, each Trip prices on its own leg of it; the leg
-POSITION (1 or 2) is the configuration's, and decides Over ST. Otherwise both
-price against their ordinary routes. A single road never picks a Combination.
+POSITION (1 or 2) is the configuration's, and decides Over ST. A single road
+never picks a Combination.
+
+**A grouped Trip never uses an ordinary route configuration** (owner's rule,
+October 2026 — it replaces the earlier fallback to the ordinary route). With no
+partner, a leg not recognised, a pair not configured or several candidates, the
+Trip prices **no route**: Tarief, Toll and Tunnel are € 0, no Over ST and no
+€ 70 surcharge apply, a warning is logged, and the snapshot stores
+`route_pricing_id = NULL` with the `combination_match` reason — so a route
+configured at € 0 (`MATCHED`, an id) stays distinguishable from no match. The
+Backload, Custom Values, fuel, EK, waiting time and CC are untouched by this:
+the Backload follows membership. Closing is never blocked by it. Ungrouping
+prices the Trip on its ordinary route again at its next pricing.
 
 The outcome is stored on every grouped Trip's snapshot as
 `trip_pricing.combination_match`:
@@ -665,8 +676,8 @@ A road may be a leg of many Combinations, so a Combination Trip is matched by
 the **pair** of roads its two Trips drive (the same identity, `isSameCombination`,
 that keeps a pair from being configured twice, matched with the layers above).
 Tarief, Toll, Tunnel and Over ST all come from that one configuration. When the
-pair is not identified, the leg prices against the ordinary route of its own
-road and owes no Over ST.
+pair is not identified, the leg prices no route at all — never the ordinary
+route of its road — and owes no Over ST.
 
 Over ST reaches a Trip only when it is priced (closed or repriced); stored
 snapshots do not change until then.

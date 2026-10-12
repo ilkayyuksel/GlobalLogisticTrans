@@ -296,6 +296,19 @@ describe("one road configured as an ordinary route and as a Combination leg", ()
   });
 
   /** Every amount the chain produced, by component code. */
+  /**
+   * No route: the Tarief is zero and there is no toll or tunnel line at all —
+   * exactly as for an ungrouped Trip whose road is not configured. Only what
+   * does not come from a route remains: fuel on nothing, and the Backload.
+   */
+  const NO_ROUTE_PRICED = expect.objectContaining({ BASE_PRICE: "0.00" });
+
+  function expectNoRoute(amounts: Record<string, string>): void {
+    expect(amounts).toEqual(NO_ROUTE_PRICED);
+    expect(amounts).not.toHaveProperty("TOLL");
+    expect(amounts).not.toHaveProperty("TUNNEL");
+  }
+
   async function amountsOf(): Promise<Record<string, string>> {
     const { lines } = await engine.calculate(TRIP_ID);
 
@@ -382,11 +395,11 @@ describe("one road configured as an ordinary route and as a Combination leg", ()
   });
 
   /**
-   * ── A PAIR WITH NO COMBINATION FALLS BACK ──────────────────────────────────
-   * Every Combination Trip priced before Combination routes existed was priced
-   * against the ordinary configuration. Refusing to match would silently reprice
-   * all of them to zero, so the fallback is what keeps existing pricing
-   * unchanged — and configuring the Combination of the pair is what changes it.
+   * ── A PAIR WITH NO COMBINATION PRICES NO ROUTE (October 2026) ─────────────
+   * This REPLACES the fallback to the ordinary route. A grouped Trip may only
+   * use a Combination configuration: with none for its pair, its route
+   * components are zero and the snapshot says why — the ordinary road's price
+   * is never borrowed. The Backload, which follows membership, stays.
    */
   describe("a genuine Combination leg whose pair has no Combination route", () => {
     beforeEach(() => {
@@ -400,12 +413,8 @@ describe("one road configured as an ordinary route and as a Combination leg", ()
       trips.findByGroupId.mockResolvedValue(genuinePair());
     });
 
-    it("is priced against the ordinary route, as it always was", async () => {
-      expect(await amountsOf()).toMatchObject({
-        BASE_PRICE: "380.00",
-        TOLL: "15.60",
-        TUNNEL: "12.50",
-      });
+    it("4. prices no route — not the ordinary one either", async () => {
+      expectNoRoute(await amountsOf());
     });
 
     it("still carries its Backload", async () => {
@@ -416,21 +425,17 @@ describe("one road configured as an ordinary route and as a Combination leg", ()
      * The outbound alone IS a configured leg — but of a Combination whose
      * return is another road. One road never picks a Combination.
      */
-    it("is never priced on a Combination that shares only its outbound", async () => {
+    it("is never priced on a Combination that shares only its outbound, nor on the ordinary route", async () => {
       combinationPricing.findAll.mockResolvedValue([combinationOf("Beveren")]);
 
-      expect(await amountsOf()).toMatchObject({
-        BASE_PRICE: "380.00",
-        TOLL: "15.60",
-        TUNNEL: "12.50",
-      });
+      expectNoRoute(await amountsOf());
     });
   });
 
   /**
-   * A group an operator made by hand claims nothing about pairing, so it is not a
-   * genuine Combination and takes the ordinary configuration. It keeps its €50
-   * all the same: the Backload follows membership, not pairing.
+   * A group an operator made by hand: a group of two is a pricing pair and is
+   * priced on the Combination its roads name — or on no route at all. It keeps
+   * its €50 all the same: the Backload follows membership, not pairing.
    */
   describe("a Trip in a manual group", () => {
     beforeEach(() => {
@@ -456,17 +461,15 @@ describe("one road configured as an ordinary route and as a Combination leg", ()
       });
     });
 
-    it("is priced against the ordinary configuration when its pair is no Combination", async () => {
+    it("prices no route when its pair is no Combination", async () => {
       combinationPricing.findAll.mockResolvedValue([combinationOf("Beveren")]);
 
-      expect(await amountsOf()).toMatchObject({
-        BASE_PRICE: "380.00",
-        TUNNEL: "12.50",
-      });
+      expectNoRoute(await amountsOf());
+      expect(routePricing.findAllOrdinary).not.toHaveBeenCalled();
     });
 
     /** Three or more Trips with no genuine pair: which would be the other leg is not guessed. */
-    it("is priced against the ordinary configuration in a larger group", async () => {
+    it("prices no route in a larger group with no pair", async () => {
       const [outbound, partner] = manualGroup();
       trips.findByGroupId.mockResolvedValue([
         outbound,
@@ -474,10 +477,8 @@ describe("one road configured as an ordinary route and as a Combination leg", ()
         { ...partner, id: "third-trip", pdfDocumentId: "pdf-third" },
       ]);
 
-      expect(await amountsOf()).toMatchObject({
-        BASE_PRICE: "380.00",
-        TUNNEL: "12.50",
-      });
+      expectNoRoute(await amountsOf());
+      expect((await amountsOf()).COMBINATION).toBe("50.00");
     });
 
     it("carries its Backload regardless of the route configuration", async () => {

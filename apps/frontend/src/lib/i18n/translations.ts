@@ -1074,13 +1074,13 @@ const nl = {
   "pricing.route.overSt.surcharge": "Over ST-toeslag",
   "pricing.route.combinationMatch.MATCHED": "Combinatieprijs",
   "pricing.route.combinationMatch.NO_PAIR":
-    "Geen combinatieprijs: de groep heeft geen eenduidig paar (geen groep van twee ritten en geen paar uit één document) — gewone routeprijzen",
+    "Geen combinatieprijs: de groep heeft geen eenduidig paar (geen groep van twee ritten en geen paar uit één document) — geen routeprijs toegepast (routecomponenten € 0)",
   "pricing.route.combinationMatch.LEG_NOT_IDENTIFIED":
-    "Geen combinatieprijs: een route van het paar is geen geconfigureerde combinatie-leg — gewone routeprijzen",
+    "Geen combinatieprijs: een route van het paar is geen geconfigureerde combinatie-leg — geen routeprijs toegepast (routecomponenten € 0)",
   "pricing.route.combinationMatch.PAIR_NOT_CONFIGURED":
-    "Geen combinatieprijs: beide routes zijn legs, maar van verschillende combinaties — gewone routeprijzen",
+    "Geen combinatieprijs: beide routes zijn legs, maar van verschillende combinaties — geen routeprijs toegepast (routecomponenten € 0)",
   "pricing.route.combinationMatch.AMBIGUOUS":
-    "Geen combinatieprijs: meerdere combinaties bevatten dit paar, geen gekozen — gewone routeprijzen",
+    "Geen combinatieprijs: meerdere combinaties bevatten dit paar, geen gekozen — geen routeprijs toegepast (routecomponenten € 0)",
   "ritten.group.pricing.notCurrent":
     "Geen actuele prijs: alleen een afgewerkte rit heeft een prijs.",
   "ritten.group.pricing.none": "Nog geen prijs berekend.",
@@ -2228,13 +2228,13 @@ const tr: Translations = {
   "pricing.route.overSt.surcharge": "Over ST ek ücreti",
   "pricing.route.combinationMatch.MATCHED": "Kombinasyon fiyatı",
   "pricing.route.combinationMatch.NO_PAIR":
-    "Kombinasyon fiyatı yok: grubun net bir çifti yok (iki seferlik bir grup veya tek belgeden bir çift değil) — normal rota fiyatları",
+    "Kombinasyon fiyatı yok: grubun net bir çifti yok (iki seferlik bir grup veya tek belgeden bir çift değil) — rota fiyatı uygulanmadı (rota bileşenleri € 0)",
   "pricing.route.combinationMatch.LEG_NOT_IDENTIFIED":
-    "Kombinasyon fiyatı yok: çiftin bir rotası yapılandırılmış bir kombinasyon ayağı değil — normal rota fiyatları",
+    "Kombinasyon fiyatı yok: çiftin bir rotası yapılandırılmış bir kombinasyon ayağı değil — rota fiyatı uygulanmadı (rota bileşenleri € 0)",
   "pricing.route.combinationMatch.PAIR_NOT_CONFIGURED":
-    "Kombinasyon fiyatı yok: iki rota da ayak, ancak farklı kombinasyonların — normal rota fiyatları",
+    "Kombinasyon fiyatı yok: iki rota da ayak, ancak farklı kombinasyonların — rota fiyatı uygulanmadı (rota bileşenleri € 0)",
   "pricing.route.combinationMatch.AMBIGUOUS":
-    "Kombinasyon fiyatı yok: bu çift birden fazla kombinasyonda var, hiçbiri seçilmedi — normal rota fiyatları",
+    "Kombinasyon fiyatı yok: bu çift birden fazla kombinasyonda var, hiçbiri seçilmedi — rota fiyatı uygulanmadı (rota bileşenleri € 0)",
   "ritten.group.pricing.notCurrent":
     "Güncel fiyat yok: yalnızca tamamlanmış bir seferin fiyatı vardır.",
   "ritten.group.pricing.none": "Henüz fiyat hesaplanmadı.",
