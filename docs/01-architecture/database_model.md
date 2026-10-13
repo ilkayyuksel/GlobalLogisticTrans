@@ -1290,6 +1290,16 @@ stored on the Trip (`TripDriverPinningService`, `cutOffAssignment`):
 A stored Driver is never replaced by any of this: every write is a
 compare-and-set on `driver_id IS NULL`.
 
+**One exception — another truck chosen on the Trip (14 October 2026).** When an
+operator explicitly changes a Trip's Vehicle (`PATCH /trips/:id` with a
+different `vehicleId` and no `driverId`), the Driver is RE-DETERMINED: the
+Driver assigned to the new Vehicle on the Trip's planning date (the new date if
+the same request moves it), or `NULL` when nobody is — never the old truck's
+Driver merely because it was stored. The lookup happens before the write and
+Vehicle and Driver are written in one statement. A `driverId` sent in the same
+request wins. A date change alone, a document, and a change of the truck's
+assignment on the fleet page still keep the Trip's Driver.
+
 > 13–14 October 2026: a variant in which only finished Trips stored their
 > Driver (with a `driver_source` of MANUAL, AUTOMATIC or UNKNOWN) was introduced
 > and withdrawn the next day by the owner. The rule above is the one in force.

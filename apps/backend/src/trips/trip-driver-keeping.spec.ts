@@ -32,6 +32,8 @@ import { TripService } from "./trip.service";
 const TRIP_ID = "trip-1";
 const TRUCK_A = "truck-a";
 const TRUCK_B = "truck-b";
+/** A truck with nobody assigned on any date. */
+const TRUCK_C = "truck-c";
 const PIET = "driver-piet";
 const AHMET = "driver-ahmet";
 const MARC = "driver-marc";
@@ -43,6 +45,10 @@ function day(iso: string): Date {
 
 /** Who drives which truck on which day. */
 function assignedDriver(vehicleId: string, onDate: Date): string | null {
+  if (vehicleId === TRUCK_C) {
+    return null;
+  }
+
   if (vehicleId === TRUCK_B) {
     return MARC;
   }
@@ -87,9 +93,12 @@ describe("a Trip keeps the driver it was planned with", () => {
   let trip: Trip;
   let trips: TripService;
   let revisions: TripRevisionService;
+  let tripTable: { update: jest.Mock };
+  let lookupFails: boolean;
 
   beforeEach(() => {
     trip = buildTrip();
+    lookupFails = false;
 
     const write = (data: Partial<Trip>): Trip => {
       const defined = Object.fromEntries(
@@ -98,7 +107,7 @@ describe("a Trip keeps the driver it was planned with", () => {
       trip = { ...trip, ...defined } as Trip;
       return trip;
     };
-    const tripTable = {
+    const table = {
       findById: jest.fn(() => Promise.resolve(trip)),
       findByIdentity: jest.fn().mockResolvedValue(null),
       findManyByBookingNumberAndOriginalDate: jest.fn(() => Promise.resolve([trip])),
@@ -115,10 +124,11 @@ describe("a Trip keeps the driver it was planned with", () => {
       recordHistory: jest.fn().mockResolvedValue(undefined),
       runTripWriteTransaction: jest.fn(),
     };
-    tripTable.runTripWriteTransaction.mockImplementation(
+    table.runTripWriteTransaction.mockImplementation(
       (work: (repositories: unknown) => unknown) =>
-        work({ trips: tripTable, customProperties: {} }),
+        work({ trips: table, customProperties: {} }),
     );
+    tripTable = table;
 
     const logger = {
       setContext: jest.fn(),
@@ -128,12 +138,17 @@ describe("a Trip keeps the driver it was planned with", () => {
     } as unknown as AppLoggerService;
     const assignments = {
       findDriversForVehiclesOnDates: (requests: readonly VehicleOnDate[]) =>
-        Promise.resolve(
+        lookupFails
+          ? Promise.reject(new Error("lookup failed"))
+          : Promise.resolve(
           new Map(
-            requests.map((request) => [
-              assignmentKey(request.vehicleId, request.onDate),
-              { id: assignedDriver(request.vehicleId, request.onDate) } as Driver,
-            ]),
+            requests
+              // A date with nobody assigned is absent, as the real lookup has it.
+              .filter((request) => assignedDriver(request.vehicleId, request.onDate) !== null)
+              .map((request) => [
+                assignmentKey(request.vehicleId, request.onDate),
+                { id: assignedDriver(request.vehicleId, request.onDate) } as Driver,
+              ]),
           ),
         ),
     } as unknown as VehicleAssignmentService;
@@ -145,7 +160,7 @@ describe("a Trip keeps the driver it was planned with", () => {
     const recalculation = stubPricingRecalculation();
 
     trips = new TripService(
-      tripTable as unknown as TripRepository,
+      table as unknown as TripRepository,
       { findById: jest.fn().mockResolvedValue({ isActive: true }) } as unknown as VehicleService,
       { findById: jest.fn().mockResolvedValue({ isActive: true }) } as unknown as DriverService,
       {
@@ -158,7 +173,7 @@ describe("a Trip keeps the driver it was planned with", () => {
       logger,
     );
     revisions = new TripRevisionService(
-      tripTable as unknown as TripRepository,
+      table as unknown as TripRepository,
       automaticFlat,
       recalculation,
       pinning,
@@ -244,19 +259,90 @@ describe("a Trip keeps the driver it was planned with", () => {
     });
   });
 
-  describe("9. another truck", () => {
-    it("keeps the driver the Trip showed", async () => {
+  /**
+   * ── ANOTHER TRUCK, CHOSEN ON THE TRIP (owner's rule, 14 October 2026) ─────
+   * An explicit change of the Trip's truck re-determines its driver: whoever
+   * drives the NEW truck on the Trip's planning date — or nobody. The driver
+   * of the old truck never stays merely because it was stored.
+   */
+  describe("another truck chosen on the Trip", () => {
+    it("1. gives the Trip the new truck's driver on its date", async () => {
       trip = buildTrip({ vehicleId: TRUCK_A });
+
+      const response = await trips.update(TRIP_ID, { vehicleId: TRUCK_B });
+
+      expect(trip).toMatchObject({ vehicleId: TRUCK_B, driverId: MARC });
+      // 8. The API answer is built from the row as written.
+      expect(tripTable.update).toHaveBeenCalledTimes(1);
+      expect(response.driverId).toBe(MARC);
+    });
+
+    it("2. replaces a driver stored for the old truck", async () => {
+      trip = buildTrip({ vehicleId: TRUCK_A, driverId: PIET });
 
       await trips.update(TRIP_ID, { vehicleId: TRUCK_B });
 
-      expect(trip).toMatchObject({ vehicleId: TRUCK_B, driverId: PIET });
+      expect(trip).toMatchObject({ vehicleId: TRUCK_B, driverId: MARC });
+    });
+
+    it("3. leaves NO driver when nobody drives the new truck on that date", async () => {
+      trip = buildTrip({ vehicleId: TRUCK_B, driverId: MARC });
+
+      await trips.update(TRIP_ID, { vehicleId: TRUCK_C });
+
+      expect(trip).toMatchObject({ vehicleId: TRUCK_C, driverId: null });
+    });
+
+    it("4. takes the driver valid on the Trip's own date, not today's", async () => {
+      // Truck A: Piet until 23 August, Ahmet from the 24th.
+      trip = buildTrip({ vehicleId: TRUCK_B, driverId: MARC, planningDate: day("2026-08-20") });
+
+      await trips.update(TRIP_ID, { vehicleId: TRUCK_A });
+      expect(trip.driverId).toBe(PIET);
+
+      trip = buildTrip({ vehicleId: TRUCK_B, driverId: MARC, planningDate: day("2026-08-20") });
+      await trips.update(TRIP_ID, { vehicleId: TRUCK_A, planningDate: "2026-08-26" });
+      expect(trip.driverId).toBe(AHMET);
+    });
+
+    it("11. respects a driver chosen in the same request", async () => {
+      trip = buildTrip({ vehicleId: TRUCK_A, driverId: PIET });
+
+      await trips.update(TRIP_ID, { vehicleId: TRUCK_B, driverId: AHMET });
+
+      expect(trip).toMatchObject({ vehicleId: TRUCK_B, driverId: AHMET });
     });
 
     it("a Trip with no truck yet gets the driver of the truck it is given", async () => {
       await trips.update(TRIP_ID, { vehicleId: TRUCK_B });
 
       expect(trip.driverId).toBe(MARC);
+    });
+
+    it("removing the truck leaves no driver", async () => {
+      trip = buildTrip({ vehicleId: TRUCK_A, driverId: PIET });
+
+      await trips.update(TRIP_ID, { vehicleId: null });
+
+      expect(trip).toMatchObject({ vehicleId: null, driverId: null });
+    });
+
+    it("sending the truck it already has re-determines nothing", async () => {
+      trip = buildTrip({ vehicleId: TRUCK_A, driverId: MARC });
+
+      await trips.update(TRIP_ID, { vehicleId: TRUCK_A });
+
+      expect(trip.driverId).toBe(MARC);
+    });
+
+    it("10. writes nothing when the new driver cannot be determined", async () => {
+      trip = buildTrip({ vehicleId: TRUCK_A, driverId: PIET });
+      lookupFails = true;
+
+      await expect(trips.update(TRIP_ID, { vehicleId: TRUCK_B })).rejects.toThrow("lookup failed");
+
+      expect(trip).toMatchObject({ vehicleId: TRUCK_A, driverId: PIET });
+      expect(tripTable.update).not.toHaveBeenCalled();
     });
   });
 

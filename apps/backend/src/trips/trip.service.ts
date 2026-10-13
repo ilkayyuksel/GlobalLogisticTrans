@@ -1394,6 +1394,10 @@ export class TripService {
    * in the same transaction so a concurrent choice is never replaced.
    */
   private async writeUpdate(existing: Trip, dto: UpdateTripDto): Promise<Trip> {
+    if (this.changesTruckOnly(existing, dto)) {
+      return this.writeTruckChange(existing, dto);
+    }
+
     const pinnedDriverId =
       dto.driverId === undefined
         ? await this.driverPinning.driverToPin(existing, {
@@ -1424,6 +1428,54 @@ export class TripService {
 
       return { ...updated, driverId: pinnedDriverId };
     });
+  }
+
+  /**
+   * Whether this update is an explicit change of the Trip's truck that names
+   * no driver of its own. A driver sent along — chosen or cleared — wins, as
+   * on every update.
+   */
+  private changesTruckOnly(existing: Trip, dto: UpdateTripDto): boolean {
+    return (
+      dto.vehicleId !== undefined &&
+      dto.vehicleId !== existing.vehicleId &&
+      dto.driverId === undefined
+    );
+  }
+
+  /**
+   * ── ANOTHER TRUCK, CHOSEN ON THE TRIP (owner's rule, 14 October 2026) ─────
+   * The driver is RE-DETERMINED: whoever is assigned to the new truck on the
+   * Trip's planning date (the new date, when the same request moves it), or
+   * nobody — never the old truck's driver merely because it was stored.
+   *
+   * Narrow on purpose. Only this explicit action re-determines; a date change,
+   * a document, and a change of the truck's assignment on the fleet page all
+   * keep the Trip's driver (`TripDriverPinningService`).
+   *
+   * The driver is looked up BEFORE anything is written, and the truck and the
+   * driver go in ONE statement: a failed lookup writes nothing, so the Trip can
+   * never hold the new truck with the old truck's driver.
+   */
+  private async writeTruckChange(existing: Trip, dto: UpdateTripDto): Promise<Trip> {
+    const planningDate =
+      dto.planningDate === undefined ? existing.planningDate : toUtcDate(dto.planningDate);
+    const driverId = await this.driverPinning.driverOn(dto.vehicleId ?? null, planningDate);
+
+    const updated = await this.repository.update(existing.id, {
+      ...this.toUpdateData(dto),
+      driverId,
+    });
+
+    this.logger.log("Driver re-determined by a change of truck", {
+      tripId: existing.id,
+      fromVehicleId: existing.vehicleId,
+      toVehicleId: updated.vehicleId,
+      fromDriverId: existing.driverId,
+      toDriverId: driverId,
+    });
+
+    return updated;
   }
 
   private toUpdateData(dto: UpdateTripDto): Prisma.TripUncheckedUpdateInput {

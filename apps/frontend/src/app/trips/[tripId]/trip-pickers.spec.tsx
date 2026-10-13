@@ -255,6 +255,35 @@ describe("The vehicle picker", () => {
       });
     });
 
+    /**
+     * 9. A new truck brings its own driver: the backend re-determines it, the
+     * page shows what the backend then says. The form never sends a driver.
+     */
+    it("shows the new truck's driver after the plate is changed and saved", async () => {
+      const driver = (id: string, name: string) => ({
+        id,
+        name,
+        isActive: true,
+        source: "VEHICLE_ASSIGNMENT" as const,
+        hasPhoneNumber: true,
+      });
+      getTripMock.mockResolvedValueOnce(
+        buildTrip({ vehicleId: "vehicle-2", driverId: "driver-ahmed", effectiveDriver: driver("driver-ahmed", "Ahmed") }),
+      );
+      getTripMock.mockResolvedValue(
+        buildTrip({ vehicleId: "vehicle-1", driverId: "driver-fatih", effectiveDriver: driver("driver-fatih", "Fatih") }),
+      );
+
+      await openEditor();
+      await userEvent.selectOptions(vehiclePicker(), "vehicle-1");
+      await userEvent.click(screen.getByRole("button", { name: "Opslaan" }));
+
+      expect(await screen.findByText("Fatih")).toBeInTheDocument();
+      expect(screen.queryByText("Ahmed")).not.toBeInTheDocument();
+      expect(updateTripMock.mock.calls[0][1]).toMatchObject({ vehicleId: "vehicle-1" });
+      expect(updateTripMock.mock.calls[0][1]).not.toHaveProperty("driverId");
+    });
+
     /** Null is how the backend documents "unassign". */
     it("sends null when the vehicle is cleared", async () => {
       getTripMock.mockResolvedValue(

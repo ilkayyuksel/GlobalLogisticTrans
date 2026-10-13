@@ -31,7 +31,9 @@ export interface TripDriverSlot {
  *     the driver it showed until now — a new date or another truck never hands
  *     its work to somebody else;
  *   a stored driver is never replaced here: only an explicit change of the
- *     Trip's own driver does that (and then nothing is pinned at all).
+ *     Trip's own driver does that (and then nothing is pinned at all) — or an
+ *     explicit change of the Trip's TRUCK, which re-determines the driver from
+ *     the new truck (`driverOn`, applied by `TripService`).
  *
  * The assignment side pins too, before it ends or replaces an assignment —
  * `VehicleAssignmentRepository.pinDriverOnUnpinnedTrips`.
@@ -79,6 +81,16 @@ export class TripDriverPinningService {
     }
 
     return undefined;
+  }
+
+  /**
+   * The driver assigned to `vehicleId` on `planningDate`, or null when nobody
+   * is — the assignment lookup every other path uses, with its validity rules.
+   *
+   * What an explicit change of a Trip's TRUCK stores: see `TripService`.
+   */
+  async driverOn(vehicleId: string | null, planningDate: Date | null): Promise<string | null> {
+    return (await this.driverOf({ vehicleId, planningDate, driverId: null })) ?? null;
   }
 
   private async driverOf(slot: TripDriverSlot): Promise<string | undefined> {
