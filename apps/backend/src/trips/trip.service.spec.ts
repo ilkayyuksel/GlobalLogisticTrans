@@ -35,6 +35,7 @@ function buildTrip(overrides: Partial<Trip> = {}): Trip {
     tripGroupId: null,
     vehicleId: null,
     driverId: null,
+    driverSource: null,
     status: TripStatus.OPEN,
     isLooseTrip: false,
     isPaid: false,
@@ -267,6 +268,7 @@ describe("TripService", () => {
           terminal: null,
           vehicleId: null,
           driverId: null,
+          driverSource: null,
           startTime: null,
           endTime: null,
           executionDatetime: null,
@@ -496,6 +498,7 @@ describe("TripService", () => {
           executionDatetime: null,
           vehicleId: null,
           driverId: null,
+          driverSource: null,
         }),
       );
     });

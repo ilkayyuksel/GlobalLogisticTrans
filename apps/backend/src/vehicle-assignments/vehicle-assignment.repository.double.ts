@@ -1,4 +1,4 @@
-import { Driver, Trip, VehicleAssignment } from "@prisma/client";
+import { Driver, Trip, TripDriverSource, TripStatus, VehicleAssignment } from "@prisma/client";
 
 import { VehicleAssignmentRepository } from "./vehicle-assignment.repository";
 
@@ -126,7 +126,7 @@ export class InMemoryAssignmentRepository {
     return Promise.resolve(row);
   }
 
-  /** The real filter: this vehicle, no stored driver, planned in [from, to]. */
+  /** The real filter: this vehicle, CLOSED, no stored driver, planned in [from, to]. */
   pinDriverOnUnpinnedTrips(query: {
     vehicleId: string;
     driverId: string;
@@ -142,8 +142,14 @@ export class InMemoryAssignmentRepository {
         planned >= query.from.getTime() &&
         (query.to === null || planned <= query.to.getTime());
 
-      if (trip.vehicleId === query.vehicleId && trip.driverId === null && inRange) {
+      if (
+        trip.vehicleId === query.vehicleId &&
+        trip.driverId === null &&
+        trip.status === TripStatus.CLOSED &&
+        inRange
+      ) {
         trip.driverId = query.driverId;
+        trip.driverSource = TripDriverSource.AUTOMATIC;
         count += 1;
       }
     }

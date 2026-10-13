@@ -7,7 +7,6 @@ import { AutomaticFlatPropertyService } from "./automatic-flat.service";
 import { stubTripWriteTransaction } from "./trip-write-transaction.double";
 import { TripRevisionService } from "./trip-revision.service";
 import { TripRepository } from "./trip.repository";
-import { noDriverPinning } from "./trip-driver-pinning.double";
 
 /**
  * What a later transport order does to a Trip that already exists.
@@ -258,7 +257,6 @@ describe("TripRevisionService", () => {
         synchronise: jest.fn(),
       } as unknown as AutomaticFlatPropertyService,
       recalculation,
-      noDriverPinning(),
       {
         setContext: jest.fn(),
         log: jest.fn(),

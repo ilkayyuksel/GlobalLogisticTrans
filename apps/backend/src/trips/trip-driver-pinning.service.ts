@@ -1,4 +1,5 @@
 import { Injectable } from "@nestjs/common";
+import { Trip, TripStatus } from "@prisma/client";
 
 import { AppLoggerService } from "../logger/app-logger.service";
 import {
@@ -6,35 +7,35 @@ import {
   assignmentKey,
 } from "../vehicle-assignments/vehicle-assignment.service";
 
-/** The three facts that decide a Trip's driver. */
+/** Where a Trip goes: its vehicle and its date. */
 export interface TripDriverSlot {
   readonly vehicleId: string | null;
   readonly planningDate: Date | null;
-  readonly driverId: string | null;
 }
 
 /**
- * Keeps the driver a Trip was planned with — the owner's rule (October 2026).
+ * Keeps the driver of FINISHED work — and of nothing else.
  *
  * ── THREE DIFFERENT THINGS ──────────────────────────────────────────────────
  *   the CURRENT driver of a vehicle   — the assignment in effect today;
- *   the driver OF A TRIP              — `trip.driverId`, stored on the Trip;
+ *   the driver OF A TRIP              — `trip.driverId` when stored, otherwise
+ *                                       its vehicle's driver on its planning
+ *                                       date (`TripPlanningDataService`);
  *   the ASSIGNMENT HISTORY            — every `vehicle_assignment` row.
- * A Trip with no stored driver still SHOWS the driver of its vehicle's
- * assignment on its planning date (`TripPlanningDataService`), but that answer
- * moves when the assignment or the date moves. So the Trip's driver is stored
- * at the moments it would otherwise move:
  *
- *   a Trip GIVEN a vehicle or a date — created with one, edited to one — and
- *     storing no driver yet gets the driver of that vehicle on that date;
- *   a Trip whose vehicle or date CHANGES, storing no driver yet, first keeps
- *     the driver it showed until now — a new date or another truck never hands
- *     its work to somebody else;
- *   a stored driver is never replaced here: only an explicit change of the
- *     Trip's own driver does that (and then nothing is pinned at all).
+ * ── THE OWNER'S RULE (13 October 2026) ──────────────────────────────────────
+ * A Trip NOT yet finished stores no driver of its own unless one was chosen
+ * for it (MANUAL): it follows whoever drives its vehicle on its date, so a new
+ * driver on the truck reaches every such Trip in that driver's period.
  *
- * The assignment side pins too, before it ends or replaces an assignment —
- * `VehicleAssignmentRepository.pinDriverOnUnpinnedTrips`.
+ * A FINISHED (CLOSED) Trip keeps the driver it had. Its answer would move only
+ * when its vehicle or date changes — handled here — or when the assignment
+ * covering its date is ended or replaced — handled by `cutOffAssignment`.
+ * Either way the driver it showed is stored first, as AUTOMATIC. When the Trip
+ * is reopened, that AUTOMATIC driver is released again (`TripRepository.setStatus`).
+ *
+ * This REPLACES the rule of 11 October, which stored the driver at planning
+ * time for every Trip and so froze unfinished work on the old driver.
  * ────────────────────────────────────────────────────────────────────────────
  */
 @Injectable()
@@ -47,38 +48,19 @@ export class TripDriverPinningService {
   }
 
   /**
-   * The driver to store with a change, or undefined to leave the column alone.
-   *
-   * `before` is null for a Trip being created.
+   * The driver a CLOSED Trip storing none must keep before its vehicle or date
+   * moves to `after`; undefined when there is nothing to keep.
    */
-  async driverToPin(
-    before: TripDriverSlot | null,
-    after: TripDriverSlot,
-  ): Promise<string | undefined> {
-    if (after.driverId !== null) {
+  async driverToKeep(before: Trip, after: TripDriverSlot): Promise<string | undefined> {
+    const moves =
+      before.vehicleId !== after.vehicleId ||
+      before.planningDate?.getTime() !== after.planningDate?.getTime();
+
+    if (before.status !== TripStatus.CLOSED || before.driverId !== null || !moves) {
       return undefined;
     }
 
-    const moves =
-      before !== null &&
-      (before.vehicleId !== after.vehicleId ||
-        before.planningDate?.getTime() !== after.planningDate?.getTime());
-
-    // The driver it showed until now, kept through the move.
-    if (moves && before.driverId === null) {
-      const shown = await this.driverOf(before);
-
-      if (shown) {
-        return shown;
-      }
-    }
-
-    // Given a vehicle and a date: the driver of that vehicle on that day.
-    if (before === null || moves) {
-      return this.driverOf(after);
-    }
-
-    return undefined;
+    return this.driverOf(before);
   }
 
   private async driverOf(slot: TripDriverSlot): Promise<string | undefined> {

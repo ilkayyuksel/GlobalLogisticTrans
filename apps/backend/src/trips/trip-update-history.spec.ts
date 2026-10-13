@@ -14,7 +14,6 @@ import { TripRepository } from "./trip.repository";
 import { VehicleAssignmentService } from "../vehicle-assignments/vehicle-assignment.service";
 import { VehicleService } from "../vehicles/vehicle.service";
 import { stubPricingRecalculation } from "../pricing-engine/pricing-recalculation.double";
-import { noDriverPinning } from "./trip-driver-pinning.double";
 
 /**
  * MANY updates to one Trip, and what each of them left behind.
@@ -296,7 +295,6 @@ describe("many updates to one Trip", () => {
         synchronise: jest.fn(),
       } as unknown as AutomaticFlatPropertyService,
       stubPricingRecalculation(),
-      noDriverPinning(),
       logger,
     );
   });

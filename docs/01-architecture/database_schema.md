@@ -387,7 +387,8 @@ The central entity. Represents one physical transport movement.
 | `pdf_document_id` | `UUID` | NO | — | Every Trip originates from exactly one PDF |
 | `trip_group_id` | `UUID` | YES | `NULL` | Non-null ⇒ Trip is part of a Combination |
 | `vehicle_id` | `UUID` | YES | `NULL` | Manually assigned |
-| `driver_id` | `UUID` | YES | `NULL` | **Driver override.** When `NULL`, the Driver is resolved through `vehicle_assignment` |
+| `driver_id` | `UUID` | YES | `NULL` | **Stored Driver.** When `NULL`, the Driver is resolved through the `vehicle_assignment` covering `planning_date` |
+| `driver_source` | `trip_driver_source` | YES | `NULL` | Where `driver_id` came from: `MANUAL` (chosen for this Trip), `AUTOMATIC` (kept by the system for a finished Trip), `UNKNOWN` (stored before this column; treated like `MANUAL`). `CHECK ((driver_id IS NULL) = (driver_source IS NULL))`. |
 | `status` | `trip_status` | NO | `'OPEN'` | |
 | `booking_number` | `TEXT` | NO | — | Original PDF value. Per Trip, including each leg of a Combination |
 | `container_number` | `TEXT` | YES | `NULL` | Empty for Loading until entered manually |

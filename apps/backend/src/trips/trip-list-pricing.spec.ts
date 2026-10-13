@@ -43,6 +43,7 @@ function buildTrip(id: string): Trip {
     tripGroupId: null,
     vehicleId: null,
     driverId: null,
+    driverSource: null,
     status: TripStatus.CLOSED,
     isLooseTrip: false,
     isPaid: false,

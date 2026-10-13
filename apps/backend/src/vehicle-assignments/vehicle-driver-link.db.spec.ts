@@ -1,9 +1,10 @@
 import { PrismaPg } from "@prisma/adapter-pg";
-import { PrismaClient, VehicleAssignment } from "@prisma/client";
+import { PrismaClient, TripStatus, VehicleAssignment } from "@prisma/client";
 
 import { DriverService } from "../drivers/driver.service";
 import { AppLoggerService } from "../logger/app-logger.service";
 import { PrismaService } from "../prisma/prisma.service";
+import { TripRepository } from "../trips/trip.repository";
 import { VehicleService } from "../vehicles/vehicle.service";
 import { ConcurrentAssignmentChangeException } from "./active-assignment-race";
 import { VehicleAssignmentRepository } from "./vehicle-assignment.repository";
@@ -106,15 +107,25 @@ describeWithDatabase("linking a driver against a real database", () => {
     });
   }
 
-  async function seedFutureTrip(vehicleId: string): Promise<string> {
+  /** A Trip of the vehicle in the far future, in the given state. */
+  async function seedFutureTrip(
+    vehicleId: string,
+    status: "OPEN" | "CLOSED" = "CLOSED",
+    chosenDriverId: string | null = null,
+  ): Promise<string> {
     const [{ id }] = await client.$queryRaw<{ id: string }[]>`
-      INSERT INTO trip (booking_number, status, vehicle_id, planning_date)
-      VALUES (${`LINK-${unique()}`}, 'OPEN'::"trip_status", ${vehicleId}::uuid, '2099-01-01')
+      INSERT INTO trip (booking_number, status, vehicle_id, planning_date, driver_id, driver_source)
+      VALUES (${`LINK-${unique()}`}, ${status}::"trip_status", ${vehicleId}::uuid, '2099-01-01',
+              ${chosenDriverId}::uuid,
+              ${chosenDriverId === null ? null : "MANUAL"}::"trip_driver_source")
       RETURNING id`;
     return id;
   }
 
-  it("ends both conflicts, pins the Trip and links, in one go", async () => {
+  const storedDriver = async (tripId: string) =>
+    client.trip.findUnique({ where: { id: tripId }, select: { driverId: true, driverSource: true } });
+
+  it("ends both conflicts, keeps the finished Trip's driver and links, in one go", async () => {
     const [truckA, truckB, driver, other] = [
       await seedVehicle(),
       await seedVehicle(),
@@ -136,7 +147,55 @@ describeWithDatabase("linking a driver against a real database", () => {
       where: { validTo: null, vehicleId: { in: [truckA, truckB] } },
     });
     expect(open.map((row) => [row.vehicleId, row.driverId])).toEqual([[truckB, driver]]);
-    expect((await client.trip.findUnique({ where: { id: tripOnB } }))?.driverId).toBe(other);
+    expect(await storedDriver(tripOnB)).toEqual({ driverId: other, driverSource: "AUTOMATIC" });
+  });
+
+  it("2/3/4. stores nothing on an OPEN Trip, keeps a CLOSED one, never touches a MANUAL one", async () => {
+    const [truck, ahmed, fatih, marc] = [
+      await seedVehicle(),
+      await seedDriver(),
+      await seedDriver(),
+      await seedDriver(),
+    ];
+    await seedAssignment(truck, ahmed);
+    const open = await seedFutureTrip(truck, "OPEN");
+    const closed = await seedFutureTrip(truck, "CLOSED");
+    const chosen = await seedFutureTrip(truck, "OPEN", marc);
+
+    await service(new VehicleAssignmentRepository(prisma)).link({ vehicleId: truck, driverId: fatih });
+
+    expect(await storedDriver(open)).toEqual({ driverId: null, driverSource: null });
+    expect(await storedDriver(closed)).toEqual({ driverId: ahmed, driverSource: "AUTOMATIC" });
+    expect(await storedDriver(chosen)).toEqual({ driverId: marc, driverSource: "MANUAL" });
+  });
+
+  it("reopening a finished Trip releases only an AUTOMATIC driver", async () => {
+    const [truck, ahmed, fatih, marc] = [
+      await seedVehicle(),
+      await seedDriver(),
+      await seedDriver(),
+      await seedDriver(),
+    ];
+    await seedAssignment(truck, ahmed);
+    const kept = await seedFutureTrip(truck, "CLOSED");
+    const chosen = await seedFutureTrip(truck, "CLOSED", marc);
+    await service(new VehicleAssignmentRepository(prisma)).link({ vehicleId: truck, driverId: fatih });
+    const trips = new TripRepository(prisma);
+
+    await trips.setStatus(kept, TripStatus.OPEN);
+    await trips.setStatus(chosen, TripStatus.OPEN);
+
+    expect(await storedDriver(kept)).toEqual({ driverId: null, driverSource: null });
+    expect(await storedDriver(chosen)).toEqual({ driverId: marc, driverSource: "MANUAL" });
+  });
+
+  it("the database refuses a driver without a source, and a source without a driver", async () => {
+    const [truck, ahmed] = [await seedVehicle(), await seedDriver()];
+    const tripId = await seedFutureTrip(truck, "OPEN");
+
+    await expect(
+      client.$executeRaw`UPDATE trip SET driver_id = ${ahmed}::uuid WHERE id = ${tripId}::uuid`,
+    ).rejects.toThrow(/trip_driver_source_check/);
   });
 
   it("13/14. a link that loses a race is refused and leaves NOTHING changed", async () => {

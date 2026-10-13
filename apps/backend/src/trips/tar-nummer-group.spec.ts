@@ -45,6 +45,7 @@ function row(id: string, overrides: Partial<Trip> = {}): Trip {
     tripGroupId: null,
     vehicleId: null,
     driverId: null,
+    driverSource: null,
     status: TripStatus.OPEN,
     isLooseTrip: false,
     isPaid: false,

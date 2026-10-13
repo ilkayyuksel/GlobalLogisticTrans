@@ -56,6 +56,7 @@ function buildTrip(overrides: Partial<Trip> = {}): Trip {
     tripGroupId: null,
     vehicleId: VEHICLE_SUMMARY.id,
     driverId: null,
+    driverSource: null,
     status: TripStatus.OPEN,
     isLooseTrip: false,
     isPaid: false,

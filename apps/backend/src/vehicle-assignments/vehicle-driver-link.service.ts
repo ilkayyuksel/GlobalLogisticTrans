@@ -22,8 +22,9 @@ import { VehicleAssignmentRepository } from "./vehicle-assignment.repository";
  * truck's other driver, the driver's other truck, or both — together with any
  * assignment of either that was planned to start later, since an open-ended
  * link would overlap it. Ended rows are kept as history; one that began today
- * is ended before it began (`isVoidAssignment`). Trips that showed an ended
- * driver keep that driver (`cutOffAssignment`).
+ * is ended before it began (`isVoidAssignment`). Finished Trips that showed an
+ * ended driver keep that driver; unfinished ones follow the new driver
+ * (`cutOffAssignment`).
  *
  * Everything runs in one transaction, and the database's active-assignment
  * indexes refuse a concurrent link that slipped past the reads

@@ -94,6 +94,15 @@ enum TripDirection {
 /// CANCELLED is a business cancellation of the transport itself.
 /// DELETED is an administrative soft delete of the record and can be restored.
 /// The two are deliberately distinct and must never be collapsed.
+/// Where a Trip's stored driver came from — see Trip.driverSource.
+enum TripDriverSource {
+  MANUAL
+  AUTOMATIC
+  UNKNOWN
+
+  @@map("trip_driver_source")
+}
+
 enum TripStatus {
   OPEN
   CLOSED
@@ -351,6 +360,12 @@ model Trip {
   /// for one-off substitutions (sickness, holiday cover), and it never alters
   /// the underlying VehicleAssignment.
   driverId      String? @map("driver_id") @db.Uuid
+  /// Where `driver_id` came from; null exactly when driver_id is null.
+  /// MANUAL: chosen for this Trip. AUTOMATIC: stored by the system to keep a
+  /// FINISHED Trip's driver through a later assignment change. UNKNOWN: a
+  /// value that predates this column — treated like MANUAL, never overwritten.
+  /// Requires a manual CHECK: (driver_id IS NULL) = (driver_source IS NULL).
+  driverSource  TripDriverSource? @map("driver_source")
 
   status TripStatus @default(OPEN)
 

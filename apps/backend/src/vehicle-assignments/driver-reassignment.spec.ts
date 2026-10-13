@@ -72,6 +72,7 @@ function trip(id: string, planningDate: string, overrideDriverId?: string): Trip
     planningDate: day(planningDate),
     vehicleId: VEHICLE_ID,
     driverId: overrideDriverId ?? null,
+    driverSource: overrideDriverId ? "MANUAL" : null,
   } as unknown as Trip;
 }
 

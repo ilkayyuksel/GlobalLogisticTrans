@@ -1,4 +1,4 @@
-import { Driver, Trip } from "@prisma/client";
+import { Driver, Trip, TripDriverSource, TripStatus } from "@prisma/client";
 
 import { DriverService } from "../drivers/driver.service";
 import { AppLoggerService } from "../logger/app-logger.service";
@@ -26,6 +26,7 @@ const TRUCK_A = "aaaaaaaa-1111-4111-8111-111111111111";
 const TRUCK_B = "aaaaaaaa-2222-4222-8222-222222222222";
 const PIET = "bbbbbbbb-2222-4222-8222-222222222222";
 const AHMET = "cccccccc-3333-4333-8333-333333333333";
+const MARC = "dddddddd-4444-4444-8444-444444444444";
 
 function day(iso: string): Date {
   return new Date(`${iso}T00:00:00.000Z`);
@@ -35,8 +36,21 @@ function driver(id: string): Driver {
   return { id, name: id, isActive: true } as Driver;
 }
 
-function trip(id: string, planningDate: string, vehicleId: string, driverId: string | null = null): Trip {
-  return { id, planningDate: day(planningDate), vehicleId, driverId } as unknown as Trip;
+function trip(
+  id: string,
+  planningDate: string,
+  vehicleId: string,
+  overrides: Partial<Trip> = {},
+): Trip {
+  return {
+    id,
+    planningDate: day(planningDate),
+    vehicleId,
+    driverId: null,
+    driverSource: null,
+    status: TripStatus.OPEN,
+    ...overrides,
+  } as unknown as Trip;
 }
 
 describe("linking a driver to a vehicle", () => {
@@ -157,35 +171,60 @@ describe("linking a driver to a vehicle", () => {
     expect(driversToday()).toEqual({ [TRUCK_A]: PIET });
   });
 
-  describe("9. Trips keep their driver through a new link", () => {
-    it("pins the driver a Trip showed on the days the old link gives up", async () => {
+  /**
+   * ── WHO DRIVES A TRIP AFTER A LINK (owner's rule, 13 October 2026) ────────
+   * A FINISHED (CLOSED) Trip keeps the driver it showed: that driver is stored
+   * on it, as AUTOMATIC, before the old link gives up its days. A Trip not yet
+   * finished stores nothing and so follows the new driver for its own date. A
+   * driver chosen for a Trip (MANUAL, or a legacy value of UNKNOWN origin) is
+   * never touched.
+   */
+  describe("9. Trips through a new link", () => {
+    it("2/3. a future OPEN Trip follows the new driver; a CLOSED one keeps the old", async () => {
       given(TRUCK_A, PIET, "2026-08-01");
-      const today = trip("today", TODAY, TRUCK_A);
-      const nextWeek = trip("next-week", "2026-09-01", TRUCK_A);
-      const lastWeek = trip("last-week", "2026-08-18", TRUCK_A);
-      repository.trips.push(today, nextWeek, lastWeek);
+      const openToday = trip("open-today", TODAY, TRUCK_A);
+      const openNextWeek = trip("open-next-week", "2026-09-01", TRUCK_A);
+      const closedToday = trip("closed-today", TODAY, TRUCK_A, { status: TripStatus.CLOSED });
+      repository.trips.push(openToday, openNextWeek, closedToday);
 
       await links.link({ vehicleId: TRUCK_A, driverId: AHMET });
 
-      expect(today.driverId).toBe(PIET);
-      expect(nextWeek.driverId).toBe(PIET);
-      // Still covered by Piet's period, so it needs nothing written.
+      expect([openToday.driverId, openNextWeek.driverId]).toEqual([null, null]);
+      expect(closedToday).toMatchObject({ driverId: PIET, driverSource: TripDriverSource.AUTOMATIC });
+    });
+
+    it("leaves a CLOSED Trip still covered by the old period alone: its date keeps resolving", async () => {
+      given(TRUCK_A, PIET, "2026-08-01");
+      const lastWeek = trip("last-week", "2026-08-18", TRUCK_A, { status: TripStatus.CLOSED });
+      repository.trips.push(lastWeek);
+
+      await links.link({ vehicleId: TRUCK_A, driverId: AHMET });
+
       expect(lastWeek.driverId).toBeNull();
     });
 
-    it("never overwrites a driver a Trip already stores", async () => {
+    it.each([TripDriverSource.MANUAL, TripDriverSource.UNKNOWN])(
+      "4. never touches a %s driver, OPEN or CLOSED",
+      async (driverSource) => {
+        given(TRUCK_A, PIET, "2026-08-01");
+        const open = trip("open", "2026-09-01", TRUCK_A, { driverId: MARC, driverSource });
+        const closed = trip("closed", TODAY, TRUCK_A, {
+          driverId: MARC,
+          driverSource,
+          status: TripStatus.CLOSED,
+        });
+        repository.trips.push(open, closed);
+
+        await links.link({ vehicleId: TRUCK_A, driverId: AHMET });
+
+        expect([open.driverId, closed.driverId]).toEqual([MARC, MARC]);
+        expect([open.driverSource, closed.driverSource]).toEqual([driverSource, driverSource]);
+      },
+    );
+
+    it("5. leaves Trips of other trucks alone", async () => {
       given(TRUCK_A, PIET, "2026-08-01");
-      const chosen = trip("chosen", "2026-09-01", TRUCK_A, AHMET);
-      repository.trips.push(chosen);
-
-      await links.link({ vehicleId: TRUCK_A, driverId: AHMET });
-
-      expect(chosen.driverId).toBe(AHMET);
-    });
-
-    it("leaves Trips of other trucks alone", async () => {
-      given(TRUCK_A, PIET, "2026-08-01");
-      const other = trip("other", TODAY, TRUCK_B);
+      const other = trip("other", TODAY, TRUCK_B, { status: TripStatus.CLOSED });
       repository.trips.push(other);
 
       await links.link({ vehicleId: TRUCK_A, driverId: AHMET });
@@ -197,14 +236,17 @@ describe("linking a driver to a vehicle", () => {
   describe("7. ending an assignment", () => {
     it("makes it inactive from today: yesterday is its last day", async () => {
       given(TRUCK_A, PIET, "2026-08-01");
-      const today = trip("today", TODAY, TRUCK_A);
-      repository.trips.push(today);
+      const closedToday = trip("closed-today", TODAY, TRUCK_A, { status: TripStatus.CLOSED });
+      const openToday = trip("open-today", TODAY, TRUCK_A);
+      repository.trips.push(closedToday, openToday);
 
       const ended = await assignments.end(repository.rows[0].id, {});
 
       expect(ended.validTo).toBe(YESTERDAY);
       expect(driversToday()).toEqual({});
-      expect(today.driverId).toBe(PIET);
+      // Finished work keeps its driver; unfinished work has none from today.
+      expect(closedToday.driverId).toBe(PIET);
+      expect(openToday.driverId).toBeNull();
     });
 
     it("keeps one that began today as history, in effect on no day", async () => {

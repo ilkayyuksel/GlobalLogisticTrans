@@ -45,12 +45,14 @@ export function lastDayBefore(
 /**
  * Ends `assignment` so it covers no day from `firstDayWithout` on.
  *
- * ── TRIPS FIRST ─────────────────────────────────────────────────────────────
+ * ── FINISHED TRIPS FIRST ────────────────────────────────────────────────────
  * A Trip that stores no driver shows its vehicle's driver on its planning
- * date. The days this assignment gives up would silently hand those Trips to
- * whoever drives the truck next, so each one is given the driver it showed
- * before the period moves. Only Trips storing NO driver are written; a stored
- * driver is never replaced. Both writes share the caller's transaction.
+ * date. On the days this assignment gives up, a FINISHED (CLOSED) Trip would
+ * silently move to whoever drives the truck next, so it is given the driver it
+ * showed, as AUTOMATIC, before the period moves. A Trip not yet finished is
+ * left alone and follows the new driver — the owner's rule of 13 October 2026.
+ * A stored driver is never replaced. Both writes share the caller's
+ * transaction.
  * ────────────────────────────────────────────────────────────────────────────
  */
 export async function cutOffAssignment(

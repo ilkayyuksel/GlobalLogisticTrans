@@ -9,7 +9,6 @@ import { FLAT_CUSTOM_PROPERTY_NAME } from "./flat-container-rule";
 import { ImportedTripData } from "./import-trips.command";
 import { TripRepository } from "./trip.repository";
 import { TripRevisionService } from "./trip-revision.service";
-import { noDriverPinning } from "./trip-driver-pinning.double";
 
 const FLAT_ID = "1b9d6bcd-bbfd-4b2d-9b5d-ab8dfbbd4bed";
 const TAR_ID = "2c9d6bcd-bbfd-4b2d-9b5d-ab8dfbbd4bed";
@@ -144,7 +143,6 @@ describe("Flat through a Trip's revisions", () => {
         logger,
       ),
       stubPricingRecalculation(),
-      noDriverPinning(),
       logger,
     );
   });

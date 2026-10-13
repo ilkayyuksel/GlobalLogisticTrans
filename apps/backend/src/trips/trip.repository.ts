@@ -1,5 +1,5 @@
 import { Injectable } from "@nestjs/common";
-import { Prisma, Trip, TripGroup, TripStatus } from "@prisma/client";
+import { Prisma, Trip, TripDriverSource, TripGroup, TripStatus } from "@prisma/client";
 
 import { bookingNumberDigits } from "../common/booking-digits";
 import { PdfDocumentRepository } from "../pdf-documents/pdf-document.repository";
@@ -826,22 +826,39 @@ export class TripRepository {
   }
 
   /**
-   * Stores `driverId` on the Trip ONLY while it stores none; true when written.
+   * Keeps a FINISHED Trip's driver: stores it as AUTOMATIC, ONLY while the
+   * Trip is CLOSED and stores no driver; true when written.
    *
-   * A compare-and-set, so pinning can never replace a driver somebody chose —
-   * not even one chosen between our read and this write.
+   * A compare-and-set, so it can never replace a driver somebody chose — not
+   * even one chosen between our read and this write — nor freeze the driver of
+   * a Trip that is not finished.
    */
   async pinDriver(id: string, driverId: string): Promise<boolean> {
     const { count } = await this.prisma.trip.updateMany({
-      where: { id, driverId: null },
-      data: { driverId },
+      where: { id, driverId: null, status: TripStatus.CLOSED },
+      data: { driverId, driverSource: TripDriverSource.AUTOMATIC },
     });
 
     return count === 1;
   }
 
-  /** Used by the status endpoint, by soft delete and by restore. */
-  setStatus(id: string, status: TripStatus): Promise<Trip> {
+  /**
+   * Used by the status endpoint, by soft delete, by restore and by a document
+   * that reopens a cancelled Trip.
+   *
+   * A Trip that becomes OPEN is no longer finished work, so a driver the system
+   * stored to keep it as history (AUTOMATIC) is released and it follows its
+   * vehicle again. A MANUAL or UNKNOWN driver stays. Two statements; callers
+   * that reopen run them in their transaction.
+   */
+  async setStatus(id: string, status: TripStatus): Promise<Trip> {
+    if (status === TripStatus.OPEN) {
+      await this.prisma.trip.updateMany({
+        where: { id, driverSource: TripDriverSource.AUTOMATIC },
+        data: { driverId: null, driverSource: null },
+      });
+    }
+
     return this.prisma.trip.update({ where: { id }, data: { status } });
   }
 

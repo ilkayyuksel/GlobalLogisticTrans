@@ -28,7 +28,6 @@ import {
   type CombinationInputChange,
 } from "./planning-date-change";
 import { repriceAfterPartnerStatusChange } from "./partner-status-change";
-import { TripDriverPinningService } from "./trip-driver-pinning.service";
 import { TripIdentity, TripRepository } from "./trip.repository";
 
 /**
@@ -204,7 +203,6 @@ export class TripRevisionService {
     private readonly repository: TripRepository,
     private readonly automaticFlat: AutomaticFlatPropertyService,
     private readonly recalculation: PricingRecalculationService,
-    private readonly driverPinning: TripDriverPinningService,
     private readonly logger: AppLoggerService,
   ) {
     this.logger.setContext(TripRevisionService.name);
@@ -472,11 +470,7 @@ export class TripRevisionService {
 
         const revised = this.toRevisedFields(trip, document);
         const before = pairInputsOf(trip);
-        const updated = await this.keepDriverThroughRevision(
-          repository,
-          trip,
-          await repository.update(trip.id, revised),
-        );
+        const updated = await repository.update(trip.id, revised);
         // Compared as stored, so a document that repeats a value moves nothing.
         changed = {
           planningDate: movesPlanningDate(before, updated),
@@ -591,11 +585,7 @@ export class TripRevisionService {
 
         const revised = this.toRevisedFields(trip, document);
         const before = pairInputsOf(trip);
-        const updated = await this.keepDriverThroughRevision(
-          repository,
-          trip,
-          await repository.update(trip.id, revised),
-        );
+        const updated = await repository.update(trip.id, revised);
         // Compared as stored, so a document that repeats a value moves nothing.
         changed = {
           planningDate: movesPlanningDate(before, updated),
@@ -835,31 +825,6 @@ export class TripRevisionService {
         description: event.description,
       },
     ]);
-  }
-
-  /**
-   * A document that moves the planned date never hands the Trip to another
-   * driver: the driver it showed until now is stored first. Written as its
-   * own compare-and-set, because `driverId` is not a field a document may
-   * write and must never become one.
-   */
-  private async keepDriverThroughRevision(
-    repository: TripRepository,
-    before: Trip,
-    updated: Trip,
-  ): Promise<Trip> {
-    const driverId = await this.driverPinning.driverToPin(before, updated);
-
-    if (driverId === undefined || !(await repository.pinDriver(updated.id, driverId))) {
-      return updated;
-    }
-
-    this.logger.log("Driver kept through a document date change", {
-      tripId: updated.id,
-      driverId,
-    });
-
-    return { ...updated, driverId };
   }
 
   /**

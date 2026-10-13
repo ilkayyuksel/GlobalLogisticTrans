@@ -9,8 +9,9 @@ import {
 import { LosritBadge } from "./losrit-badge";
 import { TripStatusBadge } from "./trip-status-badge";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
-import type { Trip, Vehicle } from "@/lib/api/types";
+import type { EffectiveDriverSource, Trip, Vehicle } from "@/lib/api/types";
 import { useTranslation } from "@/lib/i18n/language-provider";
+import type { TranslationKey } from "@/lib/i18n/translations";
 import { formatLocalDateTime } from "@/lib/calendar/local-date-time";
 import { formatWaitingTime } from "@/lib/waiting-time";
 import { formatCalendarDate } from "@/lib/calendar/calendar-dates";
@@ -145,6 +146,14 @@ export function TripSummary({
   );
 }
 
+/** Each source says what it means to a planner — never guessed here. */
+const DRIVER_SOURCE_KEYS: Record<EffectiveDriverSource, TranslationKey> = {
+  VEHICLE_ASSIGNMENT: "tripDetail.driver.fromAssignment",
+  OVERRIDE: "tripDetail.driver.fromOverride",
+  RECORDED: "tripDetail.driver.recorded",
+  STORED_UNKNOWN_ORIGIN: "tripDetail.driver.storedUnknownOrigin",
+};
+
 /**
  * The Trip's driver, as the backend resolved it.
  *
@@ -178,11 +187,7 @@ function DriverField({ trip }: { trip: Trip }) {
           honestly is the difference between "this truck's standing driver" and
           "someone chosen for this Trip alone".
         */}
-        <span>
-          {driver.source === "OVERRIDE"
-            ? t("tripDetail.driver.fromOverride")
-            : t("tripDetail.driver.fromAssignment")}
-        </span>
+        <span>{t(DRIVER_SOURCE_KEYS[driver.source])}</span>
         {driver.isActive ? null : (
           <Badge tone="warning">{t("vehicles.status.inactive")}</Badge>
         )}
