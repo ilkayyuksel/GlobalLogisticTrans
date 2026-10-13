@@ -94,7 +94,7 @@ enum TripDirection {
 /// CANCELLED is a business cancellation of the transport itself.
 /// DELETED is an administrative soft delete of the record and can be restored.
 /// The two are deliberately distinct and must never be collapsed.
-/// Where a Trip's stored driver came from — see Trip.driverSource.
+/// RETIRED with Trip.driverSource — kept only because the column is.
 enum TripDriverSource {
   MANUAL
   AUTOMATIC
@@ -360,11 +360,13 @@ model Trip {
   /// for one-off substitutions (sickness, holiday cover), and it never alters
   /// the underlying VehicleAssignment.
   driverId      String? @map("driver_id") @db.Uuid
-  /// Where `driver_id` came from; null exactly when driver_id is null.
-  /// MANUAL: chosen for this Trip. AUTOMATIC: stored by the system to keep a
-  /// FINISHED Trip's driver through a later assignment change. UNKNOWN: a
-  /// value that predates this column — treated like MANUAL, never overwritten.
-  /// Requires a manual CHECK: (driver_id IS NULL) = (driver_source IS NULL).
+  /// RETIRED (14 October 2026) — read and written by nothing.
+  ///
+  /// Added on 13 October for a rule the owner withdrew the next day. Kept, not
+  /// dropped: migration 20261013090000 may already have run somewhere, and the
+  /// column still holds what it recorded. Its CHECK is gone
+  /// (20261014090000_trip_driver_source_retired), so `driver_id` is written
+  /// without it again. A later, explicit decision may drop it.
   driverSource  TripDriverSource? @map("driver_source")
 
   status TripStatus @default(OPEN)

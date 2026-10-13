@@ -1267,43 +1267,35 @@ The database refuses a second open-ended assignment for a Vehicle AND for a
 Driver (two partial unique indexes), so two concurrent links cannot both win;
 the loser gets a 409 and its transaction rolls back.
 
-## Which Driver a Trip stores (owner's rule, 13 October 2026)
+## A Trip keeps the Driver it was planned with
 
 Three different things:
 
 - the CURRENT Driver of a Vehicle — the assignment in effect today;
-- the Driver OF A TRIP — `trip.driver_id` when stored, otherwise the Vehicle's
-  Driver on the Trip's planning date;
+- the Driver OF A TRIP — `trip.driver_id`;
 - the ASSIGNMENT HISTORY — every `vehicle_assignment` row.
 
-`trip.driver_source` says where a stored Driver came from:
+A Trip storing no Driver shows its Vehicle's Driver on its planning date, but
+that answer would move with the assignment or the date. So the Driver is
+stored on the Trip (`TripDriverPinningService`, `cutOffAssignment`):
 
-| `driver_source` | Written when | Ever changed automatically? |
-|---|---|---|
-| `MANUAL` | a Driver is chosen for the Trip (create or update with `driverId`) | never |
-| `AUTOMATIC` | a FINISHED (CLOSED) Trip storing no Driver would otherwise move: before an assignment covering its date is ended, shortened or replaced (`cutOffAssignment`), or before its own Vehicle or date changes (`TripDriverPinningService`) | released when the Trip is reopened (`TripRepository.setStatus` to OPEN) |
-| `UNKNOWN` | every `driver_id` that existed before the column — some chosen, some stored by the planning-time pinning of 11 October, and nothing tells which | never |
+- a Trip created with a Vehicle and a date stores that Vehicle's Driver on
+  that date;
+- a Trip whose Vehicle or planning date changes — by hand, by a PDF revision or
+  an import — and that stores no Driver yet first stores the Driver it showed
+  until then;
+- before an assignment is ended, shortened or replaced, every Trip of that
+  Vehicle on the days it gives up that stores no Driver stores it.
 
-So:
+A stored Driver is never replaced by any of this: every write is a
+compare-and-set on `driver_id IS NULL`.
 
-- a Trip NOT yet finished stores no Driver unless one is chosen for it: it
-  follows its Vehicle's Driver on its own planning date — a new Driver on the
-  truck reaches every such Trip in that Driver's period, and a Trip dated before
-  it keeps showing the earlier Driver;
-- a finished Trip keeps the Driver it had, whatever happens to the assignment
-  afterwards;
-- a chosen Driver, and one of unknown origin, is never replaced;
-- clearing a Trip's Driver (`driverId: null`) removes it and its source: the
-  Trip follows its Vehicle again.
-
-This REPLACES the rule of 11 October 2026, which stored the Driver for every
-Trip at planning time and so kept unfinished work on the old Driver after a
-swap. Existing values were labelled `UNKNOWN` by migration
-`20261013090000_trip_driver_source`; no `driver_id` was changed or backfilled.
-
-The API reports the source as `effectiveDriver.source`: `VEHICLE_ASSIGNMENT`,
-`OVERRIDE` (MANUAL), `RECORDED` (AUTOMATIC) or `STORED_UNKNOWN_ORIGIN`
-(UNKNOWN).
+> 13–14 October 2026: a variant in which only finished Trips stored their
+> Driver (with a `driver_source` of MANUAL, AUTOMATIC or UNKNOWN) was introduced
+> and withdrawn the next day by the owner. The rule above is the one in force.
+> The `trip.driver_source` column remains in the database, unused. Only an explicit change of the Trip's own
+Driver changes it. Trips are not backfilled in bulk; a past Trip storing no
+Driver keeps resolving through the history, which is never rewritten.
 
 An existing VehicleAssignment therefore exposes only its end date and its notes
 for editing. Its Vehicle, its Driver and its start date define which period the

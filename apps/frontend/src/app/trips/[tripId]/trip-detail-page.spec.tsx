@@ -394,33 +394,9 @@ describe("TripDetailPage", () => {
       expect(fieldValue("Chauffeur")).toContain("Ahmet Yilmaz");
       expect(fieldValue("Chauffeur")).toContain("Apart gekozen voor deze rit");
       expect(fieldValue("Chauffeur")).not.toContain("Via voertuigtoewijzing");
-    });
-
-    it.each([
-      ["RECORDED", "Vastgelegd voor deze afgewerkte rit"],
-      ["STORED_UNKNOWN_ORIGIN", "Vastgelegd op deze rit (herkomst onbekend)"],
-    ] as const)("says where a %s driver came from", async (source, text) => {
-      getTripMock.mockResolvedValue(
-        buildTrip({
-          driverId: "driver-2",
-          effectiveDriver: {
-            id: "driver-2",
-            name: "Ahmet Yilmaz",
-            isActive: true,
-            source,
-            hasPhoneNumber: true,
-          },
-          latestUpdate: null,
-          costConfirmation: null,
-        }),
-      );
-
-      render(<TripDetailPage />);
-
-      await screen.findByText("Rit ANRDUB2602247");
-
-      expect(fieldValue("Chauffeur")).toContain("Ahmet Yilmaz");
-      expect(fieldValue("Chauffeur")).toContain(text);
+      // The retired driver-source labels of 13 October are gone.
+      expect(fieldValue("Chauffeur")).not.toContain("Vastgelegd");
+      expect(fieldValue("Chauffeur")).not.toContain("herkomst onbekend");
     });
 
     it("states plainly when there is no effective driver", async () => {

@@ -1,5 +1,5 @@
 import { Injectable } from "@nestjs/common";
-import { Prisma, Trip, TripDriverSource, TripStatus } from "@prisma/client";
+import { Prisma, Trip, TripStatus } from "@prisma/client";
 
 import { changedFieldNames } from "../common/changed-fields";
 import { toUtcDate } from "../common/dates";
@@ -297,9 +297,15 @@ export class TripService {
         ? planningDate
         : toUtcDate(dto.originalPlanningDate);
     const vehicleId = dto.vehicleId ?? null;
-    // Stored only when CHOSEN for this Trip. Otherwise the Trip follows its
-    // vehicle's driver on its date — see `TripDriverPinningService`.
-    const driverId = dto.driverId ?? null;
+    // Planned with a truck and a day: it keeps that truck's driver for good.
+    const driverId =
+      dto.driverId ??
+      (await this.driverPinning.driverToPin(null, {
+        vehicleId,
+        planningDate,
+        driverId: null,
+      })) ??
+      null;
 
     const created = await this.repository.runTripWriteTransaction(
       async ({ trips: repository, customProperties }) => {
@@ -331,7 +337,6 @@ export class TripService {
           executionDatetime: toNullableDateTime(dto.executionDatetime),
           vehicleId,
           driverId,
-          driverSource: driverId === null ? null : TripDriverSource.MANUAL,
           /*
            * The two times win when they are given: the duration is derived
            * from them so the three columns cannot disagree. A Trip created
@@ -1381,23 +1386,23 @@ export class TripService {
    * alone", while an explicit null clears the column — exactly PATCH semantics.
    */
   /**
-   * The update, plus — for FINISHED work only — the driver it keeps.
+   * The update, plus the driver the Trip keeps when its vehicle or date moves.
    *
    * An explicit driver in the request — a choice or a clear — always wins and
-   * nothing is kept. Otherwise a CLOSED Trip storing no driver keeps the one
-   * it showed when its vehicle or date moves (`TripDriverPinningService`),
-   * stored by compare-and-set in the same transaction. A Trip not yet finished
-   * simply follows its new vehicle or date.
+   * nothing is pinned. Otherwise a Trip storing no driver keeps the one it
+   * showed until now (`TripDriverPinningService`), stored by compare-and-set
+   * in the same transaction so a concurrent choice is never replaced.
    */
   private async writeUpdate(existing: Trip, dto: UpdateTripDto): Promise<Trip> {
     const pinnedDriverId =
       dto.driverId === undefined
-        ? await this.driverPinning.driverToKeep(existing, {
+        ? await this.driverPinning.driverToPin(existing, {
             vehicleId: dto.vehicleId === undefined ? existing.vehicleId : dto.vehicleId,
             planningDate:
               dto.planningDate === undefined
                 ? existing.planningDate
                 : toUtcDate(dto.planningDate),
+            driverId: existing.driverId,
           })
         : undefined;
 
@@ -1412,12 +1417,12 @@ export class TripService {
         return updated;
       }
 
-      this.logger.log("Driver of a finished Trip kept through a vehicle or date change", {
+      this.logger.log("Driver kept through a vehicle or date change", {
         tripId: existing.id,
         driverId: pinnedDriverId,
       });
 
-      return { ...updated, driverId: pinnedDriverId, driverSource: TripDriverSource.AUTOMATIC };
+      return { ...updated, driverId: pinnedDriverId };
     });
   }
 
@@ -1433,14 +1438,6 @@ export class TripService {
           : toUtcDate(dto.planningDate),
       vehicleId: dto.vehicleId,
       driverId: dto.driverId,
-      // A driver given here was chosen for this Trip; a clear removes it, and
-      // with it any record of where a previous one came from.
-      driverSource:
-        dto.driverId === undefined
-          ? undefined
-          : dto.driverId === null
-            ? null
-            : TripDriverSource.MANUAL,
       distanceKm: dto.distanceKm,
       executionDatetime:
         dto.executionDatetime === undefined

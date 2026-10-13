@@ -138,7 +138,7 @@ export class VehicleAssignmentController {
   @ApiOperation({
     summary: "Link a driver to a vehicle from today",
     description:
-      "Ends the vehicle's other driver and the driver's other vehicle, keeping them as history, then links the two open-ended from today. Finished (CLOSED) Trips keep the driver they showed; Trips not yet finished follow the new driver, unless one was chosen for them. ALREADY_LINKED changes nothing. Runs in a single transaction.",
+      "Ends the vehicle's other driver and the driver's other vehicle, keeping them as history, then links the two open-ended from today. Trips keep the driver they showed. ALREADY_LINKED changes nothing. Runs in a single transaction.",
   })
   @ApiOkResponse({ type: VehicleDriverLinkResponseDto })
   @ApiBadRequestResponse({ description: "Invalid UUID." })
@@ -179,7 +179,7 @@ export class VehicleAssignmentController {
   @ApiOperation({
     summary: "End a vehicle assignment",
     description:
-      "Without a date the assignment is no longer in effect from today (yesterday is its last day; one that began today is kept as history, in effect on no day). Finished (CLOSED) Trips that showed this driver keep that driver; Trips not yet finished follow the vehicle. The record is retained so historical Trips keep resolving their driver. Runs in a single transaction.",
+      "Without a date the assignment is no longer in effect from today (yesterday is its last day; one that began today is kept as history, in effect on no day). Trips that showed this driver keep that driver. The record is retained so historical Trips keep resolving their driver. Runs in a single transaction.",
   })
   @ApiOkResponse({ type: VehicleAssignmentResponseDto })
   @ApiBadRequestResponse({

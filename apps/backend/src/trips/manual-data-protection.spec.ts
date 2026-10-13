@@ -259,6 +259,7 @@ describe("manually managed Trip data", () => {
       tripTable as unknown as TripRepository,
       automaticFlat,
       recalculation,
+      noDriverPinning(),
       logger,
     );
     trips = new TripService(

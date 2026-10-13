@@ -268,7 +268,6 @@ describe("TripService", () => {
           terminal: null,
           vehicleId: null,
           driverId: null,
-          driverSource: null,
           startTime: null,
           endTime: null,
           executionDatetime: null,
@@ -498,7 +497,6 @@ describe("TripService", () => {
           executionDatetime: null,
           vehicleId: null,
           driverId: null,
-          driverSource: null,
         }),
       );
     });

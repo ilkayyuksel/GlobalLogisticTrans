@@ -536,6 +536,7 @@ export function buildHarness(storageDirectory: string) {
         tripRepository,
         automaticFlat,
         stubPricingRecalculation(),
+        noDriverPinning(),
         logger,
       ),
       pdfDocumentService,

@@ -1,5 +1,5 @@
 import { Injectable } from "@nestjs/common";
-import { Driver, Trip, TripDriverSource, Vehicle } from "@prisma/client";
+import { Driver, Trip, Vehicle } from "@prisma/client";
 
 import { CostConfirmationService } from "../cost-confirmations/cost-confirmation.service";
 import { DriverService } from "../drivers/driver.service";
@@ -35,10 +35,7 @@ import { VehicleService } from "../vehicles/vehicle.service";
  *
  * The resolution, in order:
  *
- *   A. `trip.driverId` is set        → that Driver, source by `driverSource`:
- *                                      OVERRIDE (MANUAL), RECORDED (AUTOMATIC,
- *                                      a finished Trip's kept driver) or
- *                                      STORED_UNKNOWN_ORIGIN (UNKNOWN)
+ *   A. `trip.driverId` is set        → that Driver, source OVERRIDE
  *   B. no override, vehicle assigned → the Driver of the assignment covering
  *                                      `trip.planningDate`, source
  *                                      VEHICLE_ASSIGNMENT
@@ -233,7 +230,9 @@ export class TripPlanningDataService {
     if (trip.driverId) {
       const driver = overrideDrivers.get(trip.driverId);
 
-      return driver ? toEffectiveDriver(driver, storedDriverSource(trip)) : null;
+      return driver
+        ? toEffectiveDriver(driver, EffectiveDriverSource.Override)
+        : null;
     }
 
     /*
@@ -370,17 +369,4 @@ function toEffectiveDriver(
 /** The non-null ids, each once. */
 function distinct(ids: readonly (string | null)[]): string[] {
   return [...new Set(ids.filter((id): id is string => id !== null))];
-}
-
-/** What a driver STORED on the Trip is, by where it came from. */
-function storedDriverSource(trip: Trip): EffectiveDriverSource {
-  switch (trip.driverSource) {
-    case TripDriverSource.AUTOMATIC:
-      return EffectiveDriverSource.Recorded;
-    case TripDriverSource.MANUAL:
-      return EffectiveDriverSource.Override;
-    default:
-      // UNKNOWN, or a row the check constraint has not yet seen.
-      return EffectiveDriverSource.StoredUnknownOrigin;
-  }
 }

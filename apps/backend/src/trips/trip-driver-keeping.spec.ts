@@ -1,4 +1,4 @@
-import { Driver, Trip, TripDriverSource, TripStatus } from "@prisma/client";
+import { Driver, Trip, TripStatus } from "@prisma/client";
 
 import { DomainEventBus } from "../common/events/domain-event-bus";
 import { DriverService } from "../drivers/driver.service";
@@ -20,19 +20,13 @@ import { TripRepository } from "./trip.repository";
 import { TripService } from "./trip.service";
 
 /**
- * Which driver a Trip STORES (owner's rule, 13 October 2026).
+ * A Trip keeps the driver it was planned with.
  *
- * Truck A is Piet's until 23 August and Ahmet's from the 24th. A Trip storing
- * no driver SHOWS whoever has the truck on its date.
- *
- *   not yet finished → stores nothing unless a driver is CHOSEN for it, so it
- *     follows its truck and date wherever they move;
- *   CLOSED           → keeps the driver it showed, stored as AUTOMATIC when its
- *     truck or date moves;
- *   MANUAL / UNKNOWN → never touched by any automatic path.
- *
- * The real Trip and revision services and the real pinning service, against
- * one in-memory Trip.
+ * Truck A is Piet's until 23 August and Ahmet's from the 24th. A Trip that
+ * stores no driver SHOWS whoever has the truck on its date — so moving the date
+ * across the 24th, or giving it another truck, would quietly hand the work to
+ * somebody else. These tests run the real Trip and revision services, and the
+ * real pinning service, against one in-memory Trip.
  */
 
 const TRIP_ID = "trip-1";
@@ -63,7 +57,6 @@ function buildTrip(overrides: Partial<Trip> = {}): Trip {
     tripGroupId: null,
     vehicleId: null,
     driverId: null,
-    driverSource: null,
     status: TripStatus.OPEN,
     bookingNumber: BOOKING,
     containerNumber: null,
@@ -90,7 +83,7 @@ function buildTrip(overrides: Partial<Trip> = {}): Trip {
   } as Trip;
 }
 
-describe("which driver a Trip stores", () => {
+describe("a Trip keeps the driver it was planned with", () => {
   let trip: Trip;
   let trips: TripService;
   let revisions: TripRevisionService;
@@ -112,12 +105,11 @@ describe("which driver a Trip stores", () => {
       findManyByGroupId: jest.fn().mockResolvedValue([]),
       create: jest.fn((data: Partial<Trip>) => Promise.resolve(write(data))),
       update: jest.fn((_id: string, data: Partial<Trip>) => Promise.resolve(write(data))),
-      // The repository's compare-and-set: CLOSED and storing no driver only.
       pinDriver: jest.fn((_id: string, driverId: string) => {
-        if (trip.driverId !== null || trip.status !== TripStatus.CLOSED) {
+        if (trip.driverId !== null) {
           return Promise.resolve(false);
         }
-        write({ driverId, driverSource: TripDriverSource.AUTOMATIC });
+        write({ driverId });
         return Promise.resolve(true);
       }),
       recordHistory: jest.fn().mockResolvedValue(undefined),
@@ -169,6 +161,7 @@ describe("which driver a Trip stores", () => {
       tripTable as unknown as TripRepository,
       automaticFlat,
       recalculation,
+      pinning,
       logger,
     );
   });
@@ -190,69 +183,60 @@ describe("which driver a Trip stores", () => {
     } as ImportedTripData;
   }
 
-  describe("12. a new Trip", () => {
-    it("stores no driver: it follows its truck on its date", async () => {
+  describe("11. a new Trip", () => {
+    it("stores the driver of its truck on its date", async () => {
       await trips.create({ vehicleId: TRUCK_A, planningDate: "2026-08-20" } as CreateTripDto);
 
-      expect(trip).toMatchObject({ driverId: null, driverSource: null });
+      expect(trip.driverId).toBe(PIET);
     });
 
-    it("stores a driver given explicitly, as MANUAL", async () => {
+    it("keeps a driver given explicitly", async () => {
       await trips.create({
         vehicleId: TRUCK_A,
         driverId: MARC,
         planningDate: "2026-08-20",
       } as CreateTripDto);
 
-      expect(trip).toMatchObject({ driverId: MARC, driverSource: TripDriverSource.MANUAL });
+      expect(trip.driverId).toBe(MARC);
+    });
+
+    it("stores nothing without a truck or a date", async () => {
+      await trips.create({ planningDate: "2026-08-20" } as CreateTripDto);
+      expect(trip.driverId).toBeNull();
+
+      await trips.create({ vehicleId: TRUCK_A } as CreateTripDto);
+      expect(trip.driverId).toBeNull();
     });
   });
 
-  describe("6/7. a Trip not yet finished follows its truck and date", () => {
-    it("by hand: a new date stores nothing", async () => {
+  describe("10. a planning date that moves", () => {
+    it("by hand: the Trip keeps the driver it showed", async () => {
       trip = buildTrip({ vehicleId: TRUCK_A });
 
       await trips.update(TRIP_ID, { planningDate: "2026-08-26" });
 
-      expect(trip).toMatchObject({ planningDate: day("2026-08-26"), driverId: null });
+      expect(trip).toMatchObject({ planningDate: day("2026-08-26"), driverId: PIET });
     });
 
-    it("by hand: another truck stores nothing", async () => {
-      trip = buildTrip({ vehicleId: TRUCK_A });
-
-      await trips.update(TRIP_ID, { vehicleId: TRUCK_B });
-
-      expect(trip).toMatchObject({ vehicleId: TRUCK_B, driverId: null });
-    });
-
-    it("8. by a revised document: a new date stores nothing", async () => {
+    it("by a revised document: the Trip keeps the driver it showed", async () => {
       trip = buildTrip({ vehicleId: TRUCK_A });
 
       await revisions.applyDocumentRevision(revisedTo("2026-08-26"));
 
-      expect(trip).toMatchObject({ planningDate: day("2026-08-26"), driverId: null });
+      expect(trip).toMatchObject({ planningDate: day("2026-08-26"), driverId: PIET });
     });
-  });
 
-  describe("3. a CLOSED Trip keeps the driver it showed", () => {
-    it("when its date moves", async () => {
-      trip = buildTrip({ vehicleId: TRUCK_A, status: TripStatus.CLOSED });
+    it("never replaces a driver the Trip already stores", async () => {
+      trip = buildTrip({ vehicleId: TRUCK_A, driverId: MARC });
 
       await trips.update(TRIP_ID, { planningDate: "2026-08-26" });
+      await revisions.applyDocumentRevision(revisedTo("2026-08-27"));
 
-      expect(trip).toMatchObject({ driverId: PIET, driverSource: TripDriverSource.AUTOMATIC });
+      expect(trip.driverId).toBe(MARC);
     });
 
-    it("when it is given another truck", async () => {
-      trip = buildTrip({ vehicleId: TRUCK_A, status: TripStatus.CLOSED });
-
-      await trips.update(TRIP_ID, { vehicleId: TRUCK_B });
-
-      expect(trip).toMatchObject({ driverId: PIET, driverSource: TripDriverSource.AUTOMATIC });
-    });
-
-    it("writes nothing when neither moves", async () => {
-      trip = buildTrip({ vehicleId: TRUCK_A, status: TripStatus.CLOSED });
+    it("writes nothing when the date does not move", async () => {
+      trip = buildTrip({ vehicleId: TRUCK_A });
 
       await trips.update(TRIP_ID, { internalNotes: "bel vooraf" });
 
@@ -260,48 +244,37 @@ describe("which driver a Trip stores", () => {
     });
   });
 
-  describe("4/9/10. a chosen driver is never touched automatically", () => {
-    it.each([TripDriverSource.MANUAL, TripDriverSource.UNKNOWN])(
-      "a %s driver stays through a date change by hand and by a document",
-      async (driverSource) => {
-        trip = buildTrip({ vehicleId: TRUCK_A, driverId: MARC, driverSource });
-
-        await trips.update(TRIP_ID, { planningDate: "2026-08-26" });
-        await revisions.applyDocumentRevision(revisedTo("2026-08-27"));
-
-        expect(trip).toMatchObject({ driverId: MARC, driverSource });
-      },
-    );
-
-    it("a CLOSED Trip's MANUAL driver stays through a truck change", async () => {
-      trip = buildTrip({
-        vehicleId: TRUCK_A,
-        driverId: MARC,
-        driverSource: TripDriverSource.MANUAL,
-        status: TripStatus.CLOSED,
-      });
+  describe("9. another truck", () => {
+    it("keeps the driver the Trip showed", async () => {
+      trip = buildTrip({ vehicleId: TRUCK_A });
 
       await trips.update(TRIP_ID, { vehicleId: TRUCK_B });
 
-      expect(trip).toMatchObject({ driverId: MARC, driverSource: TripDriverSource.MANUAL });
+      expect(trip).toMatchObject({ vehicleId: TRUCK_B, driverId: PIET });
+    });
+
+    it("a Trip with no truck yet gets the driver of the truck it is given", async () => {
+      await trips.update(TRIP_ID, { vehicleId: TRUCK_B });
+
+      expect(trip.driverId).toBe(MARC);
     });
   });
 
-  describe("an explicit driver change on the Trip", () => {
-    it("is applied as given, as MANUAL, and nothing is kept over it", async () => {
-      trip = buildTrip({ vehicleId: TRUCK_A, status: TripStatus.CLOSED });
+  describe("12. an explicit driver change on the Trip", () => {
+    it("is applied as given, and nothing is pinned over it", async () => {
+      trip = buildTrip({ vehicleId: TRUCK_A, driverId: PIET });
 
       await trips.update(TRIP_ID, { driverId: AHMET, planningDate: "2026-08-10" });
 
-      expect(trip).toMatchObject({ driverId: AHMET, driverSource: TripDriverSource.MANUAL });
+      expect(trip.driverId).toBe(AHMET);
     });
 
-    it("a clear removes the driver and its source: the Trip follows its truck", async () => {
-      trip = buildTrip({ vehicleId: TRUCK_A, driverId: PIET, driverSource: TripDriverSource.UNKNOWN });
+    it("clearing it is honoured too", async () => {
+      trip = buildTrip({ vehicleId: TRUCK_A, driverId: PIET });
 
-      await trips.update(TRIP_ID, { driverId: null });
+      await trips.update(TRIP_ID, { driverId: null, planningDate: "2026-08-26" });
 
-      expect(trip).toMatchObject({ driverId: null, driverSource: null });
+      expect(trip.driverId).toBeNull();
     });
   });
 });

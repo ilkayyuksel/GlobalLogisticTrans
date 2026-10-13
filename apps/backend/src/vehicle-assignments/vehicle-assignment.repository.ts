@@ -1,12 +1,5 @@
 import { Injectable } from "@nestjs/common";
-import {
-  Driver,
-  Prisma,
-  TripDriverSource,
-  TripStatus,
-  Vehicle,
-  VehicleAssignment,
-} from "@prisma/client";
+import { Driver, Prisma, Vehicle, VehicleAssignment } from "@prisma/client";
 
 import { PrismaService } from "../prisma/prisma.service";
 
@@ -240,18 +233,13 @@ export class VehicleAssignmentRepository {
   }
 
   /**
-   * Stores `driverId`, as AUTOMATIC, on every FINISHED (CLOSED) Trip of the
-   * vehicle planned in [from, to] that stores no driver yet; returns how many
-   * were written.
-   *
-   * Only finished work keeps the driver it had (owner's rule, 13 October
-   * 2026): a Trip not yet finished stores nothing and follows whoever drives
-   * the vehicle on its date. `driverId: null` in the filter is what guarantees
-   * a stored driver — MANUAL, UNKNOWN or AUTOMATIC — is never replaced.
+   * Stores `driverId` on every Trip of the vehicle planned in [from, to] that
+   * stores no driver yet; returns how many were written.
    *
    * A write to the trip table from here, deliberately: it must share the
    * assignment's transaction, and the Trip module already depends on this one,
-   * so the reverse dependency would be a cycle.
+   * so the reverse dependency would be a cycle. `driverId: null` in the filter
+   * is what guarantees a stored driver is never replaced.
    */
   async pinDriverOnUnpinnedTrips(query: {
     vehicleId: string;
@@ -268,13 +256,12 @@ export class VehicleAssignmentRepository {
       where: {
         vehicleId: query.vehicleId,
         driverId: null,
-        status: TripStatus.CLOSED,
         planningDate: {
           gte: query.from,
           ...(query.to === null ? {} : { lte: query.to }),
         },
       },
-      data: { driverId: query.driverId, driverSource: TripDriverSource.AUTOMATIC },
+      data: { driverId: query.driverId },
     });
 
     return count;

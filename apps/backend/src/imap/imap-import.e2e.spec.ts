@@ -387,6 +387,7 @@ describe("IMAP import, end to end with a real transport order", () => {
         tripRepository,
         automaticFlat,
         stubPricingRecalculation(),
+        noDriverPinning(),
         logger,
       ),
       pdfDocumentService,

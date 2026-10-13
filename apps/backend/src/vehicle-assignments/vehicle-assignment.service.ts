@@ -282,8 +282,8 @@ export class VehicleAssignmentService {
    * convention every assignment lookup uses, read once so the whole operation
    * agrees on it across midnight.
    *
-   * Finished Trips that showed this driver on the days given up keep that
-   * driver; unfinished ones follow the vehicle (`cutOffAssignment`). One transaction, so the overlap re-check, the Trips
+   * Trips that showed this driver on the days given up keep that driver
+   * (`cutOffAssignment`). One transaction, so the overlap re-check, the Trips
    * and the end date are written together or not at all.
    */
   async end(
@@ -353,8 +353,7 @@ export class VehicleAssignmentService {
    * One that starts LATER cannot be superseded by an earlier start, so it is
    * left to the overlap check, which reports it as a genuine conflict.
    *
-   * Finished Trips that showed the superseded driver on the days given up
-   * keep that driver; unfinished ones follow the new one.
+   * Trips that showed the superseded driver on the days given up keep them.
    */
   private async closeSupersededAssignments(
     repository: VehicleAssignmentRepository,

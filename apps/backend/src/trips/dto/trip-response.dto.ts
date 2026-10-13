@@ -54,20 +54,10 @@ export class TripVehicleSummaryDto {
 
 /** How a Trip's driver was arrived at. */
 export enum EffectiveDriverSource {
-  /** trip.driver_id, MANUAL — chosen for this Trip alone. */
+  /** trip.driver_id — an explicit override for this Trip alone. */
   Override = "OVERRIDE",
   /** The VehicleAssignment covering the Trip's planning date. */
   VehicleAssignment = "VEHICLE_ASSIGNMENT",
-  /**
-   * trip.driver_id, AUTOMATIC — the driver a FINISHED Trip had, kept by the
-   * system when its vehicle, date or assignment changed afterwards.
-   */
-  Recorded = "RECORDED",
-  /**
-   * trip.driver_id, UNKNOWN — stored before the origin was recorded, so it may
-   * have been chosen or stored automatically. Never changed automatically.
-   */
-  StoredUnknownOrigin = "STORED_UNKNOWN_ORIGIN",
 }
 
 /**

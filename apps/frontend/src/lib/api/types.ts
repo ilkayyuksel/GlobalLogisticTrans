@@ -76,20 +76,8 @@ export interface TripVehicleSummary {
   isActive: boolean;
 }
 
-/**
- * How the backend arrived at a Trip's driver.
- *
- *   VEHICLE_ASSIGNMENT     the vehicle's driver on the Trip's date — follows a
- *                          driver swap;
- *   OVERRIDE               chosen for this Trip alone;
- *   RECORDED               the driver a finished Trip had, kept by the system;
- *   STORED_UNKNOWN_ORIGIN  stored on the Trip before its origin was recorded.
- */
-export type EffectiveDriverSource =
-  | "OVERRIDE"
-  | "VEHICLE_ASSIGNMENT"
-  | "RECORDED"
-  | "STORED_UNKNOWN_ORIGIN";
+/** How the backend arrived at a Trip's driver. */
+export type EffectiveDriverSource = "OVERRIDE" | "VEHICLE_ASSIGNMENT";
 
 /**
  * The driver actually responsible for a Trip.

@@ -1,4 +1,4 @@
-import { Driver, Trip, TripDriverSource, Vehicle } from "@prisma/client";
+import { Driver, Trip, Vehicle } from "@prisma/client";
 
 import { DriverService } from "../drivers/driver.service";
 import { EffectiveDriverSource } from "./dto/trip-response.dto";
@@ -99,7 +99,7 @@ describe("TripPlanningDataService", () => {
     });
 
     it("uses the override driver", async () => {
-      const trip = buildTrip({ driverId: OVERRIDE_DRIVER_ID, driverSource: TripDriverSource.MANUAL });
+      const trip = buildTrip({ driverId: OVERRIDE_DRIVER_ID });
 
       const { effectiveDriver } = await service.resolveOne(trip);
 
@@ -110,18 +110,22 @@ describe("TripPlanningDataService", () => {
       });
     });
 
-    /** Where the stored driver came from is reported, never guessed. */
-    it.each([
-      [TripDriverSource.AUTOMATIC, EffectiveDriverSource.Recorded],
-      [TripDriverSource.UNKNOWN, EffectiveDriverSource.StoredUnknownOrigin],
-    ])("reports a %s stored driver as %s", async (driverSource, source) => {
-      const trip = buildTrip({ driverId: OVERRIDE_DRIVER_ID, driverSource });
+    /**
+     * The retired `driver_source` column (13–14 October 2026) may still hold a
+     * value on some rows. It is read by nothing: a stored driver is a stored
+     * driver, whatever that column says.
+     */
+    it.each(["MANUAL", "AUTOMATIC", "UNKNOWN", null] as const)(
+      "reports a stored driver the same way whatever the retired source says (%s)",
+      async (driverSource) => {
+        const trip = { ...buildTrip({ driverId: OVERRIDE_DRIVER_ID }), driverSource };
 
-      expect((await service.resolveOne(trip)).effectiveDriver).toMatchObject({
-        id: OVERRIDE_DRIVER_ID,
-        source,
-      });
-    });
+        expect((await service.resolveOne(trip)).effectiveDriver).toMatchObject({
+          id: OVERRIDE_DRIVER_ID,
+          source: EffectiveDriverSource.Override,
+        });
+      },
+    );
 
     /** An override is an override: it wins even against a valid assignment. */
     it("prefers the override over the vehicle's assignment", async () => {
