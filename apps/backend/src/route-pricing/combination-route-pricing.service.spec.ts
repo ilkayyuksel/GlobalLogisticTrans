@@ -6,6 +6,7 @@ import { CreateRoutePricingDto } from "./dto/create-route-pricing.dto";
 import {
   CombinationLegNotSeparatelyRemovableException,
   CombinationRouteGroupNotFoundException,
+  CombinationLegsSameRouteException,
   DuplicateActiveRouteException,
   DuplicateCombinationRouteException,
   InvalidCombinationLegCountException,
@@ -421,9 +422,19 @@ describe("CombinationRoutePricingService", () => {
     });
 
     /** Two legs on one road would make the choice between them arbitrary. */
-    it("refuses a Combination whose two legs are the same road", async () => {
+    it("24. refuses a Combination whose two legs are the same road, saying so", async () => {
       await expect(service.create([leg(), leg()])).rejects.toBeInstanceOf(
-        DuplicateActiveRouteException,
+        CombinationLegsSameRouteException,
+      );
+      await expect(service.create([leg(), leg()])).rejects.toThrow(/must be different routes/);
+    });
+
+    it("refuses two spellings of one road as the same road too", async () => {
+      const first = leg({ departure: "Quay 869", destination: "Kallo" });
+      const respelled = leg({ departure: "PSA Quay 869", destination: "KALLO" });
+
+      await expect(service.create([first, respelled])).rejects.toBeInstanceOf(
+        CombinationLegsSameRouteException,
       );
     });
 

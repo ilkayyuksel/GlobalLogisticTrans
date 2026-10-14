@@ -1,9 +1,7 @@
 import { Injectable } from "@nestjs/common";
 
 import { AppLoggerService } from "../logger/app-logger.service";
-import { MAX_PAGE_SIZE } from "../common/dto/pagination-query.dto";
 import { RoutePricingResponseDto } from "../route-pricing/dto/route-pricing-response.dto";
-import { RouteConfigurationKind } from "../route-pricing/route-pricing.repository";
 import { RoutePricingService } from "../route-pricing/route-pricing.service";
 import {
   RouteConfigurationDto,
@@ -95,16 +93,16 @@ export class RouteConfigurationService {
    * IS paginated, so the maximum page size is asked for explicitly rather than
    * relied upon by default.
    */
+  /**
+   * Every ordinary route — WHOLE. It used to ask for one page of 200, so past
+   * 200 routes the list silently stopped: those routes were invisible, a new
+   * one sorting after them never appeared, and re-adding one was refused as a
+   * duplicate of a route nobody could see.
+   */
   async findAll(): Promise<RouteConfigurationDto[]> {
-    const { items } = await this.routePricing.findAll(
-      {
-        page: 1,
-        pageSize: MAX_PAGE_SIZE,
-      },
-      RouteConfigurationKind.NORMAL,
-    );
+    const routes = await this.routePricing.findAllOrdinaryForDisplay();
 
-    return Promise.all(items.map((route) => this.compose(route)));
+    return Promise.all(routes.map((route) => this.compose(route)));
   }
 
   async findById(id: string): Promise<RouteConfigurationDto> {

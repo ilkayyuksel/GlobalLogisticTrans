@@ -1,4 +1,4 @@
-import { isSameTerminal } from "../common/terminal";
+import { normalizeLocation } from "./location-forms";
 
 /**
  * The two ends of a road, as every uniqueness rule compares them.
@@ -14,17 +14,24 @@ export interface RoadEndpoints {
 }
 
 /**
- * Whether two entries describe the same road.
+ * Whether two entries describe the same road — the ONE identity every
+ * uniqueness rule uses (owner's audit, 14 October 2026).
  *
- * The departure is compared as a TERMINAL through the shared helper, so
- * `PSA Quay 869` and `Quay 869` are one place — the same rule the repositories
- * apply, which is what makes every check in the application agree with the
- * database.
+ * Both ends through `normalizeLocation`: the canonical terminal rule
+ * (`PSA Quay 869` is `Quay 869`) at EITHER end — a collection runs city →
+ * terminal — and the safe normalisation of the pricing matcher (letter case,
+ * accents, punctuation, spacing). So two configurations the matcher would read
+ * as one road (`Quay 869 → LOKEREN`, `Quay 869 → Lokeren`) can no longer both
+ * be created, which left every Trip on that road AMBIGUOUS.
+ *
+ * Deliberately NOT the aliases, qualifiers or fuzzy layer: those need the
+ * Trip's terminal end and stay in pricing (`route-matcher.ts`), where several
+ * candidates are AMBIGUOUS rather than chosen.
  */
 export function isSameRoad(left: RoadEndpoints, right: RoadEndpoints): boolean {
   return (
-    left.destination === right.destination &&
-    isSameTerminal(left.departure, right.departure)
+    normalizeLocation(left.departure) === normalizeLocation(right.departure) &&
+    normalizeLocation(left.destination) === normalizeLocation(right.destination)
   );
 }
 

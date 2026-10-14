@@ -949,6 +949,47 @@ describe("bulk route import", () => {
    *
    * Every test here would have been refused by the old rule.
    */
+  /**
+   * Over ST travels with its Combination (14 October 2026). Without it an
+   * imported Combination never owed Over ST or the surcharge.
+   */
+  describe("Over ST", () => {
+    it("imports a Combination's Over ST with it", async () => {
+      await importRoutes([
+        combinationRoute({ overSt: { tarief: 40, toll: 10, tunnel: null } }),
+      ]);
+
+      expect(configurationServices.combinations.create).toHaveBeenCalledWith({
+        legs: expect.any(Array),
+        overSt: expect.objectContaining({ tarief: 40, toll: 10, tunnel: null }),
+      });
+    });
+
+    it("keeps an explicit 0.00 as configured", async () => {
+      await importRoutes([combinationRoute({ overSt: { tarief: 0, toll: null, tunnel: null } })]);
+
+      expect(configurationServices.combinations.create.mock.calls[0][0].overSt).toMatchObject({
+        tarief: 0,
+      });
+    });
+
+    it("imports none when the entry names none", async () => {
+      await importRoutes([combinationRoute()]);
+
+      expect(configurationServices.combinations.create.mock.calls[0][0].overSt).toBeUndefined();
+    });
+
+    it("31. skips a Combination with an invalid Over ST amount and keeps the rest", async () => {
+      const result = await importResult([
+        normalRoute(),
+        combinationRoute({ overSt: { tarief: -5, toll: null, tunnel: null } }),
+      ]);
+
+      expect(result.imported.normalRoutes).toBe(1);
+      expect(result.skipped[0]).toMatchObject({ routeNumber: 2, reasons: [expect.objectContaining({ field: "tarief" })] });
+    });
+  });
+
   describe("legs shared between Combinations", () => {
     /** The same Leg 1, with a different return each time. */
     function sharingLegOne(count: number) {

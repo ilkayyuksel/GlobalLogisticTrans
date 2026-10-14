@@ -402,6 +402,9 @@ const nl = {
   "settings.pricing.routes.deleteConsequence":
     "Reeds afgewerkte ritten behouden de bedragen waarmee ze berekend zijn.",
   "settings.pricing.routes.bulk.add": "Bulk toevoegen",
+  "settings.pricing.routes.hiddenNew":
+    "{count} zojuist toegevoegde configuratie(s) opgeslagen, maar verborgen door de zoekterm of het controlefilter.",
+  "settings.pricing.routes.hiddenNew.showAll": "Alles tonen",
   "settings.pricing.routes.export": "Exporteren JSON",
   "settings.pricing.routes.reviewed": "Gecontroleerd",
   "settings.pricing.routes.reviewedCount": "gecontroleerd",
@@ -1574,6 +1577,9 @@ const tr: Translations = {
   "settings.pricing.routes.deleteConsequence":
     "Tamamlanmış seferler hesaplandıkları tutarları korur.",
   "settings.pricing.routes.bulk.add": "Toplu ekle",
+  "settings.pricing.routes.hiddenNew":
+    "Az önce eklenen {count} yapılandırma kaydedildi, ancak arama terimi veya kontrol filtresi tarafından gizleniyor.",
+  "settings.pricing.routes.hiddenNew.showAll": "Tümünü göster",
   "settings.pricing.routes.export": "JSON dışa aktar",
   "settings.pricing.routes.reviewed": "Kontrol edildi",
   "settings.pricing.routes.reviewedCount": "kontrol edildi",

@@ -10,6 +10,7 @@ import {
   type CombinationDraft,
 } from "@/components/pricing/combination-routes";
 import { CombinationsTable } from "@/components/pricing/combinations-table";
+import { HiddenNewRoutesNotice } from "@/components/pricing/hidden-new-routes-notice";
 import { NormalRoutesTable } from "@/components/pricing/normal-routes-table";
 import {
   matchesFilter,
@@ -152,6 +153,9 @@ export function RoutePricesSection({
   const [recentCombinationIds, setRecentCombinationIds] = useState<
     readonly string[]
   >([]);
+  // The same for an ordinary route: in a list of hundreds sorted by name, a new
+  // one in its alphabetical place looked as if it had not been saved.
+  const [recentRouteIds, setRecentRouteIds] = useState<readonly string[]>([]);
   /*
    * ── WHAT AN INLINE EDIT LEAVES BEHIND ─────────────────────────────────────
    * The record the backend answered with, laid over the one the list delivered,
@@ -184,9 +188,12 @@ export function RoutePricesSection({
     (combination) => combinationOverlay.get(combination.id) ?? combination,
   );
 
-  const shownRoutes = configured.filter(
-    (route) =>
-      matchesFilter(route.reviewed, filter) && matchesRouteSearch(route, search),
+  const shownRoutes = withRecentFirst(
+    configured.filter(
+      (route) =>
+        matchesFilter(route.reviewed, filter) && matchesRouteSearch(route, search),
+    ),
+    recentRouteIds,
   );
   const shownCombinations = withRecentFirst(
     configuredCombinations.filter(
@@ -197,6 +204,21 @@ export function RoutePricesSection({
     recentCombinationIds,
   );
   const hasSearch = search.trim() !== "";
+  /*
+   * Added in this visit, stored — the list holds it — and yet not shown: the
+   * operator's search or review filter excludes it. Said, never silently.
+   */
+  const hiddenNewCount =
+    recentRouteIds.filter(
+      (id) =>
+        configured.some((route) => route.id === id) &&
+        !shownRoutes.some((route) => route.id === id),
+    ).length +
+    recentCombinationIds.filter(
+      (id) =>
+        configuredCombinations.some((combination) => combination.id === id) &&
+        !shownCombinations.some((combination) => combination.id === id),
+    ).length;
 
   /*
    * A section that holds matches opens when the search changes, so a result is
@@ -257,11 +279,18 @@ export function RoutePricesSection({
 
     const payload = toRoutePayload(draft);
 
-    void run(draft.id, () =>
-      draft.id === null
-        ? createRouteConfiguration(payload)
-        : updateRouteConfiguration(draft.id, payload),
-    );
+    void run(draft.id, async () => {
+      if (draft.id !== null) {
+        await updateRouteConfiguration(draft.id, payload);
+
+        return;
+      }
+
+      const created = await createRouteConfiguration(payload);
+
+      setRecentRouteIds((current) => [created.id, ...current]);
+      setIsNormalOpen(true);
+    });
   }
 
   /** Both legs and Over ST in one request; the backend writes them together. */
@@ -277,6 +306,7 @@ export function RoutePricesSection({
       });
 
       setRecentCombinationIds((current) => [created.id, ...current]);
+      setIsCombinationsOpen(true);
     });
   }
 
@@ -456,6 +486,14 @@ export function RoutePricesSection({
           className="w-full max-w-md rounded-md border border-border bg-card px-3 py-1.5 text-sm text-foreground"
         />
       </label>
+
+      <HiddenNewRoutesNotice
+        count={hiddenNewCount}
+        onShowAll={() => {
+          setSearch("");
+          setFilter("ALL");
+        }}
+      />
 
       {!isEmptyConfiguration ? (
         <RouteReviewProgress
@@ -655,21 +693,16 @@ export function RoutePricesSection({
   );
 }
 
-/** The Combinations added in this visit first (newest first), then the rest in stored order. */
-function withRecentFirst(
-  combinations: readonly CombinationRouteConfiguration[],
+/** The records added in this visit first (newest first), then the rest in stored order. */
+function withRecentFirst<TRecord extends { readonly id: string }>(
+  records: readonly TRecord[],
   recentIds: readonly string[],
-): CombinationRouteConfiguration[] {
+): TRecord[] {
   const recent = recentIds
-    .map((id) => combinations.find((combination) => combination.id === id))
-    .filter((combination): combination is CombinationRouteConfiguration =>
-      Boolean(combination),
-    );
+    .map((id) => records.find((record) => record.id === id))
+    .filter((record): record is TRecord => Boolean(record));
 
-  return [
-    ...recent,
-    ...combinations.filter((combination) => !recentIds.includes(combination.id)),
-  ];
+  return [...recent, ...records.filter((record) => !recentIds.includes(record.id))];
 }
 
 /** "Combination #2: Antwerp → Kallo / Kallo → Antwerp", as the list names it. */

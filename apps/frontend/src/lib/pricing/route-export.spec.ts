@@ -111,6 +111,7 @@ describe("the exported document", () => {
           tunnel: 15,
         },
       ],
+      overSt: { tarief: 50, toll: 5, tunnel: null },
     });
   });
 
@@ -158,8 +159,23 @@ describe("the exported document", () => {
   });
 
   /** Over ST is configured on the screen; the importer builds from legs. */
-  it("writes no Over ST", () => {
-    const [entry] = toRouteConfigurationDocument([], [ANTWERP_KALLO]).routes;
+  /**
+   * Over ST travels with its Combination (14 October 2026): without it a
+   * re-imported Combination never owed Over ST or its surcharge.
+   */
+  it("writes the configured Over ST, an explicit 0 included", () => {
+    const zero = {
+      ...ANTWERP_KALLO,
+      overSt: { tarief: "0.00", toll: null, tunnel: null },
+    };
+    const [entry] = toRouteConfigurationDocument([], [zero]).routes;
+
+    expect(entry).toMatchObject({ overSt: { tarief: 0, toll: null, tunnel: null } });
+  });
+
+  it("writes no Over ST for a Combination with none configured", () => {
+    const none = { ...ANTWERP_KALLO, overSt: { tarief: null, toll: null, tunnel: null } };
+    const [entry] = toRouteConfigurationDocument([], [none]).routes;
 
     expect(entry).not.toHaveProperty("overSt");
   });
@@ -215,10 +231,10 @@ describe("the exported document", () => {
       ]);
     });
 
-    it("writes only a type and its legs for a Combination", () => {
+    it("writes only a type, its legs and its Over ST for a Combination", () => {
       const [entry] = toRouteConfigurationDocument([], [ANTWERP_KALLO]).routes;
 
-      expect(Object.keys(entry).sort()).toEqual(["legs", "type"]);
+      expect(Object.keys(entry).sort()).toEqual(["legs", "overSt", "type"]);
     });
   });
 

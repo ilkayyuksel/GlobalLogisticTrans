@@ -65,7 +65,7 @@ function routeCost(code: string, amount: string, overrides = {}) {
 
 describe("RouteConfigurationService", () => {
   let routePricingService: {
-    findAll: jest.Mock;
+    findAllOrdinaryForDisplay: jest.Mock;
     findById: jest.Mock;
     create: jest.Mock;
     update: jest.Mock;
@@ -84,9 +84,7 @@ describe("RouteConfigurationService", () => {
 
   beforeEach(() => {
     routePricingService = {
-      findAll: jest
-        .fn()
-        .mockResolvedValue({ items: [routePricing()], meta: {} }),
+      findAllOrdinaryForDisplay: jest.fn().mockResolvedValue([routePricing()]),
       findById: jest.fn().mockResolvedValue(routePricing()),
       create: jest.fn().mockResolvedValue(routePricing()),
       update: jest.fn().mockResolvedValue(routePricing()),
@@ -212,15 +210,17 @@ describe("RouteConfigurationService", () => {
     });
 
     /** Configuration is read whole; a page-2 route would simply be missing. */
-    it("asks for every route rather than a first page", async () => {
-      await service.findAll();
-
-      expect(routePricingService.findAll).toHaveBeenCalledWith(
-        expect.objectContaining({ page: 1, pageSize: 200 }),
-        // Ordinary routes only. A Combination leg is half a pair and is never
-        // listed as a route an operator could edit on its own.
-        "NORMAL",
+    /**
+     * 25/28. Every ordinary route, never a page. It asked for page 1 of 200,
+     * which hid route 201 onwards: invisible routes, refused "duplicates" and
+     * new routes that never appeared.
+     */
+    it("lists every ordinary route — 250 of them, not the first 200", async () => {
+      routePricingService.findAllOrdinaryForDisplay.mockResolvedValue(
+        Array.from({ length: 250 }, (_v, index) => routePricing({ id: `route-${index}` })),
       );
+
+      expect(await service.findAll()).toHaveLength(250);
     });
   });
 

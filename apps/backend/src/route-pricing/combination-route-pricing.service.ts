@@ -9,13 +9,14 @@ import {
   toRoutePricingResponse,
 } from "./dto/route-pricing-response.dto";
 import {
+  CombinationLegsSameRouteException,
   CombinationRouteGroupNotFoundException,
   DuplicateActiveRouteException,
   DuplicateCombinationRouteException,
   InvalidCombinationLegCountException,
   LEGS_PER_COMBINATION_ROUTE,
 } from "./exceptions/route-pricing.exceptions";
-import { RoadEndpoints } from "./route-identity";
+import { RoadEndpoints, isSameRoad } from "./route-identity";
 import {
   CombinationOverStData,
   CombinationRouteGroupWithLegs,
@@ -274,14 +275,10 @@ export class CombinationRoutePricingService {
   ): void {
     const [first, second] = legs;
 
-    if (
-      first.departure === second.departure &&
-      first.destination === second.destination
-    ) {
-      throw new DuplicateActiveRouteException(
-        first.departure,
-        first.destination,
-      );
+    // The same road identity every uniqueness rule uses, so the screen and
+    // the bulk import refuse exactly the same pairs.
+    if (isSameRoad(first, second)) {
+      throw new CombinationLegsSameRouteException(first.departure, first.destination);
     }
   }
 

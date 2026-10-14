@@ -116,6 +116,11 @@ export class RoutePricingService {
   }
 
   /** Every ordinary route, for the pricing route matcher. Reads, never writes. */
+  /** Every ordinary route, by name — whole, never a page. */
+  async findAllOrdinaryForDisplay(): Promise<RoutePricingResponseDto[]> {
+    return (await this.repository.findAllOrdinaryForDisplay()).map(toRoutePricingResponse);
+  }
+
   async findAllOrdinary(): Promise<RoutePricingResponseDto[]> {
     return (await this.repository.findAllOrdinary()).map(toRoutePricingResponse);
   }
@@ -274,7 +279,7 @@ export class RoutePricingService {
         conflictingRoutePricingId: holder.id,
       });
 
-      throw new DuplicateActiveRouteException(departure, destination);
+      throw new DuplicateActiveRouteException(departure, destination, holder);
     }
   }
 

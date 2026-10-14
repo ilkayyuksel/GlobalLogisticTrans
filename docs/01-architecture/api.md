@@ -74,7 +74,7 @@ each field.
 | Entry | Contains |
 |---|---|
 | `NORMAL` | one route: `departure`, `destination`, `tarief`, `toll`, `tunnel` |
-| `COMBINATION` | `legs`: exactly two, each a full route price with its own five fields |
+| `COMBINATION` | `legs`: exactly two, each a full route price with its own five fields; optional `overSt`: `{ "tarief", "toll", "tunnel" }`, each a number or `null` |
 
 At most 500 entries per document — refused rather than truncated.
 
@@ -85,9 +85,11 @@ cost. An older entry still naming `kilometres` is **refused** rather than
 ignored or converted, because either would let an operator believe the distance
 had been used. The same goes for `active`, which route prices no longer have.
 
-Over ST is not part of the import document: Combinations are created from their
-legs, and Over ST is filled in on the screen (or sent as `overSt` on the
-Combination endpoints).
+Over ST travels with its Combination (14 October 2026): an optional `overSt`
+with the screen's three amounts, each a number or `null` (`0` counts as
+configured). The JSON export writes it whenever one is configured. Before this,
+an imported or re-imported Combination always arrived WITHOUT Over ST, and so
+never owed Over ST or the €70 surcharge.
 
 ## A Combination is exactly two legs
 
@@ -157,6 +159,15 @@ not attempted. The entries before it stay imported.
 skipped), `NOTHING_IMPORTED` (every entry skipped) or `ABORTED`.
 
 ## Duplicates are skipped, never merged
+
+**One road identity everywhere** (14 October 2026, `isSameRoad`): both ends
+through `normalizeLocation` — the canonical terminal rule (`PSA Quay 869` is
+`Quay 869`) at either end, plus letter case, accents, punctuation and spacing.
+The same identity guards the screen's create and update, the bulk import, the
+Combination pair and the leg sync, so `Quay 869 → LOKEREN` is refused next to
+`Quay 869 → Lokeren` — a pair the pricing matcher would otherwise read as one
+road and price as AMBIGUOUS. Aliases, optional qualifiers and fuzzy matching
+stay in pricing only. A refusal names the route as it is stored.
 
 Nothing is overwritten and nothing is upserted: the existing uniqueness rules
 decide, through the same lookup the manual create uses, so the canonical

@@ -5,12 +5,14 @@ import {
   ArrayMinSize,
   Equals,
   IsArray,
+  IsOptional,
   ValidateNested,
 } from "class-validator";
 
 import { LEGS_PER_COMBINATION_ROUTE } from "../../route-pricing/exceptions/route-pricing.exceptions";
 import {
   RouteConfigurationType,
+  SaveCombinationOverStDto,
   SaveRouteConfigurationDto,
 } from "./route-configuration.dto";
 
@@ -148,6 +150,23 @@ export class BulkCombinationRouteImportDto {
   @ValidateNested({ each: true })
   @Type(() => SaveRouteConfigurationDto)
   legs!: SaveRouteConfigurationDto[];
+
+  /*
+   * ── OVER ST TRAVELS WITH ITS COMBINATION (14 October 2026) ─────────────────
+   * Optional, and exactly the screen's own Over ST: Tarief, Toll and Tunnel,
+   * each a number or null. Without it a Combination is imported with no Over ST
+   * — which, until now, was the only way an imported or re-imported
+   * Combination could arrive, and so it never owed Over ST or the surcharge.
+   */
+  @ApiPropertyOptional({
+    type: SaveCombinationOverStDto,
+    description:
+      "Over ST of the Combination: Tarief, Toll and Tunnel, each a number or null. Omit for none.",
+  })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => SaveCombinationOverStDto)
+  overSt?: SaveCombinationOverStDto;
 }
 
 /**

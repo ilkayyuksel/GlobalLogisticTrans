@@ -1,4 +1,5 @@
 import type {
+  CombinationOverStPayload,
   CombinationRouteConfiguration,
   RouteConfiguration,
 } from "@/lib/api/route-configuration";
@@ -23,8 +24,9 @@ import type {
  * A route carries its Toll as an amount, like its Tunnel, and the file says so.
  * The importer refuses an older file that still names a distance.
  *
- * Over ST is not part of this document: the importer creates Combinations
- * from their legs, and Over ST is filled in on the screen.
+ * Over ST travels with its Combination when one is configured (14 October
+ * 2026): leaving it out meant a re-imported Combination never owed Over ST or
+ * its surcharge. A Combination with no Over ST carries no `overSt` at all.
  */
 
 /** One road, priced. The shape of both an ordinary route and a leg. */
@@ -44,6 +46,8 @@ export interface ExportedCombinationRoute {
   readonly type: "COMBINATION";
   /** Exactly two, the outbound first. */
   readonly legs: readonly ExportedRoute[];
+  /** Present only when at least one amount is configured; 0 counts. */
+  readonly overSt?: CombinationOverStPayload;
 }
 
 export interface RouteConfigurationDocument {
@@ -75,6 +79,7 @@ export function toRouteConfigurationDocument(
     .map((combination) => ({
       type: "COMBINATION" as const,
       legs: combination.legs.map(toExportedRoute),
+      ...exportedOverSt(combination),
     }));
 
   return { routes: [...normal, ...combined] };
@@ -87,6 +92,20 @@ export function toRouteConfigurationDocument(
  * rounding can happen in transit; the import DTO takes numbers, as every amount
  * in this API does on the way in, so `"100.00"` goes back out as `100`.
  */
+function exportedOverSt(
+  combination: CombinationRouteConfiguration,
+): { overSt?: CombinationOverStPayload } {
+  const { tarief, toll, tunnel } = combination.overSt;
+
+  if (tarief === null && toll === null && tunnel === null) {
+    return {};
+  }
+
+  const amount = (value: string | null) => (value === null ? null : Number(value));
+
+  return { overSt: { tarief: amount(tarief), toll: amount(toll), tunnel: amount(tunnel) } };
+}
+
 function toExportedRoute(route: RouteConfiguration): ExportedRoute {
   return {
     departure: route.departure,

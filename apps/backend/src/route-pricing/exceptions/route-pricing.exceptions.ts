@@ -26,10 +26,37 @@ export class RoutePricingNotFoundException extends NotFoundException {
   }
 }
 
+/**
+ * The road is already configured in this context.
+ *
+ * Names the EXISTING route as it is stored when it is known: road identity
+ * ignores letter case, spacing and the `PSA` prefix, so what the operator typed
+ * and what is configured may read differently — and "already exists" without
+ * saying where sent operators looking for a route they could not find.
+ */
 export class DuplicateActiveRouteException extends ConflictException {
+  constructor(
+    departure: string,
+    destination: string,
+    existing?: { readonly departure: string; readonly destination: string },
+  ) {
+    const asStored =
+      existing &&
+      (existing.departure !== departure || existing.destination !== destination)
+        ? ` It is configured as "${existing.departure}" to "${existing.destination}".`
+        : "";
+
+    super(
+      `An active route pricing already exists for "${departure}" to "${destination}".${asStored}`,
+    );
+  }
+}
+
+/** Both legs of one Combination describe the same road. */
+export class CombinationLegsSameRouteException extends BadRequestException {
   constructor(departure: string, destination: string) {
     super(
-      `An active route pricing already exists for "${departure}" to "${destination}".`,
+      `The two legs of a Combination must be different routes; both are "${departure}" to "${destination}".`,
     );
   }
 }

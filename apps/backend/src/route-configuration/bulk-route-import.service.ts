@@ -179,7 +179,10 @@ export class BulkRouteImportService {
 function createOne(services: RouteConfigurationServices, entry: ImportedRoute): Promise<unknown> {
   return entry.kind === "NORMAL"
     ? services.routes.create(entry.route)
-    : services.combinations.create({ legs: entry.combination.legs });
+    : services.combinations.create({
+        legs: entry.combination.legs,
+        overSt: entry.combination.overSt,
+      });
 }
 
 /** The database refused the route as one that exists — a duplicate, not a fault. */

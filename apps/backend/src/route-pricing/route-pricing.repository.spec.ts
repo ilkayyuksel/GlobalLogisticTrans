@@ -156,13 +156,37 @@ describe("RoutePricingRepository", () => {
       );
     }
 
-    it("narrows by destination in SQL", async () => {
+    /** The identity is decided in memory: SQL cannot say `LOKEREN` is `Lokeren`. */
+    it("reads the whole kind and decides the road in memory", async () => {
       await repository.findByRoute("Antwerp", "Rotterdam", NORMAL_ROUTE);
 
       expect(prisma.routePricing.findMany).toHaveBeenCalledWith({
-        where: { destination: "Rotterdam", combinationGroupId: null },
+        where: { combinationGroupId: null },
         orderBy: { id: "asc" },
       });
+    });
+
+    it.each([
+      ["another case", "Quay 869", "LOKEREN"],
+      ["the PSA prefix at the destination", "Aalst", "PSA Quay 869"],
+      ["punctuation and spacing", "Quay  869", "Lokeren."],
+    ])("22. finds an existing route written in %s", async (_label, departure, destination) => {
+      prisma.routePricing.findMany.mockResolvedValue([
+        { id: "stored-1", departure: "Quay 869", destination: "Lokeren" },
+        { id: "stored-2", departure: "Aalst", destination: "Quay 869" },
+      ]);
+
+      const found = await repository.findByRoute(departure, destination, NORMAL_ROUTE);
+
+      expect(found?.id).toBe(departure === "Aalst" ? "stored-2" : "stored-1");
+    });
+
+    it("never finds the road the other way round", async () => {
+      prisma.routePricing.findMany.mockResolvedValue([
+        { id: "stored-1", departure: "Quay 869", destination: "Lokeren" },
+      ]);
+
+      expect(await repository.findByRoute("Lokeren", "Quay 869", NORMAL_ROUTE)).toBeNull();
     });
 
     /*
@@ -205,7 +229,6 @@ describe("RoutePricingRepository", () => {
 
       expect(prisma.routePricing.findMany).toHaveBeenCalledWith({
         where: {
-          destination: "Rotterdam",
           combinationGroupId: null,
           id: { not: "self" },
         },
@@ -396,14 +419,14 @@ describe("RoutePricingRepository", () => {
      * `findByRoute` is — SQL equality cannot say that PSA Quay 869 and Quay 869
      * are one place.
      */
-    it("narrows the candidate groups by the destinations of both legs", async () => {
+    it("compares every group in memory, by the shared road identity", async () => {
       await repository.findGroupWithLegRoads([
         { departure: "Quay 869", destination: "LESSINES" },
         { departure: "LESSINES", destination: "Kallo" },
       ]);
 
       expect(prisma.combinationRouteGroup.findMany).toHaveBeenCalledWith({
-        where: { legs: { some: { destination: { in: ["LESSINES", "Kallo"] } } } },
+        where: {},
         include: { legs: { orderBy: { combinationLegPosition: "asc" } } },
         orderBy: [{ createdAt: "asc" }, { id: "asc" }],
       });

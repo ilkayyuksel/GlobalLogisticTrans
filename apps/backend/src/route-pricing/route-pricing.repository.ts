@@ -1,9 +1,8 @@
 import { Injectable } from "@nestjs/common";
 import { CombinationRouteGroup, Prisma, RoutePricing } from "@prisma/client";
 
-import { isSameTerminal } from "../common/terminal";
 import { PrismaService } from "../prisma/prisma.service";
-import { RoadEndpoints, isSameCombination } from "./route-identity";
+import { RoadEndpoints, isSameCombination, isSameRoad } from "./route-identity";
 
 export interface FindRoutePricingFilter {
   search?: string;
@@ -175,6 +174,20 @@ export class RoutePricingRepository {
    * is a typo of one configuration, or fits two, cannot be answered from the
    * exact matches alone.
    */
+  /**
+   * Every ORDINARY route as the Routeprijzen list shows it: by name, then id.
+   *
+   * WHOLE — never a page. The screen is the only place an operator can see
+   * which routes exist, and the duplicate check reads every route; a list that
+   * stopped at 200 refused routes nobody could find, and hid new ones.
+   */
+  findAllOrdinaryForDisplay(): Promise<RoutePricing[]> {
+    return this.prisma.routePricing.findMany({
+      where: { combinationGroupId: null },
+      orderBy: [{ routeName: "asc" }, { id: "asc" }],
+    });
+  }
+
   findAllOrdinary(): Promise<RoutePricing[]> {
     return this.prisma.routePricing.findMany({
       where: { combinationGroupId: null },
@@ -222,10 +235,9 @@ export class RoutePricingRepository {
    * return. So "is this already configured" is a question about the PAIR, which
    * only the group can answer — see `isSameCombination`.
    *
-   * Narrowed in SQL by destination, decided in memory by the terminal rule, for
-   * the same reason `findByRoute` is: `PSA Quay 869` and `Quay 869` are one
-   * place, and SQL equality cannot say so. The candidate set is small by
-   * construction — the Combinations that touch one of these two destinations.
+   * Every group, decided in memory by `isSameCombination` — the same road
+   * identity as `findByRoute`, which SQL equality cannot express. A few
+   * hundred groups at most.
    */
   async findGroupWithLegRoads(
     roads: readonly RoadEndpoints[],
@@ -236,7 +248,6 @@ export class RoutePricingRepository {
         ...(options.excludeCombinationGroupId
           ? { id: { not: options.excludeCombinationGroupId } }
           : {}),
-        legs: { some: { destination: { in: roads.map((road) => road.destination) } } },
       },
       include: { legs: { orderBy: { combinationLegPosition: "asc" } } },
       // The oldest first, so the configuration an operator made first is the one
@@ -262,9 +273,13 @@ export class RoutePricingRepository {
     destination: string,
     options: FindRouteOptions,
   ): Promise<RoutePricing[]> {
+    /*
+     * The whole kind, decided in memory by `isSameRoad`: SQL equality cannot
+     * say that `LOKEREN` and `Lokeren`, or `PSA Quay 869` and `Quay 869`, are
+     * one road. Configuration is a few hundred rows.
+     */
     const candidates = await this.prisma.routePricing.findMany({
       where: {
-        destination,
         combinationGroupId:
           options.kind === RouteConfigurationKind.COMBINATION
             ? { not: null }
@@ -277,7 +292,7 @@ export class RoutePricingRepository {
     });
 
     return candidates.filter((candidate) =>
-      isSameTerminal(candidate.departure, departure),
+      isSameRoad(candidate, { departure, destination }),
     );
   }
 

@@ -245,13 +245,20 @@ describe("which legs are the same road, by the shared route identity", () => {
     ["a longer quay number", "PSA Quay 8690", "GENT"],
     ["PSA not prefixing a quay", "PSA 869", "GENT"],
     ["another destination", "Quay 869", "GENTBRUGGE"],
-    // The shared identity compares the DESTINATION exactly, as RoutePricing's
-    // lookup does — so the sync must not call these the same either.
-    ["the destination in another case", "Quay 869", "Gent"],
   ])("does not find %s", (_label, departure, destination) => {
     const near = combination("N", leg(departure, destination), other("N"));
 
     expect(findSyncTargets(source, 1, [source, near])).toEqual([]);
+  });
+
+  /**
+   * The shared identity normalises BOTH ends (14 October 2026): a destination
+   * in another case is the same road, as the pricing matcher reads it.
+   */
+  it("finds the destination in another case", () => {
+    const near = combination("N", leg("Quay 869", "Gent"), other("N"));
+
+    expect(findSyncTargets(source, 1, [source, near]).map((target) => target.id)).toEqual(["N"]);
   });
 
   /** E — every spelling of the same road in the same position is reached. */
