@@ -632,10 +632,71 @@ describe("city names", () => {
       expect(ids(matchRoad(delivery("MECHELEN"), routes))).toEqual(["m"]);
     });
 
-    it("never takes a village for the town in whose brackets it stands", () => {
-      expect(matchRoad(delivery("Muizen"), [to("mm", "Mechelen (Muizen)")]).method).toBe(
+    /**
+     * ── THE PLACE IN BRACKETS IS A NAME OF THE END (owner, 15 October 2026) ──
+     * This REVERSES the rule of 11 October, under which `Muizen` was never
+     * `Mechelen (Muizen)`: an explicitly bracketed place is now recognised as
+     * the end it qualifies, exactly — never by a typo — and only when it is the
+     * one configuration that names it.
+     */
+    it("takes the place in brackets as a name of the end it qualifies", () => {
+      expect(matchRoad(delivery("Muizen"), [to("mm", "Mechelen (Muizen)")])).toMatchObject({
+        method: RouteMatchMethod.NORMALIZED,
+        matches: [{ id: "mm" }],
+      });
+    });
+
+    it("ROESELARE (RUMBEKE) is Rumbeke", () => {
+      expect(ids(matchRoad(delivery("Rumbeke"), [to("r", "ROESELARE (RUMBEKE)")]))).toEqual(["r"]);
+    });
+
+    it("ROESELARE (RUMBEKE) is Roeselare", () => {
+      expect(ids(matchRoad(delivery("Roeselare"), [to("r", "ROESELARE (RUMBEKE)")]))).toEqual(["r"]);
+    });
+
+    it("Rumbeke is never Roeselare (Oekene): the bracket decides", () => {
+      expect(matchRoad(delivery("Rumbeke"), [to("o", "Roeselare (Oekene)")]).method).toBe(
         RouteMatchMethod.NOT_FOUND,
       );
+      expect(matchRoad(delivery("Roeselare (Oekene)"), [to("r", "Roeselare (Rumbeke)")]).method).toBe(
+        RouteMatchMethod.NOT_FOUND,
+      );
+    });
+
+    it("picks the configuration that names the bracketed place, not its sibling", () => {
+      const routes = [to("r", "Roeselare (Rumbeke)"), to("o", "Roeselare (Oekene)")];
+
+      expect(ids(matchRoad(delivery("Rumbeke"), routes))).toEqual(["r"]);
+      // The town alone names both: neither.
+      expect(matchRoad(delivery("Roeselare"), routes).method).toBe(RouteMatchMethod.AMBIGUOUS);
+    });
+
+    it("is AMBIGUOUS when two different towns bracket the same place", () => {
+      const routes = [to("r", "Roeselare (Rumbeke)"), to("i", "Izegem (Rumbeke)")];
+
+      expect(matchRoad(delivery("Rumbeke"), routes).method).toBe(RouteMatchMethod.AMBIGUOUS);
+    });
+
+    it("prefers a configuration of the whole name over one that brackets it", () => {
+      const routes = [to("rb", "Rumbeke"), to("r", "Roeselare (Rumbeke)")];
+
+      expect(ids(matchRoad(delivery("Rumbeke"), routes))).toEqual(["rb"]);
+    });
+
+    it("never by a typo of the bracketed place", () => {
+      expect(matchRoad(delivery("Rumbeek"), [to("r", "Roeselare (Rumbeke)")]).method).not.toBe(
+        RouteMatchMethod.NORMALIZED,
+      );
+    });
+
+    it("never the road the other way round", () => {
+      expect(matchRoad(collection("Rumbeke"), [to("r", "ROESELARE (RUMBEKE)")]).method).toBe(
+        RouteMatchMethod.NOT_FOUND,
+      );
+    });
+
+    it("reads the place in brackets on the Trip's side too", () => {
+      expect(ids(matchRoad(delivery("Roeselare (Rumbeke)"), [to("rb", "Rumbeke")]))).toEqual(["rb"]);
     });
   });
 
@@ -722,6 +783,40 @@ describe("city names", () => {
       expect(
         matchCombinationPair([delivery("Antwerp"), collection("Melsele")], groups),
       ).toMatchObject({ kind: "MATCHED", group: { id: "c" } });
+    });
+
+    /** The owner's Combination #213, as configured and as the Trips arrive. */
+    describe("COMBINATION #213", () => {
+      const groups = [
+        { id: "c213", legs: [leg("l1", 1, QUAY, "ROESELARE (RUMBEKE)"), leg("l2", 2, "IEPER", QUAY)] },
+      ];
+      const rit1 = delivery("Rumbeke", "Quay 869");
+      const rit2 = collection("Ieper", "PSA Quay 869");
+
+      it("matches both legs together, each Trip on its own leg", () => {
+        expect(matchCombinationPair([rit1, rit2], groups)).toMatchObject({
+          kind: "MATCHED",
+          group: { id: "c213" },
+          legs: [{ id: "l1" }, { id: "l2" }],
+        });
+        expect(matchCombinationPair([rit2, rit1], groups)).toMatchObject({
+          kind: "MATCHED",
+          legs: [{ id: "l2" }, { id: "l1" }],
+        });
+      });
+
+      it("is no Combination when only one leg matches", () => {
+        expect(matchCombinationPair([rit1, collection("Poperinge", "PSA Quay 869")], groups).kind).toBe(
+          "LEG_NOT_IDENTIFIED",
+        );
+        expect(matchCombinationPair([delivery("Oekene"), rit2], groups).kind).toBe("LEG_NOT_IDENTIFIED");
+      });
+
+      it("is no Combination when a leg runs the other way", () => {
+        expect(matchCombinationPair([collection("Rumbeke"), rit2], groups).kind).toBe(
+          "LEG_NOT_IDENTIFIED",
+        );
+      });
     });
 
     it("20. one ambiguous leg leaves the pair unidentified", () => {

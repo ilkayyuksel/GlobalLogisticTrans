@@ -10,8 +10,11 @@
  *                             — but only as a controlled candidate selection
  *                             in the route matcher, never by deleting it.
  *
- * Nothing else is equivalent: `Sint` is not `St`, a village is not the town in
- * whose brackets it appears (`Muizen` / `Mechelen (Muizen)`), and no country,
+ *   the place IN the brackets names the end too — `Rumbeke` is `Roeselare
+ *                             (Rumbeke)` (owner, 15 October 2026) — again only
+ *                             in the route matcher, never by deleting it.
+ *
+ * Nothing else is equivalent: `Sint` is not `St`, and no country,
  * region or municipality is inferred. A new entry is added here once the owner
  * confirms it — the matcher reads this list for every trigger.
  * ────────────────────────────────────────────────────────────────────────────

@@ -454,8 +454,15 @@ another quay (`Quay 170`, `Quay 1742`). A match through an alias is recorded as
 rule). Two configurations that are one road through an alias are AMBIGUOUS —
 neither is chosen. A new alias is added to that one list, only once confirmed.
 
-**No other aliases are invented.** `Sint` and `St`, a village and the town in
-whose brackets it stands (`Muizen` / `Mechelen (Muizen)`), `MPET 1742` and
+**The place in brackets is a name of the end** (owner, 15 October 2026 —
+reversing the rule of 11 October). At the city end a Trip's `Rumbeke` matches a
+configured `ROESELARE (RUMBEKE)`, and a Trip's `Roeselare (Rumbeke)` a configured
+`Rumbeke` — exactly after safe normalisation, never by a typo, and only when
+neither the whole name nor the optional qualifier matched. The bracket is never
+dropped: `Roeselare (Rumbeke)` and `Roeselare (Oekene)` stay two places, and the
+same place bracketed in two towns is AMBIGUOUS. Recorded as `NORMALIZED`.
+
+**No other aliases are invented.** `Sint` and `St`, `MPET 1742` and
 `Quay 1742` are different spellings to the matcher (a scored typo aside —
 `St Niklaas` is one letter from `Sint Niklaas` and so may be `FUZZY`); making
 them equal is a business decision, to be confirmed, never guessed.

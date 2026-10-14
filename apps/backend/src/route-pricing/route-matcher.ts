@@ -32,7 +32,9 @@ import type { RoadEndpoints } from "./route-identity";
  *               (`common/city-aliases.ts`: `Antwerp` = `Antwerpen`, `St` =
  *               `Saint`), and — only when the whole name matched nothing — a
  *               qualifier in brackets given on ONE side only (`Melsele` =
- *               `Melsele (Beveren)`); two different qualifiers never match.
+ *               `Melsele (Beveren)`); two different qualifiers never match;
+ *               and — only after that — the place IN the brackets as a name
+ *               of the end (`Rumbeke` = `Roeselare (Rumbeke)`).
  *   FUZZY       one end equal, the other a typo by the calibrated similarity
  *               scores (`name-similarity.ts`) — the city end when the terminal
  *               end is known — with a clear margin over the runner-up.
@@ -42,9 +44,9 @@ import type { RoadEndpoints } from "./route-identity";
  * at the TERMINAL end of the Trip's road (`terminalEnd`): never at the city,
  * never as a word inside a longer value, never for another quay number.
  *
- * Nothing else is equivalent: `Kallo` and `Kallo Noord`, a village and the
- * town in whose brackets it stands (`Muizen` / `Mechelen (Muizen)`), `Sint`
- * and `St` — none is an alias. How a road's ends are read: `location-forms.ts`.
+ * Nothing else is equivalent: `Kallo` and `Kallo Noord`, `Sint` and `St` —
+ * none is an alias. (A village and the town in whose brackets it stands —
+ * `Muizen` / `Mechelen (Muizen)` — IS, since 15 October 2026.) How a road's ends are read: `location-forms.ts`.
  *
  * ── DIRECTION ───────────────────────────────────────────────────────────────
  * A road is compared as given: `X → Y` never matches `Y → X`. The caller
@@ -152,6 +154,12 @@ export function matchRoad<T extends RoadEndpoints>(
     return decide(RouteMatchMethod.NORMALIZED, qualified, [], road.terminalEnd);
   }
 
+  const bracketed = matchByBracketedPlace(road, candidates);
+
+  if (bracketed.length > 0) {
+    return decide(RouteMatchMethod.NORMALIZED, bracketed, [], road.terminalEnd);
+  }
+
   return matchFuzzy(road, candidates);
 }
 
@@ -190,6 +198,57 @@ function matchByOptionalQualifier<T extends RoadEndpoints>(
       city.base === wantedCity.base &&
       (city.qualifier === null || wantedCity.qualifier === null)
     );
+  });
+}
+
+/**
+ * ── THE PLACE IN BRACKETS IS A NAME OF THE END (owner, 15 October 2026) ─────
+ * `ROESELARE (RUMBEKE)` is configured for Rumbeke, a part of Roeselare, and a
+ * transport order names the place itself: `Rumbeke`. So at the city end the
+ * place in brackets is a name of that end too:
+ *   a Trip's city equal to a configuration's bracketed place — `Rumbeke` is
+ *     `Roeselare (Rumbeke)`;
+ *   and the other way round — a Trip's `Roeselare (Rumbeke)` is a configured
+ *     `Rumbeke`.
+ * This REVERSES the rule of 11 October (`Muizen` was never `Mechelen
+ * (Muizen)`).
+ *
+ * What it is NOT: the bracket is never dropped. The configuration keeps its
+ * whole identity, so `Roeselare (Rumbeke)` and `Roeselare (Oekene)` stay two
+ * places, and `Rumbeke` names only the first. Equality after the safe
+ * normalisation only — never a typo of the bracketed place. Reached only when
+ * neither the whole name nor the optional qualifier matched; several
+ * configurations naming the place in different towns are AMBIGUOUS (`decide`).
+ * Terminal end equal, direction as given.
+ */
+function matchByBracketedPlace<T extends RoadEndpoints>(
+  road: TripRoad,
+  candidates: readonly T[],
+): T[] {
+  const cityEnd = cityEndOf(road.terminalEnd);
+
+  if (cityEnd === null || road.terminalEnd === undefined) {
+    return [];
+  }
+
+  const terminalSide = road.terminalEnd;
+  const wanted = roadForms(road, terminalSide);
+  const wantedCity = wanted[cityEnd];
+
+  return candidates.filter((candidate) => {
+    const forms = roadForms(candidate, terminalSide);
+    const city = forms[cityEnd];
+
+    if (forms[terminalSide].full !== wanted[terminalSide].full) {
+      return false;
+    }
+
+    const tripNamesTheBracketedPlace =
+      wantedCity.qualifier === null && city.qualifier === wantedCity.base;
+    const tripBracketsTheConfiguredPlace =
+      city.qualifier === null && wantedCity.qualifier === city.base;
+
+    return tripNamesTheBracketedPlace || tripBracketsTheConfiguredPlace;
   });
 }
 
