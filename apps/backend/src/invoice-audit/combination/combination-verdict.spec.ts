@@ -59,9 +59,9 @@ describe("judgeCombinations", () => {
   });
 
   it.each([
-    ["only one is grouped", "g", null, { g: 1 }, /only one/],
-    ["they are in different groups", "g", "h", { g: 2, h: 2 }, /different groups/],
-    ["their group holds three", "g", "g", { g: 3 }, /holds 3/],
+    ["only one is grouped", "g", null, { g: 1 }, /Slechts één/],
+    ["they are in different groups", "g", "h", { g: 2, h: 2 }, /verschillende groepen/],
+    ["their group holds three", "g", "g", { g: 3 }, /telt 3 ritten/],
   ])("is under review when %s", (_label, firstGroup, secondGroup, sizes, reason) => {
     const [first, second] = judge(firstGroup, secondGroup, sizes);
 

@@ -1,10 +1,10 @@
 import { ApiProperty } from "@nestjs/swagger";
-import { Prisma } from "@prisma/client";
+import { Prisma, RouteMatchMethod } from "@prisma/client";
 
 import { CombinationVerdict } from "../matching/invoice-row-matching.service";
 import { DifferenceKind, type InvoicePricingDifference } from "../pricing/invoice-reconciliation";
 import { PriceProblem, type PriceReliability } from "../pricing/price-reliability";
-import { RouteRelation } from "../pricing/route-evidence";
+
 import { MONEY_DECIMAL_PLACES } from "../workbook/invoice-amounts";
 import { toHeaderText } from "../workbook/invoice-columns";
 
@@ -83,19 +83,18 @@ export class InvoicePricingDifferenceDto {
 }
 
 /**
- * What the stored snapshot proves about the road the Trip was priced on.
- *
- * Shown so a person can SEE a doubtful match — a Trip to `Beveren` priced on
- * `Quay 869 → Kallo (Beveren)` — rather than trust a status.
+ * The Trip's road beside the road its price was made on, and how the system
+ * matched them — information for the operator, never the reason a price is
+ * doubted (that is `problem`, from the stored match itself).
  */
-export class InvoiceRouteEvidenceDto {
-  @ApiProperty({ enum: RouteRelation })
-  relation!: RouteRelation;
+export class InvoiceRouteDescriptionDto {
+  @ApiProperty({ enum: RouteMatchMethod, nullable: true, description: "As the snapshot recorded it." })
+  matchMethod!: RouteMatchMethod | null;
 
-  @ApiProperty({ type: String, nullable: true, example: "Beveren → Quay 869" })
+  @ApiProperty({ type: String, nullable: true, example: "Eindhout → Quay 869" })
   tripRoute!: string | null;
 
-  @ApiProperty({ type: String, nullable: true, example: "Kallo (Beveren) → Quay 869" })
+  @ApiProperty({ type: String, nullable: true, example: "LAAKDAL (EINDHOUT) → Quay 869" })
   pricedRoute!: string | null;
 }
 
@@ -110,8 +109,8 @@ export class InvoicePriceReliabilityDto {
   @ApiProperty({ type: String, nullable: true })
   explanation!: string | null;
 
-  @ApiProperty({ type: InvoiceRouteEvidenceDto, nullable: true })
-  routeEvidence!: InvoiceRouteEvidenceDto | null;
+  @ApiProperty({ type: InvoiceRouteDescriptionDto, nullable: true })
+  route!: InvoiceRouteDescriptionDto | null;
 }
 
 /**
@@ -208,13 +207,7 @@ export function toPriceReliabilityDto(
     reliable: reliability.reliable,
     problem: reliability.problem,
     explanation: reliability.explanation,
-    routeEvidence: reliability.evidence
-      ? {
-          relation: reliability.evidence.relation,
-          tripRoute: reliability.evidence.tripRoute,
-          pricedRoute: reliability.evidence.pricedRoute,
-        }
-      : null,
+    route: reliability.route ? { ...reliability.route } : null,
   };
 }
 

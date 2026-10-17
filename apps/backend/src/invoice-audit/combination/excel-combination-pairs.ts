@@ -42,7 +42,7 @@ export function findExcelCombinations(rows: readonly InvoiceSheetRow[]): ExcelCo
   const seconds = ordered.filter((row) => isMarker(row.startPoint) && !isMarker(row.endPoint));
   const unpaired: UnpairedCombinationRow[] = ordered
     .filter((row) => isMarker(row.startPoint) && isMarker(row.endPoint))
-    .map((row) => ({ row, reason: "the row is marked as both legs of a Combination" }));
+    .map((row) => ({ row, reason: "De regel is gemarkeerd als beide delen van een combinatie." }));
 
   const claims = new Map<InvoiceSheetRow, InvoiceSheetRow[]>();
 
@@ -64,9 +64,9 @@ export function findExcelCombinations(rows: readonly InvoiceSheetRow[]): ExcelCo
     if (claimedBy.length === 1) {
       pairs.push({ first: claimedBy[0], second });
     } else if (claimedBy.length === 0) {
-      unpaired.push({ row: second, reason: "no first leg of this Combination was found" });
+      unpaired.push({ row: second, reason: "Het eerste deel van deze combinatie is niet gevonden." });
     } else {
-      const reason = `rows ${claimedBy.map((row) => row.rowNumber).join(", ")} all claim the same second leg`;
+      const reason = `De rijen ${claimedBy.map((row) => row.rowNumber).join(", ")} claimen allemaal hetzelfde tweede deel.`;
 
       unpaired.push({ row: second, reason }, ...claimedBy.map((row) => ({ row, reason })));
     }
@@ -94,8 +94,8 @@ function partnerOf(
   }
 
   return sharing.length === 0
-    ? `no second leg with container ${first.containerNumber} was found`
-    : `several second legs state container ${first.containerNumber}`;
+    ? `Geen tweede deel met container ${first.containerNumber} gevonden.`
+    : `Meerdere tweede delen vermelden container ${first.containerNumber}.`;
 }
 
 function sameContainer(left: InvoiceSheetRow, right: InvoiceSheetRow): boolean {

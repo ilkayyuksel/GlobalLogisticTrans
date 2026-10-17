@@ -504,7 +504,7 @@ describe("reconcileLine", () => {
       expect(difference?.invoiceValue?.toFixed(2)).toBe("200.00");
       expect(difference?.expectedValue.toFixed(2)).toBe("250.00");
       expect(difference?.correctedValue).toBeNull();
-      expect(difference?.problem).toMatch(/stated on 2 rows/);
+      expect(difference?.problem).toMatch(/staat op 2 regels/);
       // The second row carries nothing at all: one report, not two.
       expect(outcomes[1].differences).toEqual([]);
     });

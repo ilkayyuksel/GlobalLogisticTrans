@@ -102,11 +102,11 @@ describe("a corrected invoice that does not match its plan", () => {
 
     await expect(buildInvoiceAuditService(doubles).apply(await invoice())).rejects.toMatchObject({
       constructor: InvoiceWorkbookIntegrityException,
-      response: { details: ["H2: value changed without a plan"] },
+      response: { details: ["H2: waarde gewijzigd zonder plan."] },
     });
     expect(logger.error).toHaveBeenCalledWith(
       "Corrected invoice failed its integrity check",
-      expect.objectContaining({ problems: ["H2: value changed without a plan"] }),
+      expect.objectContaining({ problems: ["H2: waarde gewijzigd zonder plan."] }),
     );
     expect(logger.log).not.toHaveBeenCalledWith("Corrected invoice produced", expect.anything());
   });

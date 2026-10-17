@@ -7,10 +7,18 @@ import { toMarkedRowNumbers } from "../invoice-corrections";
 import { InvoiceAuditService } from "../invoice-audit.service";
 import type { UploadedInvoiceFile } from "../invoice-examination.service";
 import { InvoicePaymentRepository } from "./invoice-payment.repository";
-import { assessPayments, type TripPayment } from "./payment-eligibility";
+import { assessPayments, NotPayableReason, type TripPayment } from "./payment-eligibility";
 
-/** Why a selected id is refused when the invoice does not charge it at all. */
-const NOT_ON_INVOICE = "NOT_ON_INVOICE";
+/** Why a selected Trip is refused, in the words the refusal shows. */
+const REFUSAL_WORDS: Record<NotPayableReason | "NOT_ON_INVOICE", string> = {
+  NOT_ON_INVOICE: "staat niet op deze factuur",
+  [NotPayableReason.NOT_CLOSED]: "rit niet afgesloten",
+  [NotPayableReason.NO_OWN_LINE]: "alleen EC-regels",
+  [NotPayableReason.ADDED_BY_CHECK]: "door de controle toegevoegd",
+  [NotPayableReason.LINE_MARKED]: "regel geel gemarkeerd",
+  [NotPayableReason.PRICE_NOT_SETTLED]: "prijs niet betrouwbaar gecontroleerd",
+  [NotPayableReason.OPEN_CONFLICT]: "open conflict met een andere regel",
+};
 
 /**
  * The operator's confirmation that the transports they chose are paid.
@@ -86,14 +94,21 @@ export class InvoicePaymentService {
 function toRefusals(
   selectedTripIds: readonly string[],
   assessed: ReadonlyMap<string, TripPayment>,
-): { tripId: string; reasons: string[] }[] {
+): { trip: string; reasons: string[] }[] {
   return selectedTripIds.flatMap((tripId) => {
     const payment = assessed.get(tripId);
 
     if (payment === undefined) {
-      return [{ tripId, reasons: [NOT_ON_INVOICE] }];
+      return [{ trip: tripId, reasons: [REFUSAL_WORDS.NOT_ON_INVOICE] }];
     }
 
-    return payment.payable ? [] : [{ tripId, reasons: [...payment.reasons] }];
+    return payment.payable
+      ? []
+      : [
+          {
+            trip: payment.trip.bookingNumber ?? tripId,
+            reasons: payment.reasons.map((reason) => REFUSAL_WORDS[reason]),
+          },
+        ];
   });
 }

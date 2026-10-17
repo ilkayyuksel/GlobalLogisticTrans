@@ -34,14 +34,14 @@ export function decideCostLine(
   const ccNumbers = row.costLine?.ccNumbers ?? [];
 
   if (ccNumbers.length !== 1) {
-    return unresolved(`the line names ${ccNumbers.length} confirmation numbers, not one`);
+    return unresolved(`De regel vermeldt ${ccNumbers.length} EC-nummers in plaats van één.`);
   }
 
   const ccNumber = ccNumbers[0];
   const confirmations = confirmationsByNumber.get(ccNumber) ?? [];
 
   if (confirmations.length === 0) {
-    return unresolved(`no Cost Confirmation EC ${ccNumber} is known`);
+    return unresolved(`Geen kostenbevestiging gevonden voor EC ${ccNumber}.`);
   }
 
   const trips = confirmations
@@ -49,18 +49,18 @@ export function decideCostLine(
     .filter((trip): trip is Trip => trip !== undefined);
 
   if (confirmations.length > 1) {
-    return unresolved(`Cost Confirmation EC ${ccNumber} belongs to several Trips`, trips);
+    return unresolved(`Kostenbevestiging EC ${ccNumber} hoort bij meerdere ritten.`, trips);
   }
 
   const trip = trips[0];
 
   if (trip === undefined) {
-    return unresolved(`the Trip of Cost Confirmation EC ${ccNumber} no longer exists`);
+    return unresolved(`De rit van kostenbevestiging EC ${ccNumber} bestaat niet meer.`);
   }
 
   if (trip.bookingNumber !== row.bookingNumber) {
     return unresolved(
-      `Cost Confirmation EC ${ccNumber} belongs to a Trip with booking ${trip.bookingNumber ?? "(none)"}`,
+      `Kostenbevestiging EC ${ccNumber} hoort bij een rit met boekingsnummer ${trip.bookingNumber ?? "(geen)"}.`,
       [trip],
     );
   }
@@ -69,11 +69,11 @@ export function decideCostLine(
     row.normalizedContainerNumber !== "" &&
     normalizeContainerNumber(trip.containerNumber) !== row.normalizedContainerNumber
   ) {
-    return unresolved(`Cost Confirmation EC ${ccNumber} belongs to a Trip with another container`, [trip]);
+    return unresolved(`Kostenbevestiging EC ${ccNumber} hoort bij een rit met een ander containernummer.`, [trip]);
   }
 
   if (trip.status !== TripStatus.CLOSED) {
-    return unresolved(`the Trip of Cost Confirmation EC ${ccNumber} is not finished`, [trip]);
+    return unresolved(`De rit van kostenbevestiging EC ${ccNumber} is niet afgewerkt.`, [trip]);
   }
 
   return {

@@ -48,7 +48,7 @@ export function checkTotalsResults(worksheet: ExcelJS.Worksheet, sheet: InvoiceS
     // Totals are stored at the cent, as the customer's money format shows them.
     if (!round(total).equals(round(lines))) {
       // The address only: what a transport costs stays out of logs and errors.
-      problems.push(`${toColumnLetter(position)}${totalsRow}: does not show what its lines add up to`);
+      problems.push(`${toColumnLetter(position)}${totalsRow}: toont niet wat de regels samen opleveren.`);
     }
   }
 
@@ -70,7 +70,7 @@ function grandTotalProblems(
       new RegExp(`^SUM\\([A-Z]+${totalsRow}:[A-Z]+${totalsRow}\\)$`).test(formula) &&
       !round(shownAmount(cell)).equals(round(componentTotals))
     ) {
-      problems.push(`${cell.address}: the grand total does not show the component totals`);
+      problems.push(`${cell.address}: het eindtotaal toont niet de som van de kolomtotalen.`);
     }
   });
 

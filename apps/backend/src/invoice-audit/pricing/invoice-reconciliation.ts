@@ -125,7 +125,7 @@ function reconcileComponent(
     return notPlaceable(
       base,
       rows[0].rowNumber,
-      `${component.label} is stated on ${carriers.length} rows of this invoice, so a difference cannot be placed on one of them`,
+      `${component.label} staat op ${carriers.length} regels van deze factuur; een verschil kan niet aan één ervan worden toegewezen.`,
     );
   }
 
@@ -140,7 +140,7 @@ function reconcileComponent(
 
   // Cannot happen for a raise on one row; kept so a negative can never be written.
   if (corrected.isNegative()) {
-    return notPlaceable(base, target.rowNumber, `${component.label} cannot be raised without a negative cell`);
+    return notPlaceable(base, target.rowNumber, `${component.label} kan niet verhoogd worden zonder een negatieve cel.`);
   }
 
   return written(base, component, target.rowNumber, corrected, {

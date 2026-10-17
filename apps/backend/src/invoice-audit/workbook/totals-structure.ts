@@ -69,18 +69,18 @@ function componentTotalProblems(
     const name = toHeaderText(column);
 
     if (sum === null) {
-      return [`${name}: the totals row holds no SUM down its column (${formula ?? "empty"})`];
+      return [`${name}: de totaalrij bevat geen SOM over de eigen kolom (${formula ?? "leeg"}).`];
     }
 
     const [, fromLetter, from, toLetter, to] = sum;
 
     if (fromLetter.toUpperCase() !== letter || toLetter.toUpperCase() !== letter) {
-      return [`${name}: the total adds up another column (${formula})`];
+      return [`${name}: het totaal telt een andere kolom op (${formula}).`];
     }
 
     return Number(from) <= firstLine && Number(to) === lastLine
       ? []
-      : [`${name}: the total covers rows ${from}–${to}, not ${firstLine}–${lastLine} (${formula})`];
+      : [`${name}: het totaal telt de rijen ${from}–${to} op in plaats van ${firstLine}–${lastLine} (${formula}).`];
   });
 }
 
@@ -98,7 +98,7 @@ function grandTotalProblems(
     found = found || formulaOf(cell)?.replace(/\s|\$/g, "").toUpperCase() === expected;
   });
 
-  return found ? [] : [`the totals row holds no grand total ${expected}`];
+  return found ? [] : [`De totaalrij bevat geen eindtotaal ${expected}.`];
 }
 
 /** The summary reads the totals row, and its Fuel label says the header's percentage. */
@@ -115,14 +115,14 @@ function summaryProblems(
       const reference = SINGLE_REFERENCE.exec(formulaOf(cell) ?? "");
 
       if (reference !== null && Number(reference[2]) !== totalsRow) {
-        problems.push(`summary ${cell.address} reads row ${reference[2]}, not the totals row ${totalsRow}`);
+        problems.push(`Samenvatting ${cell.address} leest rij ${reference[2]} in plaats van de totaalrij ${totalsRow}.`);
       }
 
       const labelPercentage = fuelPercentageOf(cell);
 
       if (labelPercentage !== null && headerPercentage !== null && labelPercentage !== headerPercentage) {
         problems.push(
-          `the summary label "${toCellText(cell.value)}" does not state the header's ${headerPercentage}%`,
+          `Het label "${toCellText(cell.value)}" in de samenvatting vermeldt niet de ${headerPercentage}% van de kop.`,
         );
       }
     });

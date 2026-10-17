@@ -49,7 +49,7 @@ export function findUnplannedChanges(
   const after = written.getWorksheet(sheetName);
 
   if (!before || !after) {
-    return [`the worksheet "${sheetName}" is missing`];
+    return [`Het werkblad "${sheetName}" ontbreekt.`];
   }
 
   const problems = [
@@ -60,7 +60,7 @@ export function findUnplannedChanges(
   ];
 
   return problems.length > MAX_REPORTED
-    ? [...problems.slice(0, MAX_REPORTED), `… and ${problems.length - MAX_REPORTED} more`]
+    ? [...problems.slice(0, MAX_REPORTED), `… en nog ${problems.length - MAX_REPORTED} andere.`]
     : problems;
 }
 
@@ -117,7 +117,7 @@ function compareCell(
   const yellow = plan.yellowRows.has(row);
 
   if (yellow ? !isYellowFill(is.style.fill) : !sameStyle(is.style.fill, was.style.fill)) {
-    return `${address}: fill ${yellow ? "is not the planned yellow" : "changed"}`;
+    return `${address}: ${yellow ? "niet geel gemarkeerd zoals gepland" : "opvulkleur gewijzigd zonder plan"}.`;
   }
 
   if (planned) {
@@ -128,21 +128,21 @@ function compareCell(
     const numFmtKept = is.style.numFmt === was.style.numFmt || is.style.numFmt === withBlankZero(was.style.numFmt as string);
 
     if (is.formula !== expectedFormula || (is.formula === null && !sameValue(is.value, was.value))) {
-      return `${address}: a totals cell changed its formula or value`;
+      return `${address}: formule of waarde van een totaalcel gewijzigd.`;
     }
 
-    return numFmtKept && sameOtherStyle(was, is, ["fill", "numFmt"]) ? null : `${address}: a totals cell changed its style`;
+    return numFmtKept && sameOtherStyle(was, is, ["fill", "numFmt"]) ? null : `${address}: opmaak van een totaalcel gewijzigd.`;
   }
 
   if (is.formula !== expectedFormula) {
-    return `${address}: formula changed without a plan`;
+    return `${address}: formule gewijzigd zonder plan.`;
   }
 
   if (!sameValue(is.value, was.value)) {
-    return `${address}: value changed without a plan`;
+    return `${address}: waarde gewijzigd zonder plan.`;
   }
 
-  return sameOtherStyle(was, is, ["fill"]) ? null : `${address}: style changed without a plan`;
+  return sameOtherStyle(was, is, ["fill"]) ? null : `${address}: opmaak gewijzigd zonder plan.`;
 }
 
 function comparePlanned(planned: PlannedCell, was: CellState, is: CellState, address: string): string | null {
@@ -159,7 +159,7 @@ function comparePlanned(planned: PlannedCell, was: CellState, is: CellState, add
           );
 
   if (!contentHolds) {
-    return `${address}: does not hold what was planned (${planned.reason})`;
+    return `${address}: bevat niet wat gepland was (${planned.reason}).`;
   }
 
   const font = planned.red ? inRed(was.style.font) : was.style.font;
@@ -167,7 +167,7 @@ function comparePlanned(planned: PlannedCell, was: CellState, is: CellState, add
 
   return sameStyle(is.style.font, font) && sameOtherStyle(was, is, ["fill", "font"])
     ? null
-    : `${address}: style differs from the plan (${planned.reason})`;
+    : `${address}: opmaak wijkt af van het plan (${planned.reason}).`;
 }
 
 /** Every compared style property except the ones named. */
@@ -191,7 +191,7 @@ function compareRowsAndColumns(
     const was = before.getRow(map.toOriginal(row));
 
     if (!map.isAdded(row) && (is.height !== was.height || Boolean(is.hidden) !== Boolean(was.hidden))) {
-      problems.push(`row ${row}: height or visibility changed`);
+      problems.push(`Rij ${row}: hoogte of zichtbaarheid gewijzigd.`);
     }
   }
 
@@ -203,7 +203,7 @@ function compareRowsAndColumns(
     const widthShown = !was.hidden && !is.hidden;
 
     if (Boolean(is.hidden) !== Boolean(was.hidden) || (widthShown && is.width !== was.width)) {
-      problems.push(`column ${is.letter}: width or visibility changed`);
+      problems.push(`Kolom ${is.letter}: breedte of zichtbaarheid gewijzigd.`);
     }
   }
 
@@ -215,7 +215,7 @@ function compareRowsAndColumns(
     .sort();
 
   if (!sameValue(merges(after), expected)) {
-    problems.push("merged cells changed");
+    problems.push("Samengevoegde cellen gewijzigd.");
   }
 
   return problems;

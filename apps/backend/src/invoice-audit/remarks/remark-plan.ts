@@ -12,7 +12,6 @@ import {
   type RemarkFacts,
 } from "./customer-remark-vocabulary";
 import {
-  RemarkKind,
   isStated,
   toRemarkParts,
   toStatedCcNumbers,
@@ -64,9 +63,6 @@ export function planRemarks(
   pricing: ReadonlyMap<number, InvoiceRowPricing>,
   factsByTrip: ReadonlyMap<string, TripRemarkFacts>,
 ): Map<number, RemarkChange> {
-  const documentWords = new Set(
-    matches.flatMap((match) => toRemarkParts(match.row.remarks).map((part) => part.toLowerCase())),
-  );
   const changes = new Map<number, RemarkChange>();
 
   for (const [tripId, rows] of rowsByTrip(matches)) {
@@ -76,7 +72,7 @@ export function planRemarks(
       continue;
     }
 
-    const change = planRow(own, rows, pricing.get(own.row.rowNumber), factsByTrip.get(tripId), documentWords);
+    const change = planRow(own, rows, pricing.get(own.row.rowNumber), factsByTrip.get(tripId));
 
     if (change !== null) {
       changes.set(own.row.rowNumber, change);
@@ -91,7 +87,6 @@ function planRow(
   tripRows: readonly InvoiceRowMatch[],
   outcome: InvoiceRowPricing | undefined,
   facts: TripRemarkFacts | undefined,
-  documentWords: ReadonlySet<string>,
 ): RemarkChange | null {
   const reliable = outcome !== undefined && RELIABLE_PRICING.includes(outcome.status);
   const geenCombi = tripRows.some((match) => match.combination?.verdict === CombinationVerdict.GEEN_COMBI);
@@ -105,12 +100,12 @@ function planRow(
   const stated = toRemarkParts(own.row.remarks);
   const ccNumbersOnTrip = new Set(tripRows.flatMap((match) => toStatedCcNumbers(match.row.remarks)));
   const missing = parts.filter((part) => !isStated(part, stated, ccNumbersOnTrip));
-  const notes = [
-    ...unexpressed,
-    ...missing
-      .filter((part) => part.kind === RemarkKind.PROPERTY && !documentWords.has(part.text))
-      .map((part) => `"${part.text}" is not a word this invoice uses yet`),
-  ];
+  /*
+   * A property name is written whether or not this invoice has used the word
+   * before: a Custom Property is valid without the customer having seen it, so
+   * a new word is no reason for a note (owner, October 2026).
+   */
+  const notes = [...unexpressed];
 
   if (missing.length === 0 && notes.length === 0) {
     return null;

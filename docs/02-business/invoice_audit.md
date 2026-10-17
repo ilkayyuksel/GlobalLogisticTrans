@@ -125,28 +125,22 @@ was stored with it (`pricing/price-reliability.ts`). The line is
 | grouped Trip, Combination not `MATCHED` | `COMBINATION_NOT_PRICED` |
 | snapshot contradicts the Trip's group (Backload or Combination without a group, a group without a Combination record) | `SNAPSHOT_INCONSISTENT` |
 | (phase 2) a Combination the Excel marks that cannot be confirmed | `COMBINATION_REVIEW` |
-| `NORMALIZED` route not shown to be the Trip's road | `ROUTE_NOT_EVIDENCED` |
 
-`EXACT` and `FUZZY` (the matcher only returns FUZZY for one uncontested road)
-are relied on.
+**The system's own match decides** (owner, October 2026). A route the matcher
+FOUND — `EXACT`, `NORMALIZED`, or `FUZZY` (which the matcher only records for
+one unique, uncontested road) — is relied on as found. The check does not judge
+the Trip's place and the priced place a second time: `Eindhout` priced on
+`LAAKDAL (EINDHOUT)`, `Kallo` on `Kallo (Beveren)` are the system's successful
+matches, and their spelling is no reason to doubt the price. Until October 2026
+the check reconstructed a "relation" between the two names for every
+`NORMALIZED` match and refused any place in brackets other than `Rumbeke` ↔
+`ROESELARE (RUMBEKE)`; that second judgement is gone. For a grouped Trip one
+found route still proves nothing about its pair: the Combination conditions
+above apply unchanged.
 
-**`NORMALIZED` needs a second look.** The snapshot records one method for three
-different matcher steps. `pricing/route-evidence.ts` compares the Trip's own
-road with the road the snapshot recorded (`routeMatch.legs`, the priced leg),
-using the matcher's own forms (`roadForms`, `roadKey`), and accepts only:
-
-- the same road after safe normalisation (`ANTWERPEN` = `Antwerpen`, confirmed
-  aliases, the canonical terminal);
-- a qualifier given on one side only (`Kallo` = `Kallo (Beveren)`);
-- the place in brackets confirmed by the owner — only `Rumbeke` ↔
-  `ROESELARE (RUMBEKE)` (`pricing/approved-bracketed-places.ts`).
-
-Any other place-in-brackets relation (`Beveren` → `Kallo (Beveren)`,
-`Muizen` → `MECHELEN (MUIZEN)`), unrelated names, or a snapshot without a
-recorded road is not relied on. The Trip's road and the priced road are shown
-side by side in the check result. Limitation: the snapshot does not record
-which matcher step chose the road; a relation that fits a safe step is
-accepted as that step.
+The Trip's road, the priced road and the stored match method are shown beside
+an unreliable price for information (`pricing/route-description.ts`), never as
+a reason of their own. All messages the check shows are Dutch.
 
 ### Only ever up
 
@@ -203,10 +197,10 @@ second split row) is completed with what it does not say yet
 
 - New parts go at the END, separated by `,` without a space; the existing text
   stays exactly as it was (only trailing spaces give way to the comma).
-- No translation is invented: a property name the invoice never uses is written
-  as its name and reported (`"aan/afkoppelen" is not a word this invoice uses
-  yet`). A waiting time over midnight or with only a duration is not written,
-  and reported. Over ST is never written.
+- No translation is invented: a property name is written as its name in lower
+  case — also when this invoice has never used the word, which is no reason
+  for a note (owner, October 2026). A waiting time over midnight or with only a
+  duration is not written, and reported. Over ST is never written.
 - The Trip's own facts are only written on a line whose price is relied on;
   `GEEN COMBI` also on a line marked for its price, because the pair itself was
   established from two reliably matched Trips.
@@ -327,7 +321,7 @@ Three separate steps (`invoice-audit.service.ts`, `payment/`):
   (`ADDED_BY_CHECK`) are never a ground;
 - the Trip is CLOSED (`NOT_CLOSED`);
 - every line charging it came out `MATCHED_NO_CHANGES`, `PRICING_CORRECTED` or
-  `INVOICE_HIGHER` — which requires a reliable price, route evidence included
+  `INVOICE_HIGHER` — which requires a reliable price
   (`PRICE_NOT_SETTLED`);
 - none of its lines is yellow (`LINE_MARKED`);
 - no unresolved line names it as a candidate, and every line of it is resolved

@@ -34,7 +34,7 @@ describe("checkTotalsStructure", () => {
     worksheet.getCell("M5").value = { formula: "SUM(L2:L4)", result: 0 };
 
     expect(checkTotalsStructure(worksheet, sheet).problems).toEqual([
-      expect.stringContaining("another column"),
+      expect.stringContaining("een andere kolom"),
     ]);
   });
 
@@ -44,7 +44,7 @@ describe("checkTotalsStructure", () => {
     worksheet.getCell("L5").value = 405;
 
     expect(checkTotalsStructure(worksheet, sheet).problems).toEqual([
-      expect.stringContaining("no SUM"),
+      expect.stringContaining("geen SOM"),
     ]);
   });
 
@@ -54,7 +54,7 @@ describe("checkTotalsStructure", () => {
     worksheet.getCell("U5").value = { formula: "SUM(L5:S5)", result: 0 };
 
     expect(checkTotalsStructure(worksheet, sheet).problems).toEqual([
-      expect.stringContaining("grand total SUM(L5:T5)"),
+      expect.stringContaining("eindtotaal SUM(L5:T5)"),
     ]);
   });
 
@@ -64,7 +64,7 @@ describe("checkTotalsStructure", () => {
     worksheet.getCell("L7").value = { formula: "L4", result: 0 };
 
     expect(checkTotalsStructure(worksheet, sheet).problems).toEqual([
-      expect.stringContaining("summary L7 reads row 4"),
+      expect.stringContaining("Samenvatting L7 leest rij 4"),
     ]);
   });
 
@@ -74,7 +74,7 @@ describe("checkTotalsStructure", () => {
     worksheet.getCell("K8").value = "Fuel 13% ";
 
     expect(checkTotalsStructure(worksheet, sheet).problems).toEqual([
-      expect.stringContaining("does not state the header's 10%"),
+      expect.stringContaining("vermeldt niet de 10% van de kop"),
     ]);
   });
 });

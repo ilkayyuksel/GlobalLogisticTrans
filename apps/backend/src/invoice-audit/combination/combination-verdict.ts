@@ -77,11 +77,11 @@ function judgePair(
   groupSizes: ReadonlyMap<string, number>,
 ): { verdict: CombinationVerdict; reason: string | null } {
   if (!isResolved(first) || !isResolved(second)) {
-    return review("both rows of the Combination must each be matched to one finished Trip");
+    return review("Beide regels van de combinatie moeten elk aan één afgewerkte rit gekoppeld zijn.");
   }
 
   if (first.trip!.id === second.trip!.id) {
-    return review("both rows of the Combination are the same Trip");
+    return review("Beide regels van de combinatie zijn dezelfde rit.");
   }
 
   const firstGroup = first.trip!.tripGroupId ?? null;
@@ -92,18 +92,18 @@ function judgePair(
   }
 
   if (firstGroup === null || secondGroup === null) {
-    return review("only one of the two Trips belongs to a group");
+    return review("Slechts één van beide ritten hoort bij een groep.");
   }
 
   if (firstGroup !== secondGroup) {
-    return review("the two Trips belong to different groups");
+    return review("Beide ritten horen bij verschillende groepen.");
   }
 
   const size = groupSizes.get(firstGroup) ?? 0;
 
   return size === 2
     ? { verdict: CombinationVerdict.RECOGNISED, reason: null }
-    : review(`the Trips' group holds ${size} Trips, not two`);
+    : review(`De groep van deze ritten telt ${size} ritten in plaats van twee.`);
 }
 
 function isResolved(match: InvoiceRowMatch | undefined): match is InvoiceRowMatch {

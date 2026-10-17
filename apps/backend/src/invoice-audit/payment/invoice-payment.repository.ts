@@ -35,7 +35,7 @@ export class InvoicePaymentRepository {
       if (count !== tripIds.length) {
         // Thrown inside the transaction, which is what rolls the others back.
         throw new PaymentSelectionNoLongerEligibleException(
-          tripIds.map((tripId) => ({ tripId, reasons: ["CHANGED_WHILE_SETTLING"] })),
+          tripIds.map((tripId) => ({ trip: tripId, reasons: ["gewijzigd tijdens het betalen"] })),
         );
       }
 

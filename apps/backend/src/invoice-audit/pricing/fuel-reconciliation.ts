@@ -45,7 +45,7 @@ export function reconcileFuel(
     );
 
     if (decision === ComponentDecision.RAISE || followsRaisedTarief) {
-      return notPlaceable(base, rows[0].rowNumber, `Fuel is stated on ${carriers.length} rows of this invoice`);
+      return notPlaceable(base, rows[0].rowNumber, `Fuel staat op ${carriers.length} regels van deze factuur.`);
     }
 
     return decision === ComponentDecision.INVOICE_HIGHER

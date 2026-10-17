@@ -20,7 +20,7 @@ import { reconcileTripRows } from "./trip-reconciliation";
  */
 
 const decimal = (value: string) => new Prisma.Decimal(value);
-const RELIABLE: PriceReliability = { reliable: true, problem: null, explanation: null, evidence: null };
+const RELIABLE: PriceReliability = { reliable: true, problem: null, explanation: null, route: null };
 const TRIP = tripRecord();
 
 function pricing(
@@ -180,8 +180,8 @@ describe("reconcileTripRows", () => {
       const unreliable: PriceReliability = {
         reliable: false,
         problem: "ROUTE_NOT_FOUND",
-        explanation: "no route was found for the Trip",
-        evidence: null,
+        explanation: "Voor de rit is geen route gevonden.",
+        route: null,
       };
 
       const outcomes = reconcile(

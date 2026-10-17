@@ -27,17 +27,17 @@ export function checkAddedRows(after: ExcelJS.Worksheet, plan: ChangePlan): stri
       const cell = row.getCell(column);
 
       if (cell.value !== text || (text !== null && cell.font?.color?.argb !== CORRECTED_TEXT_ARGB)) {
-        problems.push(`added row ${added.rowNumber}: ${name} is not the planned one, in red`);
+        problems.push(`Toegevoegde rij ${added.rowNumber}: ${name} is niet het geplande, in rood.`);
       }
     };
 
-    expectRed(bookingNumber, added.bookingNumber, "booking number");
-    expectRed(containerNumber, added.containerNumber, "container number");
+    expectRed(bookingNumber, added.bookingNumber, "boekingsnummer");
+    expectRed(containerNumber, added.containerNumber, "containernummer");
 
     const yellow = [1, plan.lastColumnNumber].every((column) => isYellowFill(row.getCell(column).fill));
 
     if (yellow !== added.yellow) {
-      problems.push(`added row ${added.rowNumber}: ${added.yellow ? "not" : "unexpectedly"} marked yellow`);
+      problems.push(`Toegevoegde rij ${added.rowNumber}: ${added.yellow ? "niet" : "onverwacht"} geel gemarkeerd.`);
     }
 
     return problems;
@@ -61,7 +61,7 @@ export function checkSheetsAndMarkers(
       .map((sheet) => `${sheet.name}:${sheet.state}`);
   const problems: string[] = isDeepStrictEqual(shape(written), shape(original))
     ? []
-    : ["the worksheets changed"];
+    : ["De werkbladen zijn gewijzigd."];
 
   for (const before of original.worksheets) {
     const after = written.getWorksheet(before.name);
@@ -91,7 +91,7 @@ function checkMarkers(original: ExcelJS.Workbook, written: ExcelJS.Workbook, pla
 
   return isDeepStrictEqual(order(recorded), order(expected))
     ? []
-    : ["the record of added lines does not name exactly the added lines"];
+    : ["Het register van toegevoegde regels vermeldt niet precies de toegevoegde regels."];
 }
 
 /** A worksheet this check never writes to: every cell exactly as it was. */
@@ -106,7 +106,7 @@ function compareUntouchedSheet(before: ExcelJS.Worksheet, after: ExcelJS.Workshe
       const is = stateOf(after.getRow(row).getCell(column));
 
       if (was.formula !== is.formula || !sameValue(was.value, is.value) || !sameStyle(was.style, is.style)) {
-        problems.push(`${before.name}!${after.getRow(row).getCell(column).address}: changed`);
+        problems.push(`${before.name}!${after.getRow(row).getCell(column).address}: gewijzigd.`);
       }
     }
   }

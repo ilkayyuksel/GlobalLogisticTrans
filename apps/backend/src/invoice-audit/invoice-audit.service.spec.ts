@@ -86,7 +86,7 @@ describe("InvoiceAuditService", () => {
 
       await expect(
         service.check(uploaded(file, "week 13.pdf")),
-      ).rejects.toThrow(/only \.xlsx/);
+      ).rejects.toThrow(/alleen \.xlsx/);
     });
 
     /**
@@ -97,7 +97,7 @@ describe("InvoiceAuditService", () => {
     it("refuses a file whose bytes are not a workbook", async () => {
       await expect(
         service.check(uploaded(Buffer.from("%PDF-1.7 not a workbook"), "week.xlsx")),
-      ).rejects.toThrow(/not an Excel workbook/);
+      ).rejects.toThrow(/geen Excel-werkmap/);
     });
 
     it("refuses an empty upload", async () => {

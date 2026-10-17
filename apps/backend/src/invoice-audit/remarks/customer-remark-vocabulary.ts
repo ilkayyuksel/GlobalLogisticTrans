@@ -14,8 +14,9 @@ import { RemarkKind, type RemarkPart } from "./remark-parts";
  *                       form (`wachtuur 9:00 tot 11:30`)
  *   no Combination      `GEEN COMBI`
  *
- * No translation is invented: a property name that is not a word the customer
- * uses is written as its name, and reported. A waiting time the customer has
+ * No translation is invented: a property name is written as its name, in
+ * lower case — also when this invoice has never used the word, which is no
+ * reason for a note (owner, October 2026). A waiting time the customer has
  * no way of writing — over midnight, or only a duration — is not written at
  * all, and reported. Over ST is never written here (owner, October 2026).
  */
@@ -65,7 +66,7 @@ export function toCustomerRemarkParts(facts: RemarkFacts): CustomerRemarkParts {
   if (waiting !== null) {
     parts.push({ kind: RemarkKind.WAITING, text: waiting });
   } else if (hasWaitingTime(facts.waiting)) {
-    unexpressed.push("the waiting time has no window within one day, so it is not written");
+    unexpressed.push("De wachttijd heeft geen venster binnen één dag en wordt daarom niet geschreven.");
   }
 
   if (facts.geenCombi) {

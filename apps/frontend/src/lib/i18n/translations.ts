@@ -107,8 +107,6 @@ const nl = {
   "invoiceAudit.reliability.COMBINATION_NOT_PRICED": "Combinatie niet geprijsd",
   "invoiceAudit.reliability.SNAPSHOT_INCONSISTENT":
     "De opgeslagen prijs past niet bij de groep van de rit",
-  "invoiceAudit.reliability.ROUTE_NOT_EVIDENCED":
-    "Niet aantoonbaar dat de geprijsde route de route van de rit is",
   "invoiceAudit.summary.priceChecked": "Prijs gecontroleerd",
   "invoiceAudit.summary.priceUnchanged": "Prijs klopt",
   "invoiceAudit.summary.priceCorrected": "Prijs aangepast",
@@ -1348,8 +1346,6 @@ const tr: Translations = {
   "invoiceAudit.reliability.COMBINATION_NOT_PRICED": "Kombinasyon fiyatlandırılmadı",
   "invoiceAudit.reliability.SNAPSHOT_INCONSISTENT":
     "Kayıtlı fiyat seferin grubuyla uyuşmuyor",
-  "invoiceAudit.reliability.ROUTE_NOT_EVIDENCED":
-    "Fiyatlandırılan rotanın seferin rotası olduğu gösterilemiyor",
   "invoiceAudit.summary.priceChecked": "Fiyatı kontrol edilen",
   "invoiceAudit.summary.priceUnchanged": "Fiyatı doğru",
   "invoiceAudit.summary.priceCorrected": "Fiyatı düzeltilen",

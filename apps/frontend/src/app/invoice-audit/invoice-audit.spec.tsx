@@ -210,7 +210,7 @@ function result(overrides: Record<string, unknown> = {}) {
           reliable: true,
           problem: null,
           explanation: null,
-          routeEvidence: null,
+          route: null,
         },
         remarks: "tar,EC 4220981",
         remarkNotes: [],
@@ -336,7 +336,7 @@ describe("Excel factuurcontrole", () => {
                 reliable: true,
                 problem: null,
                 explanation: null,
-                routeEvidence: null,
+                route: null,
               },
               differences: [
                 {
@@ -364,7 +364,7 @@ describe("Excel factuurcontrole", () => {
       expect(within(row).getByText(/€334\.00 · €300\.00 · niet verlaagd/)).toBeInTheDocument();
     });
 
-    it("shows why a price is not relied on, with both roads", async () => {
+    it("shows why a price is not relied on, with both roads and the match method", async () => {
       requestMock.mockResolvedValue(
         result({
           rows: [
@@ -374,12 +374,12 @@ describe("Excel factuurcontrole", () => {
               differences: [],
               priceReliability: {
                 reliable: false,
-                problem: "ROUTE_NOT_EVIDENCED",
-                explanation: "the Trip was priced on another road",
-                routeEvidence: {
-                  relation: "UNCONFIRMED_BRACKETED_PLACE",
-                  tripRoute: "Quay 869 → Beveren",
-                  pricedRoute: "Quay 869 → Kallo (Beveren)",
+                problem: "ROUTE_NOT_FOUND",
+                explanation: "Voor de rit is geen route gevonden.",
+                route: {
+                  matchMethod: "NOT_FOUND",
+                  tripRoute: "Eindhout → Quay 869",
+                  pricedRoute: null,
                 },
               },
             },
@@ -391,11 +391,39 @@ describe("Excel factuurcontrole", () => {
 
       const row = rowFor("DUBANR2718284");
       expect(within(row).getByText("Prijs onbetrouwbaar")).toBeInTheDocument();
-      expect(
-        within(row).getByText("Niet aantoonbaar dat de geprijsde route de route van de rit is"),
-      ).toBeInTheDocument();
-      expect(within(row).getByText("Quay 869 → Beveren")).toBeInTheDocument();
-      expect(within(row).getByText("Quay 869 → Kallo (Beveren)")).toBeInTheDocument();
+      expect(within(row).getByText("Geen route gevonden")).toBeInTheDocument();
+      expect(within(row).getByText("Eindhout → Quay 869")).toBeInTheDocument();
+      expect(within(row).getByText(/Geen betrouwbare route gevonden/)).toBeInTheDocument();
+    });
+
+    /** The system matched Eindhout on LAAKDAL (EINDHOUT): its price is compared. */
+    it("does not call a price unreliable for a route the system matched", async () => {
+      requestMock.mockResolvedValue(
+        result({
+          rows: [
+            {
+              ...matchedRow,
+              priceReliability: {
+                reliable: true,
+                problem: null,
+                explanation: null,
+                route: {
+                  matchMethod: "NORMALIZED",
+                  tripRoute: "Eindhout → Quay 869",
+                  pricedRoute: "LAAKDAL (EINDHOUT) → Quay 869",
+                },
+              },
+            },
+          ],
+        }),
+      );
+
+      await check();
+
+      const row = rowFor("DUBANR2718284");
+      expect(within(row).getByText("Prijs aangepast")).toBeInTheDocument();
+      expect(within(row).queryByText("Prijs onbetrouwbaar")).not.toBeInTheDocument();
+      expect(within(row).queryByText(/Niet aantoonbaar/)).not.toBeInTheDocument();
     });
   });
 
@@ -422,7 +450,7 @@ describe("Excel factuurcontrole", () => {
                 before: "tar  ",
                 after: "tar,GEEN COMBI",
                 added: ["GEEN COMBI"],
-                notes: ['"aan/afkoppelen" is not a word this invoice uses yet'],
+                notes: ["De wachttijd heeft geen venster binnen één dag en wordt daarom niet geschreven."],
               },
             },
             {
@@ -446,7 +474,9 @@ describe("Excel factuurcontrole", () => {
       expect(within(transport).getByText(/GEEN COMBI, Backload verwijderd · met rij 3/)).toBeInTheDocument();
       expect(within(transport).getByText("Remarks aangevuld: GEEN COMBI")).toBeInTheDocument();
       expect(
-        within(transport).getByText('"aan/afkoppelen" is not a word this invoice uses yet'),
+        within(transport).getByText(
+          "De wachttijd heeft geen venster binnen één dag en wordt daarom niet geschreven.",
+        ),
       ).toBeInTheDocument();
 
       const costLine = rowFor("ANRDUB2812770");
@@ -932,7 +962,7 @@ describe("Excel factuurcontrole", () => {
                 reliable: false,
                 problem: "NO_SNAPSHOT",
                 explanation: "never priced",
-                routeEvidence: null,
+                route: null,
               },
             },
           ],
@@ -1423,9 +1453,9 @@ describe("Excel factuurcontrole", () => {
       requestMock.mockRejectedValue(
         new ApiError(
           "BAD_REQUEST",
-          "The invoice workbook does not have the expected structure, so nothing was checked.",
+          "De factuur heeft niet de verwachte opbouw; er is niets gecontroleerd.",
           400,
-          ["missing column: Tol B"],
+          ["ontbrekende kolom: Tol B"],
         ),
       );
 
@@ -1436,7 +1466,7 @@ describe("Excel factuurcontrole", () => {
       );
 
       const alert = await screen.findByRole("alert");
-      expect(alert).toHaveTextContent(/does not have the expected structure/);
+      expect(alert).toHaveTextContent(/niet de verwachte opbouw/);
       // And no half-rendered result beside it.
       expect(screen.getByText("Nog geen controle")).toBeInTheDocument();
     });

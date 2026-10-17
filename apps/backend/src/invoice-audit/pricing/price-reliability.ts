@@ -2,7 +2,7 @@ import { CombinationMatchOutcome, RouteMatchMethod } from "@prisma/client";
 
 import type { CurrentTripPricing } from "../../trip-pricing/effective-pricing.service";
 import type { RoutableTrip } from "../../trips/trip-route";
-import { assessRouteEvidence, type RouteEvidence } from "./route-evidence";
+import { describeRoutes, type RouteDescription } from "./route-description";
 
 /**
  * Whether a Trip's STORED price may be compared with — and written into — the
@@ -15,8 +15,12 @@ import { assessRouteEvidence, type RouteEvidence } from "./route-evidence";
  * reason below makes the line UNRELIABLE: it is marked for review, nothing on
  * it is written, and it is never settled.
  *
- * ── EVERYTHING IS READ FROM WHAT WAS STORED ─────────────────────────────────
- * The snapshot, its route-match record and the Trip's own group. Nothing is
+ * ── THE SYSTEM'S OWN MATCH DECIDES ──────────────────────────────────────────
+ * The snapshot, its route-match record and the Trip's own group. A route the
+ * matcher FOUND — EXACT, NORMALIZED, or a FUZZY match it only records for one
+ * unique, uncontested candidate — is relied on as found: `Eindhout` priced on
+ * `LAAKDAL (EINDHOUT)` is the system's successful match, and this check does
+ * not judge the two spellings a second time (owner, October 2026). Nothing is
  * matched again and nothing is priced again; a snapshot this module distrusts
  * is reported, and repricing it is somebody else's explicit decision.
  */
@@ -31,8 +35,6 @@ export const PriceProblem = {
   COMBINATION_NOT_PRICED: "COMBINATION_NOT_PRICED",
   /** The snapshot contradicts the Trip's group membership: it is out of date. */
   SNAPSHOT_INCONSISTENT: "SNAPSHOT_INCONSISTENT",
-  /** The recorded road cannot be shown to be a safe match for the Trip's road. */
-  ROUTE_NOT_EVIDENCED: "ROUTE_NOT_EVIDENCED",
 } as const;
 
 export type PriceProblem = (typeof PriceProblem)[keyof typeof PriceProblem];
@@ -40,10 +42,10 @@ export type PriceProblem = (typeof PriceProblem)[keyof typeof PriceProblem];
 export interface PriceReliability {
   readonly reliable: boolean;
   readonly problem: PriceProblem | null;
-  /** Why, in a sentence a log and a report can carry. */
+  /** Why, in a sentence the screen and a report can carry. */
   readonly explanation: string | null;
-  /** What the snapshot proves about the road; null when it was not examined. */
-  readonly evidence: RouteEvidence | null;
+  /** The two roads and the stored match method, for information; null without a snapshot. */
+  readonly route: RouteDescription | null;
 }
 
 /** The Trip facts this judgement reads. */
@@ -54,44 +56,40 @@ export function assessPriceReliability(
   pricing: CurrentTripPricing | null,
 ): PriceReliability {
   if (pricing === null) {
-    return unreliable(PriceProblem.NO_SNAPSHOT, "the Trip has never been priced", null);
+    return unreliable(PriceProblem.NO_SNAPSHOT, "De rit is nooit geprijsd.", null);
   }
 
-  const group = groupProblem(trip, pricing);
+  const route = describeRoutes(trip, pricing.routeMatch);
+  const problem = groupProblem(trip, pricing) ?? matchProblem(pricing.routeMatch.method);
 
-  if (group !== null) {
-    return group;
-  }
+  return problem === null
+    ? { reliable: true, problem: null, explanation: null, route }
+    : unreliable(problem.problem, problem.explanation, route);
+}
 
-  const { method } = pricing.routeMatch;
-
+/** What the stored route match says, read as the matcher recorded it. */
+function matchProblem(method: RouteMatchMethod | null): Problem | null {
   if (method === null) {
-    return unreliable(
-      PriceProblem.METADATA_MISSING,
-      "the stored price does not record how its route was matched",
-      null,
-    );
+    return {
+      problem: PriceProblem.METADATA_MISSING,
+      explanation: "De opgeslagen prijs vermeldt niet hoe de route gevonden werd.",
+    };
   }
 
   if (method === RouteMatchMethod.NOT_FOUND) {
-    return unreliable(PriceProblem.ROUTE_NOT_FOUND, "no route was found for the Trip", null);
+    return { problem: PriceProblem.ROUTE_NOT_FOUND, explanation: "Voor de rit is geen route gevonden." };
   }
 
   if (method === RouteMatchMethod.AMBIGUOUS) {
-    return unreliable(PriceProblem.ROUTE_AMBIGUOUS, "several routes matched the Trip", null);
+    return { problem: PriceProblem.ROUTE_AMBIGUOUS, explanation: "Meerdere routes passen bij de rit." };
   }
 
-  const evidence = assessRouteEvidence(trip, pricing.routeMatch);
+  return null;
+}
 
-  if (!evidence.reliable) {
-    return unreliable(
-      PriceProblem.ROUTE_NOT_EVIDENCED,
-      `the Trip ${evidence.tripRoute ?? "(no road)"} was priced on ${evidence.pricedRoute ?? "(no recorded road)"}, which the stored data does not show to be the same road (${evidence.relation})`,
-      evidence,
-    );
-  }
-
-  return { reliable: true, problem: null, explanation: null, evidence };
+interface Problem {
+  readonly problem: PriceProblem;
+  readonly explanation: string;
 }
 
 /**
@@ -101,30 +99,25 @@ export function assessPriceReliability(
  * pair, and an ungrouped one whose snapshot carries a Combination or a Backload,
  * were priced under a membership that no longer holds.
  */
-function groupProblem(
-  trip: AssessedTrip,
-  pricing: CurrentTripPricing,
-): PriceReliability | null {
+function groupProblem(trip: AssessedTrip, pricing: CurrentTripPricing): Problem | null {
   const { combinationMatch, combinationRouteGroupId } = pricing.routeMatch;
 
   if (trip.tripGroupId) {
     if (combinationMatch === null) {
-      return unreliable(
-        PriceProblem.SNAPSHOT_INCONSISTENT,
-        "the Trip belongs to a group, but its stored price records no Combination",
-        null,
-      );
+      return {
+        problem: PriceProblem.SNAPSHOT_INCONSISTENT,
+        explanation: "De rit hoort bij een groep, maar de opgeslagen prijs vermeldt geen combinatie.",
+      };
     }
 
     if (
       combinationMatch !== CombinationMatchOutcome.MATCHED ||
       combinationRouteGroupId === null
     ) {
-      return unreliable(
-        PriceProblem.COMBINATION_NOT_PRICED,
-        `the Trip's Combination was not priced (${combinationMatch})`,
-        null,
-      );
+      return {
+        problem: PriceProblem.COMBINATION_NOT_PRICED,
+        explanation: "De combinatie van de rit is niet als combinatie geprijsd.",
+      };
     }
 
     return null;
@@ -135,11 +128,10 @@ function groupProblem(
     combinationMatch !== null ||
     pricing.backload.greaterThan(0)
   ) {
-    return unreliable(
-      PriceProblem.SNAPSHOT_INCONSISTENT,
-      "the Trip belongs to no group, but its stored price was made for a Combination",
-      null,
-    );
+    return {
+      problem: PriceProblem.SNAPSHOT_INCONSISTENT,
+      explanation: "De rit hoort bij geen groep, maar de opgeslagen prijs is voor een combinatie gemaakt.",
+    };
   }
 
   return null;
@@ -148,7 +140,7 @@ function groupProblem(
 function unreliable(
   problem: PriceProblem,
   explanation: string,
-  evidence: RouteEvidence | null,
+  route: RouteDescription | null,
 ): PriceReliability {
-  return { reliable: false, problem, explanation, evidence };
+  return { reliable: false, problem, explanation, route };
 }

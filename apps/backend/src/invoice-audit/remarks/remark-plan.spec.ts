@@ -92,13 +92,32 @@ describe("planRemarks", () => {
     ).toMatchObject({ after: "flat,tar,EC 4220980,stop", notes: [] });
   });
 
-  it("reports a property name the invoice never uses", () => {
+  /** A property is valid without the invoice having used its word before. */
+  it("writes a property name the invoice never used, without a note", () => {
     const rows = [match({ rowNumber: 5, remarks: "tar,AANKOPPELEN" })];
 
-    expect(planRemarks(rows, priced(rows), facts({ propertyNames: ["Aan/Afkoppelen"] })).get(5)).toMatchObject({
+    expect(planRemarks(rows, priced(rows), facts({ propertyNames: ["Aan/Afkoppelen"] })).get(5)).toEqual({
+      rowNumber: 5,
+      before: "tar,AANKOPPELEN",
+      after: "tar,AANKOPPELEN,aan/afkoppelen",
       added: ["aan/afkoppelen"],
-      notes: ['"aan/afkoppelen" is not a word this invoice uses yet'],
+      notes: [],
     });
+  });
+
+  it("does not add a property name the line already states, in any case", () => {
+    const rows = [match({ rowNumber: 5, remarks: "tar,STOP" })];
+
+    expect(planRemarks(rows, priced(rows), facts({ propertyNames: ["Stop"] })).get(5)).toBeUndefined();
+  });
+
+  /** A Custom Property that costs nothing is still named. */
+  it("names a property of €0, from the Trip's own properties", () => {
+    const rows = [match({ rowNumber: 5, remarks: "tar" })];
+
+    expect(
+      planRemarks(rows, priced(rows), facts({ propertyNames: ["Stop 2e adres+2flat kosten"] })).get(5),
+    ).toMatchObject({ added: ["stop 2e adres+2flat kosten"], notes: [] });
   });
 
   it("writes only on the Trip's first own line, never on its EC lines", () => {

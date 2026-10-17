@@ -46,9 +46,9 @@ export function withIdentityConflicts(
       candidates: [match.trip],
       containerCorrection: null,
       bookingCorrection: null,
-      problem: `correcting this line would make it the transport of row ${others
+      problem: `Door deze regel te corrigeren, zou hij dezelfde rit krijgen als rij ${others
         .map((other) => other.row.rowNumber)
-        .join(", ")}`,
+        .join(", ")}.`,
     };
   });
 }

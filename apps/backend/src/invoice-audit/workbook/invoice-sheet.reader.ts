@@ -141,7 +141,7 @@ export class InvoiceSheetReader {
       });
 
       throw new UnreadableInvoiceWorkbookException(
-        "the file could not be opened as an Excel workbook",
+        "het bestand kon niet als Excel-werkmap geopend worden",
       );
     }
 
@@ -160,7 +160,7 @@ export class InvoiceSheetReader {
 
     if (!worksheet) {
       throw new UnreadableInvoiceWorkbookException(
-        "the workbook contains no worksheet",
+        "de werkmap bevat geen werkblad",
       );
     }
 

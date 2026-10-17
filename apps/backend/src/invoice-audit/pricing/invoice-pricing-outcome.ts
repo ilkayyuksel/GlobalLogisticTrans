@@ -205,7 +205,7 @@ export function unreadableDifferences(rows: readonly InvoiceSheetRow[]): Invoice
             correctedValue: null,
             keepsFormula: false,
             write: null,
-            problem: `${component.label} on row ${row.rowNumber} is not an amount this check can read`,
+            problem: `${component.label} op rij ${row.rowNumber} is geen leesbaar bedrag.`,
           }),
         ),
     ),

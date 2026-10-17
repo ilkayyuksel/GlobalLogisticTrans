@@ -17,7 +17,7 @@ export class InvoiceTotalsStructureDto {
 
   @ApiProperty({
     type: [String],
-    example: ["Backload: the total covers rows 2–138, not 2–141 (SUM(N2:N138))"],
+    example: ["Backload: het totaal telt de rijen 2–138 op in plaats van 2–141 (SUM(N2:N138))."],
   })
   problems!: string[];
 }

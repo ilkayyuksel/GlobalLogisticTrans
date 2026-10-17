@@ -96,7 +96,7 @@ describe("InvoiceSheetReader", () => {
       const file = await buildInvoiceWorkbook({ lines: [LINE], headers });
 
       await expect(reader.read(file, "week 13.xlsx")).rejects.toMatchObject({
-        response: { details: ["missing column: Tol B"] },
+        response: { details: ["ontbrekende kolom: Tol B"] },
       });
     });
 
@@ -108,7 +108,7 @@ describe("InvoiceSheetReader", () => {
 
       await expect(reader.read(file, "week 13.xlsx")).rejects.toMatchObject({
         response: {
-          details: ["missing column: Bookingnr", "missing column: EK"],
+          details: ["ontbrekende kolom: Bookingnr", "ontbrekende kolom: EK"],
         },
       });
     });

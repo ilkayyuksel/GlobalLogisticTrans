@@ -134,7 +134,7 @@ describe("InvoicePaymentService", () => {
     const refusal = confirm([ONE, "99999999-0000-4000-8000-000000000009"]);
 
     await expect(refusal).rejects.toMatchObject({
-      response: { details: ["99999999-0000-4000-8000-000000000009: NOT_ON_INVOICE"] },
+      response: { details: ["99999999-0000-4000-8000-000000000009: staat niet op deze factuur"] },
     });
     expect(payments.settle).not.toHaveBeenCalled();
   });
@@ -165,7 +165,7 @@ describe("InvoicePaymentService", () => {
       effectivePricing.findForTrips.mockResolvedValue(new Map([[ONE, pricing("370", "37")]]));
 
       await expect(confirm([TWO])).rejects.toMatchObject({
-        response: { details: [expect.stringContaining("PRICE_NOT_SETTLED")] },
+        response: { details: [expect.stringContaining("prijs niet betrouwbaar gecontroleerd")] },
       });
     });
 
@@ -184,7 +184,7 @@ describe("InvoicePaymentService", () => {
           ],
         ),
       ).rejects.toMatchObject({
-        response: { details: [expect.stringContaining("LINE_MARKED")] },
+        response: { details: [expect.stringContaining("regel geel gemarkeerd")] },
       });
     });
 
@@ -213,7 +213,7 @@ describe("InvoicePaymentService", () => {
           ],
         ),
       ).rejects.toMatchObject({
-        response: { details: [expect.stringContaining("NO_OWN_LINE")] },
+        response: { details: [expect.stringContaining("alleen EC-regels")] },
       });
     });
   });

@@ -175,19 +175,19 @@ export class InvoiceExaminationService {
     fileName: string;
   } {
     if (!file?.buffer || file.buffer.length === 0) {
-      throw new InvalidInvoiceFileException("no file was uploaded");
+      throw new InvalidInvoiceFileException("er is geen bestand geüpload");
     }
 
     const fileName = toSafeFileName(file.originalname);
 
     if (!fileName.toLowerCase().endsWith(XLSX_EXTENSION)) {
-      throw new InvalidInvoiceFileException(`only ${XLSX_EXTENSION} workbooks are accepted`);
+      throw new InvalidInvoiceFileException(`alleen ${XLSX_EXTENSION}-bestanden worden aanvaard`);
     }
 
     if (!file.buffer.subarray(0, ZIP_HEADER.length).equals(ZIP_HEADER)) {
       this.logger.warn("Invoice upload refused on its content", { fileName });
 
-      throw new InvalidInvoiceFileException("the file is not an Excel workbook");
+      throw new InvalidInvoiceFileException("het bestand is geen Excel-werkmap");
     }
 
     return { buffer: file.buffer, fileName };

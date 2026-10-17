@@ -18,14 +18,14 @@ import {
 /** No file, or a file that is not an Excel workbook at all. */
 export class InvalidInvoiceFileException extends BadRequestException {
   constructor(reason: string) {
-    super(`The invoice file was refused: ${reason}.`);
+    super(`Het factuurbestand is geweigerd: ${reason}.`);
   }
 }
 
 /** A file that announces itself as a workbook but cannot be read as one. */
 export class UnreadableInvoiceWorkbookException extends BadRequestException {
   constructor(reason: string) {
-    super(`The invoice workbook could not be read: ${reason}.`);
+    super(`De factuur kon niet gelezen worden: ${reason}.`);
   }
 }
 
@@ -42,9 +42,9 @@ export class InvoiceColumnsMissingException extends BadRequestException {
   constructor(missingHeaders: readonly string[]) {
     super({
       message:
-        "The invoice workbook does not have the expected structure, so nothing was checked.",
-      details: missingHeaders.map((header) => `missing column: ${header}`),
-      error: "Invoice columns missing",
+        "De factuur heeft niet de verwachte opbouw; er is niets gecontroleerd.",
+      details: missingHeaders.map((header) => `ontbrekende kolom: ${header}`),
+      error: "Kolommen ontbreken",
     });
   }
 }
@@ -59,11 +59,12 @@ export class InvoiceColumnsMissingException extends BadRequestException {
  * out which of their choices were honoured.
  */
 export class PaymentSelectionNoLongerEligibleException extends ConflictException {
-  constructor(refused: readonly { tripId: string; reasons: readonly string[] }[]) {
+  /** `trip`: the booking number a person recognises, or the Trip id without one. */
+  constructor(refused: readonly { trip: string; reasons: readonly string[] }[]) {
     super({
-      message: "Some selected transports can no longer be settled on this invoice; nothing was paid.",
-      details: refused.map((trip) => `${trip.tripId}: ${trip.reasons.join(", ")}`),
-      error: "Payment selection no longer eligible",
+      message: "Een of meer gekozen ritten kunnen niet meer met deze factuur betaald worden; er is niets op betaald gezet.",
+      details: refused.map((refusal) => `${refusal.trip}: ${refusal.reasons.join(", ")}`),
+      error: "Keuze niet meer te betalen",
     });
   }
 }
@@ -80,9 +81,9 @@ export class InvoiceWorkbookIntegrityException extends InternalServerErrorExcept
   constructor(problems: readonly string[]) {
     super({
       message:
-        "The corrected invoice did not match its planned changes, so no file was produced and nothing can be paid on it.",
+        "De gecorrigeerde factuur komt niet overeen met de geplande wijzigingen; er is geen bestand gemaakt en er kan niets op betaald worden.",
       details: [...problems],
-      error: "Invoice workbook integrity",
+      error: "Controle gecorrigeerde factuur",
     });
   }
 }

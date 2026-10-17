@@ -113,7 +113,7 @@ describe("identifying invoice lines", () => {
         status: "CONFLICT",
         trip: null,
         bookingCorrection: null,
-        problem: expect.stringContaining("row 5"),
+        problem: expect.stringContaining("rij 5"),
       });
     });
 
@@ -170,8 +170,8 @@ describe("identifying invoice lines", () => {
     });
 
     it.each([
-      ["an unknown confirmation", [] as string[], [] as Trip[], /no Cost Confirmation EC 4220981/],
-      ["a confirmation of several Trips", ["a", "b"], [], /several Trips/],
+      ["an unknown confirmation", [] as string[], [] as Trip[], /^Geen kostenbevestiging gevonden voor EC 4220981\.$/],
+      ["a confirmation of several Trips", ["a", "b"], [], /meerdere ritten/],
     ])("is unresolved for %s", async (_label, tripIds, found, problem) => {
       confirm(...tripIds);
       reads.findTripsByIds.mockResolvedValue(found);

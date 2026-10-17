@@ -1,6 +1,10 @@
 import type { BookingCorrection, ContainerCorrection } from "../matching/invoice-row-match";
 import type { AddedRow } from "../missing/added-rows";
-import type { CellWrite, InvoiceRowPricing } from "../pricing/invoice-reconciliation";
+import {
+  DifferenceKind,
+  type CellWrite,
+  type InvoiceRowPricing,
+} from "../pricing/invoice-reconciliation";
 import { isShownRed, isWritable } from "./amount-cell-writer";
 import type { FuelHeaderChange } from "./fuel-header";
 import { toColumnLetter } from "./invoice-columns";
@@ -92,7 +96,7 @@ export function planChanges(input: ChangePlanInput): ChangePlan {
   planTexts(input, plan);
   planFuelHeader(input.fuelHeader, (address, text) =>
     cells.set(movedAddress(address, moved), {
-      reason: "Fuel header",
+      reason: "Fuel-kop",
       content: { kind: "TEXT", text },
       red: false,
     }),
@@ -123,6 +127,13 @@ export function planChanges(input: ChangePlanInput): ChangePlan {
   };
 }
 
+/** How a written difference reads in a report: `Tarief verhoogd`. */
+const CHANGE_WORDS: Partial<Record<DifferenceKind, string>> = {
+  [DifferenceKind.RAISE]: "verhoogd",
+  [DifferenceKind.REMOVE]: "verwijderd",
+  [DifferenceKind.KEEP_AMOUNT]: "bedrag vastgezet",
+};
+
 type PlanCell = (column: number | undefined, rowNumber: number, cell: PlannedCell) => void;
 
 /** The amounts the pricing check decided — exactly the writes of writable lines. */
@@ -140,7 +151,7 @@ function planAmounts(input: ChangePlanInput, plan: PlanCell): void {
       }
 
       plan(input.sheet.columns[difference.column], difference.correctionRowNumber, {
-        reason: `${difference.component} ${difference.kind}`,
+        reason: `${difference.component} ${CHANGE_WORDS[difference.kind] ?? difference.kind}`,
         content: { kind: "WRITE", write: difference.write },
         red: isShownRed(difference.kind),
       });
@@ -152,9 +163,9 @@ function planAmounts(input: ChangePlanInput, plan: PlanCell): void {
 function planTexts(input: ChangePlanInput, plan: PlanCell): void {
   const { columns } = input.sheet;
   const texts: [number | undefined, string, ReadonlyMap<number, string>][] = [
-    [columns.containerNumber, "container corrected", mapText(input.containerCorrections, (c) => c.tripContainerNumber)],
-    [columns.bookingNumber, "booking corrected", mapText(input.bookingCorrections, (c) => c.tripBookingNumber)],
-    [columns.remarks, "Remarks completed", input.remarks],
+    [columns.containerNumber, "containernummer gecorrigeerd", mapText(input.containerCorrections, (c) => c.tripContainerNumber)],
+    [columns.bookingNumber, "boekingsnummer gecorrigeerd", mapText(input.bookingCorrections, (c) => c.tripBookingNumber)],
+    [columns.remarks, "Remarks aangevuld", input.remarks],
   ];
 
   for (const [column, reason, byRow] of texts) {

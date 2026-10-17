@@ -56,15 +56,17 @@ export type InvoicePriceProblem =
   | "ROUTE_NOT_FOUND"
   | "ROUTE_AMBIGUOUS"
   | "COMBINATION_NOT_PRICED"
-  | "SNAPSHOT_INCONSISTENT"
-  | "ROUTE_NOT_EVIDENCED";
+  | "SNAPSHOT_INCONSISTENT";
+
+/** How the system matched a route, as the stored price recorded it. */
+export type RouteMatchMethod = "EXACT" | "NORMALIZED" | "FUZZY" | "NOT_FOUND" | "AMBIGUOUS";
 
 /**
- * The Trip's own road beside the road its stored price was made on, so a
- * doubtful match — `Beveren` priced on `Kallo (Beveren)` — can be SEEN.
+ * The Trip's own road beside the road its stored price was made on, and how the
+ * system matched them — information, never the reason a price is doubted.
  */
-export interface InvoiceRouteEvidence {
-  readonly relation: string;
+export interface InvoiceRouteDescription {
+  readonly matchMethod: RouteMatchMethod | null;
   readonly tripRoute: string | null;
   readonly pricedRoute: string | null;
 }
@@ -73,7 +75,7 @@ export interface InvoicePriceReliability {
   readonly reliable: boolean;
   readonly problem: InvoicePriceProblem | null;
   readonly explanation: string | null;
-  readonly routeEvidence: InvoiceRouteEvidence | null;
+  readonly route: InvoiceRouteDescription | null;
 }
 
 /**
@@ -392,7 +394,7 @@ export async function applyInvoiceAudit(
 
     throw new ApiError(
       "NETWORK_ERROR",
-      "The server could not be reached. Check that the backend is running, then try again.",
+      "De server is niet bereikbaar. Controleer of de backend draait en probeer het opnieuw.",
       0,
     );
   }
@@ -456,7 +458,7 @@ async function toApiError(response: Response): Promise<ApiError> {
 
   return new ApiError(
     "UNKNOWN",
-    "Something went wrong while processing this invoice. Please try again.",
+    "Er ging iets mis bij het verwerken van deze factuur. Probeer het opnieuw.",
     response.status,
   );
 }

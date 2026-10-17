@@ -70,7 +70,7 @@ describe("assessPriceReliability", () => {
     expect(assessPriceReliability(TRIP, pricing())).toMatchObject({
       reliable: true,
       problem: null,
-      evidence: { relation: "EXACT" },
+      route: { matchMethod: "EXACT", tripRoute: "Quay 869 → Zemst", pricedRoute: "Quay 869 → ZEMST" },
     });
   });
 
@@ -93,35 +93,88 @@ describe("assessPriceReliability", () => {
     });
   });
 
-  it("does not rely on a route the stored data does not show to be the Trip's", () => {
-    const beveren = { ...TRIP, destinationCity: "Beveren" };
-    const result = assessPriceReliability(
-      beveren,
+  /**
+   * ── THE SYSTEM'S SUCCESSFUL MATCH DECIDES ─────────────────────────────────
+   * A different spelling of the Trip's place and the priced place is not a
+   * reason to doubt a route the matcher FOUND. The two roads are reported for
+   * information only.
+   */
+  describe("a route the system matched", () => {
+    /** The priced leg, as the snapshot recorded it. */
+    const pricedOn = (destination: string, method: RouteMatchMethod) =>
       pricing({
-        method: RouteMatchMethod.NORMALIZED,
+        method,
         legs: [
           {
             legPosition: null,
             isPricedLeg: true,
             routePricingId: "route-1",
             departure: "Quay 869",
-            destination: "Kallo (Beveren)",
-            method: RouteMatchMethod.NORMALIZED,
+            destination,
+            method,
           },
         ],
-      }),
-    );
+      });
 
-    expect(result).toMatchObject({
-      reliable: false,
-      problem: "ROUTE_NOT_EVIDENCED",
-      evidence: {
-        relation: "UNCONFIRMED_BRACKETED_PLACE",
-        tripRoute: "Quay 869 → Beveren",
-        pricedRoute: "Quay 869 → Kallo (Beveren)",
-      },
+    it("relies on Eindhout priced on LAAKDAL (EINDHOUT)", () => {
+      const eindhout = { ...TRIP, destinationCity: "Eindhout" };
+
+      expect(
+        assessPriceReliability(eindhout, pricedOn("LAAKDAL (EINDHOUT)", RouteMatchMethod.NORMALIZED)),
+      ).toEqual({
+        reliable: true,
+        problem: null,
+        explanation: null,
+        route: {
+          matchMethod: "NORMALIZED",
+          tripRoute: "Quay 869 → Eindhout",
+          pricedRoute: "Quay 869 → LAAKDAL (EINDHOUT)",
+        },
+      });
     });
-    expect(result.explanation).toContain("Kallo (Beveren)");
+
+    it("relies on Kallo priced on Kallo (Beveren)", () => {
+      const kallo = { ...TRIP, destinationCity: "Kallo" };
+
+      expect(
+        assessPriceReliability(kallo, pricedOn("Kallo (Beveren)", RouteMatchMethod.NORMALIZED)),
+      ).toMatchObject({ reliable: true, problem: null });
+    });
+
+    /** Formerly refused as an unconfirmed place in brackets. */
+    it("relies on any NORMALIZED match, however differently the names are spelled", () => {
+      const beveren = { ...TRIP, destinationCity: "Beveren" };
+
+      expect(
+        assessPriceReliability(beveren, pricedOn("Kallo (Beveren)", RouteMatchMethod.NORMALIZED)),
+      ).toMatchObject({ reliable: true, problem: null });
+    });
+
+    /** The matcher records FUZZY only for one unique, uncontested candidate. */
+    it("relies on a FUZZY match", () => {
+      const typo = { ...TRIP, destinationCity: "Zemts" };
+
+      expect(assessPriceReliability(typo, pricedOn("ZEMST", RouteMatchMethod.FUZZY))).toMatchObject({
+        reliable: true,
+      });
+    });
+
+    it("relies on a found route even when the snapshot recorded no leg to show", () => {
+      expect(
+        assessPriceReliability(TRIP, pricing({ method: RouteMatchMethod.NORMALIZED, legs: [] })),
+      ).toMatchObject({ reliable: true, route: { pricedRoute: null } });
+    });
+
+    it("still shows both roads beside a route that was not found", () => {
+      expect(
+        assessPriceReliability(TRIP, pricedOn("ZEMST", RouteMatchMethod.NOT_FOUND)),
+      ).toMatchObject({
+        reliable: false,
+        problem: "ROUTE_NOT_FOUND",
+        explanation: "Voor de rit is geen route gevonden.",
+        route: { matchMethod: "NOT_FOUND", tripRoute: "Quay 869 → Zemst" },
+      });
+    });
   });
 
   describe("the Trip's group", () => {

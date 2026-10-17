@@ -87,7 +87,7 @@ describe("findUnplannedChanges", () => {
 
   it("refuses a value nobody planned", async () => {
     expect(await problemsAfter((sheet) => (sheet.getCell("L3").value = 210), nothingPlanned())).toEqual([
-      "L3: value changed without a plan",
+      "L3: waarde gewijzigd zonder plan.",
     ]);
   });
 
@@ -99,14 +99,14 @@ describe("findUnplannedChanges", () => {
         sheet.getCell("L2").value = 155;
         markTextRed(sheet.getCell("L2"));
       }, plan),
-    ).toEqual(["L2: does not hold what was planned (Tarief RAISE)"]);
+    ).toEqual(["L2: bevat niet wat gepland was (Tarief RAISE)."]);
   });
 
   it("refuses a planned raise that was not turned red", async () => {
     const plan = nothingPlanned({ cells: new Map([["L2", raisedTarief]]) });
 
     expect(await problemsAfter((sheet) => (sheet.getCell("L2").value = 150), plan)).toEqual([
-      "L2: style differs from the plan (Tarief RAISE)",
+      "L2: opmaak wijkt af van het plan (Tarief RAISE).",
     ]);
   });
 
@@ -115,20 +115,20 @@ describe("findUnplannedChanges", () => {
       await problemsAfter((sheet) => {
         sheet.getCell("E3").style = { ...sheet.getCell("E3").style, font: { bold: true } };
       }, nothingPlanned()),
-    ).toEqual(["E3: style changed without a plan"]);
+    ).toEqual(["E3: opmaak gewijzigd zonder plan."]);
   });
 
   it("accepts a planned yellow row, and refuses one nobody planned", async () => {
     const paint = (sheet: ExcelJS.Worksheet) => markRowsYellow(sheet, [3], 21);
 
     expect(await problemsAfter(paint, nothingPlanned({ yellowRows: new Set([3]) }))).toEqual([]);
-    expect(await problemsAfter(paint, nothingPlanned())).toContain("A3: fill changed");
+    expect(await problemsAfter(paint, nothingPlanned())).toContain("A3: opvulkleur gewijzigd zonder plan.");
   });
 
   it("refuses a totals formula that changed", async () => {
     expect(
       await problemsAfter((sheet) => (sheet.getCell("N5").value = { formula: "SUM(N2:N3)", result: 0 }), nothingPlanned()),
-    ).toEqual(["N5: a totals cell changed its formula or value"]);
+    ).toEqual(["N5: formule of waarde van een totaalcel gewijzigd."]);
   });
 
   it("refuses a hidden column shown, and a merge added", async () => {
@@ -137,7 +137,7 @@ describe("findUnplannedChanges", () => {
       sheet.mergeCells("A18:B18");
     }, nothingPlanned());
 
-    expect(problems).toEqual(expect.arrayContaining(["column I: width or visibility changed", "merged cells changed"]));
+    expect(problems).toEqual(expect.arrayContaining(["Kolom I: breedte of zichtbaarheid gewijzigd.", "Samengevoegde cellen gewijzigd."]));
   });
 
   /** I3 — a row inserted that the plan does not name moves everything below it. */
@@ -145,7 +145,7 @@ describe("findUnplannedChanges", () => {
     const problems = await problemsAfter((sheet) => openRowsAt(sheet, 3, 1), nothingPlanned());
 
     expect(problems.length).toBeGreaterThan(0);
-    expect(problems).toContain("E3: value changed without a plan");
+    expect(problems).toContain("E3: waarde gewijzigd zonder plan.");
   });
 
   it("accepts the same opening once it is planned, with its line", async () => {
@@ -165,7 +165,7 @@ describe("findUnplannedChanges", () => {
     }, plan);
 
     // Everything but the record of the added line, which the writer keeps.
-    expect(problems).toEqual(["the record of added lines does not name exactly the added lines"]);
+    expect(problems).toEqual(["Het register van toegevoegde regels vermeldt niet precies de toegevoegde regels."]);
   });
 });
 

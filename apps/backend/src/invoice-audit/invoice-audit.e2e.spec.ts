@@ -239,7 +239,7 @@ describe("Weekly invoice check, end to end over HTTP", () => {
       const response = await check().expect(400);
 
       expect(response.body.success).toBe(false);
-      expect(response.body.error.message).toMatch(/no file was uploaded/);
+      expect(response.body.error.message).toMatch(/geen bestand geüpload/);
     });
 
     it("refuses a file that is not an .xlsx", async () => {
@@ -247,7 +247,7 @@ describe("Weekly invoice check, end to end over HTTP", () => {
         .attach("file", Buffer.from("%PDF-1.7"), "order.pdf")
         .expect(400);
 
-      expect(response.body.error.message).toMatch(/only \.xlsx/);
+      expect(response.body.error.message).toMatch(/alleen \.xlsx/);
     });
 
     it("refuses a renamed file whose bytes are not a workbook", async () => {
@@ -255,7 +255,7 @@ describe("Weekly invoice check, end to end over HTTP", () => {
         .attach("file", Buffer.from("%PDF-1.7 pretending"), "week 13.xlsx")
         .expect(400);
 
-      expect(response.body.error.message).toMatch(/not an Excel workbook/);
+      expect(response.body.error.message).toMatch(/geen Excel-werkmap/);
     });
 
     it("names the columns a malformed workbook is missing", async () => {
@@ -268,7 +268,7 @@ describe("Weekly invoice check, end to end over HTTP", () => {
         .attach("file", file, "week 13.xlsx")
         .expect(400);
 
-      expect(response.body.error.details).toContain("missing column: Tarief");
+      expect(response.body.error.details).toContain("ontbrekende kolom: Tarief");
     });
   });
 
@@ -381,7 +381,7 @@ describe("Weekly invoice check, end to end over HTTP", () => {
         .attach("file", Buffer.from("%PDF-1.7 pretending"), "week 13.xlsx")
         .expect(400);
 
-      expect(response.body.error.message).toMatch(/not an Excel workbook/);
+      expect(response.body.error.message).toMatch(/geen Excel-werkmap/);
     });
   });
 
@@ -403,7 +403,7 @@ describe("Weekly invoice check, end to end over HTTP", () => {
         .expect(409);
 
       expect(response.body.error.details).toEqual([
-        "9c0f0d2e-0000-4000-8000-000000000009: NOT_ON_INVOICE",
+        "9c0f0d2e-0000-4000-8000-000000000009: staat niet op deze factuur",
       ]);
       expect(settle).not.toHaveBeenCalled();
     });
