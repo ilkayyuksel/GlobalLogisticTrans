@@ -1,4 +1,4 @@
-import { Global, INestApplication, Module, VersioningType } from "@nestjs/common";
+import { Global, INestApplication, Module, ValidationPipe, VersioningType } from "@nestjs/common";
 import { ConfigModule } from "@nestjs/config";
 import { Test } from "@nestjs/testing";
 import ExcelJS from "exceljs";
@@ -15,8 +15,13 @@ import { AppLoggerService } from "../logger/app-logger.service";
 import { PrismaService } from "../prisma/prisma.service";
 import { EffectivePricingService } from "../trip-pricing/effective-pricing.service";
 import { TripRepository } from "../trips/trip.repository";
+import { NO_FUEL_RATES, reliablyPriced } from "./__fixtures__/invoice-pricing";
+import { asReads, invoiceReads } from "./__fixtures__/invoice-reads";
+import { InvoiceAuditReadRepository } from "./invoice-audit-read.repository";
 import { buildInvoiceWorkbook } from "./__fixtures__/invoice-workbook";
 import { InvoiceAuditModule } from "./invoice-audit.module";
+import { InvoicePaymentRepository } from "./payment/invoice-payment.repository";
+import { InvoiceFuelRateReader } from "./pricing/invoice-fuel-rate.reader";
 
 /**
  * A weekly invoice, uploaded over HTTP.
@@ -32,6 +37,8 @@ import { InvoiceAuditModule } from "./invoice-audit.module";
 
 const CHECK_PATH = "/api/v1/invoice-audit/check";
 const APPLY_PATH = "/api/v1/invoice-audit/apply";
+const PAYMENT_PATH = "/api/v1/invoice-audit/payment";
+const TRIP_ID = "3f1b0d2e-0000-4000-8000-000000000001";
 const MAX_UPLOAD_MEGABYTES = 1;
 const MONDAY = new Date(Date.UTC(2026, 2, 23));
 
@@ -57,12 +64,14 @@ describe("Weekly invoice check, end to end over HTTP", () => {
   let findClosedUnpaidBetween: jest.Mock;
   let findForTrips: jest.Mock;
   let setPaidMany: jest.Mock;
+  let settle: jest.Mock;
 
   beforeEach(async () => {
     findManyForInvoice = jest.fn().mockResolvedValue([]);
     // Nothing is missing from the invoice unless a test says so.
     findClosedUnpaidBetween = jest.fn().mockResolvedValue([]);
     setPaidMany = jest.fn(async (ids: readonly string[]) => ids.length);
+    settle = jest.fn(async (ids: readonly string[]) => ids.length);
     // The pricing READ, doubled: this suite is about the HTTP path, and the
     // comparison itself has its own tests.
     findForTrips = jest.fn().mockResolvedValue(new Map());
@@ -110,9 +119,16 @@ describe("Weekly invoice check, end to end over HTTP", () => {
       } as unknown as TripRepository)
       .overrideProvider(EffectivePricingService)
       .useValue({ findForTrips } as unknown as EffectivePricingService)
+      .overrideProvider(InvoiceFuelRateReader)
+      .useValue(NO_FUEL_RATES)
+      .overrideProvider(InvoiceAuditReadRepository)
+      .useValue(asReads(invoiceReads()))
       // The export words of an added line; this suite is about the HTTP path.
       .overrideProvider(TripExportLabelsService)
       .useValue({ findForTrips: jest.fn(async () => new Map()) })
+      // The one write: doubled, so what it was asked to pay is what is asserted.
+      .overrideProvider(InvoicePaymentRepository)
+      .useValue({ settle })
       .compile();
 
     application = moduleRef.createNestApplication();
@@ -124,6 +140,14 @@ describe("Weekly invoice check, end to end over HTTP", () => {
       type: VersioningType.URI,
       defaultVersion: "1",
     });
+    application.useGlobalPipes(
+      new ValidationPipe({
+        whitelist: true,
+        forbidNonWhitelisted: true,
+        transform: true,
+        transformOptions: { enableImplicitConversion: true },
+      }),
+    );
     application.useGlobalInterceptors(new ResponseInterceptor());
     application.useGlobalFilters(new AllExceptionsFilter(logger));
 
@@ -140,6 +164,10 @@ describe("Weekly invoice check, end to end over HTTP", () => {
 
   function apply() {
     return request(application.getHttpServer()).post(APPLY_PATH);
+  }
+
+  function confirmPayment() {
+    return request(application.getHttpServer()).post(PAYMENT_PATH);
   }
 
   describe("a valid invoice", () => {
@@ -178,7 +206,8 @@ describe("Weekly invoice check, end to end over HTTP", () => {
       expect(response.body.success).toBe(true);
       expect(response.body.data).toMatchObject({
         fileName: "week 13 - 2026 GLT.xlsx",
-        period: { from: "2026-03-23", to: "2026-03-23" },
+        // Monday to Friday of the ISO week the lines are in.
+        period: { from: "2026-03-23", to: "2026-03-27" },
         summary: { totalRows: 2, matched: 1, notFound: 1 },
       });
       expect(response.body.data.rows[0]).toMatchObject({
@@ -246,14 +275,13 @@ describe("Weekly invoice check, end to end over HTTP", () => {
   /**
    * ── THE FINAL PROCESSING, OVER HTTP ─────────────────────────────────────
    * The file comes back as bytes with the name an operator will save it under,
-   * and what the run did travels in headers beside it. Nothing about the flow
-   * is doubled but the database.
+   * and what the run wrote travels in headers beside it. Nothing about the flow
+   * is doubled but the database. Payment is a separate confirmation.
    */
-  describe("processing a weekly invoice", () => {
-    async function aWeek() {
+  async function aWeek() {
       findManyForInvoice.mockResolvedValue([
         {
-          id: "3f1b0d2e-0000-4000-8000-000000000001",
+          id: TRIP_ID,
           status: TripStatus.CLOSED,
           isPaid: false,
           planningDate: MONDAY,
@@ -264,8 +292,8 @@ describe("Weekly invoice check, end to end over HTTP", () => {
       findForTrips.mockResolvedValue(
         new Map([
           [
-            "3f1b0d2e-0000-4000-8000-000000000001",
-            {
+            TRIP_ID,
+            reliablyPriced({
               components: [],
               tarief: new Prisma.Decimal("425"),
               brandstof: new Prisma.Decimal("42.50"),
@@ -275,7 +303,7 @@ describe("Weekly invoice check, end to end over HTTP", () => {
               others: new Prisma.Decimal("0"),
               ek: new Prisma.Decimal("0"),
               totaal: new Prisma.Decimal("467.50"),
-            },
+            }),
           ],
         ]),
       );
@@ -291,8 +319,9 @@ describe("Weekly invoice check, end to end over HTTP", () => {
           },
         ],
       });
-    }
+  }
 
+  describe("producing the corrected invoice", () => {
     it("answers with a workbook the browser can save", async () => {
       const response = await apply()
         .attach("file", await aWeek(), "week 13 - 2026 GLT.xlsx")
@@ -314,20 +343,17 @@ describe("Weekly invoice check, end to end over HTTP", () => {
         .attach("file", await aWeek(), "week 13 - 2026 GLT.xlsx")
         .expect(200);
 
-      expect(response.headers["x-invoice-paid-trips"]).toBe("1");
-      expect(response.headers["x-invoice-already-paid"]).toBe("0");
       expect(response.headers["x-invoice-cells-corrected"]).toBe("2");
       expect(response.headers["x-invoice-rows-added"]).toBe("0");
     });
 
-    it("settles the transport the invoice covers", async () => {
+    it("pays nothing", async () => {
       await apply()
         .attach("file", await aWeek(), "week 13 - 2026 GLT.xlsx")
         .expect(200);
 
-      expect(setPaidMany).toHaveBeenCalledWith([
-        "3f1b0d2e-0000-4000-8000-000000000001",
-      ]);
+      expect(settle).not.toHaveBeenCalled();
+      expect(setPaidMany).not.toHaveBeenCalled();
     });
 
     it("returns a workbook that reads back, corrected", async () => {
@@ -350,13 +376,49 @@ describe("Weekly invoice check, end to end over HTTP", () => {
       expect(sheet.getRow(2).getCell(12).value).toBe(425);
     });
 
-    it("refuses what the check refuses, and settles nothing", async () => {
+    it("refuses what the check refuses", async () => {
       const response = await apply()
         .attach("file", Buffer.from("%PDF-1.7 pretending"), "week 13.xlsx")
         .expect(400);
 
       expect(response.body.error.message).toMatch(/not an Excel workbook/);
-      expect(setPaidMany).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("confirming the payment", () => {
+    it("pays the chosen transports the invoice settles", async () => {
+      const response = await confirmPayment()
+        .attach("file", await aWeek(), "week 13 - 2026 GLT.xlsx")
+        .field("tripIds", JSON.stringify([TRIP_ID]))
+        .expect(200);
+
+      expect(settle).toHaveBeenCalledWith([TRIP_ID]);
+      expect(response.body.data).toEqual({ paidTrips: 1, alreadyPaid: 0, paidTripIds: [TRIP_ID] });
+    });
+
+    it("refuses a transport the invoice does not settle, and pays nothing", async () => {
+      const response = await confirmPayment()
+        .attach("file", await aWeek(), "week 13 - 2026 GLT.xlsx")
+        .field("tripIds", JSON.stringify([TRIP_ID, "9c0f0d2e-0000-4000-8000-000000000009"]))
+        .expect(409);
+
+      expect(response.body.error.details).toEqual([
+        "9c0f0d2e-0000-4000-8000-000000000009: NOT_ON_INVOICE",
+      ]);
+      expect(settle).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ["no selection", undefined],
+      ["an empty selection", "[]"],
+      ["a selection that is not JSON", "trip-1"],
+      ["an id that is not a Trip id", JSON.stringify(["trip-1"])],
+    ])("refuses %s", async (_case, tripIds) => {
+      const call = confirmPayment().attach("file", await aWeek(), "week 13 - 2026 GLT.xlsx");
+
+      await (tripIds === undefined ? call : call.field("tripIds", tripIds)).expect(400);
+
+      expect(settle).not.toHaveBeenCalled();
     });
   });
 

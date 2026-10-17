@@ -105,6 +105,7 @@ function result(overrides: Record<string, unknown> = {}) {
         differences: [
           {
             component: "Tarief",
+            kind: "RAISE",
             column: "Tarief",
             invoiceValue: "364.00",
             expectedValue: "370.00",
@@ -116,6 +117,7 @@ function result(overrides: Record<string, unknown> = {}) {
           },
           {
             component: "Backload",
+            kind: "RAISE",
             column: "Backload",
             invoiceValue: null,
             expectedValue: "50.00",
@@ -194,6 +196,7 @@ function result(overrides: Record<string, unknown> = {}) {
       },
     ],
     incompleteRowNumbers: [],
+    blockedMissingTrips: [],
     missingTrips: [
       {
         tripId: "9c0f0d2e-0000-4000-8000-000000000009",
@@ -203,7 +206,51 @@ function result(overrides: Record<string, unknown> = {}) {
         route: "Quay 869 -> MELSELE",
         tarief: "517.20",
         totaal: "681.08",
+        priceReliability: {
+          reliable: true,
+          problem: null,
+          explanation: null,
+          routeEvidence: null,
+        },
+        remarks: "tar,EC 4220981",
+        remarkNotes: [],
+        combinationEnd: null,
         rowNumber: 108,
+      },
+    ],
+    totalsStructure: { sound: true, problems: [] },
+    fuelHeader: null,
+    markedRowNumbers: [3, 4, 5],
+    totals: {
+      columns: [
+        { column: "Tarief", before: "364.00", after: "370.00" },
+        { column: "Fuel", before: "36.40", after: "36.40" },
+      ],
+      before: "400.40",
+      after: "406.40",
+    },
+    payments: [
+      {
+        tripId: "3f1b0d2e-0000-4000-8000-000000000001",
+        planningDate: "2026-03-23",
+        bookingNumber: "DUBANR2718284",
+        containerNumber: "EUCU4581604",
+        rowNumbers: [2],
+        payable: true,
+        category: "RAISED",
+        reasons: [],
+        alreadyPaid: false,
+      },
+      {
+        tripId: "3f1b0d2e-0000-4000-8000-000000000004",
+        planningDate: "2026-03-23",
+        bookingNumber: "ANRDUB2725107",
+        containerNumber: "PVDU0000001",
+        rowNumbers: [4],
+        payable: false,
+        category: null,
+        reasons: ["NOT_CLOSED"],
+        alreadyPaid: false,
       },
     ],
     ...overrides,
@@ -241,6 +288,11 @@ async function upload(
   await userEvent.upload(fileInput(), file, options);
 }
 
+/** The table of invoice lines — the first table; the totals have their own. */
+function linesTable(): HTMLElement {
+  return screen.getAllByRole("table")[0];
+}
+
 function rowFor(bookingNumber: string): HTMLElement {
   // A matched line prints the booking twice — its own cell, and the Trip it was
   // matched to — so the first occurrence, which is the cell, is the anchor.
@@ -263,6 +315,168 @@ describe("Excel factuurcontrole", () => {
     await userEvent.click(screen.getByRole("button", { name: "Controleren" }));
     await screen.findAllByText("DUBANR2718284");
   }
+
+  /**
+   * ── NOTHING IS LOWERED, AND A DOUBTFUL PRICE IS SHOWN, NOT USED ──────────
+   * The backend decides both; the page shows a figure the invoice states higher
+   * as "not lowered", and puts the Trip's own road beside the road its price was
+   * made on when that price is not relied on.
+   */
+  describe("prices that are not written", () => {
+    const matchedRow = result().rows[0];
+
+    it("shows a higher invoice amount as not lowered", async () => {
+      requestMock.mockResolvedValue(
+        result({
+          rows: [
+            {
+              ...matchedRow,
+              pricingStatus: "INVOICE_HIGHER",
+              priceReliability: {
+                reliable: true,
+                problem: null,
+                explanation: null,
+                routeEvidence: null,
+              },
+              differences: [
+                {
+                  component: "Tarief",
+                  kind: "INVOICE_HIGHER",
+                  column: "Tarief",
+                  invoiceValue: "334.00",
+                  expectedValue: "300.00",
+                  difference: "-34.00",
+                  correctedValue: null,
+                  correctionRowNumber: 2,
+                  keepsFormula: false,
+                  problem: null,
+                },
+              ],
+            },
+          ],
+        }),
+      );
+
+      await check();
+
+      const row = rowFor("DUBANR2718284");
+      expect(within(row).getByText("Factuur hoger dan systeem")).toBeInTheDocument();
+      expect(within(row).getByText(/€334\.00 · €300\.00 · niet verlaagd/)).toBeInTheDocument();
+    });
+
+    it("shows why a price is not relied on, with both roads", async () => {
+      requestMock.mockResolvedValue(
+        result({
+          rows: [
+            {
+              ...matchedRow,
+              pricingStatus: "PRICE_UNRELIABLE",
+              differences: [],
+              priceReliability: {
+                reliable: false,
+                problem: "ROUTE_NOT_EVIDENCED",
+                explanation: "the Trip was priced on another road",
+                routeEvidence: {
+                  relation: "UNCONFIRMED_BRACKETED_PLACE",
+                  tripRoute: "Quay 869 → Beveren",
+                  pricedRoute: "Quay 869 → Kallo (Beveren)",
+                },
+              },
+            },
+          ],
+        }),
+      );
+
+      await check();
+
+      const row = rowFor("DUBANR2718284");
+      expect(within(row).getByText("Prijs onbetrouwbaar")).toBeInTheDocument();
+      expect(
+        within(row).getByText("Niet aantoonbaar dat de geprijsde route de route van de rit is"),
+      ).toBeInTheDocument();
+      expect(within(row).getByText("Quay 869 → Beveren")).toBeInTheDocument();
+      expect(within(row).getByText("Quay 869 → Kallo (Beveren)")).toBeInTheDocument();
+    });
+  });
+
+  /**
+   * ── WHAT THE IDENTIFICATION DECIDED, SHOWN ───────────────────────────────
+   * A corrected booking, an EC line's confirmation, a Combination's verdict and
+   * a transport held back from the invoice — all decided by the backend.
+   */
+  describe("how lines were identified", () => {
+    const matchedRow = result().rows[0];
+
+    it("shows a corrected booking, an EC line and a Combination verdict", async () => {
+      requestMock.mockResolvedValue(
+        result({
+          rows: [
+            {
+              ...matchedRow,
+              bookingCorrection: {
+                invoiceBookingNumber: "DUBANR2718000",
+                tripBookingNumber: "DUBANR2718284",
+              },
+              combination: { verdict: "GEEN_COMBI", partnerRowNumber: 3, reason: null },
+              remarks: {
+                before: "tar  ",
+                after: "tar,GEEN COMBI",
+                added: ["GEEN COMBI"],
+                notes: ['"aan/afkoppelen" is not a word this invoice uses yet'],
+              },
+            },
+            {
+              ...matchedRow,
+              rowNumber: 53,
+              status: "COST_LINE",
+              bookingNumber: "ANRDUB2812770",
+              containerNumber: "",
+              pricingStatus: "MATCHED_NO_CHANGES",
+              differences: [],
+              costConfirmation: { ccNumber: "4220981", amount: "110.00" },
+            },
+          ],
+        }),
+      );
+
+      await check();
+
+      const transport = rowFor("DUBANR2718284");
+      expect(within(transport).getByText(/Booking gecorrigeerd → DUBANR2718284/)).toBeInTheDocument();
+      expect(within(transport).getByText(/GEEN COMBI, Backload verwijderd · met rij 3/)).toBeInTheDocument();
+      expect(within(transport).getByText("Remarks aangevuld: GEEN COMBI")).toBeInTheDocument();
+      expect(
+        within(transport).getByText('"aan/afkoppelen" is not a word this invoice uses yet'),
+      ).toBeInTheDocument();
+
+      const costLine = rowFor("ANRDUB2812770");
+      expect(within(costLine).getByText("EC-regel")).toBeInTheDocument();
+      expect(within(costLine).getByText("EC 4220981 · €110.00")).toBeInTheDocument();
+    });
+
+    it("lists a transport it did not add, with the rows that block it", async () => {
+      requestMock.mockResolvedValue(
+        result({
+          blockedMissingTrips: [
+            {
+              tripId: "9c0f0d2e-0000-4000-8000-000000000010",
+              planningDate: "2026-10-06",
+              bookingNumber: "ANRDUB2810849",
+              containerNumber: "EUCU4541197",
+              blockingRowNumbers: [3],
+            },
+          ],
+        }),
+      );
+
+      await check();
+
+      expect(
+        screen.getByText("Niet toegevoegd, mogelijk al op de factuur:"),
+      ).toBeInTheDocument();
+      expect(screen.getByRole("link", { name: "ANRDUB2810849" })).toBeInTheDocument();
+    });
+  });
 
   describe("before anything is checked", () => {
     it("says what the page will do and asks nothing of the server", () => {
@@ -351,7 +565,7 @@ describe("Excel factuurcontrole", () => {
 
       await screen.findAllByText("DUBANR2718284");
 
-      expect(screen.getAllByRole("row")).toHaveLength(5); // the header and four lines
+      expect(within(linesTable()).getAllByRole("row")).toHaveLength(5); // the header and four lines
       expect(
         within(rowFor("DUBANR2718284")).getByText("2"),
       ).toBeInTheDocument();
@@ -483,6 +697,7 @@ describe("Excel factuurcontrole", () => {
               differences: [
                 {
                   component: "EK",
+                  kind: "NOT_PLACEABLE",
                   column: null,
                   invoiceValue: "200.00",
                   expectedValue: "250.00",
@@ -608,7 +823,7 @@ describe("Excel factuurcontrole", () => {
 
       await screen.findAllByText("DUBANR2718284");
 
-      const rows = screen.getAllByRole("row").slice(1);
+      const rows = within(linesTable()).getAllByRole("row").slice(1);
       expect(rows).toHaveLength(2);
       expect(rows[0]).toHaveTextContent("zelfde sleutel als rij 9");
       expect(rows[1]).toHaveTextContent("zelfde sleutel als rij 8");
@@ -694,14 +909,101 @@ describe("Excel factuurcontrole", () => {
         screen.queryByText("Ontbrekende afgewerkte ritten:"),
       ).not.toBeInTheDocument();
     });
+
+    it("shows the Remarks the added line gets", async () => {
+      renderPage();
+      await upload();
+      await userEvent.click(screen.getByRole("button", { name: "Controleren" }));
+
+      const entry = (await screen.findByText("BELANR2720016")).closest("li") as HTMLElement;
+
+      expect(entry).toHaveTextContent("Remarks: tar,EC 4220981");
+    });
+
+    it("says a line without a reliable price is added without amounts, and why", async () => {
+      const [missing] = result().missingTrips;
+
+      requestMock.mockResolvedValue(
+        result({
+          missingTrips: [
+            {
+              ...missing,
+              priceReliability: {
+                reliable: false,
+                problem: "NO_SNAPSHOT",
+                explanation: "never priced",
+                routeEvidence: null,
+              },
+            },
+          ],
+        }),
+      );
+
+      renderPage();
+      await upload();
+      await userEvent.click(screen.getByRole("button", { name: "Controleren" }));
+
+      const entry = (await screen.findByText("BELANR2720016")).closest("li") as HTMLElement;
+
+      expect(entry).toHaveTextContent("toegevoegd zonder bedragen, geel gemarkeerd");
+      expect(entry).toHaveTextContent("Rit is nooit geprijsd");
+      expect(entry).not.toHaveTextContent("€681.08");
+    });
+
+    it("says nothing is added when the document's totals deviate, and lists them", async () => {
+      const [missing] = result().missingTrips;
+
+      requestMock.mockResolvedValue(
+        result({
+          missingTrips: [{ ...missing, rowNumber: null }],
+          totalsStructure: {
+            sound: false,
+            problems: ["Backload: the total covers rows 2–138, not 2–141 (SUM(N2:N138))"],
+          },
+        }),
+      );
+
+      renderPage();
+      await upload();
+      await userEvent.click(screen.getByRole("button", { name: "Controleren" }));
+
+      const entry = (await screen.findByText("BELANR2720016")).closest("li") as HTMLElement;
+
+      expect(entry).toHaveTextContent("niet toegevoegd, totalen wijken af");
+      expect(entry).not.toHaveTextContent("Rij");
+      expect(screen.getByText("Totalen wijken af")).toBeInTheDocument();
+      expect(screen.getByText(/SUM\(N2:N138\)/)).toBeInTheDocument();
+    });
+  });
+
+  describe("the Fuel header", () => {
+    it("shows the header and label it rewrites", async () => {
+      requestMock.mockResolvedValue(
+        result({
+          fuelHeader: {
+            percentage: "24",
+            header: { address: "M1", before: "Fuel 23%", after: "Fuel 24%" },
+            label: { address: "K131", before: "Fuel 23% ", after: "Fuel 24% " },
+          },
+        }),
+      );
+
+      renderPage();
+      await upload();
+      await userEvent.click(screen.getByRole("button", { name: "Controleren" }));
+
+      const note = (await screen.findByText("Fuel-kop aangepast:")).closest("p") as HTMLElement;
+
+      expect(note).toHaveTextContent("M1: “Fuel 23%” → “Fuel 24%”");
+      expect(note).toHaveTextContent("K131: “Fuel 23%” → “Fuel 24%”");
+    });
   });
 
   /**
    * ── THE FINAL STEP IS A DECISION ──────────────────────────────────────────
-   * Checking changes nothing and may be repeated. Processing corrects the file,
-   * adds what the invoice forgot and settles the transports it covers — so it
-   * is a second, deliberate action, it says what it will do, and it cannot be
-   * started twice.
+   * Checking changes nothing and may be repeated. Processing produces the
+   * corrected file — a second, deliberate action that says what it will do,
+   * pays nothing, and cannot be started twice.
    */
   describe("processing the invoice", () => {
     it("is not offered before anything has been checked", () => {
@@ -710,14 +1012,6 @@ describe("Excel factuurcontrole", () => {
       expect(
         screen.queryByRole("button", { name: "Verwerken en downloaden" }),
       ).not.toBeInTheDocument();
-    });
-
-    it("says how many transports it will settle", async () => {
-      await check();
-
-      expect(
-        screen.getByText(/Ritten die op betaald gezet worden/),
-      ).toHaveTextContent("Ritten die op betaald gezet worden: 1");
     });
 
     it("does nothing on its own: checking settles nothing", async () => {
@@ -786,9 +1080,6 @@ describe("Excel factuurcontrole", () => {
 
       expect(panel).toHaveTextContent("week 13 - 2026 GLT - gecorrigeerd.xlsx");
       expect(
-        within(panel).getByText("Op betaald gezet").nextSibling,
-      ).toHaveTextContent("1");
-      expect(
         within(panel).getByText("Prijsaanpassingen").nextSibling,
       ).toHaveTextContent("2");
       expect(
@@ -816,6 +1107,28 @@ describe("Excel factuurcontrole", () => {
       expect(screen.queryByText("Excel verwerkt")).not.toBeInTheDocument();
     });
 
+    it("names the cells when the corrected file did not match its plan", async () => {
+      applyMock.mockRejectedValue(
+        new ApiError(
+          "INTERNAL_SERVER_ERROR",
+          "The corrected invoice did not match its planned changes, so no file was produced and nothing can be paid on it.",
+          500,
+          ["H2: value changed without a plan"],
+        ),
+      );
+
+      await check();
+      await userEvent.click(screen.getByRole("button", { name: "Verwerken en downloaden" }));
+
+      const alert = await screen.findByRole("alert");
+
+      expect(alert).toHaveTextContent("no file was produced");
+      expect(alert).toHaveTextContent("H2: value changed without a plan");
+      expect(downloadMock).not.toHaveBeenCalled();
+      // No file, so no payment step either.
+      expect(screen.queryByText("Betaling bevestigen")).not.toBeInTheDocument();
+    });
+
     it("forgets what a previous run did when another file is checked", async () => {
       await check();
       await userEvent.click(
@@ -826,6 +1139,139 @@ describe("Excel factuurcontrole", () => {
       await upload(workbook("week 14 - 2026 GLT.xlsx"));
 
       expect(screen.queryByText("Excel verwerkt")).not.toBeInTheDocument();
+    });
+  });
+
+  /**
+   * ── PAYING IS ITS OWN DECISION ────────────────────────────────────────────
+   * Neither the check nor the corrected file pays anything. Once the file
+   * exists, the operator chooses from what the BACKEND found payable and
+   * confirms; the screen computes none of it.
+   */
+  describe("confirming the payment", () => {
+    const PAYMENT_PATH = "/api/v1/invoice-audit/payment";
+    const TRIP_ONE = "3f1b0d2e-0000-4000-8000-000000000001";
+    const TRIP_HIGHER = "3f1b0d2e-0000-4000-8000-000000000007";
+
+    function withPayments() {
+      return result({
+        payments: [
+          ...result().payments,
+          {
+            tripId: TRIP_HIGHER,
+            planningDate: "2026-03-24",
+            bookingNumber: "ANRDUB2799999",
+            containerNumber: "TLLU1999999",
+            rowNumbers: [9],
+            payable: true,
+            category: "INVOICE_HIGHER",
+            reasons: [],
+            alreadyPaid: false,
+          },
+        ],
+      });
+    }
+
+    /** Checks, produces the file, and answers payments with `answer`. */
+    async function upToPayment(answer: () => Promise<unknown> = async () => ({
+      paidTrips: 2,
+      alreadyPaid: 0,
+      paidTripIds: [TRIP_ONE, TRIP_HIGHER],
+    })) {
+      requestMock.mockImplementation((path: string) =>
+        path === PAYMENT_PATH ? answer() : Promise.resolve(withPayments()),
+      );
+
+      await check();
+      await userEvent.click(screen.getByRole("button", { name: "Verwerken en downloaden" }));
+      await screen.findByText("Excel verwerkt");
+    }
+
+    const paymentCalls = () => requestMock.mock.calls.filter(([path]) => path === PAYMENT_PATH);
+
+    it("is not offered before the corrected file exists", async () => {
+      requestMock.mockResolvedValue(withPayments());
+
+      await check();
+
+      expect(screen.queryByText("Betaling bevestigen")).not.toBeInTheDocument();
+    });
+
+    it("lists what the backend found payable, a higher invoice apart, and what it did not", async () => {
+      await upToPayment();
+
+      const groupOf = (title: string) => screen.getByText(title).closest("section") as HTMLElement;
+
+      expect(groupOf("Prijs verhoogd")).toHaveTextContent("DUBANR2718284");
+      expect(groupOf("Factuur hoger dan systeem")).toHaveTextContent("ANRDUB2799999");
+      expect(groupOf("Niet te betalen")).toHaveTextContent("PVDU0000001");
+      expect(groupOf("Niet te betalen")).toHaveTextContent("rit niet afgesloten");
+    });
+
+    it("sends the original file with the chosen transports", async () => {
+      await upToPayment();
+
+      await userEvent.click(within(screen.getByText("Factuur hoger dan systeem").closest("section") as HTMLElement).getByRole("checkbox"));
+      await userEvent.click(screen.getByRole("button", { name: "Betaling bevestigen (1)" }));
+
+      await screen.findByText(/Op betaald gezet:/);
+      const [[, options]] = paymentCalls();
+      const body = (options as { body: FormData }).body;
+
+      expect((body.get("file") as File).name).toBe("week 13 - 2026 GLT.xlsx");
+      expect(JSON.parse(body.get("tripIds") as string)).toEqual([TRIP_ONE]);
+    });
+
+    it("reports what the confirmation did", async () => {
+      await upToPayment();
+
+      await userEvent.click(screen.getByRole("button", { name: "Betaling bevestigen (2)" }));
+
+      expect(await screen.findByText(/Op betaald gezet:/)).toHaveTextContent("Op betaald gezet: 2");
+    });
+
+    it("shows the refusal and the transports it names, and pays nothing", async () => {
+      await upToPayment(async () => {
+        throw new ApiError(
+          "CONFLICT",
+          "Some selected transports can no longer be settled on this invoice; nothing was paid.",
+          409,
+          [`${TRIP_HIGHER}: NOT_CLOSED`],
+        );
+      });
+
+      await userEvent.click(screen.getByRole("button", { name: "Betaling bevestigen (2)" }));
+
+      const alert = await screen.findByRole("alert");
+
+      expect(alert).toHaveTextContent("nothing was paid");
+      expect(alert).toHaveTextContent(`${TRIP_HIGHER}: NOT_CLOSED`);
+      expect(screen.queryByText(/Op betaald gezet:/)).not.toBeInTheDocument();
+    });
+
+    it("cannot be confirmed twice while it runs", async () => {
+      let finish: (value: unknown) => void = () => {};
+
+      await upToPayment(() => new Promise((resolve) => (finish = resolve)));
+      await userEvent.click(screen.getByRole("button", { name: "Betaling bevestigen (2)" }));
+
+      expect(await screen.findByRole("button", { name: "Bezig met bevestigen…" })).toBeDisabled();
+
+      finish({ paidTrips: 2, alreadyPaid: 0, paidTripIds: [] });
+      await screen.findByText(/Op betaald gezet:/);
+      expect(paymentCalls()).toHaveLength(1);
+    });
+  });
+
+  describe("the totals", () => {
+    it("shows the changed columns and the total, received and corrected", async () => {
+      await check();
+
+      const table = screen.getByText("Totalen").parentElement as HTMLElement;
+
+      expect(within(table).getByText("Tarief").closest("tr")).toHaveTextContent("€364.00€370.00");
+      expect(within(table).queryByText("Fuel")).not.toBeInTheDocument();
+      expect(within(table).getByText("Totaal").closest("tr")).toHaveTextContent("€400.40€406.40");
     });
   });
 
@@ -885,16 +1331,6 @@ describe("Excel factuurcontrole", () => {
       expect(rowFor("BELANR2720016")).toHaveTextContent(
         "Tarief: €517.20 → €600.00",
       );
-    });
-
-    it("is not counted among the transports that will be settled", async () => {
-      requestMock.mockResolvedValue(withAddedLine());
-
-      await check();
-
-      expect(
-        screen.getByText(/Ritten die op betaald gezet worden/),
-      ).toHaveTextContent("Ritten die op betaald gezet worden: 0");
     });
   });
 

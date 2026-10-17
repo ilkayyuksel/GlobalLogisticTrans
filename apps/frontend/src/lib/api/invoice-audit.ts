@@ -16,15 +16,65 @@ export type InvoiceRowStatus =
   | "NOT_FOUND"
   | "NOT_FINISHED"
   | "AMBIGUOUS"
+  /** A correction would make it a transport another line already is. */
+  | "CONFLICT"
+  /** A Cost Confirmation line, resolved through its `EC <nr>`. */
+  | "COST_LINE"
+  | "COST_LINE_UNRESOLVED"
   /** A line this check wrote into the document itself. Priced, never settled. */
   | "ADDED_MISSING";
 
 /** What the pricing check concluded about a line. */
 export type InvoicePricingStatus =
   | "MATCHED_NO_CHANGES"
+  /** At least one amount is raised to this system's figure. */
   | "PRICING_CORRECTED"
+  /** Nothing raised; the invoice states MORE than this system. Never lowered. */
+  | "INVOICE_HIGHER"
   | "NOT_COMPARED"
-  | "NOT_DISTRIBUTABLE";
+  | "NOT_DISTRIBUTABLE"
+  /** The Trip's stored price cannot be relied on; nothing is written. */
+  | "PRICE_UNRELIABLE"
+  /** An amount cell holds something that is not an amount. */
+  | "AMOUNT_UNREADABLE"
+  /** The Excel's Combination cannot be confirmed; nothing is written. */
+  | "COMBINATION_REVIEW";
+
+/** What one difference is, decided by the backend. */
+export type InvoiceDifferenceKind =
+  | "RAISE"
+  | "REMOVE"
+  | "KEEP_AMOUNT"
+  | "INVOICE_HIGHER"
+  | "NOT_PLACEABLE"
+  | "UNREADABLE";
+
+/** Why a Trip's stored price could not be relied on. */
+export type InvoicePriceProblem =
+  | "NO_SNAPSHOT"
+  | "METADATA_MISSING"
+  | "ROUTE_NOT_FOUND"
+  | "ROUTE_AMBIGUOUS"
+  | "COMBINATION_NOT_PRICED"
+  | "SNAPSHOT_INCONSISTENT"
+  | "ROUTE_NOT_EVIDENCED";
+
+/**
+ * The Trip's own road beside the road its stored price was made on, so a
+ * doubtful match — `Beveren` priced on `Kallo (Beveren)` — can be SEEN.
+ */
+export interface InvoiceRouteEvidence {
+  readonly relation: string;
+  readonly tripRoute: string | null;
+  readonly pricedRoute: string | null;
+}
+
+export interface InvoicePriceReliability {
+  readonly reliable: boolean;
+  readonly problem: InvoicePriceProblem | null;
+  readonly explanation: string | null;
+  readonly routeEvidence: InvoiceRouteEvidence | null;
+}
 
 /**
  * One component of one line: what the invoice charges, what this system holds,
@@ -35,6 +85,7 @@ export type InvoicePricingStatus =
  */
 export interface InvoicePricingDifference {
   readonly component: string;
+  readonly kind: InvoiceDifferenceKind;
   readonly column: string | null;
   readonly invoiceValue: string | null;
   readonly expectedValue: string;
@@ -84,15 +135,62 @@ export interface InvoiceAuditRow {
   readonly sharedKeyRowNumbers: readonly number[];
   readonly pricingStatus: InvoicePricingStatus;
   readonly differences: readonly InvoicePricingDifference[];
+  /** Null for a line that was not compared. */
+  readonly priceReliability: InvoicePriceReliability | null;
   /** Null unless the invoice's container was wrong and is corrected. */
   readonly containerCorrection: InvoiceContainerCorrection | null;
+  /** Null unless the invoice's booking number was wrong and is corrected. */
+  readonly bookingCorrection: InvoiceBookingCorrection | null;
+  /** The confirmation a Cost Confirmation line charges. */
+  readonly costConfirmation: InvoiceCostConfirmation | null;
+  /** Set on a line the Excel marks as half of a Combination. */
+  readonly combination: InvoiceCombination | null;
+  /** Why the line could not be resolved. */
+  readonly matchProblem: string | null;
+  /** What this check adds to the line's Remarks; null when nothing. */
+  readonly remarks: InvoiceRemarks | null;
+}
+
+export interface InvoiceRemarks {
+  readonly before: string;
+  readonly after: string;
+  readonly added: readonly string[];
+  /** A waiting time with no customer spelling, a word the invoice does not use yet. */
+  readonly notes: readonly string[];
+}
+
+export interface InvoiceBookingCorrection {
+  readonly invoiceBookingNumber: string;
+  readonly tripBookingNumber: string;
+}
+
+export interface InvoiceCostConfirmation {
+  /** Digits only; the sheet prints `EC <nr>`. */
+  readonly ccNumber: string;
+  readonly amount: string;
+}
+
+export interface InvoiceCombination {
+  readonly verdict: "RECOGNISED" | "GEEN_COMBI" | "REVIEW";
+  readonly partnerRowNumber: number | null;
+  readonly reason: string | null;
+}
+
+/** A transport not added because an unresolved line could be it. */
+export interface BlockedMissingTrip {
+  readonly tripId: string;
+  readonly planningDate: string;
+  readonly bookingNumber: string | null;
+  readonly containerNumber: string | null;
+  readonly blockingRowNumbers: readonly number[];
 }
 
 /**
  * A finished transport the invoice never mentioned.
  *
  * Not a problem line: this system finished it, nobody has paid for it, and the
- * corrected workbook adds it as an ordinary line on `rowNumber`.
+ * corrected workbook adds it as an ordinary line on `rowNumber` — without
+ * amounts, and yellow, when its stored price cannot be relied on.
  */
 export interface MissingTrip {
   readonly tripId: string;
@@ -102,8 +200,33 @@ export interface MissingTrip {
   readonly route: string;
   readonly tarief: string | null;
   readonly totaal: string | null;
-  /** The row the corrected workbook writes it on. */
-  readonly rowNumber: number;
+  readonly priceReliability: InvoicePriceReliability;
+  /** The Remarks the added line gets, in the customer's words; empty for none. */
+  readonly remarks: string;
+  readonly remarkNotes: readonly string[];
+  /** The end that carries `COMBINATION`, for a leg of a group of two. */
+  readonly combinationEnd: "startPoint" | "endPoint" | null;
+  /** The row the corrected workbook writes it on; null when it cannot be added. */
+  readonly rowNumber: number | null;
+}
+
+/** Whether the document's totals can take added lines; when not, why not. */
+export interface InvoiceTotalsStructure {
+  readonly sound: boolean;
+  readonly problems: readonly string[];
+}
+
+export interface InvoiceTextChange {
+  readonly address: string;
+  readonly before: string;
+  readonly after: string;
+}
+
+/** The Fuel header and label, when the whole column states one new percentage. */
+export interface InvoiceFuelHeaderChange {
+  readonly percentage: string;
+  readonly header: InvoiceTextChange;
+  readonly label: InvoiceTextChange | null;
 }
 
 export interface InvoiceAuditSummary {
@@ -116,7 +239,10 @@ export interface InvoiceAuditSummary {
   readonly priceChecked: number;
   readonly priceUnchanged: number;
   readonly priceCorrected: number;
+  readonly priceInvoiceHigher: number;
   readonly priceNotDistributable: number;
+  readonly priceUnreliable: number;
+  readonly amountUnreadable: number;
   /** Cells the corrected workbook would write. */
   readonly correctedCells: number;
   /** Finished, unpaid transports of this period the invoice does not state. */
@@ -125,6 +251,14 @@ export interface InvoiceAuditSummary {
   readonly addedMissing: number;
   /** Matched lines whose container was wrong. Counted within `matched` too. */
   readonly containerCorrected: number;
+  readonly blockedMissingTrips: number;
+  readonly bookingCorrected: number;
+  readonly conflicts: number;
+  readonly costLines: number;
+  readonly costLinesUnresolved: number;
+  readonly combinationsRecognised: number;
+  readonly geenCombi: number;
+  readonly combinationsReview: number;
 }
 
 export interface InvoiceAuditResult {
@@ -136,18 +270,66 @@ export interface InvoiceAuditResult {
   readonly rows: readonly InvoiceAuditRow[];
   readonly incompleteRowNumbers: readonly number[];
   readonly missingTrips: readonly MissingTrip[];
+  readonly blockedMissingTrips: readonly BlockedMissingTrip[];
+  readonly totalsStructure: InvoiceTotalsStructure;
+  /** Null when the Fuel header stays as the customer wrote it. */
+  readonly fuelHeader: InvoiceFuelHeaderChange | null;
+  /** The rows the corrected document marks yellow — decided by the backend. */
+  readonly markedRowNumbers: readonly number[];
+  readonly totals: InvoiceTotals;
+  /** Every transport the invoice charges, and whether a confirmation may settle it. */
+  readonly payments: readonly InvoiceTripPayment[];
 }
 
-/** What the final processing did, beside the file it produced. */
+/** The invoice's amounts, added up over its lines, before and after the correction. */
+export interface InvoiceTotals {
+  readonly columns: readonly {
+    readonly column: string;
+    readonly before: string;
+    readonly after: string;
+  }[];
+  readonly before: string;
+  readonly after: string;
+}
+
+export type InvoicePaymentCategory = "UNCHANGED" | "RAISED" | "INVOICE_HIGHER";
+
+export type InvoiceNotPayableReason =
+  | "NOT_CLOSED"
+  | "NO_OWN_LINE"
+  | "ADDED_BY_CHECK"
+  | "LINE_MARKED"
+  | "PRICE_NOT_SETTLED"
+  | "OPEN_CONFLICT";
+
+/** One transport the invoice charges — decided by the backend, shown here. */
+export interface InvoiceTripPayment {
+  readonly tripId: string;
+  readonly planningDate: string | null;
+  readonly bookingNumber: string | null;
+  readonly containerNumber: string | null;
+  readonly rowNumbers: readonly number[];
+  readonly payable: boolean;
+  /** Null when not payable. */
+  readonly category: InvoicePaymentCategory | null;
+  readonly reasons: readonly InvoiceNotPayableReason[];
+  /** Re-invoiced: already paid, never paid again. */
+  readonly alreadyPaid: boolean;
+}
+
+/** What a payment confirmation did. */
+export interface InvoicePaymentResult {
+  readonly paidTrips: number;
+  readonly alreadyPaid: number;
+  readonly paidTripIds: readonly string[];
+}
+
+/** The corrected document, and what was written into it. Nothing is paid. */
 export interface AppliedInvoiceAudit {
   /** The corrected workbook, ready to be saved. */
   readonly file: Blob;
   /** The name the browser should save it under. */
   readonly fileName: string;
-  /** Trips this run marked paid. */
-  readonly paidTrips: number;
-  /** Trips that were already paid before it ran. */
-  readonly alreadyPaid: number;
   readonly rowsAdded: number;
   readonly rowsMarked: number;
   readonly correctedCells: number;
@@ -177,14 +359,8 @@ export function checkInvoiceWorkbook(
 }
 
 /**
- * Processes one weekly invoice, finally.
- *
- * ── ONE REQUEST, AND THE BACKEND ORDERS THE WORK ────────────────────────────
- * The corrected document and the payments it settles come from a single call:
- * the server produces the whole file first and only then marks the transports
- * paid, so a document it could not write settles nothing. A browser that
- * corrected the file and then fired a hundred payment requests could not make
- * that promise.
+ * Produces the corrected weekly invoice. Nothing in the system changes: in
+ * particular, nothing is paid — that is `confirmInvoicePayment`.
  *
  * Reached with a bare `fetch` because the answer is BYTES rather than the JSON
  * envelope — the same reason `fetchPdfDocument` does. A refusal still speaks
@@ -228,26 +404,50 @@ export async function applyInvoiceAudit(
   return {
     file: await response.blob(),
     fileName: toFileName(response, file.name),
-    paidTrips: toCount(response, "X-Invoice-Paid-Trips"),
-    alreadyPaid: toCount(response, "X-Invoice-Already-Paid"),
     rowsAdded: toCount(response, "X-Invoice-Rows-Added"),
     rowsMarked: toCount(response, "X-Invoice-Rows-Marked"),
     correctedCells: toCount(response, "X-Invoice-Cells-Corrected"),
   };
 }
 
+/**
+ * Confirms the payment of the chosen transports.
+ *
+ * The ORIGINAL file goes up again with the chosen Trip ids: the backend
+ * examines the document afresh and pays only what is payable on it now. If a
+ * single chosen Trip is not, it refuses the whole request and pays nothing.
+ */
+export function confirmInvoicePayment(
+  file: File,
+  tripIds: readonly string[],
+  signal?: AbortSignal,
+): Promise<InvoicePaymentResult> {
+  const body = new FormData();
+
+  body.append("file", file);
+  body.append("tripIds", JSON.stringify(tripIds));
+
+  return request<InvoicePaymentResult>("/api/v1/invoice-audit/payment", {
+    method: "POST",
+    body,
+    signal,
+  });
+}
+
 /** The backend's own reason, when it sent one. */
 async function toApiError(response: Response): Promise<ApiError> {
   try {
     const payload: unknown = await response.json();
-    const error = (payload as { error?: { code?: string; message?: string } })
-      .error;
+    const error = (
+      payload as { error?: { code?: string; message?: string; details?: unknown } }
+    ).error;
 
     if (error?.message) {
       return new ApiError(
         error.code ?? "UNKNOWN",
         error.message,
         response.status,
+        error.details,
       );
     }
   } catch {

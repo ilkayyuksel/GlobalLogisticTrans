@@ -16,9 +16,23 @@ export interface InvoiceAmountCell {
   readonly value: Prisma.Decimal | null;
   /** The formula behind it, when there is one. Kept, never rewritten blindly. */
   readonly formula: string | null;
+  /**
+   * The cell holds SOMETHING, but not an amount this check can read: a word, a
+   * dash, an Excel error, or a formula no program ever calculated.
+   *
+   * Never the same as an empty cell. Reading `-` or `#REF!` as nothing stated
+   * would make it zero, and zero would then be "raised" to this system's figure
+   * — overwriting what the customer actually wrote. A line holding one is
+   * unreliable and is left exactly as it is.
+   */
+  readonly unreadable: boolean;
 }
 
-export const EMPTY_AMOUNT: InvoiceAmountCell = { value: null, formula: null };
+export const EMPTY_AMOUNT: InvoiceAmountCell = {
+  value: null,
+  formula: null,
+  unreadable: false,
+};
 
 /** Money, as this system compares and writes it. */
 export const MONEY_DECIMAL_PLACES = 2;
@@ -28,8 +42,9 @@ export const MONEY_DECIMAL_PLACES = 2;
  *
  * Numbers arrive as numbers; a sheet a human typed into may hold `135,00` as
  * text, and a European decimal comma is the ordinary spelling in these
- * documents. Anything that is not a number at all — a word, a dash — reads as
- * nothing stated, because guessing at it would invent a figure.
+ * documents. Anything that is not a number at all — a word, a dash — is read as
+ * UNREADABLE rather than as nothing, because guessing at it would invent a
+ * figure and treating it as empty would invent a zero.
  */
 export function toAmountCell(value: unknown): InvoiceAmountCell {
   if (value === null || value === undefined) {
@@ -37,44 +52,49 @@ export function toAmountCell(value: unknown): InvoiceAmountCell {
   }
 
   if (typeof value === "number") {
-    return { value: toDecimal(value), formula: null };
+    return { value: toDecimal(value), formula: null, unreadable: false };
   }
 
   if (typeof value === "object" && "formula" in value) {
     const cell = value as { formula: string; result?: unknown };
 
-    return {
-      // What the formula last CALCULATED is what the sheet shows. A formula a
-      // writer never calculated shows nothing yet, which is not the same as a
-      // cell holding zero.
-      value: cell.result === undefined ? null : toAmount(cell.result),
-      formula: cell.formula,
-    };
+    // What the formula last CALCULATED is what the sheet shows. A formula no
+    // program ever calculated shows nothing this check can know.
+    if (cell.result === undefined) {
+      return { value: null, formula: cell.formula, unreadable: true };
+    }
+
+    return { ...toAmount(cell.result), formula: cell.formula };
   }
 
-  return { value: toAmount(value), formula: null };
+  return { ...toAmount(value), formula: null };
 }
 
-function toAmount(value: unknown): Prisma.Decimal | null {
+function toAmount(value: unknown): Omit<InvoiceAmountCell, "formula"> {
   if (typeof value === "number") {
-    return toDecimal(value);
+    return { value: toDecimal(value), unreadable: false };
+  }
+
+  // An Excel error (`#REF!`, `#VALUE!`) is a cell that shows no figure.
+  if (value !== null && typeof value === "object" && "error" in value) {
+    return { value: null, unreadable: true };
   }
 
   const text = toCellText(value);
 
   if (text === "") {
-    return null;
+    return { value: null, unreadable: false };
   }
 
   // The European decimal comma, and nothing else: a thousands separator would
-  // make `1.234` ambiguous, so a value that is not a plain number is left unread.
+  // make `1.234` ambiguous, so a value that is not a plain number is unreadable.
   const normalised = text.replace(",", ".");
 
   if (!/^-?\d+(\.\d+)?$/.test(normalised)) {
-    return null;
+    return { value: null, unreadable: true };
   }
 
-  return toDecimal(normalised);
+  return { value: toDecimal(normalised), unreadable: false };
 }
 
 function toDecimal(value: number | string): Prisma.Decimal {
@@ -102,9 +122,15 @@ export function isSameAmount(
   return round(stated).equals(round(expected));
 }
 
-/** The money precision this system states every amount at. */
+/**
+ * The money precision this system states every amount at.
+ *
+ * Half a cent rounds UP, explicitly: that is how the Pricing Engine rounds
+ * (`ROUND_HALF_UP`) and how Excel shows a figure, so `24% × 179,35 = 43,044`
+ * compares as the 43,04 the customer sees.
+ */
 export function round(amount: Prisma.Decimal): Prisma.Decimal {
-  return amount.toDecimalPlaces(MONEY_DECIMAL_PLACES);
+  return amount.toDecimalPlaces(MONEY_DECIMAL_PLACES, Prisma.Decimal.ROUND_HALF_UP);
 }
 
 /**
@@ -129,6 +155,24 @@ export function toFormulaResult(
   rowNumber: number,
   tarief: Prisma.Decimal,
 ): Prisma.Decimal | null {
+  const exact = toExactFormulaResult(formula, tariefColumnLetter, rowNumber, tarief);
+
+  return exact === null ? null : round(exact);
+}
+
+/**
+ * The same, unrounded: what Excel itself will CALCULATE and store.
+ *
+ * `24%*L3` on 179,35 is 43,044 in the cell, shown as 43,04. The cached result a
+ * writer leaves behind must be the figure Excel will compute when it opens the
+ * file, or the totals would move by fractions of a cent on the first save.
+ */
+export function toExactFormulaResult(
+  formula: string,
+  tariefColumnLetter: string,
+  rowNumber: number,
+  tarief: Prisma.Decimal,
+): Prisma.Decimal | null {
   const match = PERCENTAGE_OF_CELL.exec(formula);
 
   if (!match) {
@@ -145,7 +189,5 @@ export function toFormulaResult(
     return null;
   }
 
-  return round(
-    tarief.mul(new Prisma.Decimal(percentage.replace(",", "."))).div(100),
-  );
+  return tarief.mul(new Prisma.Decimal(percentage.replace(",", "."))).div(100);
 }

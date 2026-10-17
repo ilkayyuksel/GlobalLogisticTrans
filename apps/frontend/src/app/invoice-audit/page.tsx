@@ -5,7 +5,11 @@ import { useState } from "react";
 import { InvoiceApply } from "@/components/invoice-audit/invoice-apply";
 import { InvoiceAuditRows } from "@/components/invoice-audit/invoice-audit-rows";
 import { InvoiceAuditSummary } from "@/components/invoice-audit/invoice-audit-summary";
+import { InvoiceBlockedTrips } from "@/components/invoice-audit/invoice-blocked-trips";
+import { InvoiceDocumentChecks } from "@/components/invoice-audit/invoice-document-checks";
 import { InvoiceMissingTrips } from "@/components/invoice-audit/invoice-missing-trips";
+import { InvoicePaymentConfirm } from "@/components/invoice-audit/invoice-payment-confirm";
+import { InvoiceTotals } from "@/components/invoice-audit/invoice-totals";
 import { InvoiceUpload } from "@/components/invoice-audit/invoice-upload";
 import { Card, CardHeader } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/states";
@@ -18,12 +22,11 @@ import { useTranslation } from "@/lib/i18n/language-provider";
 /**
  * Excel factuurcontrole — checking a customer's weekly invoice, and settling it.
  *
- * ── TWO STEPS, AND THE FIRST ONE IS FREE ────────────────────────────────────
- * Uploading CHECKS: it shows, per line, whether this system holds a finished
- * transport for it and what the prices should be, and it changes nothing at
- * all. Processing is a second, deliberate action — it corrects the document,
- * adds the transports the invoice forgot, marks the unresolved lines, saves the
- * file and settles the transports the invoice covers.
+ * ── THREE STEPS, AND ONLY THE LAST ONE PAYS ─────────────────────────────────
+ * Uploading CHECKS: a preview of the corrected document, the totals before and
+ * after, and which transports may be settled — nothing changes. Processing
+ * produces the corrected file — still nothing changes in the system. Only the
+ * separate payment confirmation marks the chosen transports paid.
  *
  * ── THE RESULT LIVES ONLY HERE ──────────────────────────────────────────────
  * Nothing is stored: no audit history, no upload record. Reloading the page
@@ -61,14 +64,17 @@ export default function InvoiceAuditPage() {
           <>
             <InvoiceAuditSummary result={result} />
             {result.rows.length > 0 ? (
-              <InvoiceAuditRows rows={result.rows} />
+              <InvoiceAuditRows rows={result.rows} markedRowNumbers={result.markedRowNumbers} />
             ) : (
               <EmptyState
                 title={t("invoiceAudit.empty.title")}
                 description={t("invoiceAudit.empty.description")}
               />
             )}
+            <InvoiceDocumentChecks result={result} />
             <InvoiceMissingTrips result={result} />
+            <InvoiceBlockedTrips result={result} />
+            <InvoiceTotals result={result} />
             {checked ? (
               <InvoiceApply
                 file={checked.file}
@@ -76,6 +82,13 @@ export default function InvoiceAuditPage() {
                 applied={applied}
                 onApplied={setApplied}
               />
+            ) : null}
+            {/*
+              Offered once the corrected file exists: the operator first reads
+              the preview, then the file, and only then decides about payment.
+            */}
+            {checked && applied ? (
+              <InvoicePaymentConfirm file={checked.file} result={result} />
             ) : null}
           </>
         ) : (

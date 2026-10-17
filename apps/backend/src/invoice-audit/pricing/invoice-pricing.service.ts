@@ -5,11 +5,10 @@ import { EffectivePricingService } from "../../trip-pricing/effective-pricing.se
 import type { InvoiceRowMatch } from "../matching/invoice-row-matching.service";
 import type { InvoiceColumnPositions } from "../workbook/invoice-columns";
 import { toColumnLetter } from "../workbook/invoice-columns";
-import {
-  InvoicePricingStatus,
-  reconcileLine,
-  type InvoiceRowPricing,
-} from "./invoice-reconciliation";
+import { InvoiceFuelRateReader } from "./invoice-fuel-rate.reader";
+import { InvoicePricingStatus, type InvoiceRowPricing } from "./invoice-reconciliation";
+import { assessPriceReliability } from "./price-reliability";
+import { reconcileTripRows } from "./trip-reconciliation";
 
 /**
  * What the invoice charges, against what this system holds.
@@ -22,9 +21,15 @@ import {
  * calculation would eventually disagree with the first, and the invoice would
  * be corrected towards a figure nothing else in the system states.
  *
+ * ── AND ONLY A PRICE THAT CAN BE RELIED ON IS USED ──────────────────────────
+ * Before a line is compared, the Trip's stored price is judged from what was
+ * stored with it — see `price-reliability.ts`. A Trip never priced, priced on
+ * no route, on an unconfirmed route or under a group it no longer has is
+ * PRICE_UNRELIABLE: nothing on its lines is written, and it is never settled.
+ *
  * ── ONE CALL FOR THE WHOLE DOCUMENT ─────────────────────────────────────────
- * Every matched Trip id goes to `findForTrips` together, exactly as the match
- * itself asks the database once. A hundred-line invoice costs one pricing read.
+ * Every matched Trip id goes to the reads together, exactly as the match itself
+ * asks the database once. A hundred-line invoice costs a fixed number of reads.
  *
  * ── AND ONLY MATCHED LINES ARE COMPARED ─────────────────────────────────────
  * A line with no CLOSED Trip, one whose Trip is unfinished and one that matched
@@ -35,6 +40,7 @@ import {
 export class InvoicePricingService {
   constructor(
     private readonly effectivePricing: EffectivePricingService,
+    private readonly fuelRates: InvoiceFuelRateReader,
     private readonly logger: AppLoggerService,
   ) {
     this.logger.setContext(InvoicePricingService.name);
@@ -45,42 +51,34 @@ export class InvoicePricingService {
     columns: InvoiceColumnPositions,
   ): Promise<ReadonlyMap<number, InvoiceRowPricing>> {
     const matched = matches.filter((match) => match.trip !== null);
-    const pricingByTrip = await this.effectivePricing.findForTrips([
-      ...new Set(matched.map((match) => match.trip!.id)),
+    const tripIds = [...new Set(matched.map((match) => match.trip!.id))];
+    const [pricingByTrip, ratesByTrip] = await Promise.all([
+      this.effectivePricing.findForTrips(tripIds),
+      this.fuelRates.findForTrips(tripIds),
     ]);
 
     const byRow = new Map<number, InvoiceRowPricing>();
-    const context = {
-      tariefColumnLetter: toColumnLetter(columns.tarief ?? 0),
+    const tariefColumnLetter = toColumnLetter(columns.tarief ?? 0);
+    const tripOfRow = new Map(matched.map((match) => [match.row.rowNumber, match.trip!.id]));
+    const pricingOfRow = (rowNumber: number) => {
+      const tripId = tripOfRow.get(rowNumber);
+
+      return tripId === undefined ? null : (pricingByTrip.get(tripId) ?? null);
     };
 
-    for (const [, line] of this.groupByTrip(matched)) {
-      const pricing = pricingByTrip.get(line[0].trip!.id);
-
-      /*
-       * A Trip that has never been priced has no figures to compare against.
-       * That is an ordinary state — a Trip is priced when it is closed, and a
-       * snapshot can be absent — so the line is left uncompared rather than
-       * corrected towards zeros nobody calculated.
-       */
-      if (!pricing) {
-        for (const match of line) {
-          byRow.set(match.row.rowNumber, {
-            rowNumber: match.row.rowNumber,
-            status: InvoicePricingStatus.NOT_COMPARED,
-            differences: [],
-          });
-        }
-
-        continue;
-      }
-
-      for (const row of reconcileLine(
-        line.map((match) => match.row),
+    for (const [tripId, rows] of this.groupByTrip(matched)) {
+      const pricing = pricingByTrip.get(tripId) ?? null;
+      const outcomes = reconcileTripRows({
+        rows,
         pricing,
-        context,
-      )) {
-        byRow.set(row.rowNumber, row);
+        reliability: assessPriceReliability(rows[0].trip!, pricing),
+        tariefColumnLetter,
+        fuelRate: ratesByTrip.get(tripId) ?? null,
+        pricingOfRow,
+      });
+
+      for (const outcome of outcomes) {
+        byRow.set(outcome.rowNumber, outcome);
       }
     }
 
@@ -91,23 +89,35 @@ export class InvoicePricingService {
           rowNumber: match.row.rowNumber,
           status: InvoicePricingStatus.NOT_COMPARED,
           differences: [],
+          reliability: null,
         });
       }
     }
 
-    this.logger.log("Invoice pricing reconciled", {
-      comparedLines: matched.length,
-      pricedTrips: pricingByTrip.size,
-      // Counts only: what a transport costs is commercial data and is not logged.
-      correctedRows: [...byRow.values()].filter(
-        (row) => row.status === InvoicePricingStatus.PRICING_CORRECTED,
-      ).length,
-      notDistributableRows: [...byRow.values()].filter(
-        (row) => row.status === InvoicePricingStatus.NOT_DISTRIBUTABLE,
-      ).length,
-    });
+    this.logReconciled(matched.length, pricingByTrip.size, byRow);
 
     return byRow;
+  }
+
+  private logReconciled(
+    comparedLines: number,
+    pricedTrips: number,
+    byRow: ReadonlyMap<number, InvoiceRowPricing>,
+  ): void {
+    const count = (status: InvoicePricingStatus) =>
+      [...byRow.values()].filter((row) => row.status === status).length;
+
+    this.logger.log("Invoice pricing reconciled", {
+      comparedLines,
+      pricedTrips,
+      // Counts only: what a transport costs is commercial data and is not logged.
+      correctedRows: count(InvoicePricingStatus.PRICING_CORRECTED),
+      invoiceHigherRows: count(InvoicePricingStatus.INVOICE_HIGHER),
+      notDistributableRows: count(InvoicePricingStatus.NOT_DISTRIBUTABLE),
+      priceUnreliableRows: count(InvoicePricingStatus.PRICE_UNRELIABLE),
+      amountUnreadableRows: count(InvoicePricingStatus.AMOUNT_UNREADABLE),
+      combinationReviewRows: count(InvoicePricingStatus.COMBINATION_REVIEW),
+    });
   }
 
   /**

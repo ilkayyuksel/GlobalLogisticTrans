@@ -4,32 +4,33 @@ import { normalizeContainerNumber } from "@tms/parser";
 
 import { toIsoDate, toUtcDate } from "../../common/dates";
 import { AppLoggerService } from "../../logger/app-logger.service";
-import type { EffectivePricing } from "../../trip-pricing/effective-pricing";
-import { EffectivePricingService } from "../../trip-pricing/effective-pricing.service";
-import { TripExportLabelsService } from "../../trip-export/trip-export-labels.service";
+import {
+  EffectivePricingService,
+  type CurrentTripPricing,
+} from "../../trip-pricing/effective-pricing.service";
 import { TripRepository } from "../../trips/trip.repository";
 import { toTripRoute } from "../../trips/trip-route";
 import type { InvoiceSheetRow } from "../workbook/invoice-sheet";
+import {
+  NO_BLOCKING,
+  blockingRowsFor,
+  type BlockingIdentities,
+} from "./missing-trip-blocking";
 
 /**
  * A finished transport the invoice does not mention.
  *
  * It carries the Trip, what this system holds it is worth, and the route as the
  * Trip domain itself derives it — nothing is assembled here that already has an
- * answer elsewhere.
+ * answer elsewhere. What its line SAYS — Remarks, the Combination marker — and
+ * whether its price can be written are decided in `added-rows.service.ts`.
  */
 export interface MissingTrip {
   readonly trip: Trip;
-  /** The effective pricing, or null when the Trip has never been priced. */
-  readonly pricing: EffectivePricing | null;
+  /** The stored pricing, or null when the Trip has never been priced. */
+  readonly pricing: CurrentTripPricing | null;
   /** `Quay 869 -> ZEMST`, as `toTripRoute` derives it. */
   readonly route: string;
-  /**
-   * What the Remarks column says about it — its Custom Properties, TAR when
-   * charged, its waiting window, every Cost Confirmation — in the exports' own
-   * vocabulary. Empty when there is nothing to say.
-   */
-  readonly remarks: string;
 }
 
 /**
@@ -42,9 +43,12 @@ export interface MissingTrip {
  *     or DELETED one is never added;
  *   * not paid — a transport already settled belongs to a week that was
  *     invoiced before;
- *   * planned inside the days the invoice covers, which come from the Planning
- *     date values in the document and never from its file name;
- *   * and its identity appears on NO line of the document.
+ *   * planned (its CURRENT `planningDate`) Monday to Friday of the ISO week the
+ *     document's transport lines are in — see `toInvoicePeriod`; never read
+ *     from the file name;
+ *   * its identity appears on NO line of the document;
+ *   * and no UNRESOLVED line could be it — see `missing-trip-blocking.ts`. Such
+ *     a transport is reported as blocked rather than added.
  *
  * ── WHY EVERY LINE COUNTS, NOT ONLY THE MATCHED ONES ────────────────────────
  * A line that found no Trip, one whose Trip is unfinished and one that matched
@@ -70,7 +74,6 @@ export class MissingTripsService {
   constructor(
     private readonly trips: TripRepository,
     private readonly effectivePricing: EffectivePricingService,
-    private readonly exportLabels: TripExportLabelsService,
     private readonly logger: AppLoggerService,
   ) {
     this.logger.setContext(MissingTripsService.name);
@@ -81,11 +84,13 @@ export class MissingTripsService {
     rows: readonly InvoiceSheetRow[],
     /** Every Trip the match resolved a line to, or named as a candidate. */
     namedTripIds: ReadonlySet<string> = new Set(),
-  ): Promise<readonly MissingTrip[]> {
-    // No line, no period, nothing to be missing FROM: an empty document is not
-    // a claim that a week went uninvoiced.
+    /** What the document's unresolved lines name — see `missing-trip-blocking.ts`. */
+    blocking: BlockingIdentities = NO_BLOCKING,
+  ): Promise<MissingTripsOutcome> {
+    // No transport line, or lines in several ISO weeks: which week is meant is
+    // not in the document, and nothing is called missing on a guess.
     if (period === null) {
-      return [];
+      return { missing: [], blocked: [] };
     }
 
     const candidates = await this.trips.findClosedUnpaidBetween({
@@ -94,7 +99,7 @@ export class MissingTripsService {
     });
 
     const stated = new Set(rows.map((row) => toRowIdentity(row)));
-    const missing = candidates.filter((trip) => {
+    const unstated = candidates.filter((trip) => {
       const identity = toTripIdentity(trip);
 
       return (
@@ -103,32 +108,51 @@ export class MissingTripsService {
         !namedTripIds.has(trip.id)
       );
     });
+    const blocked = unstated
+      .map((trip) => ({ trip, blockingRowNumbers: blockingRowsFor(trip, blocking) }))
+      .filter((candidate) => candidate.blockingRowNumbers.length > 0);
+    const blockedIds = new Set(blocked.map((candidate) => candidate.trip.id));
+    const missing = unstated.filter((trip) => !blockedIds.has(trip.id));
 
-    // One pricing read and one label read for all of them, as the rest of this
-    // module does. The invoice is Dutch, so the documents' own waiting word.
-    const missingIds = missing.map((trip) => trip.id);
-    const [pricingByTrip, labelsByTrip] = await Promise.all([
-      this.effectivePricing.findForTrips(missingIds),
-      this.exportLabels.findForTrips(missingIds),
-    ]);
+    // One pricing read for all of them, as the rest of this module does.
+    const pricingByTrip = await this.effectivePricing.findForTrips(
+      missing.map((trip) => trip.id),
+    );
 
     this.logger.log("Missing finished transports found", {
       periodFrom: period.from,
       periodTo: period.to,
       closedUnpaidInPeriod: candidates.length,
-      statedByTheInvoice: candidates.length - missing.length,
+      statedByTheInvoice: candidates.length - unstated.length,
       missing: missing.length,
+      blockedByAnUnresolvedLine: blocked.length,
       // Counts only: what a transport is worth is commercial data.
       pricedMissing: pricingByTrip.size,
     });
 
-    return missing.map((trip) => ({
-      trip,
-      pricing: pricingByTrip.get(trip.id) ?? null,
-      route: toRouteLabel(trip),
-      remarks: labelsByTrip.get(trip.id)?.remarks ?? "",
-    }));
+    return {
+      missing: missing.map((trip) => ({
+        trip,
+        pricing: pricingByTrip.get(trip.id) ?? null,
+        route: toRouteLabel(trip),
+      })),
+      blocked,
+    };
   }
+}
+
+/**
+ * A finished, unpaid transport the invoice does not state, which is NOT added
+ * because an unresolved line of the document could be that very transport.
+ */
+export interface BlockedMissingTrip {
+  readonly trip: Trip;
+  readonly blockingRowNumbers: readonly number[];
+}
+
+export interface MissingTripsOutcome {
+  readonly missing: readonly MissingTrip[];
+  readonly blocked: readonly BlockedMissingTrip[];
 }
 
 /**

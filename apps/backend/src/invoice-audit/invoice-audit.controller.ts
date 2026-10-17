@@ -29,16 +29,15 @@ import {
 /**
  * The weekly invoice check, and its final processing.
  *
- * ── TWO ENDPOINTS, AND THE DIFFERENCE IS THE POINT ──────────────────────────
- * `check` READS. The customer's workbook goes up, the result comes back, and
- * nothing in this system or in that file changes — an operator can run it as
- * often as they like, on anything, without consequence.
+ * ── NEITHER OF THESE PAYS ANYTHING ──────────────────────────────────────────
+ * `check` READS and previews. The customer's workbook goes up, the result comes
+ * back, and nothing in this system or in that file changes — an operator can
+ * run it as often as they like, on anything, without consequence.
  *
- * `apply` DOES IT. The same reading, then the corrected document and the
- * payments it implies, in that order: the file is produced and serialised
- * first, and only once those bytes exist is anything marked paid. It answers
- * with the file, so the browser makes one request rather than a correction call
- * followed by a hundred payment calls.
+ * `apply` answers with the corrected document — the same reading, written into
+ * the customer's own file. It changes nothing in this system either.
+ *
+ * Settling is a third, separate confirmation: `InvoicePaymentController`.
  *
  * There is no GET and no history. The result of a check is the file the
  * operator is holding plus what this answered about it; storing a copy would be
@@ -57,7 +56,7 @@ export class InvoiceAuditController {
   @ApiOperation({
     summary: "Check a customer weekly invoice against the Trips in this system",
     description:
-      "Reads an uploaded .xlsx weekly invoice and reports, per line, whether this system holds a CLOSED Trip for it. A line is identified by exactly three values — Planning date, Bookingnr and Container nr. — with the container compared in its normalised form, and there is no fallback to fewer of them. Nothing is written: no price is corrected, no Trip is marked paid, and the uploaded file is neither stored nor modified.",
+      "Reads an uploaded .xlsx weekly invoice and previews its correction: per line, the Trip it was matched to, the price comparison and the cells the corrected document would write; the lines marked yellow; the transports added; the totals before and after; and which transports a payment confirmation may settle. Nothing is written: no Trip is marked paid, and the uploaded file is neither stored nor modified.",
   })
   @ApiBody({
     required: true,
@@ -89,7 +88,7 @@ export class InvoiceAuditController {
   }
 
   /**
-   * The final processing: the corrected document, and the payments it settles.
+   * The corrected document.
    *
    * ── IT IS THEIR FILE, CORRECTED ───────────────────────────────────────────
    * Not a new export: the uploaded workbook itself, with the price cells a
@@ -98,24 +97,22 @@ export class InvoiceAuditController {
    * hidden columns, formulas, totals row and summary block are the customer's
    * own and are not rebuilt.
    *
-   * ── AND IT SETTLES WHAT THE INVOICE COVERS ────────────────────────────────
-   * Every line that matched exactly one CLOSED Trip and whose pricing was
-   * reconciled marks that Trip paid — a corrected price included, because the
-   * correction is the answer. The transports ADDED below are not paid: they
-   * were not on the document the customer sent.
+   * ── AND IT PAYS NOTHING ───────────────────────────────────────────────────
+   * Producing the file is not a decision about money. Settling is confirmed
+   * separately, on `POST invoice-audit/payment`.
    *
    * The file is answered as bytes rather than in the envelope, so the browser
-   * can save it. What it did travels in headers beside it, which is what the
-   * screen reports; the detail is the `check` endpoint's own answer.
+   * can save it. What it did travels in headers beside it; the detail is the
+   * `check` endpoint's own answer.
    */
   @Post("apply")
   @HttpCode(HttpStatus.OK)
   @UseInterceptors(FileInterceptor("file"))
   @ApiConsumes("multipart/form-data")
   @ApiOperation({
-    summary: "Process a weekly invoice: correct it, complete it, and settle it",
+    summary: "Produce the corrected weekly invoice",
     description:
-      "Writes the differences into the uploaded workbook itself — only the amount cells of lines matched to exactly one CLOSED Trip, with the effective pricing of that Trip as the correct figure — adds the finished unpaid transports of the same period the invoice does not state, marks the unresolved lines yellow, and then marks the matched Trips paid. The file is produced and serialised BEFORE anything is paid, so a document that cannot be produced settles nothing. No row is moved, no Trip changes status, and nothing but `isPaid` is written.",
+      "Writes the previewed corrections into the uploaded workbook itself — raised amounts, corrected numbers and completed Remarks in red, the finished unpaid transports the invoice does not state as added lines, the lines needing review in yellow — and answers with the file. Nothing in this system changes: no Trip is marked paid.",
   })
   @ApiBody({
     required: true,
@@ -127,7 +124,7 @@ export class InvoiceAuditController {
   })
   @ApiOkResponse({
     description:
-      "The corrected .xlsx workbook. What the run did travels in the X-Invoice-* headers: paid Trips, Trips already paid, rows added, cells corrected and rows marked.",
+      "The corrected .xlsx workbook. What the run wrote travels in the X-Invoice-* headers: rows added, cells corrected and rows marked.",
   })
   @ApiBadRequestResponse({
     description: "The same refusals the check answers with.",
@@ -165,8 +162,6 @@ export class InvoiceAuditController {
      * read them at all.
      */
     const counts: Record<string, number> = {
-      "X-Invoice-Paid-Trips": applied.paidTrips,
-      "X-Invoice-Already-Paid": applied.alreadyPaid,
       "X-Invoice-Rows-Added": applied.rowsAdded,
       "X-Invoice-Rows-Marked": applied.rowsMarked,
       "X-Invoice-Cells-Corrected": applied.cellsWritten,

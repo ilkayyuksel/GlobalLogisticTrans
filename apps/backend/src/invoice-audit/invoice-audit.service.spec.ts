@@ -1,17 +1,10 @@
 import { TripStatus } from "@prisma/client";
 
-import { TripExportLabelsService } from "../trip-export/trip-export-labels.service";
 import { AppLoggerService } from "../logger/app-logger.service";
-import { EffectivePricingService } from "../trip-pricing/effective-pricing.service";
-import { TripRepository } from "../trips/trip.repository";
 import { buildInvoiceWorkbook } from "./__fixtures__/invoice-workbook";
 import { InvalidInvoiceFileException } from "./exceptions/invoice-audit.exceptions";
 import { InvoiceAuditService } from "./invoice-audit.service";
-import { InvoiceRowMatchingService } from "./matching/invoice-row-matching.service";
-import { MissingTripsService } from "./missing/missing-trips.service";
-import { InvoicePricingService } from "./pricing/invoice-pricing.service";
-import { InvoiceSheetReader } from "./workbook/invoice-sheet.reader";
-import { InvoiceSheetWriter } from "./workbook/invoice-sheet.writer";
+import { buildInvoiceAuditService } from "./__fixtures__/invoice-audit-service";
 
 /**
  * The check, from an uploaded file to the answer a screen shows.
@@ -39,9 +32,6 @@ function uploaded(buffer: Buffer, originalname = "week 13 - 2026 GLT.xlsx") {
   return { buffer, originalname, size: buffer.length };
 }
 
-/** The export words: none unless a test supplies them. */
-const exportLabels = { findForTrips: jest.fn(async () => new Map()) };
-
 describe("InvoiceAuditService", () => {
   let trips: {
     findManyForInvoice: jest.Mock;
@@ -68,23 +58,11 @@ describe("InvoiceAuditService", () => {
       error: jest.fn(),
     } as unknown as AppLoggerService;
 
-    service = new InvoiceAuditService(
-      new InvoiceSheetReader(logger),
-      new InvoiceRowMatchingService(trips as unknown as TripRepository, logger),
-      new InvoicePricingService(
-        effectivePricing as unknown as EffectivePricingService,
-        logger,
-      ),
-      new MissingTripsService(
-        trips as unknown as TripRepository,
-        effectivePricing as unknown as EffectivePricingService,
-        exportLabels as unknown as TripExportLabelsService,
-        logger,
-      ),
-      new InvoiceSheetWriter(logger),
-      trips as unknown as TripRepository,
+    service = buildInvoiceAuditService({
+      trips,
+      effectivePricing,
       logger,
-    );
+    });
   });
 
   describe("what it accepts", () => {

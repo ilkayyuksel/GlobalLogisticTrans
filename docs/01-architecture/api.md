@@ -263,3 +263,43 @@ reads the source and the targets inside one transaction and saves each target
 through the same Combination update an inline leg edit uses, so there is no
 second way prices are written. Both answer with the source leg, its values and
 `targetCombinationGroupIds`; an empty list means nothing was changed.
+
+
+# Weekly invoice check
+
+`POST /api/v1/invoice-audit/check` — multipart `file`
+`POST /api/v1/invoice-audit/apply` — multipart `file`
+`POST /api/v1/invoice-audit/payment` — multipart `file`, `tripIds`
+
+Three steps, and only the last one changes anything in the system. The rules
+behind them are in `docs/02-business/invoice_audit.md`.
+
+- **check** answers the preview: per line the match, the price comparison and
+  the cells the corrected document would write; `markedRowNumbers` (yellow);
+  the added transports; `totals` before and after; and `payments` — every
+  transport the invoice charges, with `payable`, `category` (`UNCHANGED`,
+  `RAISED`, `INVOICE_HIGHER`), `reasons` and `alreadyPaid`. It computes the
+  totals by writing the corrections into an in-memory copy of the upload, the
+  same path `apply` uses; that copy is never returned.
+- **apply** answers the corrected `.xlsx` as bytes, with `X-Invoice-Rows-Added`,
+  `X-Invoice-Rows-Marked` and `X-Invoice-Cells-Corrected` beside it. It pays
+  nothing. The bytes are verified against the change plan first; a file that
+  differs by anything unplanned is refused with **500** and the differing
+  cells in `details` — no file is answered.
+- **payment** takes the ORIGINAL file again and `tripIds`, a JSON array of Trip
+  ids sent as a form field:
+
+  ```
+  tripIds=["3f1b0d2e-0000-4000-8000-000000000001"]
+  ```
+
+  The document is examined afresh and its corrected file produced and
+  verified again (a refused file pays nothing). Every chosen id must be payable on it now,
+  or the request is refused with **409** — `details` names each refused id and
+  its reasons (`NOT_ON_INVOICE`, `NOT_CLOSED`, `PRICE_NOT_SETTLED`, …) — and
+  nothing is paid. Otherwise the chosen Trips not yet paid are marked paid in
+  one transaction whose update repeats the conditions (CLOSED, not yet paid);
+  a Trip that changed in between rolls the whole transaction back. Chosen
+  Trips already paid are left as they are, so confirming twice changes
+  nothing. Answers `{ paidTrips, alreadyPaid, paidTripIds }`. A selection that
+  is not a non-empty, duplicate-free list of at most 500 UUIDs is a 400.

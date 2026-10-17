@@ -1,31 +1,22 @@
 import ExcelJS from "exceljs";
 import { Prisma, TripStatus } from "@prisma/client";
 
-import { TripExportLabelsService } from "../trip-export/trip-export-labels.service";
 import { AppLoggerService } from "../logger/app-logger.service";
-import type { EffectivePricing } from "../trip-pricing/effective-pricing";
-import { EffectivePricingService } from "../trip-pricing/effective-pricing.service";
-import { TripRepository } from "../trips/trip.repository";
+import { type CurrentTripPricing } from "../trip-pricing/effective-pricing.service";
 import { buildInvoiceWorkbook } from "./__fixtures__/invoice-workbook";
+import { reliablyPriced } from "./__fixtures__/invoice-pricing";
 import { InvoiceAuditService } from "./invoice-audit.service";
-import { InvoiceRowMatchingService } from "./matching/invoice-row-matching.service";
-import { MissingTripsService } from "./missing/missing-trips.service";
-import { InvoicePricingService } from "./pricing/invoice-pricing.service";
-import { InvoiceSheetReader } from "./workbook/invoice-sheet.reader";
 import { InvoiceSheetWriter } from "./workbook/invoice-sheet.writer";
+import { buildInvoiceAuditService } from "./__fixtures__/invoice-audit-service";
 
 /**
- * The final processing: the corrected document, and the payments it settles.
+ * The corrected document, and the preview that comes with it.
  *
  * ── THE TWO RULES THIS FILE EXISTS FOR ──────────────────────────────────────
- * WHICH transports are paid — a line of the customer's own document that
- * matched one CLOSED Trip and whose pricing was reconciled, and nothing else —
- * and WHEN: only after the whole file has been produced, so a document this
- * system cannot write settles nothing.
- *
- * The transports ADDED below the invoice are the case worth stating twice: they
- * are written into the file and deliberately left unpaid, because they were not
- * on the document the customer sent.
+ * Producing the file changes NOTHING in this system — nothing is paid, no Trip
+ * is touched — and its preview says which transports a separate confirmation
+ * may settle: a line of the customer's own document that matched one CLOSED
+ * Trip and whose pricing was reconciled, and nothing else.
  */
 
 const MONDAY = new Date(Date.UTC(2026, 2, 23));
@@ -36,10 +27,10 @@ const COLUMN = {
   fuel: 13,
 } as const;
 
-function pricing(overrides: Record<string, string> = {}): EffectivePricing {
+function pricing(overrides: Record<string, string> = {}): CurrentTripPricing {
   const amount = (key: string) => new Prisma.Decimal(overrides[key] ?? "0");
 
-  return {
+  return reliablyPriced({
     components: [],
     tarief: amount("tarief"),
     brandstof: amount("brandstof"),
@@ -49,7 +40,7 @@ function pricing(overrides: Record<string, string> = {}): EffectivePricing {
     others: amount("others"),
     ek: amount("ek"),
     totaal: amount("totaal"),
-  };
+  });
 }
 
 function trip(
@@ -87,9 +78,6 @@ function line(bookingNumber: string, containerNumber: string, amounts: Record<st
   };
 }
 
-/** The export words: none unless a test supplies them. */
-const exportLabels = { findForTrips: jest.fn(async () => new Map()) };
-
 describe("processing a weekly invoice", () => {
   let trips: {
     findManyForInvoice: jest.Mock;
@@ -117,23 +105,12 @@ describe("processing a weekly invoice", () => {
 
     writer = new InvoiceSheetWriter(logger);
 
-    service = new InvoiceAuditService(
-      new InvoiceSheetReader(logger),
-      new InvoiceRowMatchingService(trips as unknown as TripRepository, logger),
-      new InvoicePricingService(
-        effectivePricing as unknown as EffectivePricingService,
-        logger,
-      ),
-      new MissingTripsService(
-        trips as unknown as TripRepository,
-        effectivePricing as unknown as EffectivePricingService,
-        exportLabels as unknown as TripExportLabelsService,
-        logger,
-      ),
-      writer,
-      trips as unknown as TripRepository,
+    service = buildInvoiceAuditService({
+      trips,
+      effectivePricing,
       logger,
-    );
+      writer,
+    });
   });
 
   async function apply(file: Buffer) {
@@ -149,12 +126,18 @@ describe("processing a weekly invoice", () => {
     return { applied, sheet: workbook.worksheets[0] };
   }
 
-  /** The ids this run marked paid. */
-  const paidIds = () =>
-    (trips.setPaidMany.mock.calls[0]?.[0] ?? []) as readonly string[];
+  /** The Trips the preview offers for payment. */
+  const payableIds = (applied: { result: { payments: { tripId: string; payable: boolean }[] } }) =>
+    applied.result.payments.filter((payment) => payment.payable).map((payment) => payment.tripId);
 
-  describe("which transports it settles", () => {
-    it("pays a line whose price was already right", async () => {
+  /**
+   * ── THE CORRECTED FILE PAYS NOTHING ──────────────────────────────────────
+   * Producing the document is not a decision about money; the operator
+   * confirms payment separately (`payment/invoice-payment.service.spec.ts`).
+   * What the preview does say is which transports that confirmation may settle.
+   */
+  describe("which transports the preview offers for payment", () => {
+    it("offers a line whose price was already right", async () => {
       trips.findManyForInvoice.mockResolvedValue([
         trip("trip-1", "DUBANR2718284", "EUCU4581604"),
       ]);
@@ -166,13 +149,13 @@ describe("processing a weekly invoice", () => {
         await buildInvoiceWorkbook({ lines: [line("DUBANR2718284", "EUCU 4581604")] }),
       );
 
-      expect(paidIds()).toEqual(["trip-1"]);
-      expect(applied.paidTrips).toBe(1);
+      expect(payableIds(applied)).toEqual(["trip-1"]);
+      expect(applied.result.payments[0].category).toBe("UNCHANGED");
       expect(applied.result.rows[0].pricingStatus).toBe("MATCHED_NO_CHANGES");
     });
 
     /** A wrong price is a reason to correct the invoice, not to leave it unpaid. */
-    it("pays a line whose price it had to correct", async () => {
+    it("offers a line whose price it had to correct", async () => {
       trips.findManyForInvoice.mockResolvedValue([
         trip("trip-1", "DUBANR2718284", "EUCU4581604"),
       ]);
@@ -184,18 +167,12 @@ describe("processing a weekly invoice", () => {
         await buildInvoiceWorkbook({ lines: [line("DUBANR2718284", "EUCU 4581604")] }),
       );
 
-      expect(paidIds()).toEqual(["trip-1"]);
-      expect(applied.result.rows[0].pricingStatus).toBe("PRICING_CORRECTED");
-      // And the document really was corrected before anything was paid.
+      expect(payableIds(applied)).toEqual(["trip-1"]);
+      expect(applied.result.payments[0].category).toBe("RAISED");
       expect(sheet.getRow(2).getCell(COLUMN.tarief).value).toBe(425);
     });
 
     it.each([
-      [
-        "NOT_FOUND",
-        [] as unknown[],
-        {},
-      ],
       [
         "NOT_FINISHED",
         [trip("open-1", "DUBANR2718284", "EUCU4581604", { status: TripStatus.OPEN })],
@@ -209,7 +186,7 @@ describe("processing a weekly invoice", () => {
         ],
         { "closed-a": pricing({ tarief: "370" }), "closed-b": pricing({ tarief: "370" }) },
       ],
-    ])("pays nothing for a %s line", async (status, candidates, prices) => {
+    ])("offers nothing for a %s line", async (status, candidates, prices) => {
       trips.findManyForInvoice.mockResolvedValue(candidates);
       effectivePricing.findForTrips.mockResolvedValue(new Map(Object.entries(prices)));
 
@@ -218,15 +195,14 @@ describe("processing a weekly invoice", () => {
       );
 
       expect(applied.result.rows[0].status).toBe(status);
-      expect(applied.paidTrips).toBe(0);
-      expect(paidIds()).toEqual([]);
+      expect(payableIds(applied)).toEqual([]);
     });
 
     /**
      * A difference no cell may carry is a question for the customer, so the
      * transport is not settled on it either.
      */
-    it("pays nothing for a line whose difference could not be placed", async () => {
+    it("offers nothing for a line whose difference could not be placed", async () => {
       trips.findManyForInvoice.mockResolvedValue([
         trip("trip-1", "DUBANR2718284", "EUCU4581604"),
       ]);
@@ -244,23 +220,14 @@ describe("processing a weekly invoice", () => {
       );
 
       expect(applied.result.rows[0].pricingStatus).toBe("NOT_DISTRIBUTABLE");
-      expect(applied.paidTrips).toBe(0);
+      expect(applied.result.payments[0]).toMatchObject({
+        payable: false,
+        reasons: expect.arrayContaining(["PRICE_NOT_SETTLED", "LINE_MARKED"]),
+      });
     });
 
-    it("pays nothing for a row that states too little to be a line", async () => {
-      const { applied } = await apply(
-        await buildInvoiceWorkbook({
-          lines: [],
-          incompleteLines: [[null, "GLT", null, null, "ANRDUB2725107"]],
-        }),
-      );
-
-      expect(applied.result.incompleteRowNumbers).toEqual([2]);
-      expect(applied.paidTrips).toBe(0);
-    });
-
-    /** One transport charged on two lines is settled once. */
-    it("pays a transport once however many lines charge it", async () => {
+    /** One transport charged on two lines is one entry, with both rows. */
+    it("lists a transport once however many lines charge it", async () => {
       trips.findManyForInvoice.mockResolvedValue([
         trip("trip-1", "DUBANR2718284", "EUCU4581604"),
       ]);
@@ -268,7 +235,7 @@ describe("processing a weekly invoice", () => {
         new Map([["trip-1", pricing({ tarief: "370", brandstof: "37", ek: "200" })]]),
       );
 
-      await apply(
+      const { applied } = await apply(
         await buildInvoiceWorkbook({
           lines: [
             line("DUBANR2718284", "EUCU 4581604", { ek: 200 }),
@@ -277,48 +244,11 @@ describe("processing a weekly invoice", () => {
         }),
       );
 
-      expect(paidIds()).toEqual(["trip-1"]);
+      expect(applied.result.payments).toHaveLength(1);
+      expect(applied.result.payments[0]).toMatchObject({ payable: true, rowNumbers: [2, 3] });
     });
-  });
 
-  describe("the transports it adds", () => {
-    /**
-     * ── ADDED, AND DELIBERATELY UNPAID ──────────────────────────────────────
-     * They were not on the invoice the customer sent, so nothing has been paid
-     * for them. They are written into the file so the next invoice is complete.
-     */
-    it("adds a missing transport without settling it", async () => {
-      trips.findManyForInvoice.mockResolvedValue([
-        trip("trip-1", "DUBANR2718284", "EUCU4581604"),
-      ]);
-      trips.findClosedUnpaidBetween.mockResolvedValue([
-        trip("missing-1", "BELANR2720016", "EUCU2451828"),
-      ]);
-      effectivePricing.findForTrips.mockResolvedValue(
-        new Map([
-          ["trip-1", pricing({ tarief: "370", brandstof: "37" })],
-          ["missing-1", pricing({ tarief: "517.20", brandstof: "51.72" })],
-        ]),
-      );
-
-      const { applied, sheet } = await apply(
-        await buildInvoiceWorkbook({ lines: [line("DUBANR2718284", "EUCU 4581604")] }),
-      );
-
-      expect(applied.rowsAdded).toBe(1);
-      // Where the report says it went — below the summary block.
-      const addedRow = applied.result.missingTrips[0].rowNumber;
-      expect(sheet.getRow(addedRow).getCell(COLUMN.bookingNumber).value).toBe(
-        "BELANR2720016",
-      );
-      // Only the invoice's own transport is settled.
-      expect(paidIds()).toEqual(["trip-1"]);
-      expect(paidIds()).not.toContain("missing-1");
-    });
-  });
-
-  describe("running it twice", () => {
-    it("counts a transport that was already paid rather than paying it again", async () => {
+    it("shows a transport already paid as re-invoiced", async () => {
       trips.findManyForInvoice.mockResolvedValue([
         trip("trip-1", "DUBANR2718284", "EUCU4581604", { isPaid: true }),
       ]);
@@ -330,26 +260,41 @@ describe("processing a weekly invoice", () => {
         await buildInvoiceWorkbook({ lines: [line("DUBANR2718284", "EUCU 4581604")] }),
       );
 
-      expect(applied.alreadyPaid).toBe(1);
-      expect(applied.paidTrips).toBe(0);
-      expect(paidIds()).toEqual([]);
+      expect(applied.result.payments[0]).toMatchObject({ payable: true, alreadyPaid: true });
     });
   });
 
-  describe("the order of the work", () => {
-    /**
-     * ── THE FILE FIRST, ALWAYS ──────────────────────────────────────────────
-     * A document this system cannot produce must settle nothing: an operator
-     * can retry that. Paying first and then failing would leave a week marked
-     * paid with nothing to send.
-     */
-    it("settles nothing when the document cannot be produced", async () => {
+  /** B1 — producing the corrected document writes nothing to this system. */
+  describe("what the corrected file changes in this system", () => {
+    it("pays nothing and touches no Trip", async () => {
+      const write = jest.fn();
+
+      Object.assign(trips, { update: write, create: write, setPaid: write, delete: write });
       trips.findManyForInvoice.mockResolvedValue([
         trip("trip-1", "DUBANR2718284", "EUCU4581604"),
       ]);
+      trips.findClosedUnpaidBetween.mockResolvedValue([
+        trip("missing-1", "BELANR2720016", "EUCU2451828"),
+      ]);
       effectivePricing.findForTrips.mockResolvedValue(
-        new Map([["trip-1", pricing({ tarief: "370", brandstof: "37" })]]),
+        new Map([
+          ["trip-1", pricing({ tarief: "425", brandstof: "42.50" })],
+          ["missing-1", pricing({ tarief: "517.20", brandstof: "51.72" })],
+        ]),
       );
+
+      const { applied, sheet } = await apply(
+        await buildInvoiceWorkbook({ lines: [line("DUBANR2718284", "EUCU 4581604")] }),
+      );
+      const addedRow = applied.result.missingTrips[0].rowNumber!;
+
+      expect(applied.rowsAdded).toBe(1);
+      expect(sheet.getRow(addedRow).getCell(COLUMN.bookingNumber).value).toBe("BELANR2720016");
+      expect(trips.setPaidMany).not.toHaveBeenCalled();
+      expect(write).not.toHaveBeenCalled();
+    });
+
+    it("answers nothing when the document cannot be produced", async () => {
       jest.spyOn(writer, "apply").mockImplementation(() => {
         throw new Error("the workbook could not be written");
       });
@@ -361,78 +306,32 @@ describe("processing a weekly invoice", () => {
       await expect(
         service.apply({ buffer: file, originalname: "week.xlsx", size: file.length }),
       ).rejects.toThrow("the workbook could not be written");
-
-      expect(trips.setPaidMany).not.toHaveBeenCalled();
     });
+  });
 
-    it("reports no success when the payment fails", async () => {
+  /** The lines as received, and as the corrected file states them. */
+  describe("the totals before and after", () => {
+    it("adds up the raised amounts and the added lines", async () => {
       trips.findManyForInvoice.mockResolvedValue([
         trip("trip-1", "DUBANR2718284", "EUCU4581604"),
       ]);
-      effectivePricing.findForTrips.mockResolvedValue(
-        new Map([["trip-1", pricing({ tarief: "370", brandstof: "37" })]]),
-      );
-      trips.setPaidMany.mockRejectedValue(new Error("the database is gone"));
-
-      const file = await buildInvoiceWorkbook({
-        lines: [line("DUBANR2718284", "EUCU 4581604")],
-      });
-
-      await expect(
-        service.apply({ buffer: file, originalname: "week.xlsx", size: file.length }),
-      ).rejects.toThrow("the database is gone");
-    });
-
-    it("writes one statement for the whole invoice", async () => {
-      trips.findManyForInvoice.mockResolvedValue(
-        Array.from({ length: 20 }, (_value, index) =>
-          trip(`trip-${index}`, `ANRDUB${2725000 + index}`, `EUCU${4581000 + index}`),
-        ),
-      );
-      effectivePricing.findForTrips.mockResolvedValue(
-        new Map(
-          Array.from({ length: 20 }, (_value, index) => [
-            `trip-${index}`,
-            pricing({ tarief: "370", brandstof: "37" }),
-          ]),
-        ),
-      );
-
-      await apply(
-        await buildInvoiceWorkbook({
-          lines: Array.from({ length: 20 }, (_value, index) =>
-            line(`ANRDUB${2725000 + index}`, `EUCU ${4581000 + index}`),
-          ),
-        }),
-      );
-
-      expect(trips.setPaidMany).toHaveBeenCalledTimes(1);
-      expect(paidIds()).toHaveLength(20);
-    });
-
-    /** Payment writes one column. Nothing else on a Trip is reachable from here. */
-    it("touches nothing on a Trip but its payment", async () => {
-      const write = jest.fn();
-
-      Object.assign(trips, {
-        update: write,
-        create: write,
-        setPaid: write,
-        delete: write,
-      });
-      trips.findManyForInvoice.mockResolvedValue([
-        trip("trip-1", "DUBANR2718284", "EUCU4581604"),
+      trips.findClosedUnpaidBetween.mockResolvedValue([
+        trip("missing-1", "BELANR2720016", "EUCU2451828"),
       ]);
       effectivePricing.findForTrips.mockResolvedValue(
-        new Map([["trip-1", pricing({ tarief: "425", brandstof: "42.50" })]]),
+        new Map([
+          ["trip-1", pricing({ tarief: "425", brandstof: "37" })],
+          ["missing-1", pricing({ tarief: "100", brandstof: "10" })],
+        ]),
       );
 
-      await apply(
+      const { applied } = await apply(
         await buildInvoiceWorkbook({ lines: [line("DUBANR2718284", "EUCU 4581604")] }),
       );
+      const tarief = applied.result.totals.columns.find((column) => column.column === "Tarief");
 
-      expect(write).not.toHaveBeenCalled();
-      expect(trips.setPaidMany).toHaveBeenCalledWith(["trip-1"]);
+      expect(tarief).toEqual({ column: "Tarief", before: "370.00", after: "525.00" });
+      expect(applied.result.totals).toMatchObject({ before: "407.00", after: "572.00" });
     });
   });
 
@@ -483,12 +382,13 @@ describe("processing a weekly invoice", () => {
 
     it("does not mark the transports it added", async () => {
       const { sheet, applied } = await aWeekWithAProblem();
-      const addedRow = applied.result.missingTrips[0].rowNumber;
+      const addedRow = applied.result.missingTrips[0].rowNumber!;
 
       expect(sheet.getRow(addedRow).getCell(COLUMN.bookingNumber).value).toBe(
         "BELANR2720016",
       );
-      expect(fillOf(sheet, addedRow)).toBeUndefined();
+      // No fill: ExcelJS reads a styled cell without one back as pattern "none".
+      expect((fillOf(sheet, addedRow) as ExcelJS.FillPattern | undefined)?.pattern ?? "none").toBe("none");
     });
 
     /** A colour, and nothing else: the customer's own figures stay theirs. */

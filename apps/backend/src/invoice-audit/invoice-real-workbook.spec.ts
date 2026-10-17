@@ -2,20 +2,17 @@ import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 import ExcelJS from "exceljs";
-import { Prisma, TripStatus } from "@prisma/client";
+import { Prisma, Trip, TripStatus } from "@prisma/client";
 
-import { TripExportLabelsService } from "../trip-export/trip-export-labels.service";
 import { AppLoggerService } from "../logger/app-logger.service";
-import type { EffectivePricing } from "../trip-pricing/effective-pricing";
-import { EffectivePricingService } from "../trip-pricing/effective-pricing.service";
-import { TripRepository } from "../trips/trip.repository";
-import { InvoiceAuditService } from "./invoice-audit.service";
-import { InvoiceRowMatchingService } from "./matching/invoice-row-matching.service";
-import { MissingTripsService } from "./missing/missing-trips.service";
-import { InvoicePricingService } from "./pricing/invoice-pricing.service";
+import { type CurrentTripPricing } from "../trip-pricing/effective-pricing.service";
+import { reliablyPriced } from "./__fixtures__/invoice-pricing";
+import { invoiceReads } from "./__fixtures__/invoice-reads";
+import { noRemarks } from "./__fixtures__/invoice-remarks";
 import { AUDIT_MARKER_SHEET } from "./workbook/invoice-audit-marker";
+import { CORRECTED_TEXT_ARGB } from "./workbook/cell-marking";
 import { InvoiceSheetReader } from "./workbook/invoice-sheet.reader";
-import { InvoiceSheetWriter } from "./workbook/invoice-sheet.writer";
+import { buildInvoiceAuditService } from "./__fixtures__/invoice-audit-service";
 
 /**
  * The customer's REAL weekly invoice through the corrected-workbook writer.
@@ -45,10 +42,10 @@ const LAST_LINE = 99;
 
 const describeWithRealInvoice = existsSync(REAL_INVOICE) ? describe : describe.skip;
 
-function pricing(amounts: Record<string, string>): EffectivePricing {
+function pricing(amounts: Record<string, string>): CurrentTripPricing {
   const of = (key: string) => new Prisma.Decimal(amounts[key] ?? "0");
 
-  return {
+  return reliablyPriced({
     components: [],
     tarief: of("tarief"),
     brandstof: of("brandstof"),
@@ -58,7 +55,7 @@ function pricing(amounts: Record<string, string>): EffectivePricing {
     others: of("others"),
     ek: of("ek"),
     totaal: of("totaal"),
-  };
+  });
 }
 
 /** Two finished, unpaid transports of week 13 the invoice never mentions. */
@@ -103,9 +100,6 @@ const MISSING_PRICING = new Map([
   ["missing-2", pricing({ tarief: "150", brandstof: "19.5" })],
 ]);
 
-/** The export words: none unless a test supplies them. */
-const exportLabels = { findForTrips: jest.fn(async () => new Map()) };
-
 describeWithRealInvoice("the real week 13 invoice, corrected", () => {
   const logger = {
     setContext: jest.fn(),
@@ -134,8 +128,8 @@ describeWithRealInvoice("the real week 13 invoice, corrected", () => {
     options: { problemBooking?: string | null; missing?: typeof MISSING; paidIds?: string[] } = {},
   ) {
     const sheet = await new InvoiceSheetReader(logger).read(bytes, "week 13 - 2026 GLT.xlsx");
-    const lines = sheet.rows
-      .filter((row) => row.bookingNumber !== (options.problemBooking ?? null))
+    const known = sheet.rows.filter((row) => row.bookingNumber !== (options.problemBooking ?? null));
+    const lines = known
       .map((row, index) => ({
         id: `line-${index}`,
         status: TripStatus.CLOSED,
@@ -146,33 +140,47 @@ describeWithRealInvoice("the real week 13 invoice, corrected", () => {
         containerNumber: row.normalizedContainerNumber,
       }));
     const missing = options.missing ?? MISSING;
+    /*
+     * Every Cost Confirmation line (R41, `EC 3906728`) names a confirmation the
+     * database knows, for the Trip of that same line, at the amount the line
+     * charges — so it is resolved and agrees, and marks nothing.
+     */
+    const reads = invoiceReads();
+    const costLines = known
+      .filter((row) => row.costLine !== null)
+      .map((row) => ({
+        ccNumber: row.costLine!.ccNumbers[0],
+        trip: lines[known.indexOf(row)],
+        amount: row.amounts.ek!.value!,
+      }));
+    reads.findCostConfirmationsByNumbers.mockResolvedValue(
+      costLines.map((line) => ({ tripId: line.trip.id, ccNumber: line.ccNumber, amount: line.amount })),
+    );
+    reads.findTripsByIds.mockResolvedValue(costLines.map((line) => line.trip as unknown as Trip));
     const trips = {
       findManyForInvoice: jest.fn().mockResolvedValue(lines),
       findClosedUnpaidBetween: jest.fn().mockResolvedValue(missing),
       setPaidMany: jest.fn(async (ids: readonly string[]) => ids.length),
     };
     const effective = {
-      // Only the missing transports are priced: no line of the invoice is
-      // corrected, so every difference below is the writer's own doing.
+      /*
+       * Every line is reliably priced at NOTHING: the invoice then states more
+       * than this system on every line, and nothing is ever lowered — so no
+       * line of the invoice is written, and every difference below is the
+       * writer's own doing. The missing transports carry their own prices.
+       */
       findForTrips: jest.fn(async (ids: readonly string[]) =>
-        new Map(ids.filter((id) => MISSING_PRICING.has(id)).map((id) => [id, MISSING_PRICING.get(id)!])),
+        new Map(ids.map((id) => [id, MISSING_PRICING.get(id) ?? pricing({})])),
       ),
     };
 
-    const service = new InvoiceAuditService(
-      new InvoiceSheetReader(logger),
-      new InvoiceRowMatchingService(trips as unknown as TripRepository, logger),
-      new InvoicePricingService(effective as unknown as EffectivePricingService, logger),
-      new MissingTripsService(
-        trips as unknown as TripRepository,
-        effective as unknown as EffectivePricingService,
-        exportLabels as unknown as TripExportLabelsService,
-        logger,
-      ),
-      new InvoiceSheetWriter(logger),
-      trips as unknown as TripRepository,
+    const service = buildInvoiceAuditService({
+      trips,
+      effectivePricing: effective,
       logger,
-    );
+      reads,
+      remarks: noRemarks(),
+    });
 
     return service.apply({ buffer: bytes, originalname: "week 13 - 2026 GLT.xlsx", size: bytes.length });
   }
@@ -242,12 +250,18 @@ describeWithRealInvoice("the real week 13 invoice, corrected", () => {
       }
     });
 
-    /** A — an ordinary line keeps its formatting exactly. */
+    /**
+     * A — an ordinary line keeps its formatting exactly.
+     *
+     * Ordinary: outside every Combination. The pairs of this week (R2–R3,
+     * R23–R24, …) are ungrouped Trips in this suite's database, so they are
+     * GEEN COMBI and rightly carry red text.
+     */
     it("leaves an ordinary line's formatting exactly as it was", async () => {
       const applied = await run(originalBytes, { problemBooking: null });
       const sheet = (await load(applied.workbook)).worksheets[0];
 
-      for (const rowNumber of [3, 40, LAST_LINE]) {
+      for (const rowNumber of [4, 40, LAST_LINE]) {
         for (let column = 1; column <= 21; column += 1) {
           expect(sheet.getRow(rowNumber).getCell(column).style).toEqual(
             original.getRow(rowNumber).getCell(column).style,
@@ -296,7 +310,11 @@ describeWithRealInvoice("the real week 13 invoice, corrected", () => {
         expect(isYellow(added.getCell(column))).toBe(false);
       }
       expect(added.getCell(COLUMN.tarief).numFmt).toBe(original.getRow(40).getCell(COLUMN.tarief).numFmt);
-      expect(added.getCell(COLUMN.booking).font).toEqual(original.getRow(40).getCell(COLUMN.booking).font);
+      // The customer's font — in red, because the booking is new to them.
+      expect(added.getCell(COLUMN.booking).font).toEqual({
+        ...original.getRow(40).getCell(COLUMN.booking).font,
+        color: { argb: CORRECTED_TEXT_ARGB },
+      });
     });
 
     /** 7 — the effective pricing, and the document's own Fuel convention. */
@@ -405,8 +423,10 @@ describeWithRealInvoice("the real week 13 invoice, corrected", () => {
       expect(
         again.result.rows.filter((row) => row.status === "ADDED_MISSING").map((row) => row.rowNumber),
       ).toEqual([100, 101]);
-      expect(again.paidTripIds).not.toContain("missing-1");
-      expect(again.paidTripIds).not.toContain("missing-2");
+      const payable = again.result.payments.filter((payment) => payment.payable).map((payment) => payment.tripId);
+
+      expect(payable).not.toContain("missing-1");
+      expect(payable).not.toContain("missing-2");
     });
 
     /**

@@ -6,14 +6,24 @@ import { memoryStorage } from "multer";
 import type { EnvironmentVariables } from "../config/environment.variables";
 import { EffectivePricingModule } from "../trip-pricing/effective-pricing.module";
 import { TripExportModule } from "../trip-export/trip-export.module";
+import { TripPricingRepository } from "../trip-pricing/trip-pricing.repository";
 import { TripRepository } from "../trips/trip.repository";
+import { InvoiceAuditReadRepository } from "./invoice-audit-read.repository";
 import { InvoiceAuditController } from "./invoice-audit.controller";
 import { InvoiceAuditService } from "./invoice-audit.service";
+import { InvoiceExaminationService } from "./invoice-examination.service";
 import { InvoiceRowMatchingService } from "./matching/invoice-row-matching.service";
+import { AddedRowsService } from "./missing/added-rows.service";
 import { MissingTripsService } from "./missing/missing-trips.service";
+import { InvoicePaymentController } from "./payment/invoice-payment.controller";
+import { InvoicePaymentRepository } from "./payment/invoice-payment.repository";
+import { InvoicePaymentService } from "./payment/invoice-payment.service";
+import { InvoiceFuelRateReader } from "./pricing/invoice-fuel-rate.reader";
 import { InvoicePricingService } from "./pricing/invoice-pricing.service";
+import { InvoiceRemarksService } from "./remarks/invoice-remarks.service";
 import { InvoiceSheetReader } from "./workbook/invoice-sheet.reader";
 import { InvoiceSheetWriter } from "./workbook/invoice-sheet.writer";
+import { InvoiceWorkbookVerifier } from "./workbook/invoice-workbook-verifier";
 
 /** The unit the limit is reasoned about in, as the PDF upload states it too. */
 const BYTES_PER_MEGABYTE = 1024 * 1024;
@@ -23,7 +33,9 @@ const BYTES_PER_MEGABYTE = 1024 * 1024;
  *
  * ── IT OWNS NO TABLE ────────────────────────────────────────────────────────
  * Nothing here is stored. The module reads a document, asks the Trip side what
- * it holds, and answers — so its only dependency is the READ side of Trips.
+ * it holds, and answers — so it depends on the READ side of Trips. Its one
+ * write is `isPaid`, on the operator's separate confirmation, through
+ * `InvoicePaymentRepository`.
  *
  * `TripRepository` is provided directly rather than reached through
  * `TripService`: this needs one batched lookup by day and booking, which the
@@ -69,15 +81,34 @@ const BYTES_PER_MEGABYTE = 1024 * 1024;
       }),
     }),
   ],
-  controllers: [InvoiceAuditController],
+  controllers: [InvoiceAuditController, InvoicePaymentController],
   providers: [
     InvoiceAuditService,
+    InvoiceExaminationService,
+    InvoicePaymentService,
+    /*
+     * The one write of this module: `isPaid` on the Trips an operator
+     * confirmed, guarded and in one transaction — see the repository.
+     */
+    InvoicePaymentRepository,
     InvoiceSheetReader,
     InvoiceSheetWriter,
+    InvoiceWorkbookVerifier,
     InvoiceRowMatchingService,
     InvoicePricingService,
+    InvoiceFuelRateReader,
+    InvoiceAuditReadRepository,
+    InvoiceRemarksService,
     MissingTripsService,
+    AddedRowsService,
     TripRepository,
+    /*
+     * Read only, for the Fuel RATE a snapshot stored — see
+     * `InvoiceFuelRateReader`. The same instance-per-module precedent as
+     * `TripRepository` above: a stateless Prisma wrapper whose write methods
+     * nothing here calls.
+     */
+    TripPricingRepository,
   ],
 })
 export class InvoiceAuditModule {}

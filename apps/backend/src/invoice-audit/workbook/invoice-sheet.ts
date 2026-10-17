@@ -1,4 +1,10 @@
-import { isCalendarDate, toIsoDate } from "../../common/dates";
+import {
+  addDays,
+  isCalendarDate,
+  startOfWeekUtc,
+  toIsoDate,
+  toUtcDate,
+} from "../../common/dates";
 import type { AuditMarkedRow } from "./invoice-audit-marker";
 import type { InvoiceAmountCell } from "./invoice-amounts";
 import type { InvoiceColumn, InvoiceColumnPositions } from "./invoice-columns";
@@ -17,6 +23,11 @@ export interface InvoiceSheet {
   /** The sheet the rows were read from, as the workbook names it. */
   readonly sheetName: string;
   readonly headerRowNumber: number;
+  /**
+   * The last column the header row uses — `U`, Remarks, in every real week.
+   * A line marked for review is yellow from the first column to this one.
+   */
+  readonly lastColumnNumber: number;
   readonly columns: InvoiceColumnPositions;
   readonly rows: readonly InvoiceSheetRow[];
   /**
@@ -39,6 +50,14 @@ export interface InvoiceSheet {
    */
   readonly incompleteRowNumbers: readonly number[];
   /**
+   * The same rows, with what identity values they DO state.
+   *
+   * An incomplete row still names a booking or a container, and a transport it
+   * names must never be added to the invoice as missing: it may be the very
+   * transport the row was meant to be. See `missing-trip-blocking.ts`.
+   */
+  readonly incompleteRows: readonly IncompleteInvoiceRow[];
+  /**
    * The lines a previous run of this check added to this document, by row.
    *
    * Empty for a customer's own invoice. A line named here is one this system
@@ -49,6 +68,30 @@ export interface InvoiceSheet {
   readonly addedByAudit: ReadonlyMap<number, AuditMarkedRow>;
 }
 
+/** A row that states some identity values but not all three. */
+export interface IncompleteInvoiceRow {
+  readonly rowNumber: number;
+  /** Empty when the row states none. */
+  readonly bookingNumber: string;
+  /** Null when the row states none. */
+  readonly normalizedContainerNumber: string | null;
+}
+
+/**
+ * A line that charges ONE Cost Confirmation and nothing else.
+ *
+ * The customer prints it as its own line: an EK amount, `EC 4220981` in
+ * Remarks, and none of a transport's own details — no time, no container type,
+ * no start- or endpoint, no route, no Tarief. Every real example (week 13 R41,
+ * week 36 R36–R37, week 41 R53–R54 and R107) belongs to a transport whose own
+ * line is not on the same invoice; week 41 R53–R54 do not even state a
+ * container. See `supplementary-cost-line.ts`.
+ */
+export interface InvoiceCostLine {
+  /** Every `EC <nr>` the Remarks state, digits only. */
+  readonly ccNumbers: readonly string[];
+}
+
 /** One invoice line, exactly as the sheet states it. */
 export interface InvoiceSheetRow {
   /** The row's number in the workbook, 1-based, as Excel counts. */
@@ -56,10 +99,20 @@ export interface InvoiceSheetRow {
   /** `YYYY-MM-DD`, normalised from whatever the cell held. */
   readonly planningDate: string;
   readonly bookingNumber: string;
-  /** The container EXACTLY as the sheet spells it, spaces and all. */
+  /**
+   * The container EXACTLY as the sheet spells it, spaces and all. Empty only on
+   * a Cost Confirmation line that states none.
+   */
   readonly containerNumber: string;
   /** The same container, as matching compares it. See `normalizeContainerNumber`. */
   readonly normalizedContainerNumber: string;
+  /** `COMBINATION ` and the like, as the sheet spells it; empty when blank. */
+  readonly startPoint: string;
+  readonly endPoint: string;
+  /** The Remarks text exactly as the sheet holds it, trailing spaces included. */
+  readonly remarks: string;
+  /** Set when the line charges one Cost Confirmation and nothing else. */
+  readonly costLine: InvoiceCostLine | null;
   /**
    * What this row charges, per amount column.
    *
@@ -189,18 +242,51 @@ function fromExcelSerial(serial: number): string | null {
   );
 }
 
-/** The days an invoice covers, from the rows themselves. */
-export function toInvoicePeriod(
-  rows: readonly InvoiceSheetRow[],
-): { readonly from: string; readonly to: string } | null {
-  if (rows.length === 0) {
+/** The days an invoice covers: Monday to Friday of one ISO week. */
+export interface InvoicePeriod {
+  readonly from: string;
+  readonly to: string;
+}
+
+/**
+ * The days an invoice covers: Monday to Friday of the ISO week its lines are in.
+ *
+ * ── FROM THE LINES, NEVER FROM THE FILE NAME ────────────────────────────────
+ * Every real invoice covers one ISO week, Monday to Friday — week 41 runs from
+ * 5 to 9 October 2026, and the owner's own hand-added row in week 36 reads
+ * "31-08 tot 04-09-2026". The week is read from the transports' planning dates;
+ * Cost Confirmation lines are left out, because a confirmation can be invoiced
+ * after the week its transport ran in.
+ *
+ * Null when there is no transport line, and null when the lines fall in more
+ * than one ISO week: which week is meant is then not in the document, and no
+ * transport is called missing on a guess.
+ */
+export function toInvoicePeriod(rows: readonly InvoiceSheetRow[]): InvoicePeriod | null {
+  const transports = rows.filter((row) => row.costLine === null);
+
+  if (transports.length === 0) {
     return null;
   }
 
-  const dates = rows.map((row) => row.planningDate).sort();
+  const mondays = new Set(
+    transports.map((row) => toIsoDate(startOfWeekUtc(toUtcDate(row.planningDate)))),
+  );
 
-  return { from: dates[0], to: dates[dates.length - 1] };
+  if (mondays.size !== 1) {
+    return null;
+  }
+
+  const monday = [...mondays][0];
+
+  return {
+    from: monday,
+    to: toIsoDate(addDays(toUtcDate(monday), DAYS_MONDAY_TO_FRIDAY)),
+  };
 }
+
+/** Friday is four days after Monday. */
+const DAYS_MONDAY_TO_FRIDAY = 4;
 
 /** Which columns a sheet offers, for a caller that only needs to ask. */
 export function hasColumn(

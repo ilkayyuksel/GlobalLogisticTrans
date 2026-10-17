@@ -1,19 +1,13 @@
 import ExcelJS from "exceljs";
 import { Prisma, TripStatus } from "@prisma/client";
 
-import { TripExportLabelsService } from "../trip-export/trip-export-labels.service";
 import { AppLoggerService } from "../logger/app-logger.service";
-import type { EffectivePricing } from "../trip-pricing/effective-pricing";
-import { EffectivePricingService } from "../trip-pricing/effective-pricing.service";
-import { TripRepository } from "../trips/trip.repository";
+import { type CurrentTripPricing } from "../trip-pricing/effective-pricing.service";
 import { buildInvoiceWorkbook } from "./__fixtures__/invoice-workbook";
-import { InvoiceAuditService } from "./invoice-audit.service";
-import { InvoiceRowMatchingService } from "./matching/invoice-row-matching.service";
-import { MissingTripsService } from "./missing/missing-trips.service";
-import { InvoicePricingService } from "./pricing/invoice-pricing.service";
+import { reliablyPriced } from "./__fixtures__/invoice-pricing";
+import { InvoiceAuditService, type AppliedInvoiceAudit } from "./invoice-audit.service";
 import { AUDIT_MARKER_SHEET } from "./workbook/invoice-audit-marker";
-import { InvoiceSheetReader } from "./workbook/invoice-sheet.reader";
-import { InvoiceSheetWriter } from "./workbook/invoice-sheet.writer";
+import { buildInvoiceAuditService } from "./__fixtures__/invoice-audit-service";
 
 /**
  * A line this system added, on the next upload of the same document.
@@ -35,10 +29,10 @@ const MONDAY = new Date(Date.UTC(2026, 2, 23));
 
 const COLUMN = { bookingNumber: 5, tarief: 12, fuel: 13, backload: 14 } as const;
 
-function pricing(overrides: Record<string, string> = {}): EffectivePricing {
+function pricing(overrides: Record<string, string> = {}): CurrentTripPricing {
   const amount = (key: string) => new Prisma.Decimal(overrides[key] ?? "0");
 
-  return {
+  return reliablyPriced({
     components: [],
     tarief: amount("tarief"),
     brandstof: amount("brandstof"),
@@ -48,7 +42,7 @@ function pricing(overrides: Record<string, string> = {}): EffectivePricing {
     others: amount("others"),
     ek: amount("ek"),
     totaal: amount("totaal"),
-  };
+  });
 }
 
 function trip(
@@ -75,9 +69,6 @@ function trip(
   };
 }
 
-/** The export words: none unless a test supplies them. */
-const exportLabels = { findForTrips: jest.fn(async () => new Map()) };
-
 describe("a line this system added to the invoice", () => {
   let trips: {
     findManyForInvoice: jest.Mock;
@@ -102,23 +93,11 @@ describe("a line this system added to the invoice", () => {
       error: jest.fn(),
     } as unknown as AppLoggerService;
 
-    service = new InvoiceAuditService(
-      new InvoiceSheetReader(logger),
-      new InvoiceRowMatchingService(trips as unknown as TripRepository, logger),
-      new InvoicePricingService(
-        effectivePricing as unknown as EffectivePricingService,
-        logger,
-      ),
-      new MissingTripsService(
-        trips as unknown as TripRepository,
-        effectivePricing as unknown as EffectivePricingService,
-        exportLabels as unknown as TripExportLabelsService,
-        logger,
-      ),
-      new InvoiceSheetWriter(logger),
-      trips as unknown as TripRepository,
+    service = buildInvoiceAuditService({
+      trips,
+      effectivePricing,
       logger,
-    );
+    });
   });
 
   const upload = (workbook: Buffer, name = "week 13 - 2026 GLT.xlsx") => ({
@@ -134,9 +113,23 @@ describe("a line this system added to the invoice", () => {
     return book;
   }
 
-  /** The ids the last run marked paid. */
-  const paidIds = () =>
-    (trips.setPaidMany.mock.calls.at(-1)?.[0] ?? []) as readonly string[];
+  let last: AppliedInvoiceAudit | null = null;
+
+  /** Produces the corrected document, and keeps its preview for `payableIds`. */
+  async function apply(file: ReturnType<typeof upload>): Promise<AppliedInvoiceAudit> {
+    last = await service.apply(file);
+
+    return last;
+  }
+
+  /** What a confirmation could pay after the last run: payable and not yet paid. */
+  const payableIds = () =>
+    (last?.result.payments ?? [])
+      .filter((payment) => payment.payable && !payment.alreadyPaid)
+      .map((payment) => payment.tripId);
+
+  const paymentOf = (applied: AppliedInvoiceAudit, tripId: string) =>
+    applied.result.payments.find((payment) => payment.tripId === tripId);
 
   /** The customer's own invoice: one line, and a transport it forgot. */
   async function anInvoiceMissingOneTransport(
@@ -175,12 +168,12 @@ describe("a line this system added to the invoice", () => {
 
   describe("the first processing", () => {
     it("adds the transport, leaves it unpaid, and records the row", async () => {
-      const first = await service.apply(
+      const first = await apply(
         upload(await anInvoiceMissingOneTransport(trip("missing-1", "BELANR2720016", "EUCU2451828"))),
       );
 
       expect(first.rowsAdded).toBe(1);
-      expect(paidIds()).toEqual(["trip-1"]);
+      expect(payableIds()).toEqual(["trip-1"]);
 
       const book = await readBack(first.workbook);
       const record = book.getWorksheet(AUDIT_MARKER_SHEET);
@@ -197,13 +190,13 @@ describe("a line this system added to the invoice", () => {
       missing = trip("missing-1", "BELANR2720016", "EUCU2451828"),
       secondPricing = pricing({ tarief: "517.20", brandstof: "51.72" }),
     ) {
-      const first = await service.apply(
+      const first = await apply(
         upload(await anInvoiceMissingOneTransport(missing)),
       );
 
       /*
-       * The database as the first run left it: the customer's own transport is
-       * settled, the added one is not, and the document now states both — so
+       * The database after the first run was confirmed: the customer's own
+       * transport is settled, the added one is not, and the document now states both — so
        * nothing is missing from it any more.
        */
       trips.findManyForInvoice.mockResolvedValue([
@@ -224,7 +217,7 @@ describe("a line this system added to the invoice", () => {
         ),
       );
 
-      const second = await service.apply(
+      const second = await apply(
         upload(first.workbook, "week 13 - 2026 GLT - gecorrigeerd.xlsx"),
       );
 
@@ -245,9 +238,12 @@ describe("a line this system added to the invoice", () => {
     it("does not settle it", async () => {
       const { second } = await processTwice();
 
-      expect(paidIds()).not.toContain("missing-1");
-      expect(second.paidTrips).toBe(0);
-      expect(second.alreadyPaid).toBe(1);
+      expect(payableIds()).not.toContain("missing-1");
+      expect(paymentOf(second, "missing-1")).toMatchObject({
+        payable: false,
+        // Its only line is the one this check wrote.
+        reasons: ["NO_OWN_LINE", "ADDED_BY_CHECK"],
+      });
     });
 
     it("still settles the customer's own line", async () => {
@@ -258,8 +254,8 @@ describe("a line this system added to the invoice", () => {
       );
 
       expect(own?.status).toBe("MATCHED");
-      // Already paid by the first run, and counted as such rather than paid twice.
-      expect(second.alreadyPaid).toBe(1);
+      // Paid after the first run, and shown as such rather than offered twice.
+      expect(paymentOf(second, "trip-1")).toMatchObject({ payable: true, alreadyPaid: true });
     });
 
     /** §7: the prices of an added line are checked and corrected as any other. */
@@ -290,7 +286,7 @@ describe("a line this system added to the invoice", () => {
 
       expect(sheet.getRow(row).getCell(COLUMN.tarief).value).toBe(600);
       // And still not settled, however much its price moved.
-      expect(paidIds()).not.toContain("missing-1");
+      expect(payableIds()).not.toContain("missing-1");
     });
 
     it("adds no second copy of it", async () => {
@@ -320,9 +316,11 @@ describe("a line this system added to the invoice", () => {
       );
       const sheet = (await readBack(second.workbook)).worksheets[0];
 
+      // No fill: ExcelJS reads a styled cell without one back as pattern "none".
       expect(
-        sheet.getRow(added!.rowNumber).getCell(COLUMN.bookingNumber).fill,
-      ).toBeUndefined();
+        (sheet.getRow(added!.rowNumber).getCell(COLUMN.bookingNumber).fill as ExcelJS.FillPattern | undefined)
+          ?.pattern ?? "none",
+      ).toBe("none");
     });
 
     it("keeps the record for a third run", async () => {
@@ -330,13 +328,13 @@ describe("a line this system added to the invoice", () => {
 
       trips.findClosedUnpaidBetween.mockResolvedValue([]);
 
-      const third = await service.apply(
+      const third = await apply(
         upload(second.workbook, "week 13 - 2026 GLT - gecorrigeerd.xlsx"),
       );
 
       expect(third.result.summary.addedMissing).toBe(1);
       expect(third.rowsAdded).toBe(0);
-      expect(paidIds()).not.toContain("missing-1");
+      expect(payableIds()).not.toContain("missing-1");
     });
 
     /** A Combination leg keeps its own surcharge through all of it. */
@@ -353,7 +351,7 @@ describe("a line this system added to the invoice", () => {
 
       expect(added?.status).toBe("ADDED_MISSING");
       expect(sheet.getRow(added!.rowNumber).getCell(COLUMN.backload).value).toBe(50);
-      expect(paidIds()).not.toContain("missing-1");
+      expect(payableIds()).not.toContain("missing-1");
     });
   });
 
@@ -367,7 +365,7 @@ describe("a line this system added to the invoice", () => {
     it("settles the same transport when the customer invoices it", async () => {
       const missing = trip("missing-1", "BELANR2720016", "EUCU2451828");
 
-      await service.apply(upload(await anInvoiceMissingOneTransport(missing)));
+      await apply(upload(await anInvoiceMissingOneTransport(missing)));
 
       trips.findManyForInvoice.mockResolvedValue([missing]);
       trips.findClosedUnpaidBetween.mockResolvedValue([]);
@@ -388,10 +386,10 @@ describe("a line this system added to the invoice", () => {
         ],
       });
 
-      const applied = await service.apply(upload(theirInvoice, "week 14 - 2026 GLT.xlsx"));
+      const applied = await apply(upload(theirInvoice, "week 14 - 2026 GLT.xlsx"));
 
       expect(applied.result.rows[0].status).toBe("MATCHED");
-      expect(paidIds()).toEqual(["missing-1"]);
+      expect(payableIds()).toEqual(["missing-1"]);
     });
 
     /** Being unpaid is not what stops it — the record is. */
@@ -403,7 +401,7 @@ describe("a line this system added to the invoice", () => {
         new Map([["trip-1", pricing({ tarief: "370", brandstof: "37" })]]),
       );
 
-      const applied = await service.apply(
+      await apply(
         upload(
           await buildInvoiceWorkbook({
             lines: [
@@ -419,8 +417,7 @@ describe("a line this system added to the invoice", () => {
         ),
       );
 
-      expect(applied.paidTrips).toBe(1);
-      expect(paidIds()).toEqual(["trip-1"]);
+      expect(payableIds()).toEqual(["trip-1"]);
     });
 
     /**
@@ -428,13 +425,13 @@ describe("a line this system added to the invoice", () => {
      * types another transport over that row has written their own line.
      */
     it("lets go when the row is rewritten into another transport", async () => {
-      const first = await service.apply(
+      const first = await apply(
         upload(await anInvoiceMissingOneTransport(trip("missing-1", "BELANR2720016", "EUCU2451828"))),
       );
 
       const book = await readBack(first.workbook);
       const sheet = book.worksheets[0];
-      const addedRow = first.result.missingTrips[0].rowNumber;
+      const addedRow = first.result.missingTrips[0].rowNumber!;
 
       sheet.getRow(addedRow).getCell(COLUMN.bookingNumber).value = "ANRDUB2725107";
       sheet.getRow(addedRow).getCell(6).value = "TLLU 1595717";
@@ -453,14 +450,14 @@ describe("a line this system added to the invoice", () => {
       );
 
       const edited = Buffer.from(await book.xlsx.writeBuffer());
-      const applied = await service.apply(upload(edited, "week 13 - edited.xlsx"));
+      const applied = await apply(upload(edited, "week 13 - edited.xlsx"));
 
       const rewritten = applied.result.rows.find(
         (row) => row.bookingNumber === "ANRDUB2725107",
       );
 
       expect(rewritten?.status).toBe("MATCHED");
-      expect(paidIds()).toContain("other-1");
+      expect(payableIds()).toContain("other-1");
     });
   });
 });

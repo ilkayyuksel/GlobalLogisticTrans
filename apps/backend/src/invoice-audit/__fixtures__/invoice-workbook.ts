@@ -69,6 +69,16 @@ export interface InvoiceFixtureLine {
   readonly others?: number | null;
   readonly ek?: number | null;
   readonly remarks?: string;
+  /**
+   * The customer's own words for where a leg starts and ends. An ordinary
+   * transport by default; `COMBINATION ` marks a Combination's legs (Endpoint on
+   * the first, Startpoint on the second), and null leaves the cell empty, as a
+   * Cost Confirmation line does.
+   */
+  readonly startPoint?: string | null;
+  readonly endPoint?: string | null;
+  /** `45PH` by default; null for a Cost Confirmation line. */
+  readonly containerType?: string | null;
 }
 
 export interface InvoiceFixtureOptions {
@@ -159,12 +169,15 @@ export async function buildInvoiceWorkbook(
 
     row.getCell(COLUMN.planningDate).value = line.planningDate;
     row.getCell(COLUMN.supplier).value = "GLT";
-    row.getCell(COLUMN.containerType).value = "45PH";
+    row.getCell(COLUMN.containerType).value =
+      line.containerType === undefined ? "45PH" : line.containerType;
     row.getCell(COLUMN.bookingNumber).value = line.bookingNumber;
     row.getCell(COLUMN.containerNumber).value = line.containerNumber;
-    row.getCell(COLUMN.startPoint).value = "VOYAGE BEQ869";
+    row.getCell(COLUMN.startPoint).value =
+      line.startPoint === undefined ? "VOYAGE BEQ869" : line.startPoint;
     row.getCell(COLUMN.trip).value = "Quay 869 -> ZEMST";
-    row.getCell(COLUMN.endPoint).value = "COMBINATION ";
+    row.getCell(COLUMN.endPoint).value =
+      line.endPoint === undefined ? "LOCATION BEQ869" : line.endPoint;
     row.getCell(COLUMN.tarief).value = line.tarief ?? null;
     row.getCell(COLUMN.fuel).value = toFuelCell(line, row.number, options, firstLineRow);
     row.getCell(COLUMN.backload).value = line.backload ?? null;
@@ -188,7 +201,7 @@ export async function buildInvoiceWorkbook(
   }
 
   if (options.withTotals !== false) {
-    writeTotals(sheet, firstLineRow);
+    writeTotals(sheet, firstLineRow, options.fuelPercentage ?? 10);
   }
 
   const buffer = await workbook.xlsx.writeBuffer();
@@ -241,7 +254,11 @@ function withFuelHeader(percentage = 10): string[] {
  * sums each amount column; a blank line follows; then the block of labels whose
  * values point back at the totals row.
  */
-function writeTotals(sheet: ExcelJS.Worksheet, firstLineRow: number): void {
+function writeTotals(
+  sheet: ExcelJS.Worksheet,
+  firstLineRow: number,
+  fuelPercentage: number,
+): void {
   const lastLineRow = sheet.rowCount;
   const totalsRow = sheet.getRow(lastLineRow + 1);
 
@@ -254,12 +271,16 @@ function writeTotals(sheet: ExcelJS.Worksheet, firstLineRow: number): void {
     };
   }
 
-  totalsRow.getCell(21).value = { formula: "SUM(L2:T2)", result: 0 };
+  // The grand total adds up the component totals beside it, as `U128` does.
+  totalsRow.getCell(21).value = {
+    formula: `SUM(L${totalsRow.number}:T${totalsRow.number})`,
+    result: 0,
+  };
   totalsRow.commit();
 
   const labels = [
     "Total",
-    "Fuel 10% ",
+    `Fuel ${fuelPercentage}% `,
     "Backloads",
     "Maut D",
     "Tol B",

@@ -1,6 +1,5 @@
 import { Prisma, Trip, TripStatus } from "@prisma/client";
 
-import { TripExportLabelsService } from "../../trip-export/trip-export-labels.service";
 import { AppLoggerService } from "../../logger/app-logger.service";
 import type { EffectivePricing } from "../../trip-pricing/effective-pricing";
 import { EffectivePricingService } from "../../trip-pricing/effective-pricing.service";
@@ -49,6 +48,10 @@ function row(overrides: Partial<InvoiceSheetRow> = {}): InvoiceSheetRow {
     bookingNumber: "BELANR2720016",
     containerNumber: "EUCU 2451828",
     normalizedContainerNumber: "EUCU2451828",
+    startPoint: "",
+    endPoint: "",
+    remarks: "",
+    costLine: null,
     amounts: {},
     ...overrides,
   };
@@ -70,9 +73,6 @@ function pricing(tarief: string): EffectivePricing {
   };
 }
 
-/** The export words: none unless a test supplies them. */
-const exportLabels = { findForTrips: jest.fn(async () => new Map()) };
-
 describe("MissingTripsService", () => {
   let trips: { findClosedUnpaidBetween: jest.Mock };
   let effectivePricing: { findForTrips: jest.Mock };
@@ -85,7 +85,6 @@ describe("MissingTripsService", () => {
     service = new MissingTripsService(
       trips as unknown as TripRepository,
       effectivePricing as unknown as EffectivePricingService,
-      exportLabels as unknown as TripExportLabelsService,
       {
         setContext: jest.fn(),
         log: jest.fn(),
@@ -105,7 +104,7 @@ describe("MissingTripsService", () => {
     });
 
     it("asks nothing at all for a document with no line", async () => {
-      const missing = await service.find(null, []);
+      const { missing } = await service.find(null, []);
 
       expect(missing).toEqual([]);
       expect(trips.findClosedUnpaidBetween).not.toHaveBeenCalled();
@@ -133,7 +132,7 @@ describe("MissingTripsService", () => {
     it("reports a finished unpaid transport the invoice does not state", async () => {
       trips.findClosedUnpaidBetween.mockResolvedValue([trip()]);
 
-      const missing = await service.find(PERIOD, [
+      const { missing } = await service.find(PERIOD, [
         row({ bookingNumber: "ANRDUB2725107", normalizedContainerNumber: "TLLU1595717" }),
       ]);
 
@@ -148,7 +147,7 @@ describe("MissingTripsService", () => {
         trip({ id: "c", bookingNumber: "C" }),
       ]);
 
-      const missing = await service.find(PERIOD, []);
+      const { missing } = await service.find(PERIOD, []);
 
       expect(missing.map((entry) => entry.trip.id)).toEqual(["a", "b", "c"]);
     });
@@ -156,7 +155,7 @@ describe("MissingTripsService", () => {
     it("leaves out a transport the invoice already states", async () => {
       trips.findClosedUnpaidBetween.mockResolvedValue([trip()]);
 
-      const missing = await service.find(PERIOD, [row()]);
+      const { missing } = await service.find(PERIOD, [row()]);
 
       expect(missing).toEqual([]);
     });
@@ -167,7 +166,7 @@ describe("MissingTripsService", () => {
         trip({ containerNumber: "EUCU 2451828" }),
       ]);
 
-      const missing = await service.find(PERIOD, [
+      const { missing } = await service.find(PERIOD, [
         row({ containerNumber: "EUCU2451828", normalizedContainerNumber: "EUCU2451828" }),
       ]);
 
@@ -177,7 +176,7 @@ describe("MissingTripsService", () => {
     it("does not consider another day the same transport", async () => {
       trips.findClosedUnpaidBetween.mockResolvedValue([trip()]);
 
-      const missing = await service.find(PERIOD, [
+      const { missing } = await service.find(PERIOD, [
         row({ planningDate: "2026-03-24" }),
       ]);
 
@@ -187,7 +186,7 @@ describe("MissingTripsService", () => {
     it("does not consider another booking the same transport", async () => {
       trips.findClosedUnpaidBetween.mockResolvedValue([trip()]);
 
-      const missing = await service.find(PERIOD, [
+      const { missing } = await service.find(PERIOD, [
         row({ bookingNumber: "ANRDUB2725107" }),
       ]);
 
@@ -198,7 +197,7 @@ describe("MissingTripsService", () => {
     it("does not consider a line with another container the same transport", async () => {
       trips.findClosedUnpaidBetween.mockResolvedValue([trip()]);
 
-      const missing = await service.find(PERIOD, [
+      const { missing } = await service.find(PERIOD, [
         row({ normalizedContainerNumber: "TLLU1595717" }),
       ]);
 
@@ -218,7 +217,7 @@ describe("MissingTripsService", () => {
       trips.findClosedUnpaidBetween.mockResolvedValue([trip()]);
 
       // The line the check reported as AMBIGUOUS: same three values.
-      const missing = await service.find(PERIOD, [row()]);
+      const { missing } = await service.find(PERIOD, [row()]);
 
       expect(missing).toEqual([]);
     });
@@ -237,7 +236,7 @@ describe("MissingTripsService", () => {
         ]),
       );
 
-      const missing = await service.find(PERIOD, []);
+      const { missing } = await service.find(PERIOD, []);
 
       expect(effectivePricing.findForTrips).toHaveBeenCalledTimes(1);
       expect(effectivePricing.findForTrips).toHaveBeenCalledWith(["a", "b"]);
@@ -247,7 +246,7 @@ describe("MissingTripsService", () => {
     it("reports a Trip that was never priced without inventing amounts", async () => {
       trips.findClosedUnpaidBetween.mockResolvedValue([trip()]);
 
-      const missing = await service.find(PERIOD, []);
+      const { missing } = await service.find(PERIOD, []);
 
       expect(missing[0].pricing).toBeNull();
     });
@@ -258,7 +257,7 @@ describe("MissingTripsService", () => {
         trip({ direction: "DELIVERY", terminal: "PSA Quay 869", destinationCity: "MELSELE" }),
       ]);
 
-      const missing = await service.find(PERIOD, []);
+      const { missing } = await service.find(PERIOD, []);
 
       // The canonical terminal, and the direction deciding which end is first.
       expect(missing[0].route).toBe("Quay 869 -> MELSELE");
@@ -269,7 +268,7 @@ describe("MissingTripsService", () => {
         trip({ direction: "COLLECTION", terminal: "Quay 869", destinationCity: "ANTWERPEN" }),
       ]);
 
-      const missing = await service.find(PERIOD, []);
+      const { missing } = await service.find(PERIOD, []);
 
       expect(missing[0].route).toBe("ANTWERPEN -> Quay 869");
     });

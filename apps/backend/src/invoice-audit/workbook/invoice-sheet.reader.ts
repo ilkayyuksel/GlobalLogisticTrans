@@ -19,9 +19,11 @@ import {
   statesSomething,
   toCellText,
   toPlanningDate,
+  type IncompleteInvoiceRow,
   type InvoiceSheet,
   type InvoiceSheetRow,
 } from "./invoice-sheet";
+import { TRANSPORT_DETAIL_COLUMNS, toCostLine } from "./supplementary-cost-line";
 
 /**
  * The columns that carry money, which is what the pricing check compares and
@@ -228,7 +230,7 @@ export class InvoiceSheetReader {
     columns: InvoiceColumnPositions,
   ): Omit<InvoiceSheet, "addedByAudit"> {
     const rows: InvoiceSheetRow[] = [];
-    const incompleteRowNumbers: number[] = [];
+    const incompleteRows: IncompleteInvoiceRow[] = [];
     const summaryRowNumbers: number[] = [];
     let totalsRowNumber: number | null = null;
 
@@ -247,23 +249,24 @@ export class InvoiceSheetReader {
         (value) => value !== null && value !== "",
       ).length;
 
-      if (statedValues === 3 && planningDate !== null && container !== null) {
-        rows.push({
+      if (planningDate !== null && bookingNumber !== "") {
+        const line = this.toLine(row, columns, {
           rowNumber,
           planningDate,
           bookingNumber,
-          // The sheet's own spelling is kept: it is what the corrected document
-          // must still say, and normalisation exists only to compare with.
           containerNumber,
           normalizedContainerNumber: container,
-          amounts: this.readAmounts(row, columns),
         });
 
-        continue;
+        if (line !== null) {
+          rows.push(line);
+
+          continue;
+        }
       }
 
       if (statedValues > 0) {
-        incompleteRowNumbers.push(rowNumber);
+        incompleteRows.push({ rowNumber, bookingNumber, normalizedContainerNumber: container });
 
         continue;
       }
@@ -290,11 +293,14 @@ export class InvoiceSheetReader {
       }
     }
 
+    const lines = withSplitLinesJoined(rows);
+
     this.logger.log("Invoice workbook read", {
       sheetName: worksheet.name,
       headerRowNumber,
-      lineCount: rows.length,
-      incompleteRowCount: incompleteRowNumbers.length,
+      lineCount: lines.length,
+      costLineCount: lines.filter((line) => line.costLine !== null).length,
+      incompleteRowCount: incompleteRows.length,
       hasTotalsRow: totalsRowNumber !== null,
       summaryRowCount: summaryRowNumbers.length,
     });
@@ -302,11 +308,61 @@ export class InvoiceSheetReader {
     return {
       sheetName: worksheet.name,
       headerRowNumber,
+      lastColumnNumber: worksheet.getRow(headerRowNumber).cellCount,
       columns,
-      rows,
+      rows: lines,
       totalsRowNumber,
       summaryRowNumbers,
-      incompleteRowNumbers,
+      incompleteRowNumbers: incompleteRows.map((row) => row.rowNumber),
+      incompleteRows,
+    };
+  }
+
+  /**
+   * One row as an invoice line, or null when it is not one.
+   *
+   * A line states all three identity values — or, as a Cost Confirmation line
+   * (week 41 R53–R54), a day, a booking and an EC charge but no container.
+   */
+  private toLine(
+    row: ExcelJS.Row,
+    columns: InvoiceColumnPositions,
+    identity: {
+      rowNumber: number;
+      planningDate: string;
+      bookingNumber: string;
+      containerNumber: string;
+      normalizedContainerNumber: string | null;
+    },
+  ): InvoiceSheetRow | null {
+    const amounts = this.readAmounts(row, columns);
+    const remarks = toRawText(this.cell(row, columns, "remarks"));
+    const text = (column: InvoiceColumn) => toCellText(this.cell(row, columns, column));
+    const costLine = toCostLine({
+      details: Object.fromEntries(
+        TRANSPORT_DETAIL_COLUMNS.map((column) => [column, text(column)]),
+      ),
+      amounts,
+      remarks,
+    });
+
+    if (identity.normalizedContainerNumber === null && costLine === null) {
+      return null;
+    }
+
+    return {
+      rowNumber: identity.rowNumber,
+      planningDate: identity.planningDate,
+      bookingNumber: identity.bookingNumber,
+      // The sheet's own spelling is kept: it is what the corrected document
+      // must still say, and normalisation exists only to compare with.
+      containerNumber: identity.containerNumber,
+      normalizedContainerNumber: identity.normalizedContainerNumber ?? "",
+      startPoint: text("startPoint"),
+      endPoint: text("endPoint"),
+      remarks,
+      costLine,
+      amounts,
     };
   }
 
@@ -318,11 +374,13 @@ export class InvoiceSheetReader {
     const amounts: Partial<Record<InvoiceColumn, InvoiceAmountCell>> = {};
 
     for (const column of AMOUNT_COLUMNS) {
-      if (columns[column] === undefined) {
+      const position = columns[column];
+
+      if (position === undefined) {
         continue;
       }
 
-      amounts[column] = toAmountCell(this.cell(row, columns, column));
+      amounts[column] = toAmountCell(withOwnFormula(row.getCell(position)));
     }
 
     return amounts;
@@ -357,4 +415,70 @@ export class InvoiceSheetReader {
 
     return stated;
   }
+}
+
+/**
+ * ── A COST LINE NEXT TO ITS OWN TRANSPORT IS PART OF THAT LINE ─────────────
+ * A row shaped like a Cost Confirmation line but stating the very same day,
+ * booking and container as a transport line of this document is that
+ * transport's EK, split over several rows — the established case the
+ * reconciliation adds up per component. Only a STAND-ALONE one is compared
+ * with its own confirmation.
+ */
+function withSplitLinesJoined(rows: readonly InvoiceSheetRow[]): InvoiceSheetRow[] {
+  const transportKeys = new Set(
+    rows.filter((row) => row.costLine === null).map(toIdentityKey),
+  );
+
+  return rows.map((row) =>
+    row.costLine !== null &&
+    row.normalizedContainerNumber !== "" &&
+    transportKeys.has(toIdentityKey(row))
+      ? { ...row, costLine: null }
+      : row,
+  );
+}
+
+function toIdentityKey(row: InvoiceSheetRow): string {
+  return `${row.planningDate}|${row.bookingNumber}|${row.normalizedContainerNumber}`;
+}
+
+/**
+ * The Remarks text exactly as the cell holds it — trailing spaces included,
+ * because a later step appends to it and must not change what is there.
+ */
+function toRawText(value: unknown): string {
+  if (typeof value === "string") {
+    return value;
+  }
+
+  if (value !== null && typeof value === "object" && "richText" in value) {
+    return (value as { richText: readonly { text: string }[] }).richText
+      .map((part) => part.text)
+      .join("");
+  }
+
+  return toCellText(value);
+}
+
+/**
+ * A cell's value, with a BORROWED formula given back as the cell's own.
+ *
+ * ── WHY THIS MATTERS ────────────────────────────────────────────────────────
+ * The customer writes a column of identical formulas once, as a shared formula:
+ * in week 41, `M2` holds `24%*L2` and `M3` to `M68` only point at it. ExcelJS
+ * hands such a borrower over as `{ sharedFormula: "M2", result }`, with no
+ * formula of its own — read as a plain figure, a Fuel of 54,96 would look fixed
+ * when Excel will in fact recalculate it from the row's Tarief. A raised
+ * Tarief would then silently raise the Fuel too. `cell.formula` is the master's
+ * formula translated to THIS cell (`24%*L3`), which is what Excel computes.
+ */
+function withOwnFormula(cell: ExcelJS.Cell): unknown {
+  const value = cell.value as { sharedFormula?: string; result?: unknown } | null;
+
+  if (value !== null && typeof value === "object" && value.sharedFormula) {
+    return { formula: cell.formula, result: value.result };
+  }
+
+  return value;
 }

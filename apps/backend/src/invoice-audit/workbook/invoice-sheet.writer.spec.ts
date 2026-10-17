@@ -25,6 +25,7 @@ function sheetOf(rowNumbers: readonly number[]): InvoiceSheet {
   return {
     sheetName: "Sheet1",
     headerRowNumber: 1,
+    lastColumnNumber: 13,
     columns: COLUMNS,
     rows: rowNumbers.map((rowNumber) => ({
       rowNumber,
@@ -32,11 +33,16 @@ function sheetOf(rowNumbers: readonly number[]): InvoiceSheet {
       bookingNumber: "DUBANR2718284",
       containerNumber: "EUCU 4581604",
       normalizedContainerNumber: "EUCU4581604",
+      startPoint: "",
+      endPoint: "",
+      remarks: "",
+      costLine: null,
       amounts: {},
     })),
     totalsRowNumber: null,
     summaryRowNumbers: [],
     incompleteRowNumbers: [],
+    incompleteRows: [],
     // Nothing in this document was written by a previous run.
     addedByAudit: new Map(),
   };
@@ -52,6 +58,7 @@ function correction(
     differences: [
       {
         component: "Tarief",
+        kind: "RAISE",
         column: "tarief",
         invoiceValue: new Prisma.Decimal("364"),
         expectedValue: new Prisma.Decimal("370"),
@@ -59,9 +66,11 @@ function correction(
         correctionRowNumber: rowNumber,
         correctedValue: new Prisma.Decimal("370"),
         keepsFormula: false,
+        write: { kind: "VALUE", value: new Prisma.Decimal("370") },
         problem: null,
       },
     ],
+    reliability: null,
   };
 }
 
@@ -96,15 +105,16 @@ describe("InvoiceSheetWriter", () => {
   });
 
   /**
-   * ── THE HARD RULE OF THIS PHASE ─────────────────────────────────────────
-   * Only a line the pricing check CORRECTED is written to. Even handed a
-   * difference, a row in any other state is left exactly as it was — the status
-   * is what decides, not the presence of a figure.
+   * ── THE HARD RULE ───────────────────────────────────────────────────────
+   * A line that is a problem in any way is never written to. Even handed a
+   * planned write, a row in one of these states is left exactly as it was —
+   * the status is what decides, not the presence of a figure.
    */
   it.each([
-    InvoicePricingStatus.MATCHED_NO_CHANGES,
     InvoicePricingStatus.NOT_COMPARED,
     InvoicePricingStatus.NOT_DISTRIBUTABLE,
+    InvoicePricingStatus.PRICE_UNRELIABLE,
+    InvoicePricingStatus.AMOUNT_UNREADABLE,
   ])("writes nothing for a row that is %s", (status) => {
     const written = writer.apply(
       workbook,
@@ -135,14 +145,49 @@ describe("InvoiceSheetWriter", () => {
     expect(workbook.calcProperties.fullCalcOnLoad).toBe(true);
   });
 
-  it("leaves the workbook's own settings alone when nothing changed", () => {
-    writer.apply(
+  /**
+   * A line whose amounts did not go up can still need a cell rewritten — a
+   * Fuel formula frozen to the amount it shows (`KEEP_AMOUNT`). The planned
+   * write is carried out; a difference without one never is.
+   */
+  it.each([
+    InvoicePricingStatus.MATCHED_NO_CHANGES,
+    InvoicePricingStatus.INVOICE_HIGHER,
+  ])("carries out a planned write on a row that is %s", (status) => {
+    const written = writer.apply(
       workbook,
       worksheet,
       sheetOf([2]),
-      new Map([[2, correction(2, InvoicePricingStatus.MATCHED_NO_CHANGES)]]),
+      new Map([[2, correction(2, status)]]),
     );
 
+    expect(written.cellsWritten).toBe(1);
+  });
+
+  it("never writes a difference that only reports", () => {
+    const reported = correction(2, InvoicePricingStatus.INVOICE_HIGHER);
+    const written = writer.apply(
+      workbook,
+      worksheet,
+      sheetOf([2]),
+      new Map([
+        [
+          2,
+          {
+            ...reported,
+            differences: reported.differences.map((difference) => ({
+              ...difference,
+              kind: "INVOICE_HIGHER" as const,
+              correctedValue: null,
+              write: null,
+            })),
+          },
+        ],
+      ]),
+    );
+
+    expect(written.cellsWritten).toBe(0);
+    expect(worksheet.getRow(2).getCell(COLUMNS.tarief).value).toBe(364);
     expect(workbook.calcProperties.fullCalcOnLoad).toBeUndefined();
   });
 });

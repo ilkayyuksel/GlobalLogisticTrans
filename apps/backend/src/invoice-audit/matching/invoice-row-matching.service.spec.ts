@@ -2,6 +2,11 @@ import { Trip, TripStatus } from "@prisma/client";
 
 import { AppLoggerService } from "../../logger/app-logger.service";
 import { TripRepository } from "../../trips/trip.repository";
+import {
+  asReads,
+  invoiceReads,
+  type InvoiceReadsDouble,
+} from "../__fixtures__/invoice-reads";
 import type { InvoiceSheetRow } from "../workbook/invoice-sheet";
 import { InvoiceRowMatchingService } from "./invoice-row-matching.service";
 
@@ -33,6 +38,10 @@ function row(overrides: Partial<InvoiceSheetRow> = {}): InvoiceSheetRow {
     containerNumber: "EUCU 4581604",
     normalizedContainerNumber: "EUCU4581604",
     // Matching reads none of them; the pricing check has its own suite.
+    startPoint: "",
+    endPoint: "",
+    remarks: "",
+    costLine: null,
     amounts: {},
     ...overrides,
   };
@@ -55,13 +64,16 @@ describe("InvoiceRowMatchingService", () => {
   let trips: { findManyForInvoice: jest.Mock };
   let logger: { setContext: jest.Mock; log: jest.Mock; warn: jest.Mock };
   let service: InvoiceRowMatchingService;
+  let reads: InvoiceReadsDouble;
 
   beforeEach(() => {
     trips = { findManyForInvoice: jest.fn().mockResolvedValue([]) };
     logger = { setContext: jest.fn(), log: jest.fn(), warn: jest.fn() };
 
+    reads = invoiceReads();
     service = new InvoiceRowMatchingService(
       trips as unknown as TripRepository,
+      asReads(reads),
       logger as unknown as AppLoggerService,
     );
   });
@@ -323,6 +335,7 @@ describe("InvoiceRowMatchingService — both dates and a misprinted container", 
     trips = { findManyForInvoice: jest.fn().mockResolvedValue([]) };
     service = new InvoiceRowMatchingService(
       trips as unknown as TripRepository,
+      asReads(invoiceReads()),
       { setContext: jest.fn(), log: jest.fn(), warn: jest.fn() } as unknown as AppLoggerService,
     );
   });

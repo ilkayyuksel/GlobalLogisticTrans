@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 
-import { userFacingMessage } from "@/lib/api/client";
+import { errorDetailsOf, userFacingMessage } from "@/lib/api/client";
 import {
   applyInvoiceAudit,
   type AppliedInvoiceAudit,
@@ -12,14 +12,12 @@ import { downloadBlob } from "@/lib/download";
 import { useTranslation } from "@/lib/i18n/language-provider";
 
 /**
- * The final step: process the invoice and save the corrected document.
+ * The second step: produce and save the corrected document.
  *
- * ── WHY IT IS A SEPARATE ACTION ─────────────────────────────────────────────
- * Checking a file changes nothing and may be done as often as an operator
- * likes. THIS is the one that corrects the document, adds what the invoice
- * forgot and marks the transports paid — so it is never what an upload does by
- * itself. It is offered once the check has been read, and it says plainly what
- * it will do before it is pressed.
+ * ── IT PAYS NOTHING ─────────────────────────────────────────────────────────
+ * The corrected file is the customer's invoice with the previewed corrections
+ * written into it. Nothing in the system changes; settling the transports is
+ * the separate confirmation that follows (`InvoicePaymentConfirm`).
  *
  * ── ONE REQUEST, ONE OUTCOME ────────────────────────────────────────────────
  * The button is disabled while the request is in flight, so a second click
@@ -39,7 +37,7 @@ export function InvoiceApply({
 }) {
   const t = useTranslation();
   const [isApplying, setIsApplying] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<{ message: string; details: string[] } | null>(null);
 
   async function apply(): Promise<void> {
     if (isApplying) {
@@ -57,7 +55,8 @@ export function InvoiceApply({
       downloadBlob(outcome.file, outcome.fileName);
       onApplied(outcome);
     } catch (failure: unknown) {
-      setError(userFacingMessage(failure));
+      // A corrected file refused by its integrity check names the cells.
+      setError({ message: userFacingMessage(failure), details: errorDetailsOf(failure) });
     } finally {
       setIsApplying(false);
     }
@@ -83,9 +82,6 @@ export function InvoiceApply({
                 ? t("invoiceAudit.apply.working")
                 : t("invoiceAudit.apply.action")}
             </button>
-            <span className="text-xs text-muted">
-              {t("invoiceAudit.apply.willPay")} {payableCount(result)}
-            </span>
           </div>
         </>
       )}
@@ -95,7 +91,12 @@ export function InvoiceApply({
           role="alert"
           className="mt-3 rounded-md border border-danger/30 bg-danger/5 px-3 py-2 text-sm text-foreground"
         >
-          {error}
+          {error.message}
+          {error.details.map((detail) => (
+            <span key={detail} className="block text-xs text-secondary">
+              {detail}
+            </span>
+          ))}
         </p>
       ) : null}
     </div>
@@ -124,11 +125,6 @@ function AppliedResult({
     },
     { label: t("invoiceAudit.applied.problems"), value: applied.rowsMarked },
     { label: t("invoiceAudit.applied.added"), value: applied.rowsAdded },
-    { label: t("invoiceAudit.applied.paid"), value: applied.paidTrips },
-    {
-      label: t("invoiceAudit.applied.alreadyPaid"),
-      value: applied.alreadyPaid,
-    },
   ];
 
   return (
@@ -154,27 +150,4 @@ function AppliedResult({
       </dl>
     </div>
   );
-}
-
-/**
- * How many transports this will settle, read from the check.
- *
- * The same rule the backend applies: a line matched to one CLOSED Trip whose
- * pricing was reconciled. It is shown BEFORE the button is pressed, because an
- * operator should know what a final action is about to do.
- */
-function payableCount(result: InvoiceAuditResult): number {
-  const payable = new Set(
-    result.rows
-      .filter(
-        (row) =>
-          row.status === "MATCHED" &&
-          row.trip !== null &&
-          (row.pricingStatus === "MATCHED_NO_CHANGES" ||
-            row.pricingStatus === "PRICING_CORRECTED"),
-      )
-      .map((row) => row.trip!.id),
-  );
-
-  return payable.size;
 }

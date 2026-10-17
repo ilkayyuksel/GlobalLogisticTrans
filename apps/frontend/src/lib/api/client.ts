@@ -420,6 +420,13 @@ function isAbortError(error: unknown): boolean {
   return error instanceof Error && error.name === "AbortError";
 }
 
+/** The reasons the backend listed beside a refusal, as text; empty when there are none. */
+export function errorDetailsOf(error: unknown): string[] {
+  return error instanceof ApiError && Array.isArray(error.details)
+    ? error.details.filter((detail): detail is string => typeof detail === "string")
+    : [];
+}
+
 /**
  * A message safe to put in front of a user.
  *

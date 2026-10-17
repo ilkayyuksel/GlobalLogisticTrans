@@ -1,18 +1,12 @@
 import ExcelJS from "exceljs";
 import { Prisma, TripStatus } from "@prisma/client";
 
-import { TripExportLabelsService } from "../trip-export/trip-export-labels.service";
 import { AppLoggerService } from "../logger/app-logger.service";
-import type { EffectivePricing } from "../trip-pricing/effective-pricing";
-import { EffectivePricingService } from "../trip-pricing/effective-pricing.service";
-import { TripRepository } from "../trips/trip.repository";
+import { type CurrentTripPricing } from "../trip-pricing/effective-pricing.service";
 import { buildInvoiceWorkbook } from "./__fixtures__/invoice-workbook";
+import { reliablyPriced } from "./__fixtures__/invoice-pricing";
 import { InvoiceAuditService } from "./invoice-audit.service";
-import { InvoiceRowMatchingService } from "./matching/invoice-row-matching.service";
-import { MissingTripsService } from "./missing/missing-trips.service";
-import { InvoicePricingService } from "./pricing/invoice-pricing.service";
-import { InvoiceSheetReader } from "./workbook/invoice-sheet.reader";
-import { InvoiceSheetWriter } from "./workbook/invoice-sheet.writer";
+import { buildInvoiceAuditService } from "./__fixtures__/invoice-audit-service";
 
 /**
  * The corrected workbook, read back out of the bytes that were produced.
@@ -45,10 +39,10 @@ const COLUMN = {
 
 const MONEY_FORMAT = '_-"€"* #,##0.00_-;-"€"* #,##0.00_-;_-"€"* "-"??_-;_-@_-';
 
-function pricing(overrides: Record<string, string> = {}): EffectivePricing {
+function pricing(overrides: Record<string, string> = {}): CurrentTripPricing {
   const amount = (key: string) => new Prisma.Decimal(overrides[key] ?? "0");
 
-  return {
+  return reliablyPriced({
     components: [],
     tarief: amount("tarief"),
     brandstof: amount("brandstof"),
@@ -58,7 +52,7 @@ function pricing(overrides: Record<string, string> = {}): EffectivePricing {
     others: amount("others"),
     ek: amount("ek"),
     totaal: amount("totaal"),
-  };
+  });
 }
 
 function trip(
@@ -95,9 +89,6 @@ function formulaAt(sheet: ExcelJS.Worksheet, rowNumber: number, column: number) 
     : null;
 }
 
-/** The export words: none unless a test supplies them. */
-const exportLabels = { findForTrips: jest.fn(async () => new Map()) };
-
 describe("the corrected weekly invoice", () => {
   let trips: {
     findManyForInvoice: jest.Mock;
@@ -122,23 +113,11 @@ describe("the corrected weekly invoice", () => {
       error: jest.fn(),
     } as unknown as AppLoggerService;
 
-    service = new InvoiceAuditService(
-      new InvoiceSheetReader(logger),
-      new InvoiceRowMatchingService(trips as unknown as TripRepository, logger),
-      new InvoicePricingService(
-        effectivePricing as unknown as EffectivePricingService,
-        logger,
-      ),
-      new MissingTripsService(
-        trips as unknown as TripRepository,
-        effectivePricing as unknown as EffectivePricingService,
-        exportLabels as unknown as TripExportLabelsService,
-        logger,
-      ),
-      new InvoiceSheetWriter(logger),
-      trips as unknown as TripRepository,
+    service = buildInvoiceAuditService({
+      trips,
+      effectivePricing,
       logger,
-    );
+    });
   });
 
   /** Reads the corrected workbook this service produces for `file`. */
@@ -163,7 +142,8 @@ describe("the corrected weekly invoice", () => {
      */
     async function aWeekToCorrect() {
       trips.findManyForInvoice.mockResolvedValue([
-        trip("trip-1", "DUBANR2718284", "EUCU4581604"),
+        // Charged a Backload, so grouped: the price is a Combination's.
+        { ...trip("trip-1", "DUBANR2718284", "EUCU4581604"), tripGroupId: "group-1" },
         trip("trip-2", "ANRDUB2725107", "TLLU1595717"),
       ]);
       effectivePricing.findForTrips.mockResolvedValue(
@@ -519,11 +499,19 @@ describe("the corrected weekly invoice", () => {
       expect(amountAt(sheet, 4, COLUMN.ek)).toBe(80);
     });
 
+    /**
+     * The transport is corrected completely or not at all: every row of it is
+     * reported, and none of them is written to.
+     */
     it("reports a differing total and changes neither cell", async () => {
       const { result, sheet } = await aWeekWithTwoConfirmations("250");
 
-      expect(result.result.rows[0].pricingStatus).toBe("NOT_DISTRIBUTABLE");
-      expect(result.result.summary.priceNotDistributable).toBe(1);
+      expect(result.result.rows.map((row) => row.pricingStatus)).toEqual([
+        "NOT_DISTRIBUTABLE",
+        "NOT_DISTRIBUTABLE",
+        "NOT_DISTRIBUTABLE",
+      ]);
+      expect(result.result.summary.priceNotDistributable).toBe(3);
       expect(result.result.summary.correctedCells).toBe(0);
       // Both EK cells keep exactly what the customer stated.
       expect(amountAt(sheet, 3, COLUMN.ek)).toBe(120);
@@ -639,10 +627,14 @@ describe("the corrected weekly invoice", () => {
     const YELLOW = "FFFFFF00";
 
     it("paints the problem line and no other line", async () => {
-      // Line 2 is found; line 3 matches nothing and is the one problem.
+      // Line 2 is found and reliably priced; line 3 matches nothing and is the
+      // one problem.
       trips.findManyForInvoice.mockResolvedValue([
         trip("trip-1", "DUBANR2718284", "EUCU4581604"),
       ]);
+      effectivePricing.findForTrips.mockResolvedValue(
+        new Map([["trip-1", pricing({ tarief: "135" })]]),
+      );
 
       const { sheet, result } = await correct(
         await buildInvoiceWorkbook({
@@ -878,10 +870,12 @@ describe("the corrected weekly invoice", () => {
       });
 
       expect(sheet.getRow(3).getCell(COLUMN.tarief).numFmt).toBe(MONEY_FORMAT);
-      // Not a problem row: no highlight of any kind.
-      expect(sheet.getRow(3).getCell(COLUMN.bookingNumber).fill).toEqual(
-        sheet.getRow(2).getCell(COLUMN.bookingNumber).fill,
-      );
+      // Not a problem row: no highlight of any kind. ExcelJS reads a styled
+      // cell without a fill back as pattern "none".
+      expect(
+        (sheet.getRow(3).getCell(COLUMN.bookingNumber).fill as ExcelJS.FillPattern | undefined)
+          ?.pattern ?? "none",
+      ).toBe("none");
     });
 
     /** The document's own Fuel convention, when it uses one. */

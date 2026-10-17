@@ -108,9 +108,9 @@ export const INVOICE_COMPONENTS: readonly InvoiceComponent[] = [
     columns: ["others"],
     correctionColumn: "others",
     /*
-     * Exactly what this system reports, waiting time included: `others` is the
-     * effective figure and is never recomputed here. The invoice has no waiting
-     * column, so the two meet in this one.
+     * Exactly what this system reports: the priced Custom Properties. The
+     * waiting time is NOT here — it is an EK source (`effective-pricing.ts`),
+     * and counting it in both would charge it twice.
      */
     expected: (pricing) => pricing.others,
   },

@@ -1,18 +1,12 @@
 import ExcelJS from "exceljs";
 import { Prisma, TripStatus } from "@prisma/client";
 
-import { TripExportLabelsService } from "../trip-export/trip-export-labels.service";
 import { AppLoggerService } from "../logger/app-logger.service";
-import type { EffectivePricing } from "../trip-pricing/effective-pricing";
-import { EffectivePricingService } from "../trip-pricing/effective-pricing.service";
-import { TripRepository } from "../trips/trip.repository";
+import { type CurrentTripPricing } from "../trip-pricing/effective-pricing.service";
 import { buildInvoiceWorkbook } from "./__fixtures__/invoice-workbook";
-import { InvoiceAuditService } from "./invoice-audit.service";
-import { InvoiceRowMatchingService } from "./matching/invoice-row-matching.service";
-import { MissingTripsService } from "./missing/missing-trips.service";
-import { InvoicePricingService } from "./pricing/invoice-pricing.service";
-import { InvoiceSheetReader } from "./workbook/invoice-sheet.reader";
-import { InvoiceSheetWriter } from "./workbook/invoice-sheet.writer";
+import { reliablyPriced } from "./__fixtures__/invoice-pricing";
+import { InvoiceAuditService, type AppliedInvoiceAudit } from "./invoice-audit.service";
+import { buildInvoiceAuditService } from "./__fixtures__/invoice-audit-service";
 
 /**
  * The revised match, through the whole check: the report, the corrected
@@ -31,10 +25,10 @@ const PLANNED = new Date(Date.UTC(2026, 8, 28));
 const COLUMN = { bookingNumber: 5, containerNumber: 6, tarief: 12 } as const;
 const RED = "FFFF0000";
 
-function pricing(tarief: string): EffectivePricing {
+function pricing(tarief: string): CurrentTripPricing {
   const zero = new Prisma.Decimal(0);
 
-  return {
+  return reliablyPriced({
     components: [],
     tarief: new Prisma.Decimal(tarief),
     brandstof: zero,
@@ -44,7 +38,7 @@ function pricing(tarief: string): EffectivePricing {
     others: zero,
     ek: zero,
     totaal: new Prisma.Decimal(tarief),
-  };
+  });
 }
 
 function trip(id: string, overrides: Record<string, unknown> = {}) {
@@ -79,9 +73,6 @@ function line(overrides: Record<string, unknown> = {}) {
   };
 }
 
-/** The export words: none unless a test supplies them. */
-const exportLabels = { findForTrips: jest.fn(async () => new Map()) };
-
 describe("the revised match, through the whole invoice check", () => {
   let trips: {
     findManyForInvoice: jest.Mock;
@@ -106,23 +97,11 @@ describe("the revised match, through the whole invoice check", () => {
       error: jest.fn(),
     } as unknown as AppLoggerService;
 
-    service = new InvoiceAuditService(
-      new InvoiceSheetReader(logger),
-      new InvoiceRowMatchingService(trips as unknown as TripRepository, logger),
-      new InvoicePricingService(
-        effectivePricing as unknown as EffectivePricingService,
-        logger,
-      ),
-      new MissingTripsService(
-        trips as unknown as TripRepository,
-        effectivePricing as unknown as EffectivePricingService,
-        exportLabels as unknown as TripExportLabelsService,
-        logger,
-      ),
-      new InvoiceSheetWriter(logger),
-      trips as unknown as TripRepository,
+    service = buildInvoiceAuditService({
+      trips,
+      effectivePricing,
       logger,
-    );
+    });
   });
 
   const upload = (workbook: Buffer) => ({
@@ -181,8 +160,20 @@ describe("the revised match, through the whole invoice check", () => {
     return Buffer.from(await book.xlsx.writeBuffer());
   }
 
-  const paidIds = () =>
-    (trips.setPaidMany.mock.calls.at(-1)?.[0] ?? []) as readonly string[];
+  let last: AppliedInvoiceAudit | null = null;
+
+  /** Produces the corrected document, and keeps its preview for `payableIds`. */
+  async function apply(file: ReturnType<typeof upload>): Promise<AppliedInvoiceAudit> {
+    last = await service.apply(file);
+
+    return last;
+  }
+
+  /** What a confirmation could pay after the last run: payable and not yet paid. */
+  const payableIds = () =>
+    (last?.result.payments ?? [])
+      .filter((payment) => payment.payable && !payment.alreadyPaid)
+      .map((payment) => payment.tripId);
 
   describe("a re-planned transport invoiced on either of its dates", () => {
     it.each([
@@ -191,7 +182,7 @@ describe("the revised match, through the whole invoice check", () => {
     ])("matches, pays, and appends nothing when invoiced on %s", async (_label, day) => {
       holding([trip("trip-a", { planningDate: PLANNED, originalPlanningDate: ORDERED })]);
 
-      const applied = await service.apply(
+      const applied = await apply(
         upload(await buildInvoiceWorkbook({ lines: [line({ planningDate: day })] })),
       );
 
@@ -200,7 +191,7 @@ describe("the revised match, through the whole invoice check", () => {
         containerCorrection: null,
         trip: { id: "trip-a" },
       });
-      expect(paidIds()).toEqual(["trip-a"]);
+      expect(payableIds()).toEqual(["trip-a"]);
       /*
        * The duplicate this guards against: invoiced on its ORIGINAL day, the
        * line's text no longer equals the Trip's planned day — and the Trip used
@@ -220,7 +211,7 @@ describe("the revised match, through the whole invoice check", () => {
         line({ bookingNumber: "ANRDUB2725107", containerNumber: "TLLU 1595717" }),
       ]);
 
-      return service.apply(upload(workbook));
+      return apply(upload(workbook));
     }
 
     it("reports the line MATCHED with its correction", async () => {
@@ -296,7 +287,7 @@ describe("the revised match, through the whole invoice check", () => {
     it("pays the Trip like any matched line", async () => {
       await correctedRun();
 
-      expect(paidIds()).toEqual(["trip-a"]);
+      expect(payableIds()).toEqual(["trip-a"]);
     });
 
     /** And the Trip it resolved to is on the invoice — not appended again. */
@@ -317,15 +308,16 @@ describe("the revised match, through the whole invoice check", () => {
       trips.findManyForInvoice.mockResolvedValue([trip("trip-a", { isPaid: true })]);
       trips.findClosedUnpaidBetween.mockResolvedValue([]);
 
-      const again = await service.apply(upload(first.workbook));
+      const again = await apply(upload(first.workbook));
 
       expect(again.result.rows[0]).toMatchObject({
         status: "MATCHED",
         containerCorrection: null,
       });
       expect(again.rowsAdded).toBe(0);
-      expect(again.paidTrips).toBe(0);
-      expect(again.alreadyPaid).toBe(1);
+      expect(again.result.payments).toEqual([
+        expect.objectContaining({ tripId: "trip-a", payable: true, alreadyPaid: true }),
+      ]);
     });
   });
 
@@ -340,7 +332,7 @@ describe("the revised match, through the whole invoice check", () => {
         }),
       ]);
 
-      return service.apply(
+      return apply(
         upload(await styled([line({ containerNumber: "EUCU 9999999" })])),
       );
     }
@@ -369,7 +361,7 @@ describe("the revised match, through the whole invoice check", () => {
     it("pays neither Trip", async () => {
       await ambiguousRun();
 
-      expect(paidIds()).toEqual([]);
+      expect(payableIds()).toEqual([]);
     });
 
     /** Either candidate may be the invoiced one: neither is appended as missing. */
@@ -385,7 +377,7 @@ describe("the revised match, through the whole invoice check", () => {
     it("carries no correction and keeps its container's colour", async () => {
       holding([trip("trip-a")]);
 
-      const applied = await service.apply(upload(await styled([line()])));
+      const applied = await apply(upload(await styled([line()])));
       const container = (await readBack(applied.workbook))
         .getRow(2)
         .getCell(COLUMN.containerNumber);

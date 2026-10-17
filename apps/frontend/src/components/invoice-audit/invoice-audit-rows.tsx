@@ -3,62 +3,64 @@
 import Link from "next/link";
 
 import { InvoicePricingCell } from "@/components/invoice-audit/invoice-pricing-cell";
-import type {
-  InvoiceAuditRow,
-  InvoiceContainerCorrection,
-  InvoiceRowStatus,
-} from "@/lib/api/invoice-audit";
+import {
+  ContainerCorrectionNote,
+  InvoiceRowNotes,
+} from "@/components/invoice-audit/invoice-row-notes";
+import type { InvoiceAuditRow, InvoiceRowStatus } from "@/lib/api/invoice-audit";
 import { useTranslation } from "@/lib/i18n/language-provider";
 import type { TranslationKey } from "@/lib/i18n/translations";
 
-/**
- * How each answer reads, and what it looks like.
- *
- * ── THE THREE PROBLEMS SHARE ONE COLOUR ─────────────────────────────────────
- * NOT_FOUND, NOT_FINISHED and AMBIGUOUS are the rows an operator has to do
- * something about, and they are the rows that will be marked in the corrected
- * workbook later. Giving them one highlight here — and the same highlight —
- * means the screen and the returned file will show the same set.
- */
+/** How each answer reads, and what its badge looks like. */
 const STATUS_STYLE: Record<
   InvoiceRowStatus,
   {
     readonly labelKey: TranslationKey;
-    readonly row: string;
     readonly badge: string;
   }
 > = {
   MATCHED: {
     labelKey: "invoiceAudit.status.matched",
-    row: "",
     badge: "border-success/40 bg-success/10 text-success",
   },
   NOT_FOUND: {
     labelKey: "invoiceAudit.status.notFound",
-    row: "bg-[#fdfd66]/40",
     badge: "border-danger/40 bg-danger/10 text-danger",
   },
   NOT_FINISHED: {
     labelKey: "invoiceAudit.status.notFinished",
-    row: "bg-[#fdfd66]/40",
     badge: "border-warning/40 bg-warning/10 text-warning",
   },
   AMBIGUOUS: {
     labelKey: "invoiceAudit.status.ambiguous",
-    row: "bg-[#fdfd66]/40",
+    badge: "border-danger/40 bg-danger/10 text-danger",
+  },
+  CONFLICT: {
+    labelKey: "invoiceAudit.status.conflict",
+    badge: "border-danger/40 bg-danger/10 text-danger",
+  },
+  /* A Cost Confirmation line, resolved: priced against its own confirmation. */
+  COST_LINE: {
+    labelKey: "invoiceAudit.status.costLine",
+    badge: "border-border bg-hover text-secondary",
+  },
+  COST_LINE_UNRESOLVED: {
+    labelKey: "invoiceAudit.status.costLineUnresolved",
     badge: "border-danger/40 bg-danger/10 text-danger",
   },
   /*
    * A line this check wrote into the document because the invoice had forgotten
-   * the transport. Not a problem and never highlighted: its prices are checked
-   * like any other line's, and it is simply never settled.
+   * the transport: its prices are checked like any other line's, and it is
+   * simply never settled.
    */
   ADDED_MISSING: {
     labelKey: "invoiceAudit.status.addedMissing",
-    row: "",
     badge: "border-primary/40 bg-primary/10 text-primary",
   },
 };
+
+/** The highlight of a row the corrected workbook marks yellow. */
+const MARKED_ROW = "bg-[#fdfd66]/40";
 
 /**
  * Every line of the invoice, with what became of it.
@@ -66,11 +68,16 @@ const STATUS_STYLE: Record<
  * The Excel ROW NUMBER is the first column on purpose: it is how an operator
  * finds the line in their own file, and it is the coordinate the corrected
  * workbook will be written into.
+ *
+ * Which rows are yellow is the backend's answer (`markedRowNumbers`), so the
+ * screen highlights exactly the rows the corrected file marks.
  */
 export function InvoiceAuditRows({
   rows,
+  markedRowNumbers,
 }: {
   rows: readonly InvoiceAuditRow[];
+  markedRowNumbers: readonly number[];
 }) {
   const t = useTranslation();
 
@@ -104,7 +111,11 @@ export function InvoiceAuditRows({
         </thead>
         <tbody>
           {rows.map((row) => (
-            <InvoiceAuditRowLine key={row.rowNumber} row={row} />
+            <InvoiceAuditRowLine
+              key={row.rowNumber}
+              row={row}
+              marked={markedRowNumbers.includes(row.rowNumber)}
+            />
           ))}
         </tbody>
       </table>
@@ -112,12 +123,12 @@ export function InvoiceAuditRows({
   );
 }
 
-function InvoiceAuditRowLine({ row }: { row: InvoiceAuditRow }) {
+function InvoiceAuditRowLine({ row, marked }: { row: InvoiceAuditRow; marked: boolean }) {
   const t = useTranslation();
   const style = STATUS_STYLE[row.status];
 
   return (
-    <tr className={`border-b border-border last:border-0 ${style.row}`}>
+    <tr className={`border-b border-border last:border-0 ${marked ? MARKED_ROW : ""}`}>
       <td className="px-3 py-2 tabular-nums text-muted">{row.rowNumber}</td>
       <td className="px-3 py-2">
         <span
@@ -150,36 +161,12 @@ function InvoiceAuditRowLine({ row }: { row: InvoiceAuditRow }) {
       </td>
       <td className="px-3 py-2">
         <TripCell row={row} />
+        <InvoiceRowNotes row={row} />
       </td>
       <td className="px-3 py-2 align-top">
         <InvoicePricingCell row={row} />
       </td>
     </tr>
-  );
-}
-
-/**
- * The transport was found; the container the invoice printed was not its own.
- *
- * One short line beside the container, in the warning colour the page already
- * uses for an unfinished Trip — no alert, no block of text. It says what the
- * corrected workbook will state instead; the hover text says it in full.
- */
-function ContainerCorrectionNote({
-  correction,
-}: {
-  correction: InvoiceContainerCorrection;
-}) {
-  const t = useTranslation();
-
-  return (
-    <span
-      className="ml-2 inline-flex items-center gap-1 whitespace-nowrap rounded border border-warning/40 bg-warning/10 px-1.5 py-0.5 text-xs font-medium text-warning"
-      title={`${t("invoiceAudit.containerCorrected.detail")} ${correction.invoiceContainerNumber} → ${correction.tripContainerNumber}`}
-    >
-      <span aria-hidden="true">⚠</span>
-      {t("invoiceAudit.containerCorrected")} → {correction.tripContainerNumber}
-    </span>
   );
 }
 
