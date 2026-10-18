@@ -16,6 +16,12 @@ import {
  * the stored price came from and how they matched. Quiet for an ordinary match,
  * emphasised when the Tarief is zero because nothing reliable matched, or when
  * a typo was trusted. The full account is on the Trip's detail page.
+ *
+ * Beside a route that DID price the Trip, a second marker says that its price
+ * has not been through the Routeprijzen page's check yet. The backend reads
+ * that page's own mark for the very configuration the snapshot recorded — the
+ * screen decides nothing — and a match that failed never carries one: that is
+ * the first marker's warning, not a price to check.
  */
 export function RouteMatchHint({ routeMatch }: { routeMatch: RouteMatch | null | undefined }) {
   const t = useTranslation();
@@ -27,19 +33,36 @@ export function RouteMatchHint({ routeMatch }: { routeMatch: RouteMatch | null |
 
   const tone = routeMatchTone(routeMatch);
   const description = describe(routeMatch, tone, t);
+  const needsReview = routeMatch.reviewed === false && PRICED_TONES.includes(tone);
 
   return (
-    <span
-      role="img"
-      aria-label={`${t("ritten.route.label")}: ${description}`}
-      title={description}
-      data-route-match={tone}
-      className={`shrink-0 cursor-help select-none text-[0.65rem] leading-none ${TONE_CLASSES[tone]}`}
-    >
-      {TONE_SYMBOLS[tone]}
-    </span>
+    <>
+      <span
+        role="img"
+        aria-label={`${t("ritten.route.label")}: ${description}`}
+        title={description}
+        data-route-match={tone}
+        className={`shrink-0 cursor-help select-none text-[0.65rem] leading-none ${TONE_CLASSES[tone]}`}
+      >
+        {TONE_SYMBOLS[tone]}
+      </span>
+      {needsReview ? (
+        <span
+          role="img"
+          aria-label={t("ritten.route.reviewNeeded")}
+          title={t("ritten.route.reviewNeeded")}
+          data-route-review="needed"
+          className="shrink-0 cursor-help select-none text-[0.65rem] font-bold leading-none text-warning"
+        >
+          ⚠
+        </span>
+      ) : null}
+    </>
   );
 }
+
+/** The tones of a route that priced the Trip — the only ones with a price to check. */
+const PRICED_TONES: readonly RouteMatchTone[] = ["matched", "approximate"];
 
 const TONE_SYMBOLS: Record<RouteMatchTone, string> = {
   matched: "●",

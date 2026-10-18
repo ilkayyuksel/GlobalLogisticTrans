@@ -1,6 +1,7 @@
 import { Injectable } from "@nestjs/common";
 
-import { toRouteMatchView, type RouteMatchView } from "./route-match-view";
+import { reviewOf, toRouteMatchView, type RouteMatchView } from "./route-match-view";
+import { RouteReviewRepository, type RouteReviewStatus } from "./route-review.repository";
 import {
   TripPricingRepository,
   type TripPricingWithItemsAndRoute,
@@ -56,6 +57,11 @@ export class EffectivePricingService {
      * off the N+1 path.
      */
     private readonly snapshots: TripPricingRepository,
+    /*
+     * The review mark of the configurations those snapshots were priced on,
+     * one query per page, so the list can say which prices still await a check.
+     */
+    private readonly reviews: RouteReviewRepository,
   ) {}
 
   /**
@@ -73,9 +79,15 @@ export class EffectivePricingService {
       this.overrides.findForTrip(tripId),
     ]);
 
-    return snapshot
-      ? toCurrentPricing(snapshot, overrideRows.map(toOverrideAmount))
-      : null;
+    if (!snapshot) {
+      return null;
+    }
+
+    return toCurrentPricing(
+      snapshot,
+      overrideRows.map(toOverrideAmount),
+      await this.reviewStatusOf([snapshot]),
+    );
   }
 
   /**
@@ -118,26 +130,43 @@ export class EffectivePricingService {
       overridesByTrip.set(row.tripId, existing);
     }
 
+    const reviews = await this.reviewStatusOf(snapshots);
     const byTrip = new Map<string, CurrentTripPricing>();
 
     for (const snapshot of snapshots) {
       byTrip.set(
         snapshot.tripId,
-        toCurrentPricing(snapshot, overridesByTrip.get(snapshot.tripId) ?? []),
+        toCurrentPricing(snapshot, overridesByTrip.get(snapshot.tripId) ?? [], reviews),
       );
     }
 
     return byTrip;
+  }
+
+  /** One lookup for the configurations every given snapshot was priced on. */
+  private reviewStatusOf(
+    snapshots: readonly TripPricingWithItemsAndRoute[],
+  ): Promise<RouteReviewStatus> {
+    const routeIds = snapshots
+      .filter((snapshot) => snapshot.combinationRouteGroupId === null)
+      .map((snapshot) => snapshot.routePricingId)
+      .filter((id): id is string => id !== null);
+    const combinationIds = snapshots
+      .map((snapshot) => snapshot.combinationRouteGroupId)
+      .filter((id): id is string => id !== null);
+
+    return this.reviews.findReviewStatus([...new Set(routeIds)], [...new Set(combinationIds)]);
   }
 }
 
 function toCurrentPricing(
   snapshot: TripPricingWithItemsAndRoute,
   overrides: readonly OverrideAmount[],
+  reviews: RouteReviewStatus,
 ): CurrentTripPricing {
   return {
     ...resolveEffectivePricing(snapshot.items.map(toEngineAmount), [...overrides]),
-    routeMatch: toRouteMatchView(snapshot),
+    routeMatch: toRouteMatchView(snapshot, reviewOf(snapshot, reviews)),
   };
 }
 

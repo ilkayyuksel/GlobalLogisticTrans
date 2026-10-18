@@ -45,6 +45,7 @@ import { TripClosedPricingListener } from "./trip-closed-pricing.listener";
 import { TunnelCalculator } from "./tunnel.calculator";
 import { WaitingTimeCalculator } from "./waiting-time.calculator";
 import { noDriverPinning } from "../trips/trip-driver-pinning.double";
+import { NO_REVIEW_STATUS, type RouteReviewRepository } from "../trip-pricing/route-review.repository";
 
 /**
  * The whole pricing lifecycle of a Trip, wired from the real services.
@@ -422,6 +423,7 @@ export function buildPricingLifecycle() {
       findForTrips: () => Promise.resolve([]),
     } as never,
     pricingRepository as never,
+    { findReviewStatus: async () => NO_REVIEW_STATUS } as unknown as RouteReviewRepository,
   );
 
   /* ── the Engine ─────────────────────────────────────────────────────────── */

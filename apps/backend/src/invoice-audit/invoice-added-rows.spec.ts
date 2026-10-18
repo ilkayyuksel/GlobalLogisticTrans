@@ -174,8 +174,13 @@ describe("the lines added for forgotten transports", () => {
     expect(isYellow(added.getCell(1))).toBe(true);
     expect(isYellow(added.getCell(COLUMN.remarks))).toBe(true);
     expect(applied.result.missingTrips[0].priceReliability.reliable).toBe(false);
-    // An added line is never offered for payment.
-    expect(applied.result.payments.map((payment) => payment.tripId)).toEqual(["trip-1"]);
+    // Its price is a problem: listed, and left unpaid.
+    expect(applied.result.payments.find((payment) => payment.tripId === "missing-1")).toMatchObject({
+      payable: false,
+      category: null,
+      reasons: ["PRICE_NOT_SETTLED"],
+      rowNumbers: [ADDED_ROW],
+    });
   });
 
   describe("COMBINATION", () => {

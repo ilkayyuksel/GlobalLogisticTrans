@@ -1238,6 +1238,50 @@ describe("Excel factuurcontrole", () => {
       expect(groupOf("Niet te betalen")).toHaveTextContent("rit niet afgesloten");
     });
 
+    /** In the system, not in the Excel: paid with the rest unless its price is a problem. */
+    it("offers a transport the invoice did not state, chosen like the rest", async () => {
+      const ADDED_TRIP = "3f1b0d2e-0000-4000-8000-000000000011";
+
+      requestMock.mockImplementation((path: string) =>
+        path === PAYMENT_PATH
+          ? Promise.resolve({ paidTrips: 3, alreadyPaid: 0, paidTripIds: [] })
+          : Promise.resolve(
+              result({
+                payments: [
+                  ...withPayments().payments,
+                  {
+                    tripId: ADDED_TRIP,
+                    planningDate: "2026-03-25",
+                    bookingNumber: "BELANR2720016",
+                    containerNumber: "EUCU2451828",
+                    rowNumbers: [108],
+                    payable: true,
+                    category: "ADDED",
+                    reasons: [],
+                    alreadyPaid: false,
+                  },
+                ],
+              }),
+            ),
+      );
+
+      await check();
+      await userEvent.click(screen.getByRole("button", { name: "Verwerken en downloaden" }));
+      await screen.findByText("Excel verwerkt");
+
+      const group = screen.getByText("Niet in Excel, toegevoegd aan factuur").closest("section") as HTMLElement;
+
+      expect(group).toHaveTextContent("BELANR2720016");
+      expect(within(group).getByRole("checkbox")).toBeChecked();
+
+      await userEvent.click(screen.getByRole("button", { name: "Betaling bevestigen (3)" }));
+      await screen.findByText(/Op betaald gezet:/);
+
+      const [[, options]] = paymentCalls();
+
+      expect(JSON.parse((options as { body: FormData }).body.get("tripIds") as string)).toContain(ADDED_TRIP);
+    });
+
     it("sends the original file with the chosen transports", async () => {
       await upToPayment();
 

@@ -15,6 +15,11 @@ export const PaymentCategory = {
    * apart, because a higher figure can point at an outdated price.
    */
   INVOICE_HIGHER: "INVOICE_HIGHER",
+  /**
+   * A transport the invoice did not state, added to the corrected document
+   * with a price this system relies on — see `missing-trip-payments.ts`.
+   */
+  ADDED: "ADDED",
 } as const;
 
 export type PaymentCategory = (typeof PaymentCategory)[keyof typeof PaymentCategory];
@@ -25,8 +30,11 @@ export const NotPayableReason = {
   NOT_CLOSED: "NOT_CLOSED",
   /** Only Cost Confirmation lines charge it: they never settle a transport. */
   NO_OWN_LINE: "NO_OWN_LINE",
-  /** A line of it was added by this check, not stated by the customer. */
-  ADDED_BY_CHECK: "ADDED_BY_CHECK",
+  /**
+   * Not on the invoice, and not added to the corrected one either: the
+   * document's totals could not take a line, so the customer does not pay it.
+   */
+  NOT_ADDED: "NOT_ADDED",
   /** One of its lines is marked yellow. */
   LINE_MARKED: "LINE_MARKED",
   /** One of its lines was not priced reliably and completely. */
@@ -58,6 +66,16 @@ const SETTLED_PRICING_STATUSES: readonly InvoicePricingStatus[] = [
   InvoicePricingStatus.INVOICE_HIGHER,
 ];
 
+/**
+ * The lines that are a transport's own: the customer's, or one this check added
+ * to the document earlier because the invoice had not stated it. The corrected
+ * document the customer pays carries both (owner, October 2026).
+ */
+const OWN_LINE_STATUSES: readonly InvoiceRowStatus[] = [
+  InvoiceRowStatus.MATCHED,
+  InvoiceRowStatus.ADDED_MISSING,
+];
+
 /** The line statuses that name one transport for certain. */
 const RESOLVED_LINE_STATUSES: readonly InvoiceRowStatus[] = [
   InvoiceRowStatus.MATCHED,
@@ -72,16 +90,19 @@ const RESOLVED_LINE_STATUSES: readonly InvoiceRowStatus[] = [
  * ── THE WHOLE RULE, IN ONE PLACE ────────────────────────────────────────────
  * A transport is payable only when ALL of these hold:
  *
- *   * it has a line of the customer's OWN (MATCHED) — a Cost Confirmation line
- *     alone, or a line this check added, is never a ground;
- *   * every line charging it is resolved and of the customer's own;
+ *   * it has a line of its OWN — matched, or added by this check to an earlier
+ *     correction of the document; a Cost Confirmation line alone is never a
+ *     ground;
+ *   * every line charging it is resolved;
  *   * the Trip is CLOSED;
  *   * every line came out UNCHANGED, RAISED or INVOICE_HIGHER — which already
  *     requires a reliable price, route evidence included;
  *   * none of its lines is marked yellow;
  *   * no unresolved line names it as a candidate.
  *
- * Deciding is all this does. Paying is a separate, confirmed step.
+ * The transports the invoice did not state at all are judged beside these —
+ * see `invoice-payments.ts`. Deciding is all this does. Paying is a separate,
+ * confirmed step.
  */
 export function assessPayments(
   matches: readonly InvoiceRowMatch[],
@@ -122,11 +143,7 @@ function reasonsAgainst(
   add(NotPayableReason.NOT_CLOSED, trip.status !== TripStatus.CLOSED);
   add(
     NotPayableReason.NO_OWN_LINE,
-    !lines.some((line) => line.status === InvoiceRowStatus.MATCHED),
-  );
-  add(
-    NotPayableReason.ADDED_BY_CHECK,
-    lines.some((line) => line.status === InvoiceRowStatus.ADDED_MISSING),
+    !lines.some((line) => OWN_LINE_STATUSES.includes(line.status)),
   );
   add(
     NotPayableReason.LINE_MARKED,

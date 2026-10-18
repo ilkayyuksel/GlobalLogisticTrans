@@ -294,12 +294,13 @@ export interface InvoiceTotals {
   readonly after: string;
 }
 
-export type InvoicePaymentCategory = "UNCHANGED" | "RAISED" | "INVOICE_HIGHER";
+/** `ADDED`: not on the customer's invoice, added to the corrected one with a reliable price. */
+export type InvoicePaymentCategory = "UNCHANGED" | "RAISED" | "INVOICE_HIGHER" | "ADDED";
 
 export type InvoiceNotPayableReason =
   | "NOT_CLOSED"
   | "NO_OWN_LINE"
-  | "ADDED_BY_CHECK"
+  | "NOT_ADDED"
   | "LINE_MARKED"
   | "PRICE_NOT_SETTLED"
   | "OPEN_CONFLICT";

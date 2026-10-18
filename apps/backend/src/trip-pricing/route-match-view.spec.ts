@@ -37,7 +37,7 @@ function stored(overrides: Partial<StoredRouteMatch> = {}): StoredRouteMatch {
 
 describe("the route a stored price was matched to", () => {
   it("names the ordinary route as it was configured, and how it matched", () => {
-    expect(toRouteMatchDto(toRouteMatchView(stored()))).toEqual({
+    expect(toRouteMatchDto(toRouteMatchView(stored(), null))).toEqual({
       method: "EXACT",
       routePricingId: "route-1",
       combinationRouteGroupId: null,
@@ -53,6 +53,7 @@ describe("the route a stored price was matched to", () => {
         },
       ],
       overSt: null,
+      reviewed: null,
     });
   });
 
@@ -61,6 +62,7 @@ describe("the route a stored price was matched to", () => {
     it("NOT_FOUND: no route, no configuration", () => {
       const view = toRouteMatchView(
         stored({ routeMatch: "NOT_FOUND", routePricingId: null, routeLegs: [] }),
+        null,
       );
 
       expect(view).toMatchObject({ method: "NOT_FOUND", routePricingId: null, legs: [] });
@@ -69,6 +71,7 @@ describe("the route a stored price was matched to", () => {
     it("AMBIGUOUS: no route chosen between candidates", () => {
       const view = toRouteMatchView(
         stored({ routeMatch: "AMBIGUOUS", routePricingId: null, routeLegs: [] }),
+        null,
       );
 
       expect(view).toMatchObject({ method: "AMBIGUOUS", routePricingId: null, legs: [] });
@@ -77,6 +80,7 @@ describe("the route a stored price was matched to", () => {
     it("not recorded: an older snapshot says so instead of guessing", () => {
       const view = toRouteMatchView(
         stored({ routeMatch: null, routePricingId: null, routeLegs: [] }),
+        null,
       );
 
       expect(view).toMatchObject({ method: null, routePricingId: null, legs: [] });
@@ -85,6 +89,7 @@ describe("the route a stored price was matched to", () => {
     it("a configured route at zero: matched, with its configuration", () => {
       const view = toRouteMatchView(
         stored({ items: [line("BASE_PRICE", "Quay 869 - Ghlin", "0.00")] }),
+        null,
       );
 
       expect(view).toMatchObject({ method: "EXACT", routePricingId: "route-1" });
@@ -101,6 +106,7 @@ describe("the route a stored price was matched to", () => {
     it("names both legs, Leg 1 first, and the selected Combination", () => {
       const view = toRouteMatchView(
         stored({ combinationRouteGroupId: "combination-1", routePricingId: "leg-2", routeLegs: LEGS }),
+        null,
       );
 
       expect(view.combinationRouteGroupId).toBe("combination-1");
@@ -122,6 +128,7 @@ describe("the route a stored price was matched to", () => {
             line("TOLL", "Over ST", "10.00"),
           ],
         }),
+        null,
       );
 
       expect(toRouteMatchDto(view).overSt).toEqual({
@@ -136,6 +143,7 @@ describe("the route a stored price was matched to", () => {
     it("says Over ST was not applied when the calculation wrote none", () => {
       const view = toRouteMatchView(
         stored({ combinationRouteGroupId: "combination-1", routeLegs: LEGS }),
+        null,
       );
 
       expect(toRouteMatchDto(view).overSt).toEqual({
@@ -155,6 +163,7 @@ describe("the route a stored price was matched to", () => {
           routeLegs: LEGS,
           items: [line("BASE_PRICE", "Over ST toeslag", "70.00")],
         }),
+        null,
       );
 
       expect(view.overSt?.applied).toBe(true);
@@ -162,6 +171,6 @@ describe("the route a stored price was matched to", () => {
   });
 
   it("says nothing about Over ST for an ordinary route", () => {
-    expect(toRouteMatchView(stored()).overSt).toBeNull();
+    expect(toRouteMatchView(stored(), null).overSt).toBeNull();
   });
 });

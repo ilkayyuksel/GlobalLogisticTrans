@@ -88,6 +88,7 @@ describe("the reprocess response", () => {
         },
       ],
       overSt: null,
+      reviewed: null,
     });
     await expectStored(tripId, response);
   });
@@ -137,6 +138,7 @@ describe("the reprocess response", () => {
       combinationMatch: null,
       legs: [],
       overSt: null,
+      reviewed: null,
     });
     await expectStored(tripId, response);
   });

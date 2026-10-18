@@ -87,6 +87,27 @@ describe("assessPayments", () => {
     expect(payment).toMatchObject({ payable: false, reasons: ["OPEN_CONFLICT"] });
   });
 
+  /** A line this check added earlier is the transport's own line. */
+  it("pays a transport through the line this check added to the document earlier", () => {
+    const [payment] = assessPayments(
+      [match(4, InvoiceRowStatus.ADDED_MISSING, ONE)],
+      priced([4, InvoicePricingStatus.MATCHED_NO_CHANGES]),
+      new Set(),
+    );
+
+    expect(payment).toMatchObject({ payable: true, category: "UNCHANGED", reasons: [] });
+  });
+
+  it("keeps such a line unpaid when its price is a problem", () => {
+    const [payment] = assessPayments(
+      [match(4, InvoiceRowStatus.ADDED_MISSING, ONE)],
+      priced([4, InvoicePricingStatus.PRICE_UNRELIABLE]),
+      new Set([4]),
+    );
+
+    expect(payment).toMatchObject({ payable: false, reasons: ["LINE_MARKED", "PRICE_NOT_SETTLED"] });
+  });
+
   it("never pays a Trip that is not CLOSED", () => {
     const [payment] = assessPayments(
       [match(2, InvoiceRowStatus.MATCHED, tripRecord({ id: "one", status: TripStatus.OPEN }))],

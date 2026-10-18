@@ -3,6 +3,7 @@ import { Prisma } from "@prisma/client";
 import { EffectivePricingService } from "./effective-pricing.service";
 import { TripPricingOverrideRepository } from "./trip-pricing-override.repository";
 import { TripPricingRepository } from "./trip-pricing.repository";
+import { NO_REVIEW_STATUS, type RouteReviewRepository } from "./route-review.repository";
 
 /**
  * The batch read the Ritten list depends on.
@@ -46,6 +47,7 @@ describe("EffectivePricingService.findForTrips", () => {
   let service: EffectivePricingService;
   let findCurrentByTripIds: jest.Mock;
   let findOverridesForTrips: jest.Mock;
+  let findReviewStatus: jest.Mock;
 
   beforeEach(() => {
     findCurrentByTripIds = jest
@@ -54,23 +56,27 @@ describe("EffectivePricingService.findForTrips", () => {
         Promise.resolve(ids.map(buildSnapshot)),
       );
     findOverridesForTrips = jest.fn().mockResolvedValue([]);
+    findReviewStatus = jest.fn().mockResolvedValue(NO_REVIEW_STATUS);
 
     service = new EffectivePricingService(
       {
         findForTrips: findOverridesForTrips,
+        findForTrip: jest.fn().mockResolvedValue([]),
       } as unknown as TripPricingOverrideRepository,
       {
         findCurrentByTripIds,
       } as unknown as TripPricingRepository,
+      { findReviewStatus } as unknown as RouteReviewRepository,
     );
   });
 
   describe("the number of queries does not grow with the page", () => {
-    it.each([1, 2, 20, 100])("uses two queries for %i Trips", async (count) => {
+    it.each([1, 2, 20, 100])("uses three reads for %i Trips", async (count) => {
       await service.findForTrips(tripIds(count));
 
       expect(findCurrentByTripIds).toHaveBeenCalledTimes(1);
       expect(findOverridesForTrips).toHaveBeenCalledTimes(1);
+      expect(findReviewStatus).toHaveBeenCalledTimes(1);
     });
 
     it.each([1, 2, 20, 100])("prices all %i Trips", async (count) => {
@@ -188,6 +194,74 @@ describe("EffectivePricingService.findForTrips", () => {
       expect(batched?.brandstof.toFixed(2)).toBe("15.00");
       expect(batched?.tol.toFixed(2)).toBe("30.00");
       expect(batched?.totaal.toFixed(2)).toBe("145.00");
+    });
+  });
+
+  /**
+   * ── THE PRICE CHECK OF THE ROUTE THAT PRICED THE TRIP ─────────────────────
+   * The Routeprijzen page's own `reviewed` mark, read live by the ids the
+   * snapshot recorded — the group's mark for a Combination — and never a copy.
+   */
+  describe("the review mark of the route that priced a Trip", () => {
+    function pricedOn(tripId: string, routePricingId: string | null, combinationRouteGroupId: string | null = null) {
+      return { ...buildSnapshot(tripId), routeMatch: routePricingId ? "EXACT" : "NOT_FOUND", routePricingId, combinationRouteGroupId };
+    }
+
+    it("reads every priced route and Combination at once, by the recorded ids", async () => {
+      findCurrentByTripIds.mockResolvedValue([
+        pricedOn("trip-1", "route-1"),
+        pricedOn("trip-2", "route-1"),
+        pricedOn("trip-3", "leg-2", "combination-1"),
+        pricedOn("trip-4", null),
+      ]);
+
+      await service.findForTrips(["trip-1", "trip-2", "trip-3", "trip-4"]);
+
+      // A leg is never looked up as a route of its own: its group is.
+      expect(findReviewStatus).toHaveBeenCalledWith(["route-1"], ["combination-1"]);
+    });
+
+    it("follows the mark in both directions", async () => {
+      findCurrentByTripIds.mockResolvedValue([pricedOn("trip-1", "route-1"), pricedOn("trip-2", "route-2")]);
+      findReviewStatus.mockResolvedValue({
+        routes: new Map([
+          ["route-1", false],
+          ["route-2", true],
+        ]),
+        combinations: new Map(),
+      });
+
+      const result = await service.findForTrips(["trip-1", "trip-2"]);
+
+      expect(result.get("trip-1")?.routeMatch.reviewed).toBe(false);
+      expect(result.get("trip-2")?.routeMatch.reviewed).toBe(true);
+    });
+
+    it("gives a Combination's Trip the Combination's mark", async () => {
+      findCurrentByTripIds.mockResolvedValue([pricedOn("trip-1", "leg-2", "combination-1")]);
+      findReviewStatus.mockResolvedValue({
+        routes: new Map([["leg-2", true]]),
+        combinations: new Map([["combination-1", false]]),
+      });
+
+      expect((await service.findForTrips(["trip-1"])).get("trip-1")?.routeMatch.reviewed).toBe(false);
+    });
+
+    /** Not a route to check: nothing matched, or the configuration is gone. */
+    it("says nothing for a Trip priced on no route, or on one since removed", async () => {
+      findCurrentByTripIds.mockResolvedValue([pricedOn("trip-1", null), pricedOn("trip-2", "removed-route")]);
+
+      const result = await service.findForTrips(["trip-1", "trip-2"]);
+
+      expect(result.get("trip-1")?.routeMatch.reviewed).toBeNull();
+      expect(result.get("trip-2")?.routeMatch.reviewed).toBeNull();
+    });
+
+    it("reads the mark for the single-Trip read too", async () => {
+      findCurrentByTripIds.mockResolvedValue([pricedOn("trip-1", "route-1")]);
+      findReviewStatus.mockResolvedValue({ routes: new Map([["route-1", false]]), combinations: new Map() });
+
+      expect((await service.findForTrip("trip-1"))?.routeMatch.reviewed).toBe(false);
     });
   });
 });

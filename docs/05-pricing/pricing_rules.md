@@ -594,6 +594,20 @@ is what stops the two configurations of one road sharing a toll or tunnel
 amount: editing the Combination's can no longer change what every ordinary Trip
 on that road pays.
 
+## A route price still awaiting its check
+
+The Ritten list warns ("Prijscontrole nodig voor deze routeprijs") beside a
+price that came from a configuration nobody has checked yet on the Routeprijzen
+page. The answer is that page's own `reviewed` mark — of the ordinary route, or
+of the Combination as a whole (`combination_route_group.reviewed`, never a
+leg's) — for the configuration the snapshot RECORDED (`route_pricing_id`,
+`combination_route_group_id`), read live on every read of the price
+(`trip-pricing/route-review.repository.ts`). It is bookkeeping only: nothing is
+recalculated, ticking or unticking the mark changes the warning on the next
+read, and a Trip priced on no route (NOT_FOUND, AMBIGUOUS) or on a configuration
+since removed carries no such warning — the route marker already says what is
+wrong there.
+
 ---
 
 # Toll and Tunnel Costs

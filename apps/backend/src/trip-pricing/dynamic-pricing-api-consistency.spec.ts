@@ -9,6 +9,7 @@ import { toEffectivePricingDto } from "./dto/effective-pricing.dto";
 import { EffectivePricingService } from "./effective-pricing.service";
 import { TripPricingOverrideRepository } from "./trip-pricing-override.repository";
 import { TripPricingRepository } from "./trip-pricing.repository";
+import { NO_REVIEW_STATUS, type RouteReviewRepository } from "./route-review.repository";
 
 const TRIP_ID = "3f2504e0-4f89-41d3-9a0c-0305e82c3301";
 const OTHER_TRIP_ID = "9c858901-8a57-4791-81fe-4c455b099bc9";
@@ -87,6 +88,7 @@ describe("a mutation's pricing equals the Ritten list's pricing", () => {
           Promise.resolve(ids.map(snapshotOf)),
         ),
       } as unknown as TripPricingRepository,
+      { findReviewStatus: async () => NO_REVIEW_STATUS } as unknown as RouteReviewRepository,
     );
 
     recalculation = new PricingRecalculationService(

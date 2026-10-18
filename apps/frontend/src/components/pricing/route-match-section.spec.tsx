@@ -221,4 +221,52 @@ describe("the route on the Ritten Tarief cell", () => {
 
     expect(screen.queryByRole("img", { name: /Route-match/ })).not.toBeInTheDocument();
   });
+
+  /**
+   * ── A ROUTE PRICE STILL AWAITING ITS CHECK ────────────────────────────────
+   * The backend reads the Routeprijzen page's own mark for the configuration
+   * that priced the Trip; the list only shows it.
+   */
+  describe("the price check of the route that priced the Trip", () => {
+    const reviewMarker = () => screen.queryByRole("img", { name: "Prijscontrole nodig voor deze routeprijs" });
+
+    it("warns beside an ordinary route price nobody has checked", () => {
+      renderRow({ ...ORDINARY, reviewed: false });
+
+      expect(reviewMarker()).toHaveAttribute("title", "Prijscontrole nodig voor deze routeprijs");
+      expect(reviewMarker()).toHaveAttribute("data-route-review", "needed");
+    });
+
+    it("says nothing once the route price is checked", () => {
+      renderRow({ ...ORDINARY, reviewed: true });
+
+      expect(reviewMarker()).not.toBeInTheDocument();
+    });
+
+    it("warns beside a Combination nobody has checked", () => {
+      renderRow({ ...COMBINATION, reviewed: false });
+
+      expect(reviewMarker()).toBeInTheDocument();
+      // The route marker itself is unchanged beside it.
+      expect(screen.getByRole("img", { name: /Route-match/ })).toHaveAttribute("data-route-match", "approximate");
+    });
+
+    /** A match that failed is the route marker's warning, never a price to check. */
+    it.each([
+      ["no route matched", { method: "NOT_FOUND" as const, ...NO_ROUTE }],
+      ["several routes matched", { method: "AMBIGUOUS" as const, ...NO_ROUTE }],
+      ["an older calculation", { method: null, ...NO_ROUTE }],
+    ])("adds no check warning when %s", (_case, routeMatch) => {
+      renderRow({ ...routeMatch, reviewed: false });
+
+      expect(reviewMarker()).not.toBeInTheDocument();
+      expect(screen.getByRole("img", { name: /Route-match/ })).toBeInTheDocument();
+    });
+
+    it("says nothing when the response does not carry the mark", () => {
+      renderRow({ ...ORDINARY });
+
+      expect(reviewMarker()).not.toBeInTheDocument();
+    });
+  });
 });

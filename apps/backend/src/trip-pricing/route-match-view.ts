@@ -8,6 +8,7 @@ import {
   OVER_ST_DESCRIPTION,
   OVER_ST_SURCHARGE_DESCRIPTION,
 } from "./over-st-lines";
+import type { RouteReviewStatus } from "./route-review.repository";
 
 /**
  * Which configured route a stored calculation was priced against.
@@ -51,6 +52,14 @@ export interface RouteMatchView {
   readonly legs: readonly RouteMatchLegView[];
   /** Null unless a Combination priced the Trip. */
   readonly overSt: AppliedOverStView | null;
+  /**
+   * Whether the configuration that priced the Trip has been through an
+   * administrator's price check — the Routeprijzen page's own `reviewed` mark,
+   * read live (see `route-review.repository.ts`). The group's mark for a
+   * Combination. Null when nothing was priced on a route, when the
+   * configuration no longer exists, or when the caller did not read it.
+   */
+  readonly reviewed: boolean | null;
 }
 
 /** The parts of a stored snapshot the view is read from. */
@@ -76,7 +85,10 @@ export interface StoredRouteMatch {
 
 const ZERO = new Prisma.Decimal(0);
 
-export function toRouteMatchView(snapshot: StoredRouteMatch): RouteMatchView {
+export function toRouteMatchView(
+  snapshot: StoredRouteMatch,
+  reviewed: boolean | null,
+): RouteMatchView {
   return {
     method: snapshot.routeMatch,
     routePricingId: snapshot.routePricingId,
@@ -94,7 +106,26 @@ export function toRouteMatchView(snapshot: StoredRouteMatch): RouteMatchView {
       })),
     overSt:
       snapshot.combinationRouteGroupId === null ? null : appliedOverSt(snapshot.items),
+    reviewed,
   };
+}
+
+/**
+ * The review mark of the configuration a snapshot was priced on: its
+ * Combination's when a Combination priced it, otherwise its ordinary route's.
+ * Never a leg's own flag, and never a guess from the route's names.
+ */
+export function reviewOf(
+  snapshot: Pick<StoredRouteMatch, "routePricingId" | "combinationRouteGroupId">,
+  status: RouteReviewStatus,
+): boolean | null {
+  if (snapshot.combinationRouteGroupId !== null) {
+    return status.combinations.get(snapshot.combinationRouteGroupId) ?? null;
+  }
+
+  return snapshot.routePricingId === null
+    ? null
+    : (status.routes.get(snapshot.routePricingId) ?? null);
 }
 
 /** The Over ST lines the Engine wrote, summed per component. */

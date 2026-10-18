@@ -2,6 +2,7 @@ import { Module } from "@nestjs/common";
 
 import { TripPricingItemRepository } from "../trip-pricing-items/trip-pricing-item.repository";
 import { EffectivePricingService } from "./effective-pricing.service";
+import { RouteReviewRepository } from "./route-review.repository";
 import { TripPricingOverrideRepository } from "./trip-pricing-override.repository";
 import { TripPricingRepository } from "./trip-pricing.repository";
 
@@ -42,6 +43,7 @@ import { TripPricingRepository } from "./trip-pricing.repository";
     TripPricingRepository,
     TripPricingItemRepository,
     TripPricingOverrideRepository,
+    RouteReviewRepository,
   ],
   exports: [EffectivePricingService],
 })

@@ -19,6 +19,8 @@ export const EXACT_ROUTE_MATCH: RouteMatchView = {
   combinationMatch: null,
   legs: [],
   overSt: null,
+  // The invoice check never reads the price-check mark of a route.
+  reviewed: null,
 };
 
 export const EXACT_COMBINATION_MATCH: RouteMatchView = {

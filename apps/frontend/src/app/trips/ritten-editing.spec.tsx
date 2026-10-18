@@ -290,6 +290,17 @@ describe("Ritten editing", () => {
   });
 
   describe("the planning date", () => {
+    /** The week is shown beside the date; the stored date is what is edited. */
+    it("shows the week beside the date, and edits the stored date itself", async () => {
+      await showTrip();
+
+      expect(screen.getByText("13/08/2026 (W33)")).toBeInTheDocument();
+
+      await openCell("Planningsdatum");
+
+      expect(screen.getByLabelText("Planningsdatum")).toHaveValue("2026-08-13");
+    });
+
     it("saves a new date", async () => {
       await showTrip();
       await openCell("Planningsdatum");

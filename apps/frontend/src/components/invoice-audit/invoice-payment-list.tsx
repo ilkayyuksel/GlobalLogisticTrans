@@ -11,7 +11,7 @@ import { useTranslation } from "@/lib/i18n/language-provider";
 import type { TranslationKey } from "@/lib/i18n/translations";
 
 /** The order the payable groups are shown in; a higher invoice stands apart, last. */
-const CATEGORIES: readonly InvoicePaymentCategory[] = ["UNCHANGED", "RAISED", "INVOICE_HIGHER"];
+const CATEGORIES: readonly InvoicePaymentCategory[] = ["UNCHANGED", "RAISED", "ADDED", "INVOICE_HIGHER"];
 
 /**
  * The transports the invoice charges, grouped by the backend's own answer.

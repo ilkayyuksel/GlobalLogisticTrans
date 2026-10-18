@@ -247,7 +247,8 @@ export class TripPricingService {
     return snapshots.map((snapshot) => ({
       pricing: toTripPricingResponse(snapshot),
       items: snapshot.items.map(toTripPricingItemResponse),
-      routeMatch: toRouteMatchDto(toRouteMatchView(snapshot)),
+      // An export prints prices, not the price-check bookkeeping of routes.
+      routeMatch: toRouteMatchDto(toRouteMatchView(snapshot, null)),
     }));
   }
 

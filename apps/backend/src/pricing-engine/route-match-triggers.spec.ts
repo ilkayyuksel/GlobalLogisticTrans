@@ -102,6 +102,7 @@ describe("which route a stored price came from, through every trigger", () => {
       combinationMatch,
       legs: [],
       overSt: null,
+      reviewed: null,
     });
     expect(world.storedSnapshot(tripId)?.routeLegs).toEqual([]);
   }
@@ -129,6 +130,7 @@ describe("which route a stored price came from, through every trigger", () => {
           },
         ],
         overSt: null,
+        reviewed: null,
       });
     });
 

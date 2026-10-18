@@ -15,6 +15,7 @@ import { TripRepository } from "./trip.repository";
 import { TripService } from "./trip.service";
 import { stubPricingRecalculation } from "../pricing-engine/pricing-recalculation.double";
 import { noDriverPinning } from "./trip-driver-pinning.double";
+import { NO_REVIEW_STATUS, type RouteReviewRepository } from "../trip-pricing/route-review.repository";
 
 /**
  * The pricing the Ritten list carries.
@@ -149,6 +150,7 @@ describe("the Ritten list carries the effective pricing of each Trip", () => {
         findCurrentByTripIds,
         findCurrentByTripId,
       } as unknown as TripPricingRepository,
+      { findReviewStatus: async () => NO_REVIEW_STATUS } as unknown as RouteReviewRepository,
     );
 
     findForTripsSpy = jest.spyOn(effectivePricing, "findForTrips");

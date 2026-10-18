@@ -167,13 +167,15 @@ describe("a line this system added to the invoice", () => {
   }
 
   describe("the first processing", () => {
-    it("adds the transport, leaves it unpaid, and records the row", async () => {
+    /** Not on the customer's invoice, but on the corrected one they pay (owner, October 2026). */
+    it("adds the transport, offers it for payment, and records the row", async () => {
       const first = await apply(
         upload(await anInvoiceMissingOneTransport(trip("missing-1", "BELANR2720016", "EUCU2451828"))),
       );
 
       expect(first.rowsAdded).toBe(1);
-      expect(payableIds()).toEqual(["trip-1"]);
+      expect(payableIds()).toEqual(["trip-1", "missing-1"]);
+      expect(paymentOf(first, "missing-1")).toMatchObject({ payable: true, category: "ADDED" });
 
       const book = await readBack(first.workbook);
       const record = book.getWorksheet(AUDIT_MARKER_SHEET);
@@ -235,14 +237,15 @@ describe("a line this system added to the invoice", () => {
       expect(second.result.summary.addedMissing).toBe(1);
     });
 
-    it("does not settle it", async () => {
+    /** Still unpaid after the first run: its own line on the corrected document settles it. */
+    it("offers it for payment, its added line being its own", async () => {
       const { second } = await processTwice();
 
-      expect(payableIds()).not.toContain("missing-1");
+      expect(payableIds()).toContain("missing-1");
       expect(paymentOf(second, "missing-1")).toMatchObject({
-        payable: false,
-        // Its only line is the one this check wrote.
-        reasons: ["NO_OWN_LINE", "ADDED_BY_CHECK"],
+        payable: true,
+        category: "UNCHANGED",
+        reasons: [],
       });
     });
 
@@ -285,8 +288,7 @@ describe("a line this system added to the invoice", () => {
       const row = added!.rowNumber;
 
       expect(sheet.getRow(row).getCell(COLUMN.tarief).value).toBe(600);
-      // And still not settled, however much its price moved.
-      expect(payableIds()).not.toContain("missing-1");
+      expect(paymentOf(second, "missing-1")).toMatchObject({ payable: true, category: "RAISED" });
     });
 
     it("adds no second copy of it", async () => {
@@ -334,11 +336,11 @@ describe("a line this system added to the invoice", () => {
 
       expect(third.result.summary.addedMissing).toBe(1);
       expect(third.rowsAdded).toBe(0);
-      expect(payableIds()).not.toContain("missing-1");
+      expect(paymentOf(third, "missing-1")).toMatchObject({ payable: true });
     });
 
     /** A Combination leg keeps its own surcharge through all of it. */
-    it("keeps a Combination's Backload, and still does not settle it", async () => {
+    it("keeps a Combination's Backload, and settles it like any other line", async () => {
       const { second } = await processTwice(
         trip("missing-1", "BELANR2720016", "EUCU2451828", { tripGroupId: "group-1" }),
         pricing({ tarief: "210", brandstof: "21", backload: "50" }),
@@ -351,7 +353,7 @@ describe("a line this system added to the invoice", () => {
 
       expect(added?.status).toBe("ADDED_MISSING");
       expect(sheet.getRow(added!.rowNumber).getCell(COLUMN.backload).value).toBe(50);
-      expect(payableIds()).not.toContain("missing-1");
+      expect(paymentOf(second, "missing-1")).toMatchObject({ payable: true });
     });
   });
 

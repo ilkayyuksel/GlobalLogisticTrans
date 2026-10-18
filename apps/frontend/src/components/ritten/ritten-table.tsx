@@ -13,7 +13,7 @@ import type { Trip, Vehicle } from "@/lib/api/types";
 import { CopyButton } from "@/components/ui/copy-button";
 import { PricingCells } from "@/components/ritten/pricing-cells";
 import { toClockLabel } from "@/lib/calendar/clock";
-import { formatCalendarDate } from "@/lib/calendar/calendar-dates";
+import { formatCalendarDateWithWeek } from "@/lib/calendar/iso-week";
 import { toFleetOptions, type FleetOption } from "@/lib/fleet-options";
 import { toVehicleLabel } from "@/lib/fleet/vehicle-label";
 import { useTranslation } from "@/lib/i18n/language-provider";
@@ -409,7 +409,8 @@ function RittenRow({
       <td className="whitespace-nowrap px-1.5 py-2 tabular-nums text-secondary">
         <InlineCell
           label={t("ritten.edit.planningDate")}
-          displayValue={formatCalendarDate(trip.planningDate) ?? empty}
+          // With its ISO week beside it; the stored date itself is what is edited.
+          displayValue={formatCalendarDateWithWeek(trip.planningDate, t("ritten.weekPrefix")) ?? empty}
           editValue={trip.planningDate ?? ""}
           kind="date"
           isDisabled={!isEditable || isBusy}

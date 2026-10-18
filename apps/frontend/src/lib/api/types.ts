@@ -395,6 +395,14 @@ export interface RouteMatch {
   legs: RouteMatchLeg[];
   /** Null unless a Combination priced the Trip. */
   overSt: AppliedOverSt | null;
+  /**
+   * Whether the route price (the Combination's, for a Combination) that priced
+   * the Trip has been checked on the Routeprijzen page — that page's own mark,
+   * read live. Null when nothing was priced on a route, when the configuration
+   * no longer exists, or when the response does not carry it. Optional: absent
+   * from responses of backends older than the field.
+   */
+  reviewed?: boolean | null;
 }
 
 export interface TripPricingItem {

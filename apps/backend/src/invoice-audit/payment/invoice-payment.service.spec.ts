@@ -102,6 +102,40 @@ describe("InvoicePaymentService", () => {
     );
   }
 
+  /**
+   * ── NOT IN THE EXCEL, BUT IN THE SYSTEM (OWNER, OCTOBER 2026) ─────────────
+   * Paid when its price is reliable; only a price problem keeps it unpaid.
+   */
+  describe("a transport the invoice did not state", () => {
+    const MISSING = "33333333-0000-4000-8000-000000000003";
+
+    beforeEach(() => {
+      trips.findClosedUnpaidBetween.mockResolvedValue([
+        trip(MISSING, "ANRDUB2725107", "TLLU1595717", { startTime: null, containerType: "45PH" }),
+      ]);
+    });
+
+    it("is paid when its price is reliable", async () => {
+      effectivePricing.findForTrips.mockResolvedValue(
+        new Map([
+          [ONE, pricing("370", "37")],
+          [TWO, pricing("425", "42.50")],
+          [MISSING, pricing("200", "20")],
+        ]),
+      );
+
+      await expect(confirm([ONE, MISSING])).resolves.toMatchObject({ paidTrips: 2 });
+      expect(payments.settle).toHaveBeenCalledWith([ONE, MISSING]);
+    });
+
+    it("stays unpaid when its price is a problem, and nothing is paid", async () => {
+      await expect(confirm([ONE, MISSING])).rejects.toMatchObject({
+        response: { details: ["ANRDUB2725107: prijs niet betrouwbaar gecontroleerd"] },
+      });
+      expect(payments.settle).not.toHaveBeenCalled();
+    });
+  });
+
   /** B2 — the chosen payable transports, one with a raised price, in one call. */
   it("pays exactly the chosen transports, raised prices included", async () => {
     const result = await confirm([ONE, TWO]);

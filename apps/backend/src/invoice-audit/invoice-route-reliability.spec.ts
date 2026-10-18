@@ -48,6 +48,7 @@ function pricedOn(destination: string, method: RouteMatchMethod | null, match: P
           ? []
           : [{ legPosition: null, isPricedLeg: true, routePricingId: "route-1", departure: destination, destination: "Quay 869", method }],
       overSt: null,
+      reviewed: null,
       ...match,
     },
   };

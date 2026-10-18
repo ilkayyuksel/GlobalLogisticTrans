@@ -19,6 +19,7 @@ import { TripPricingOverrideController } from "./trip-pricing-override.controlle
 import { TripPricingOverrideRepository } from "./trip-pricing-override.repository";
 import { TripPricingOverrideService } from "./trip-pricing-override.service";
 import { TripPricingRepository } from "./trip-pricing.repository";
+import { NO_REVIEW_STATUS, RouteReviewRepository } from "./route-review.repository";
 
 const TRIP_ID = "1b9d6bcd-bbfd-4b2d-9b5d-ab8dfbbd4bed";
 const OTHER_TRIP_ID = "2c9d6bcd-bbfd-4b2d-9b5d-ab8dfbbd4bee";
@@ -135,6 +136,11 @@ describe("TripPricingOverrideController (integration)", () => {
         EffectivePricingService,
         { provide: TripPricingOverrideRepository, useValue: overrides },
         { provide: TripPricingItemRepository, useValue: items },
+        // No route priced, so no route price check to read.
+        {
+          provide: RouteReviewRepository,
+          useValue: { findReviewStatus: async () => NO_REVIEW_STATUS },
+        },
         {
           // The snapshot the effective read resolves against: header, lines
           // and route in the one consistent read.

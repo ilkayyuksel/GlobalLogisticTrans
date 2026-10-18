@@ -99,7 +99,8 @@ describe("Ritten table", () => {
       const row = rowOf(table, "ANRDUB2602247");
 
       expect(within(row).getByText("1-ABC-123")).toBeInTheDocument();
-      expect(within(row).getByText("13/08/2026")).toBeInTheDocument();
+      // With its ISO week: Thursday 13 August 2026 is in week 33.
+      expect(within(row).getByText("13/08/2026 (W33)")).toBeInTheDocument();
       expect(within(row).getByText("10:00")).toBeInTheDocument();
       expect(within(row).getByText("16:00")).toBeInTheDocument();
       expect(within(row).getByText("MSKU1234567")).toBeInTheDocument();

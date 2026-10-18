@@ -8,7 +8,7 @@ import {
   type ExaminedInvoice,
   type UploadedInvoiceFile,
 } from "./invoice-examination.service";
-import { assessPayments } from "./payment/payment-eligibility";
+import { assessInvoicePayments } from "./payment/invoice-payments";
 import type { ChangePlan } from "./workbook/change-plan";
 import {
   InvoiceSheetWriter,
@@ -151,7 +151,7 @@ export class InvoiceAuditService {
       (_, index) => (written.firstAddedRowNumber ?? 0) + index,
     );
     const totalsAfter = sumAmountColumns(worksheet, sheet, [...lineRows, ...addedRows]);
-    const payments = assessPayments(examined.matches, examined.pricing, new Set(markedRowNumbers));
+    const payments = assessInvoicePayments(examined, new Set(markedRowNumbers));
 
     return {
       examined,

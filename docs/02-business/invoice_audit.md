@@ -165,6 +165,14 @@ rounded to the cent (half up):
 
 ### Fuel
 
+Fuel is compared on its own on every reliably priced line — also when the
+Tarief already agrees, and whatever the other components do. The expected
+Fuel is the system's own: the amount the Pricing Engine stored on the snapshot
+(the configured percentage applied to the Tarief, Over ST included), following
+an operator's Tarief correction at the snapshot's rate. A Tarief of zero owes
+no Fuel, and a Fuel on the invoice is never lowered. Proven end to end in
+`invoice-fuel-check.spec.ts`.
+
 The target is the higher of the invoice's Fuel and the system's. Because Excel
 recalculates every formula when the file is opened, the cell is written so it
 keeps that target (`pricing/fuel-cell-plan.ts`):
@@ -276,8 +284,9 @@ the summary; every formula is rewritten for the move (`openRowsAt`).
   price is used"). Otherwise the line is added with no amounts and the whole row
   is yellow. Zero is an empty cell. Fuel follows the document's formula
   convention when that formula produces the amount exactly; otherwise a figure.
-- An added line is never settled, and the document records it (see
-  `invoice-audit-marker.ts`) so a later upload recognises it.
+- An added line with a reliable price is settled like any other (see "When a
+  transport is payable"); one without stays unpaid. The document records every
+  added line (see `invoice-audit-marker.ts`) so a later upload recognises it.
 
 ### Fuel header
 
@@ -314,11 +323,16 @@ Three separate steps (`invoice-audit.service.ts`, `payment/`):
 
 ### When a transport is payable
 
-`payment/payment-eligibility.ts`, the whole rule in one place. ALL of:
+`payment/invoice-payments.ts` composes the whole rule — the lines of the
+document (`payment/payment-eligibility.ts`) and the transports it did not state
+(`payment/missing-trip-payments.ts`) — once, for the preview and for the
+confirmation alike.
 
-- it has a line of the customer's own that matched it (MATCHED) — Cost
-  Confirmation lines alone (`NO_OWN_LINE`) and lines this check added
-  (`ADDED_BY_CHECK`) are never a ground;
+**A transport the document charges** is payable when ALL of:
+
+- it has a line of its own: matched (MATCHED), or added by this check to an
+  earlier correction of the document (ADDED_MISSING) — Cost Confirmation lines
+  alone are never a ground (`NO_OWN_LINE`);
 - the Trip is CLOSED (`NOT_CLOSED`);
 - every line charging it came out `MATCHED_NO_CHANGES`, `PRICING_CORRECTED` or
   `INVOICE_HIGHER` — which requires a reliable price
@@ -327,8 +341,18 @@ Three separate steps (`invoice-audit.service.ts`, `payment/`):
 - no unresolved line names it as a candidate, and every line of it is resolved
   (`OPEN_CONFLICT`).
 
-A payable transport has a category: `UNCHANGED`, `RAISED`, or `INVOICE_HIGHER`
-— payable, because everything owed is on the invoice, but shown apart because a
+**A transport this system holds that the invoice did not state** (owner,
+October 2026) is paid when it was added to the corrected document with a price
+this system relies on — the corrected invoice the customer pays carries it.
+Only a price problem keeps it unpaid: added without amounts, yellow
+(`PRICE_NOT_SETTLED`). Two kinds are not on the corrected invoice and stay
+unpaid for that reason: not added because the document's totals deviate
+(`NOT_ADDED`), and blocked because an unresolved line could be that transport
+(`OPEN_CONFLICT`). Until October 2026 an added transport was never settled.
+
+A payable transport has a category: `UNCHANGED`, `RAISED`, `ADDED` (not on
+the customer's invoice, added to the corrected one), or `INVOICE_HIGHER` —
+payable, because everything owed is on the invoice, but shown apart because a
 higher figure can point at an outdated price. A payable transport that is
 already paid is reported as re-invoiced and never paid again.
 

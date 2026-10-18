@@ -98,6 +98,14 @@ export class RouteMatchDto {
     description: "Null unless a Combination priced the Trip.",
   })
   overSt!: AppliedOverStDto | null;
+
+  @ApiPropertyOptional({
+    type: Boolean,
+    nullable: true,
+    description:
+      "Whether the route price (or, for a Combination, the Combination) that priced the Trip has been checked on the Routeprijzen page. Read live, so it follows that page's mark. Null when nothing was priced on a route, when the configuration no longer exists, or when this read does not carry it.",
+  })
+  reviewed!: boolean | null;
 }
 
 export function toRouteMatchDto(view: RouteMatchView): RouteMatchDto {
@@ -116,5 +124,6 @@ export function toRouteMatchDto(view: RouteMatchView): RouteMatchDto {
           surcharge: view.overSt.surcharge.toFixed(MONEY_DECIMAL_PLACES),
         }
       : null,
+    reviewed: view.reviewed,
   };
 }

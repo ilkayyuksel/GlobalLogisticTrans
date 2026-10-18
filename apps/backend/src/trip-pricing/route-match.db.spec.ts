@@ -93,7 +93,7 @@ describeWithDatabase("the matched route of a snapshot, against a real database",
 
     expect(snapshot.combinationRouteGroupId).toBe("33333333-3333-4333-8333-333333333333");
     expect(snapshot.combinationMatch).toBe("MATCHED");
-    expect(toRouteMatchView(snapshot).legs.map((each) => [each.legPosition, each.isPricedLeg])).toEqual([
+    expect(toRouteMatchView(snapshot, null).legs.map((each) => [each.legPosition, each.isPricedLeg])).toEqual([
       [1, false],
       [2, true],
     ]);

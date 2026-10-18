@@ -7,14 +7,15 @@ import { toMarkedRowNumbers } from "../invoice-corrections";
 import { InvoiceAuditService } from "../invoice-audit.service";
 import type { UploadedInvoiceFile } from "../invoice-examination.service";
 import { InvoicePaymentRepository } from "./invoice-payment.repository";
-import { assessPayments, NotPayableReason, type TripPayment } from "./payment-eligibility";
+import { assessInvoicePayments } from "./invoice-payments";
+import { NotPayableReason, type TripPayment } from "./payment-eligibility";
 
 /** Why a selected Trip is refused, in the words the refusal shows. */
 const REFUSAL_WORDS: Record<NotPayableReason | "NOT_ON_INVOICE", string> = {
   NOT_ON_INVOICE: "staat niet op deze factuur",
   [NotPayableReason.NOT_CLOSED]: "rit niet afgesloten",
   [NotPayableReason.NO_OWN_LINE]: "alleen EC-regels",
-  [NotPayableReason.ADDED_BY_CHECK]: "door de controle toegevoegd",
+  [NotPayableReason.NOT_ADDED]: "niet aan de factuur toegevoegd, de totalen wijken af",
   [NotPayableReason.LINE_MARKED]: "regel geel gemarkeerd",
   [NotPayableReason.PRICE_NOT_SETTLED]: "prijs niet betrouwbaar gecontroleerd",
   [NotPayableReason.OPEN_CONFLICT]: "open conflict met een andere regel",
@@ -57,9 +58,8 @@ export class InvoicePaymentService {
      */
     const { examined } = await this.invoices.produce(file);
     const assessed = new Map(
-      assessPayments(
-        examined.matches,
-        examined.pricing,
+      assessInvoicePayments(
+        examined,
         new Set(toMarkedRowNumbers(examined.matches, examined.pricing)),
       ).map((payment) => [payment.trip.id, payment]),
     );
