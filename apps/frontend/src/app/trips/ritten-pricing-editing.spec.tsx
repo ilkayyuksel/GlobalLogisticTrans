@@ -812,3 +812,49 @@ describe("correcting the price of a CLOSED Trip", () => {
     expect(within(await rowOf(BOOKING_A)).getByText("Afgewerkt")).toBeInTheDocument();
   });
 });
+
+/*
+ * The later leg of a Combination: route 80 + Over ST 50 + €70 = Tarief 200.
+ * Over ST and the €70 stay on top of any correction (backend), so the editor
+ * offers the route part the backend reports — never the total, which an
+ * operator would otherwise retype and so count Over ST twice.
+ */
+describe("correcting the Tarief of a leg with Over ST", () => {
+  beforeEach(() => {
+    const pricing = buildPricing({ tarief: "200.00", brandstof: "30.00", totaal: "260.00" });
+
+    respondWith(requestMock, {
+      trips: buildPage([
+        buildTrip({
+          id: TRIP_A_ID,
+          bookingNumber: BOOKING_A,
+          status: "CLOSED",
+          pricing: {
+            ...pricing,
+            components: pricing.components.map((component) =>
+              component.componentCode === "BASE_PRICE"
+                ? { ...component, correctableAmount: "80.00" }
+                : component,
+            ),
+          },
+        }),
+        tripB(),
+      ]),
+    });
+  });
+
+  it("shows the whole Tarief, Over ST and the €70 included", async () => {
+    await showPrices();
+
+    expect((await cellsOf(BOOKING_A))[CELL.tarief]).toHaveTextContent("200.00");
+  });
+
+  it("offers the route part to correct, not the total", async () => {
+    await showPrices();
+    const row = within(await rowOf(BOOKING_A));
+
+    await userEvent.click(row.getByRole("button", { name: "Tarief aanpassen" }));
+
+    expect(row.getByLabelText("Tarief aanpassen")).toHaveValue(80);
+  });
+});

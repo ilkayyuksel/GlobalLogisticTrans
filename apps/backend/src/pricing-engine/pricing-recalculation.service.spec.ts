@@ -211,6 +211,7 @@ describe("PricingRecalculationService", () => {
         componentCode: "BASE_PRICE",
         engineAmount: "520.00",
         effectiveAmount: "520.00",
+        correctableAmount: "520.00",
         source: "ENGINE",
       });
     });
@@ -247,6 +248,7 @@ describe("PricingRecalculationService", () => {
         componentCode: "BASE_PRICE",
         engineAmount: "520.00",
         effectiveAmount: "620.00",
+        correctableAmount: "620.00",
         source: "OVERRIDE",
       });
     });

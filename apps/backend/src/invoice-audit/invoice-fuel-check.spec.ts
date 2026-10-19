@@ -48,6 +48,7 @@ function withEngineLines(held: CurrentTripPricing): CurrentTripPricing {
     componentCode,
     engineAmount: amount,
     effectiveAmount: amount,
+    correctableAmount: amount,
     source: PricingAmountSource.ENGINE,
   });
 

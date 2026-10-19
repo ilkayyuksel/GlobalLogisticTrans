@@ -706,7 +706,20 @@ pair is not identified, the leg prices no route at all — never the ordinary
 route of its road — and owes no Over ST.
 
 Over ST reaches a Trip only when it is priced (closed or repriced); stored
-snapshots do not change until then.
+snapshots do not change until then. A CLOSED Trip priced before the rule of
+19 October 2026 keeps its old answer until it is repriced.
+
+**Why a later leg has no €70** — `over-st-diagnose.sql` (read-only) lists every
+CLOSED grouped Trip on a later day than its partner whose Tarief lacks the €70,
+with the cause: a missing date, never priced, no Combination recognised, or
+an old snapshot that needs "Prijs herberekenen".
+
+**A manual correction never removes it** (owner, 19 October 2026). An operator's
+Tarief, Toll or Tunnel override replaces only the ROUTE part of that component;
+the Engine's "Over ST" and "Over ST toeslag" lines of it stay on top
+(`resolveEffectivePricing`). The editor offers that route part
+(`correctableAmount`), so the total is never retyped and Over ST never counted
+twice. Example: route 80 + Over ST 50 + €70 = 200; corrected to 100 → 220.
 
 ### A date change reprices both legs automatically
 

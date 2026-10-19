@@ -145,6 +145,7 @@ export function buildPricing({
       componentCode,
       engineAmount: amountOf[componentCode],
       effectiveAmount: amountOf[componentCode],
+      correctableAmount: amountOf[componentCode],
       source: overriddenComponents.includes(componentCode)
         ? ("OVERRIDE" as const)
         : ("ENGINE" as const),

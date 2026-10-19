@@ -567,4 +567,89 @@ describe("resolving the effective pricing of a Trip", () => {
       expect(isOverridableComponent(componentCode)).toBe(false);
     });
   });
+
+  /*
+   * ── OVER ST SURVIVES A CORRECTION (owner, 19 October 2026) ────────────────
+   * The later leg of a Combination: route 80 / 15 / 5, Over ST 50 / 10 / 3 and
+   * the €70, fuel 15%. A correction replaces only the route part.
+   */
+  describe("Over ST and the €70 under a correction", () => {
+    function line(componentCode: string, amount: string, description: string): EngineAmount {
+      return { ...engine(componentCode, amount), description };
+    }
+
+    const LATER_LEG: EngineAmount[] = [
+      line(EffectiveComponent.BASE_PRICE, "80.00", "Quay 869 - GENT"),
+      line(EffectiveComponent.BASE_PRICE, "50.00", "Over ST"),
+      line(EffectiveComponent.BASE_PRICE, "70.00", "Over ST toeslag"),
+      engine(EffectiveComponent.FUEL_SURCHARGE, "30.00", "15"),
+      line(EffectiveComponent.TOLL, "15.00", "Toll"),
+      line(EffectiveComponent.TOLL, "10.00", "Over ST"),
+      line(EffectiveComponent.TUNNEL, "5.00", "Tunnel"),
+      line(EffectiveComponent.TUNNEL, "3.00", "Over ST"),
+    ];
+
+    const componentOf = (pricing: ReturnType<typeof resolveEffectivePricing>, code: string) =>
+      pricing.components.find((component) => component.componentCode === code)!;
+
+    it("without a correction: the Engine's sum, and the route part to correct", () => {
+      const pricing = resolveEffectivePricing(LATER_LEG, []);
+
+      expect(pricing.tarief.toFixed(2)).toBe("200.00");
+      expect(componentOf(pricing, "BASE_PRICE").correctableAmount.toFixed(2)).toBe("80.00");
+      expect(componentOf(pricing, "TOLL").correctableAmount.toFixed(2)).toBe("15.00");
+      expect(componentOf(pricing, "TUNNEL").correctableAmount.toFixed(2)).toBe("5.00");
+    });
+
+    it("keeps Over ST and the €70 on top of a corrected Tarief, and fuel on all of it", () => {
+      const pricing = resolveEffectivePricing(LATER_LEG, [
+        override(EffectiveComponent.BASE_PRICE, "100.00"),
+      ]);
+
+      expect(pricing.tarief.toFixed(2)).toBe("220.00");
+      expect(componentOf(pricing, "BASE_PRICE")).toMatchObject({
+        source: PricingAmountSource.OVERRIDE,
+      });
+      expect(componentOf(pricing, "BASE_PRICE").correctableAmount.toFixed(2)).toBe("100.00");
+      expect(pricing.brandstof.toFixed(2)).toBe("33.00");
+    });
+
+    it("keeps Over ST on top of a corrected Toll and Tunnel", () => {
+      const pricing = resolveEffectivePricing(LATER_LEG, [
+        override(EffectiveComponent.TOLL, "20.00"),
+        override(EffectiveComponent.TUNNEL, "0.00"),
+      ]);
+
+      expect(pricing.tol.toFixed(2)).toBe("30.00");
+      expect(pricing.tunnel.toFixed(2)).toBe("3.00");
+    });
+
+    it("keeps the €70 when the Tarief is corrected to zero", () => {
+      const pricing = resolveEffectivePricing(LATER_LEG, [
+        override(EffectiveComponent.BASE_PRICE, "0.00"),
+      ]);
+
+      expect(pricing.tarief.toFixed(2)).toBe("120.00");
+    });
+
+    it("changes nothing for a Trip without Over ST", () => {
+      const pricing = resolveEffectivePricing(
+        [engine(EffectiveComponent.BASE_PRICE, "100.00"), engine(EffectiveComponent.FUEL_SURCHARGE, "15.00", "15")],
+        [override(EffectiveComponent.BASE_PRICE, "120.00")],
+      );
+
+      expect(pricing.tarief.toFixed(2)).toBe("120.00");
+      expect(componentOf(pricing, "BASE_PRICE").correctableAmount.toFixed(2)).toBe("120.00");
+      expect(pricing.brandstof.toFixed(2)).toBe("18.00");
+    });
+
+    it("totals every Over ST amount exactly once", () => {
+      const pricing = resolveEffectivePricing(LATER_LEG, [
+        override(EffectiveComponent.BASE_PRICE, "100.00"),
+      ]);
+
+      // 220 Tarief + 33 fuel + 25 toll + 8 tunnel
+      expect(pricing.totaal.toFixed(2)).toBe("286.00");
+    });
+  });
 });

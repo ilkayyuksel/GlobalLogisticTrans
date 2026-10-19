@@ -341,6 +341,42 @@ describe("choosing a route by hand", () => {
     expect(world.storedSnapshot(LEG2)).toMatchObject({ combinationRouteGroupId: UNMATCHED_COMBINATION });
   });
 
+  /*
+   * A chosen Combination owes Over ST and the €70 exactly as a matched one:
+   * on the leg planned on the LATER day, whichever leg position it holds.
+   */
+  describe("Over ST on a chosen Combination (owner, 19 October 2026)", () => {
+    it("charges the later leg even when it holds the chosen Combination's Leg 1", async () => {
+      await unmatchedPair();
+
+      // LEG1 (day one) takes Leg 2 of Lille; LEG2 (day two) takes Leg 1.
+      await choose(LEG1, { kind: "COMBINATION", combinationRouteGroupId: UNMATCHED_COMBINATION, legPosition: 2 });
+
+      // 150 + Over ST 40 + €70 on the later leg; the earlier leg its route alone.
+      expect(await actions.apiPricing(LEG2)).toMatchObject({ tarief: "260.00", tol: "10.00" });
+      expect(actions.surcharges(LEG2)).toHaveLength(1);
+      expect(await actions.apiPricing(LEG1)).toMatchObject({ tarief: "120.00", tol: "0.00" });
+      expect(actions.surcharges(LEG1)).toEqual([]);
+      await actions.expectConsistent(LEG1);
+      await actions.expectConsistent(LEG2);
+    });
+
+    it("moves Over ST and the €70 to the other leg when the days swap", async () => {
+      await unmatchedPair();
+      await choose(LEG1, { kind: "COMBINATION", combinationRouteGroupId: HALF_MATCHING_COMBINATION });
+      expect(actions.surcharges(LEG2)).toHaveLength(1);
+
+      await actions.moveTo(LEG1, "2026-09-02");
+
+      expect(world.storedSnapshot(LEG1)).toMatchObject({ routeSelection: "MANUAL" });
+      // 111 + Over ST 40 + €70 now on LEG1; LEG2 back to its route alone.
+      expect(await actions.apiPricing(LEG1)).toMatchObject({ tarief: "221.00" });
+      expect(actions.surcharges(LEG1)).toHaveLength(1);
+      expect(await actions.apiPricing(LEG2)).toMatchObject({ tarief: "99.00" });
+      expect(actions.surcharges(LEG2)).toEqual([]);
+    });
+  });
+
   it("uses the same day for both legs without Over ST, by the existing rule", async () => {
     actions.seedLegs(DAY_ONE);
     await actions.close(LEG1);

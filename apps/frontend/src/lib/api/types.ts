@@ -471,6 +471,11 @@ export interface EffectivePricingComponent {
   componentCode: string;
   engineAmount: string | null;
   effectiveAmount: string;
+  /**
+   * The part a correction replaces — what an editor offers. Over ST and its
+   * €70 are never in it: the backend keeps them on top of any correction.
+   */
+  correctableAmount: string;
   source: PricingAmountSource;
 }
 

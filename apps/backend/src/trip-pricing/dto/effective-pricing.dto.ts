@@ -43,6 +43,14 @@ export class EffectivePricingComponentDto {
   effectiveAmount!: string;
 
   @ApiProperty({
+    type: String,
+    description:
+      "The part of the effective amount a correction replaces — what an editor offers. Over ST and its €70 are never in it: they always stay on top. Equal to effectiveAmount when the Trip carries no Over ST.",
+    example: "120.00",
+  })
+  correctableAmount!: string;
+
+  @ApiProperty({
     enum: PricingAmountSource,
     description: "OVERRIDE when an operator corrected this component by hand.",
   })
@@ -136,6 +144,7 @@ function toComponentDto(
     engineAmount:
       component.engineAmount?.toFixed(MONEY_DECIMAL_PLACES) ?? null,
     effectiveAmount: component.effectiveAmount.toFixed(MONEY_DECIMAL_PLACES),
+    correctableAmount: component.correctableAmount.toFixed(MONEY_DECIMAL_PLACES),
     source: component.source,
   };
 }

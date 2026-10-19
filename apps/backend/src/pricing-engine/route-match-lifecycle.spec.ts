@@ -153,6 +153,35 @@ describe("route matching and Over ST through the pricing lifecycle", () => {
   });
 
   /**
+   * ── THE LATER DAY OWES IT, AND A DATE CHANGE MOVES IT ─────────────────────
+   * Through the real Trip edit: moving either CLOSED leg reprices BOTH, so
+   * Over ST and the €70 follow the later day to whichever leg has it now.
+   */
+  describe("a date change between two CLOSED legs", () => {
+    it("moves Over ST and the €70 to Leg 1 when Leg 1 moves past Leg 2", async () => {
+      await closedCombination();
+      expect(surcharges(LEG2)).toHaveLength(1);
+
+      await world.tripService.update(LEG1, { planningDate: "2026-09-02" });
+
+      // Leg 1: 150 + Over ST 40 + €70; Leg 2: its route alone.
+      expect(await apiPricing(LEG1)).toMatchObject({ tarief: "260.00", tol: "10.00" });
+      expect(surcharges(LEG1)).toHaveLength(1);
+      expect(await apiPricing(LEG2)).toMatchObject(WITHOUT_OVER_ST);
+      expect(surcharges(LEG2)).toEqual([]);
+    });
+
+    it("removes it from both when the legs share a day again", async () => {
+      await closedCombination();
+
+      await world.tripService.update(LEG1, { planningDate: DAY_TWO });
+
+      expect(surcharges(LEG1)).toEqual([]);
+      expect(surcharges(LEG2)).toEqual([]);
+    });
+  });
+
+  /**
    * ── CONFIGURATION NEVER REPRICES BY ITSELF ───────────────────────────────
    * A stored price stays what it was priced at until the Trip is priced again
    * — by an edit while CLOSED, closing again, or an explicit reprocess.

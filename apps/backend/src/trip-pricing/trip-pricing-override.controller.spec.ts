@@ -298,6 +298,7 @@ describe("TripPricingOverrideController (integration)", () => {
         componentCode: "BASE_PRICE",
         engineAmount: "100.00",
         effectiveAmount: "120.00",
+        correctableAmount: "120.00",
         source: "OVERRIDE",
       });
     });
@@ -449,6 +450,7 @@ describe("TripPricingOverrideController (integration)", () => {
         componentCode: "BASE_PRICE",
         engineAmount: "100.00",
         effectiveAmount: "100.00",
+        correctableAmount: "100.00",
         source: "ENGINE",
       });
     });

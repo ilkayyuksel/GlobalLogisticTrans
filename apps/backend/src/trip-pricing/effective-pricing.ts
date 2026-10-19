@@ -1,5 +1,7 @@
 import { Prisma } from "@prisma/client";
 
+import { OVER_ST_DESCRIPTION, OVER_ST_SURCHARGE_DESCRIPTION } from "./over-st-lines";
+
 /**
  * What a Trip is worth, after the operator has had their say.
  *
@@ -17,6 +19,13 @@ import { Prisma } from "@prisma/client";
  * travel in the result so a screen can show the effective figure and still
  * explain where it differs from the calculation — which is what makes a manual
  * correction auditable rather than merely applied.
+ *
+ * ── OVER ST SURVIVES A CORRECTION (owner, 19 October 2026) ──────────────────
+ * The Combination leg on the later day ALWAYS carries Over ST and the €70 —
+ * also when an operator corrects its Tarief, Toll or Tunnel by hand. So an
+ * override replaces only the ROUTE part of a component; the Engine's Over ST
+ * lines of that component are added on top of it. `correctableAmount` is the
+ * part an override replaces, which is what an editor must offer.
  * ────────────────────────────────────────────────────────────────────────────
  */
 
@@ -94,6 +103,12 @@ export interface EffectiveAmount {
   readonly componentCode: string;
   readonly engineAmount: Prisma.Decimal | null;
   readonly effectiveAmount: Prisma.Decimal;
+  /**
+   * The part of `effectiveAmount` an override replaces: everything but the
+   * Over ST and the €70, which always stay on top. Equal to `effectiveAmount`
+   * for every component and Trip that carries no Over ST.
+   */
+  readonly correctableAmount: Prisma.Decimal;
   readonly source: PricingAmountSource;
 }
 
@@ -222,13 +237,8 @@ export function resolveEffectivePricing(
     overrides.map((override) => [override.componentCode, override.amount]),
   );
 
-  const engineByComponent = new Map<string, Prisma.Decimal>();
-
-  for (const line of engineAmounts) {
-    const running = engineByComponent.get(line.componentCode) ?? ZERO;
-
-    engineByComponent.set(line.componentCode, running.plus(line.amount));
-  }
+  const engineByComponent = sumPerComponent(engineAmounts);
+  const overStByComponent = sumPerComponent(engineAmounts.filter(isOverStLine));
 
   /*
    * The percentage the fuel line was calculated with, when the snapshot
@@ -251,11 +261,15 @@ export function resolveEffectivePricing(
     .map((componentCode) => {
       const engineAmount = engineByComponent.get(componentCode) ?? null;
       const override = overrideByComponent.get(componentCode);
+      const overSt = overStByComponent.get(componentCode) ?? ZERO;
+      const effectiveAmount =
+        override === undefined ? (engineAmount ?? ZERO) : override.plus(overSt);
 
       return {
         componentCode,
         engineAmount,
-        effectiveAmount: override ?? engineAmount ?? ZERO,
+        effectiveAmount,
+        correctableAmount: effectiveAmount.minus(overSt),
         source: override
           ? PricingAmountSource.OVERRIDE
           : PricingAmountSource.ENGINE,
@@ -305,6 +319,25 @@ export function resolveEffectivePricing(
       .plus(others)
       .plus(ek),
   };
+}
+
+/** Engine lines added up per component code. */
+function sumPerComponent(lines: readonly EngineAmount[]): Map<string, Prisma.Decimal> {
+  const sums = new Map<string, Prisma.Decimal>();
+
+  for (const line of lines) {
+    sums.set(line.componentCode, (sums.get(line.componentCode) ?? ZERO).plus(line.amount));
+  }
+
+  return sums;
+}
+
+/** A line the Engine wrote for Over ST or its €70 — see `over-st-lines.ts`. */
+function isOverStLine(line: EngineAmount): boolean {
+  return (
+    line.description === OVER_ST_DESCRIPTION ||
+    line.description === OVER_ST_SURCHARGE_DESCRIPTION
+  );
 }
 
 /**

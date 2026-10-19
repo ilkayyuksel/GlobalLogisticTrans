@@ -481,6 +481,7 @@ describe("a CLOSED Trip on an unconfigured route", () => {
         componentCode: "BASE_PRICE",
         engineAmount: "0.00",
         effectiveAmount: "50.00",
+        correctableAmount: "50.00",
         source: "OVERRIDE",
       });
     });

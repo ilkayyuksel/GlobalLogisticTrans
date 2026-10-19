@@ -52,24 +52,28 @@
       "componentCode": "BASE_PRICE",
       "engineAmount": "0.00",
       "effectiveAmount": "0.00",
+      "correctableAmount": "0.00",
       "source": "ENGINE"
      },
      {
       "componentCode": "COMBINATION",
       "engineAmount": "50.00",
       "effectiveAmount": "50.00",
+      "correctableAmount": "50.00",
       "source": "ENGINE"
      },
      {
       "componentCode": "FUEL_SURCHARGE",
       "engineAmount": "0.00",
       "effectiveAmount": "0.00",
+      "correctableAmount": "0.00",
       "source": "ENGINE"
      },
      {
       "componentCode": "WAITING_TIME",
       "engineAmount": "55.00",
       "effectiveAmount": "55.00",
+      "correctableAmount": "55.00",
       "source": "ENGINE"
      }
     ]

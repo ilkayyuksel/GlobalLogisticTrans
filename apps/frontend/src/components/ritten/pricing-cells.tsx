@@ -236,7 +236,7 @@ function EditableAmountCell({
         <InlineCell
           label={`${label} ${t("ritten.pricing.editLabel")}`}
           kind="number"
-          editValue={amount}
+          editValue={correctableAmountOf(pricing, column.componentCode) ?? amount}
           displayValue={
             isOverridden ? (
               <span
@@ -308,6 +308,21 @@ function ResetOverrideButton({
         <path d="M4 3.5V6h2.5" />
       </svg>
     </button>
+  );
+}
+
+/**
+ * What the editor offers: the part of the amount a correction replaces, as the
+ * backend states it. Over ST and its €70 always stay on top of a correction,
+ * so they are not in it. Null when the backend reports no such component.
+ */
+function correctableAmountOf(
+  pricing: EffectivePricing,
+  componentCode: string,
+): string | null {
+  return (
+    pricing.components.find((component) => component.componentCode === componentCode)
+      ?.correctableAmount ?? null
   );
 }
 

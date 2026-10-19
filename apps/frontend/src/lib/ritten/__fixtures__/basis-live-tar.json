@@ -46,18 +46,21 @@
       "componentCode": "BASE_PRICE",
       "engineAmount": "0.00",
       "effectiveAmount": "0.00",
+      "correctableAmount": "0.00",
       "source": "ENGINE"
      },
      {
       "componentCode": "CUSTOM_PROPERTY",
       "engineAmount": "50.00",
       "effectiveAmount": "50.00",
+      "correctableAmount": "50.00",
       "source": "ENGINE"
      },
      {
       "componentCode": "FUEL_SURCHARGE",
       "engineAmount": "0.00",
       "effectiveAmount": "0.00",
+      "correctableAmount": "0.00",
       "source": "ENGINE"
      }
     ]
@@ -116,18 +119,21 @@
       "componentCode": "BASE_PRICE",
       "engineAmount": "0.00",
       "effectiveAmount": "0.00",
+      "correctableAmount": "0.00",
       "source": "ENGINE"
      },
      {
       "componentCode": "COMBINATION",
       "engineAmount": "50.00",
       "effectiveAmount": "50.00",
+      "correctableAmount": "50.00",
       "source": "ENGINE"
      },
      {
       "componentCode": "FUEL_SURCHARGE",
       "engineAmount": "0.00",
       "effectiveAmount": "0.00",
+      "correctableAmount": "0.00",
       "source": "ENGINE"
      }
     ]
@@ -186,18 +192,21 @@
       "componentCode": "BASE_PRICE",
       "engineAmount": "0.00",
       "effectiveAmount": "0.00",
+      "correctableAmount": "0.00",
       "source": "ENGINE"
      },
      {
       "componentCode": "CUSTOM_PROPERTY",
       "engineAmount": "50.00",
       "effectiveAmount": "50.00",
+      "correctableAmount": "50.00",
       "source": "ENGINE"
      },
      {
       "componentCode": "FUEL_SURCHARGE",
       "engineAmount": "0.00",
       "effectiveAmount": "0.00",
+      "correctableAmount": "0.00",
       "source": "ENGINE"
      }
     ]
@@ -256,12 +265,14 @@
       "componentCode": "BASE_PRICE",
       "engineAmount": "0.00",
       "effectiveAmount": "0.00",
+      "correctableAmount": "0.00",
       "source": "ENGINE"
      },
      {
       "componentCode": "FUEL_SURCHARGE",
       "engineAmount": "0.00",
       "effectiveAmount": "0.00",
+      "correctableAmount": "0.00",
       "source": "ENGINE"
      }
     ]
@@ -320,12 +331,14 @@
       "componentCode": "BASE_PRICE",
       "engineAmount": "0.00",
       "effectiveAmount": "0.00",
+      "correctableAmount": "0.00",
       "source": "ENGINE"
      },
      {
       "componentCode": "FUEL_SURCHARGE",
       "engineAmount": "0.00",
       "effectiveAmount": "0.00",
+      "correctableAmount": "0.00",
       "source": "ENGINE"
      }
     ]
@@ -384,18 +397,21 @@
       "componentCode": "BASE_PRICE",
       "engineAmount": "0.00",
       "effectiveAmount": "0.00",
+      "correctableAmount": "0.00",
       "source": "ENGINE"
      },
      {
       "componentCode": "COMBINATION",
       "engineAmount": "50.00",
       "effectiveAmount": "50.00",
+      "correctableAmount": "50.00",
       "source": "ENGINE"
      },
      {
       "componentCode": "FUEL_SURCHARGE",
       "engineAmount": "0.00",
       "effectiveAmount": "0.00",
+      "correctableAmount": "0.00",
       "source": "ENGINE"
      }
     ]
@@ -454,18 +470,21 @@
       "componentCode": "BASE_PRICE",
       "engineAmount": "0.00",
       "effectiveAmount": "0.00",
+      "correctableAmount": "0.00",
       "source": "ENGINE"
      },
      {
       "componentCode": "COMBINATION",
       "engineAmount": "50.00",
       "effectiveAmount": "50.00",
+      "correctableAmount": "50.00",
       "source": "ENGINE"
      },
      {
       "componentCode": "FUEL_SURCHARGE",
       "engineAmount": "0.00",
       "effectiveAmount": "0.00",
+      "correctableAmount": "0.00",
       "source": "ENGINE"
      }
     ]
@@ -524,18 +543,21 @@
       "componentCode": "BASE_PRICE",
       "engineAmount": "0.00",
       "effectiveAmount": "0.00",
+      "correctableAmount": "0.00",
       "source": "ENGINE"
      },
      {
       "componentCode": "COMBINATION",
       "engineAmount": "50.00",
       "effectiveAmount": "50.00",
+      "correctableAmount": "50.00",
       "source": "ENGINE"
      },
      {
       "componentCode": "FUEL_SURCHARGE",
       "engineAmount": "0.00",
       "effectiveAmount": "0.00",
+      "correctableAmount": "0.00",
       "source": "ENGINE"
      }
     ]
@@ -594,18 +616,21 @@
       "componentCode": "BASE_PRICE",
       "engineAmount": "0.00",
       "effectiveAmount": "0.00",
+      "correctableAmount": "0.00",
       "source": "ENGINE"
      },
      {
       "componentCode": "COMBINATION",
       "engineAmount": "50.00",
       "effectiveAmount": "50.00",
+      "correctableAmount": "50.00",
       "source": "ENGINE"
      },
      {
       "componentCode": "FUEL_SURCHARGE",
       "engineAmount": "0.00",
       "effectiveAmount": "0.00",
+      "correctableAmount": "0.00",
       "source": "ENGINE"
      }
     ]
@@ -664,18 +689,21 @@
       "componentCode": "BASE_PRICE",
       "engineAmount": "0.00",
       "effectiveAmount": "0.00",
+      "correctableAmount": "0.00",
       "source": "ENGINE"
      },
      {
       "componentCode": "COMBINATION",
       "engineAmount": "50.00",
       "effectiveAmount": "50.00",
+      "correctableAmount": "50.00",
       "source": "ENGINE"
      },
      {
       "componentCode": "FUEL_SURCHARGE",
       "engineAmount": "0.00",
       "effectiveAmount": "0.00",
+      "correctableAmount": "0.00",
       "source": "ENGINE"
      }
     ]
@@ -734,18 +762,21 @@
       "componentCode": "BASE_PRICE",
       "engineAmount": "0.00",
       "effectiveAmount": "0.00",
+      "correctableAmount": "0.00",
       "source": "ENGINE"
      },
      {
       "componentCode": "COMBINATION",
       "engineAmount": "50.00",
       "effectiveAmount": "50.00",
+      "correctableAmount": "50.00",
       "source": "ENGINE"
      },
      {
       "componentCode": "FUEL_SURCHARGE",
       "engineAmount": "0.00",
       "effectiveAmount": "0.00",
+      "correctableAmount": "0.00",
       "source": "ENGINE"
      }
     ]
@@ -804,18 +835,21 @@
       "componentCode": "BASE_PRICE",
       "engineAmount": "0.00",
       "effectiveAmount": "0.00",
+      "correctableAmount": "0.00",
       "source": "ENGINE"
      },
      {
       "componentCode": "COMBINATION",
       "engineAmount": "50.00",
       "effectiveAmount": "50.00",
+      "correctableAmount": "50.00",
       "source": "ENGINE"
      },
      {
       "componentCode": "FUEL_SURCHARGE",
       "engineAmount": "0.00",
       "effectiveAmount": "0.00",
+      "correctableAmount": "0.00",
       "source": "ENGINE"
      }
     ]
@@ -874,18 +908,21 @@
       "componentCode": "BASE_PRICE",
       "engineAmount": "0.00",
       "effectiveAmount": "0.00",
+      "correctableAmount": "0.00",
       "source": "ENGINE"
      },
      {
       "componentCode": "COMBINATION",
       "engineAmount": "50.00",
       "effectiveAmount": "50.00",
+      "correctableAmount": "50.00",
       "source": "ENGINE"
      },
      {
       "componentCode": "FUEL_SURCHARGE",
       "engineAmount": "0.00",
       "effectiveAmount": "0.00",
+      "correctableAmount": "0.00",
       "source": "ENGINE"
      }
     ]
@@ -944,18 +981,21 @@
       "componentCode": "BASE_PRICE",
       "engineAmount": "0.00",
       "effectiveAmount": "0.00",
+      "correctableAmount": "0.00",
       "source": "ENGINE"
      },
      {
       "componentCode": "COMBINATION",
       "engineAmount": "50.00",
       "effectiveAmount": "50.00",
+      "correctableAmount": "50.00",
       "source": "ENGINE"
      },
      {
       "componentCode": "FUEL_SURCHARGE",
       "engineAmount": "0.00",
       "effectiveAmount": "0.00",
+      "correctableAmount": "0.00",
       "source": "ENGINE"
      }
     ]
@@ -1014,18 +1054,21 @@
       "componentCode": "BASE_PRICE",
       "engineAmount": "0.00",
       "effectiveAmount": "0.00",
+      "correctableAmount": "0.00",
       "source": "ENGINE"
      },
      {
       "componentCode": "COMBINATION",
       "engineAmount": "50.00",
       "effectiveAmount": "50.00",
+      "correctableAmount": "50.00",
       "source": "ENGINE"
      },
      {
       "componentCode": "FUEL_SURCHARGE",
       "engineAmount": "0.00",
       "effectiveAmount": "0.00",
+      "correctableAmount": "0.00",
       "source": "ENGINE"
      }
     ]
@@ -1084,18 +1127,21 @@
       "componentCode": "BASE_PRICE",
       "engineAmount": "0.00",
       "effectiveAmount": "0.00",
+      "correctableAmount": "0.00",
       "source": "ENGINE"
      },
      {
       "componentCode": "COMBINATION",
       "engineAmount": "50.00",
       "effectiveAmount": "50.00",
+      "correctableAmount": "50.00",
       "source": "ENGINE"
      },
      {
       "componentCode": "FUEL_SURCHARGE",
       "engineAmount": "0.00",
       "effectiveAmount": "0.00",
+      "correctableAmount": "0.00",
       "source": "ENGINE"
      }
     ]
@@ -1154,18 +1200,21 @@
       "componentCode": "BASE_PRICE",
       "engineAmount": "0.00",
       "effectiveAmount": "0.00",
+      "correctableAmount": "0.00",
       "source": "ENGINE"
      },
      {
       "componentCode": "COMBINATION",
       "engineAmount": "50.00",
       "effectiveAmount": "50.00",
+      "correctableAmount": "50.00",
       "source": "ENGINE"
      },
      {
       "componentCode": "FUEL_SURCHARGE",
       "engineAmount": "0.00",
       "effectiveAmount": "0.00",
+      "correctableAmount": "0.00",
       "source": "ENGINE"
      }
     ]
@@ -1224,18 +1273,21 @@
       "componentCode": "BASE_PRICE",
       "engineAmount": "0.00",
       "effectiveAmount": "0.00",
+      "correctableAmount": "0.00",
       "source": "ENGINE"
      },
      {
       "componentCode": "COMBINATION",
       "engineAmount": "50.00",
       "effectiveAmount": "50.00",
+      "correctableAmount": "50.00",
       "source": "ENGINE"
      },
      {
       "componentCode": "FUEL_SURCHARGE",
       "engineAmount": "0.00",
       "effectiveAmount": "0.00",
+      "correctableAmount": "0.00",
       "source": "ENGINE"
      }
     ]
@@ -1294,18 +1346,21 @@
       "componentCode": "BASE_PRICE",
       "engineAmount": "0.00",
       "effectiveAmount": "0.00",
+      "correctableAmount": "0.00",
       "source": "ENGINE"
      },
      {
       "componentCode": "COMBINATION",
       "engineAmount": "50.00",
       "effectiveAmount": "50.00",
+      "correctableAmount": "50.00",
       "source": "ENGINE"
      },
      {
       "componentCode": "FUEL_SURCHARGE",
       "engineAmount": "0.00",
       "effectiveAmount": "0.00",
+      "correctableAmount": "0.00",
       "source": "ENGINE"
      }
     ]
@@ -1364,18 +1419,21 @@
       "componentCode": "BASE_PRICE",
       "engineAmount": "0.00",
       "effectiveAmount": "0.00",
+      "correctableAmount": "0.00",
       "source": "ENGINE"
      },
      {
       "componentCode": "COMBINATION",
       "engineAmount": "50.00",
       "effectiveAmount": "50.00",
+      "correctableAmount": "50.00",
       "source": "ENGINE"
      },
      {
       "componentCode": "FUEL_SURCHARGE",
       "engineAmount": "0.00",
       "effectiveAmount": "0.00",
+      "correctableAmount": "0.00",
       "source": "ENGINE"
      }
     ]

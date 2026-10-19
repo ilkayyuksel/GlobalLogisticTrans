@@ -135,6 +135,7 @@ describe("reconcileTripRows", () => {
                 componentCode: "WAITING_TIME",
                 engineAmount: decimal("55"),
                 effectiveAmount: decimal("55"),
+                correctableAmount: decimal("55"),
                 source: "ENGINE",
               },
             ],
