@@ -709,6 +709,24 @@ const nl = {
   "ritten.feedback.repriced": "Prijs opnieuw berekend",
   "ritten.feedback.repricedWithoutRoute":
     "Prijs opnieuw berekend, maar er is geen passende route gevonden. Controleer de routeprijzen.",
+  "ritten.feedback.routeChosen": "Route gekozen en prijs berekend",
+  "ritten.routeChoice.open": "Route kiezen",
+  "ritten.routeChoice.title": "Route kiezen",
+  "ritten.routeChoice.description.NORMAL":
+    "Kies de gewone route waarop deze rit geprijsd wordt. Alleen de route wordt getoond; de prijs berekent het systeem.",
+  "ritten.routeChoice.description.COMBINATION":
+    "Kies de combinatieroute voor deze rit. De andere leg van de groep krijgt automatisch de andere leg van dezelfde combinatie.",
+  "ritten.routeChoice.search": "Zoeken op Van of Naar",
+  "ritten.routeChoice.loading": "Routes laden…",
+  "ritten.routeChoice.loadFailed": "De routes konden niet geladen worden.",
+  "ritten.routeChoice.noResults": "Geen routes gevonden.",
+  "ritten.routeChoice.combination": "Combinatie",
+  "ritten.routeChoice.legQuestion": "Welke leg van de combinatie is deze rit?",
+  "ritten.routeChoice.leg1": "Leg 1",
+  "ritten.routeChoice.leg2": "Leg 2",
+  "ritten.routeChoice.confirm": "Route toepassen",
+  "ritten.routeChoice.saving": "Prijs berekenen…",
+  "ritten.routeChoice.cancel": "Annuleren",
   "ritten.reprice.reason.NOT_CLOSED": "niet afgewerkt, overgeslagen",
   "ritten.reprice.reason.NOT_FOUND": "niet gevonden, overgeslagen",
   "ritten.reprice.reason.FAILED": "mislukt",
@@ -1142,6 +1160,9 @@ const nl = {
     "Meerdere mogelijke routes, geen gekozen — Tarief, Tol en Tunnel € 0",
   "pricing.route.notRecorded":
     "Niet vastgelegd: deze oudere berekening bewaarde niet welke route ze gebruikte. Prijs opnieuw berekenen legt het vast.",
+  "pricing.route.manual": "Handmatig gekozen route",
+  "pricing.route.manualReason":
+    "De automatische routeherkenning vond geen bruikbare route; deze route werd handmatig gekozen. Prijs opnieuw berekenen laat de automatische herkenning weer beslissen.",
   "pricing.route.overSt": "Over ST",
   "pricing.route.overSt.applied": "Toegepast",
   "pricing.route.overSt.notApplied": "Niet toegepast",
@@ -1948,6 +1969,24 @@ const tr: Translations = {
   "ritten.feedback.repriced": "Fiyat yeniden hesaplandı",
   "ritten.feedback.repricedWithoutRoute":
     "Fiyat yeniden hesaplandı, ancak uygun bir rota bulunamadı. Rota fiyatlarını kontrol edin.",
+  "ritten.feedback.routeChosen": "Rota seçildi ve fiyat hesaplandı",
+  "ritten.routeChoice.open": "Rota seç",
+  "ritten.routeChoice.title": "Rota seç",
+  "ritten.routeChoice.description.NORMAL":
+    "Bu seferin fiyatlandırılacağı normal rotayı seçin. Yalnızca rota gösterilir; fiyatı sistem hesaplar.",
+  "ritten.routeChoice.description.COMBINATION":
+    "Bu sefer için kombinasyon rotasını seçin. Gruptaki diğer ayak aynı kombinasyonun diğer ayağını otomatik olarak alır.",
+  "ritten.routeChoice.search": "Nereden veya Nereye ara",
+  "ritten.routeChoice.loading": "Rotalar yükleniyor…",
+  "ritten.routeChoice.loadFailed": "Rotalar yüklenemedi.",
+  "ritten.routeChoice.noResults": "Rota bulunamadı.",
+  "ritten.routeChoice.combination": "Kombinasyon",
+  "ritten.routeChoice.legQuestion": "Bu sefer kombinasyonun hangi ayağı?",
+  "ritten.routeChoice.leg1": "Ayak 1",
+  "ritten.routeChoice.leg2": "Ayak 2",
+  "ritten.routeChoice.confirm": "Rotayı uygula",
+  "ritten.routeChoice.saving": "Fiyat hesaplanıyor…",
+  "ritten.routeChoice.cancel": "İptal",
   "ritten.reprice.reason.NOT_CLOSED": "tamamlanmamış, atlandı",
   "ritten.reprice.reason.NOT_FOUND": "bulunamadı, atlandı",
   "ritten.reprice.reason.FAILED": "başarısız",
@@ -2374,6 +2413,9 @@ const tr: Translations = {
     "Birden fazla olası rota, hiçbiri seçilmedi — Tarife, Geçiş ücreti ve Tünel € 0",
   "pricing.route.notRecorded":
     "Kaydedilmemiş: bu eski hesaplama hangi rotayı kullandığını saklamadı. Fiyatı yeniden hesaplamak bunu kaydeder.",
+  "pricing.route.manual": "Elle seçilen rota",
+  "pricing.route.manualReason":
+    "Otomatik rota tanıma kullanılabilir bir rota bulamadı; bu rota elle seçildi. Fiyatı yeniden hesaplamak otomatik tanımaya geri döner.",
   "pricing.route.overSt": "Over ST",
   "pricing.route.overSt.applied": "Uygulandı",
   "pricing.route.overSt.notApplied": "Uygulanmadı",

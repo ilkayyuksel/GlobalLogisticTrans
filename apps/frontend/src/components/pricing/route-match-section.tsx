@@ -34,6 +34,9 @@ export function RouteMatchSection({ routeMatch }: { routeMatch: RouteMatch }) {
       <p className="mt-0.5 text-xs text-muted">{t("pricing.route.source")}</p>
 
       <CombinationOutcome routeMatch={routeMatch} />
+      {tone === "manual" ? (
+        <p className="mt-2 text-xs text-secondary">{t("pricing.route.manualReason")}</p>
+      ) : null}
       <RouteMatchBody routeMatch={routeMatch} tone={tone} />
     </section>
   );
@@ -97,7 +100,7 @@ function RouteMatchBody({
 
       <ul className="mt-2 space-y-1.5">
         {legsInOrder(routeMatch).map((leg) => (
-          <LegRow key={leg.routePricingId} leg={leg} />
+          <LegRow key={leg.routePricingId} leg={leg} isChosen={tone === "manual"} />
         ))}
       </ul>
 
@@ -106,7 +109,7 @@ function RouteMatchBody({
   );
 }
 
-function LegRow({ leg }: { leg: RouteMatchLeg }) {
+function LegRow({ leg, isChosen }: { leg: RouteMatchLeg; isChosen: boolean }) {
   const t = useTranslation();
 
   return (
@@ -117,9 +120,12 @@ function LegRow({ leg }: { leg: RouteMatchLeg }) {
         </span>
       ) : null}
       <span className="text-foreground">{formatRoad(leg)}</span>
-      <span className="text-xs text-secondary">
-        {t(`pricing.route.method.${leg.method}`)}
-      </span>
+      {/* A chosen road was not matched, so no match method beside it. */}
+      {isChosen ? null : (
+        <span className="text-xs text-secondary">
+          {t(`pricing.route.method.${leg.method}`)}
+        </span>
+      )}
       {leg.legPosition !== null && leg.isPricedLeg ? (
         <span className="text-xs text-primary">({t("pricing.route.thisTrip")})</span>
       ) : null}
@@ -168,6 +174,7 @@ function OverStSummary({ overSt }: { overSt: AppliedOverSt }) {
 const TONE_TO_BADGE = {
   matched: "outline",
   approximate: "warning",
+  manual: "outline",
   unmatched: "warning",
   unknown: "outline",
 } as const;
@@ -177,7 +184,7 @@ function MethodBadge({ routeMatch, tone }: { routeMatch: RouteMatch; tone: Route
 
   return (
     <Badge tone={TONE_TO_BADGE[tone]}>
-      {routeMatch.method ?? "—"}
+      {tone === "manual" ? t("pricing.route.manual") : (routeMatch.method ?? "—")}
       <span className="sr-only">
         {" "}
         {t("pricing.route.method")}

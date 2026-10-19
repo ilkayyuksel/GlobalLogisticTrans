@@ -308,6 +308,36 @@ export function resolveEffectivePricing(
 }
 
 /**
+ * The Fuel this Trip owes on ANOTHER Tarief than its own — at the Trip's own
+ * percentage, the one its snapshot recorded.
+ *
+ * For a reader that holds a Tarief this system did not produce — the invoice
+ * check, where a customer's higher Tarief stays as it is and its Fuel must
+ * still be our percentage of it. The same `resolveFuel` every screen uses, so
+ * there is one Fuel rule: on the Trip's own Tarief it is exactly `brandstof`.
+ */
+export function fuelOnTarief(
+  pricing: EffectivePricing,
+  tarief: Prisma.Decimal,
+  storedRate: Prisma.Decimal | null,
+): Prisma.Decimal {
+  if (tarief.equals(pricing.tarief)) {
+    return pricing.brandstof;
+  }
+
+  const engineAmountOf = (componentCode: string) =>
+    pricing.components.find((component) => component.componentCode === componentCode)
+      ?.engineAmount ?? null;
+
+  return resolveFuel(
+    tarief,
+    engineAmountOf(EffectiveComponent.BASE_PRICE),
+    engineAmountOf(EffectiveComponent.FUEL_SURCHARGE),
+    storedRate,
+  );
+}
+
+/**
  * EK: ONE source, never two added together.
  *
  *   waiting time charged (> €0)  → the waiting time; the confirmations are

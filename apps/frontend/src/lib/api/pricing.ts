@@ -32,6 +32,27 @@ export function reprocessTripPricing(
 }
 
 /**
+ * "Route kiezen": the route of a Trip whose automatic match is unusable —
+ * exactly one of an ordinary route (Trip in no group) or a Combination
+ * (grouped Trip; its partner leg gets the other leg). `legPosition` only when
+ * the backend answered 422 because the roads do not say which leg this is.
+ * The backend prices on the choice and keeps it only when that worked.
+ */
+export function chooseTripRoute(
+  tripId: string,
+  choice:
+    | { routePricingId: string }
+    | { combinationRouteGroupId: string; legPosition?: 1 | 2 },
+  signal?: AbortSignal,
+): Promise<{ pricedTripIds: string[] }> {
+  return request<{ pricedTripIds: string[] }>(`${PRICING_PATH}/trip/${tripId}/route-choice`, {
+    method: "POST",
+    body: choice,
+    signal,
+  });
+}
+
+/**
  * "Prijs herberekenen" for a selection: every CLOSED Trip matched and priced
  * again by the backend, every other one skipped — each with its own outcome.
  * The backend checks the status itself; nothing here decides which Trips

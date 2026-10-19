@@ -9,6 +9,8 @@ import { chooseTripRoute } from "@/lib/api/pricing";
 import {
   listCombinationRouteConfigurations,
   listRouteConfigurations,
+  type CombinationRouteConfiguration,
+  type RouteConfiguration,
 } from "@/lib/api/route-configuration";
 import type { ManualRouteChoiceKind, Trip } from "@/lib/api/types";
 import { useTranslation } from "@/lib/i18n/language-provider";
@@ -19,6 +21,13 @@ interface RouteOption {
   readonly id: string;
   readonly label: string;
 }
+
+type RouteLists =
+  | { readonly kind: "NORMAL"; readonly routes: RouteConfiguration[] }
+  | { readonly kind: "COMBINATION"; readonly combinations: CombinationRouteConfiguration[] };
+
+const road = (route: Pick<RouteConfiguration, "departure" | "destination">) =>
+  `${route.departure} → ${route.destination}`;
 
 /**
  * "Route kiezen" for a Trip whose automatic match is unusable.
@@ -56,48 +65,18 @@ export function RouteChoiceDialog({
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const routes = useAsync(
+  const lists = useAsync(
     useCallback(
-      async (signal: AbortSignal): Promise<RouteOption[]> =>
+      async (signal: AbortSignal): Promise<RouteLists> =>
         kind === "NORMAL"
-          ? (await listRouteConfigurations(signal)).map((route) => ({
-              id: route.id,
-              label: `${route.departure} → ${route.destination}`,
-              search: route,
-            })).map(({ id, label }) => ({ id, label }))
-          : (await listCombinationRouteConfigurations(signal)).map((combination, index) => ({
-              id: combination.id,
-              // Numbered as the Routeprijzen page numbers them, in stored order.
-              label: `${t("ritten.routeChoice.combination")} #${index + 1}: ${combination.legs
-                .map((leg) => `${leg.departure} → ${leg.destination}`)
-                .join(" / ")}`,
-            })),
-      // The kind decides the list; the translation only labels it.
-      // eslint-disable-next-line react-hooks/exhaustive-deps
+          ? { kind, routes: await listRouteConfigurations(signal) }
+          : { kind, combinations: await listCombinationRouteConfigurations(signal) },
       [kind],
     ),
     [kind],
   );
-  const searchable = useAsync(
-    useCallback(
-      (signal: AbortSignal) =>
-        kind === "NORMAL"
-          ? listRouteConfigurations(signal).then((list) =>
-              new Set(list.filter((route) => matchesRouteSearch(route, search)).map((route) => route.id)),
-            )
-          : listCombinationRouteConfigurations(signal).then((list) =>
-              new Set(
-                list
-                  .filter((combination) => matchesCombinationSearch(combination, search))
-                  .map((combination) => combination.id),
-              ),
-            ),
-      [kind, search],
-    ),
-    [kind, search],
-  );
 
-  const shown = (routes.data ?? []).filter((option) => searchable.data?.has(option.id) ?? true);
+  const options = lists.data ? optionsFor(lists.data, search, t("ritten.routeChoice.combination")) : [];
 
   async function apply(): Promise<void> {
     if (!selectedId || isSaving) {
@@ -127,11 +106,16 @@ export function RouteChoiceDialog({
   }
 
   return (
-    <RittenDialog title={`${t("ritten.routeChoice.title")} ${trip.bookingNumber ?? ""}`.trim()} onClose={onClose}>
+    <RittenDialog
+      title={`${t("ritten.routeChoice.title")} ${trip.bookingNumber ?? ""}`.trim()}
+      onClose={onClose}
+    >
       <p className="text-sm text-secondary">{t(`ritten.routeChoice.description.${kind}`)}</p>
 
       <label className="mt-3 block">
-        <span className="mb-1 block text-xs font-medium text-muted">{t("ritten.routeChoice.search")}</span>
+        <span className="mb-1 block text-xs font-medium text-muted">
+          {t("ritten.routeChoice.search")}
+        </span>
         <input
           type="search"
           value={search}
@@ -141,32 +125,14 @@ export function RouteChoiceDialog({
       </label>
 
       <RouteOptions
-        options={shown}
-        isLoading={routes.isLoading && routes.data === null}
-        hasFailed={routes.error !== null}
+        options={options}
+        isLoading={lists.isLoading && lists.data === null}
+        hasFailed={lists.error !== null}
         selectedId={selectedId}
         onSelect={setSelectedId}
       />
 
-      {needsLeg ? (
-        <fieldset className="mt-3">
-          <legend className="text-sm font-medium text-foreground">{t("ritten.routeChoice.legQuestion")}</legend>
-          <div className="mt-1 flex gap-4">
-            {([1, 2] as const).map((position) => (
-              <label key={position} className="flex items-center gap-1.5 text-sm text-foreground">
-                <input
-                  type="radio"
-                  name="route-choice-leg"
-                  checked={legPosition === position}
-                  onChange={() => setLegPosition(position)}
-                  className="accent-primary"
-                />
-                {t(`ritten.routeChoice.leg${position}`)}
-              </label>
-            ))}
-          </div>
-        </fieldset>
-      ) : null}
+      {needsLeg ? <LegQuestion legPosition={legPosition} onChange={setLegPosition} /> : null}
 
       {error ? (
         <p role="alert" className="mt-3 text-sm text-danger">
@@ -193,6 +159,57 @@ export function RouteChoiceDialog({
         </button>
       </div>
     </RittenDialog>
+  );
+}
+
+/**
+ * The searched routes as choices. A Combination is numbered as Routeprijzen
+ * numbers it — by its place in the stored order, counted before the search —
+ * so "Combinatie #4" means the same Combination on both screens.
+ */
+function optionsFor(lists: RouteLists, search: string, combinationLabel: string): RouteOption[] {
+  if (lists.kind === "NORMAL") {
+    return lists.routes
+      .filter((route) => matchesRouteSearch(route, search))
+      .map((route) => ({ id: route.id, label: road(route) }));
+  }
+
+  return lists.combinations
+    .map((combination, index) => ({ combination, number: index + 1 }))
+    .filter(({ combination }) => matchesCombinationSearch(combination, search))
+    .map(({ combination, number }) => ({
+      id: combination.id,
+      label: `${combinationLabel} #${number}: ${combination.legs.map(road).join(" / ")}`,
+    }));
+}
+
+function LegQuestion({
+  legPosition,
+  onChange,
+}: {
+  legPosition: 1 | 2 | null;
+  onChange: (position: 1 | 2) => void;
+}) {
+  const t = useTranslation();
+
+  return (
+    <fieldset className="mt-3">
+      <legend className="text-sm font-medium text-foreground">{t("ritten.routeChoice.legQuestion")}</legend>
+      <div className="mt-1 flex gap-4">
+        {([1, 2] as const).map((position) => (
+          <label key={position} className="flex items-center gap-1.5 text-sm text-foreground">
+            <input
+              type="radio"
+              name="route-choice-leg"
+              checked={legPosition === position}
+              onChange={() => onChange(position)}
+              className="accent-primary"
+            />
+            {t(`ritten.routeChoice.leg${position}`)}
+          </label>
+        ))}
+      </div>
+    </fieldset>
   );
 }
 
@@ -229,7 +246,11 @@ function RouteOptions({
   }
 
   return (
-    <ul role="radiogroup" aria-label={t("ritten.routeChoice.title")} className="mt-3 max-h-72 overflow-y-auto rounded-md border border-border">
+    <ul
+      role="radiogroup"
+      aria-label={t("ritten.routeChoice.title")}
+      className="mt-3 max-h-72 overflow-y-auto rounded-md border border-border"
+    >
       {options.map((option) => (
         <li key={option.id} className="border-b border-border last:border-0">
           <label

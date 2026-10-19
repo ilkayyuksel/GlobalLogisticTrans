@@ -16,6 +16,7 @@ import {
 import { NewTripDialog } from "@/components/ritten/new-trip-dialog";
 import { PdfViewerDialog } from "@/components/ritten/pdf-viewer-dialog";
 import { RittenScrollRegion } from "@/components/ritten/ritten-scroll-region";
+import { RouteChoiceDialog } from "@/components/ritten/route-choice-dialog";
 import { SelectionToolbar } from "@/components/ritten/selection-toolbar";
 import { PeriodNav } from "@/components/ritten/period-nav";
 import { RittenCounters } from "@/components/ritten/ritten-counters";
@@ -270,6 +271,7 @@ function RittenList() {
   const [openCombinationId, setOpenCombinationId] = useState<string | null>(null);
   const [customPropertiesTrip, setCustomPropertiesTrip] = useState<Trip | null>(null);
   const [notesTrip, setNotesTrip] = useState<Trip | null>(null);
+  const [routeChoiceTrip, setRouteChoiceTrip] = useState<Trip | null>(null);
   const [isCreating, setIsCreating] = useState(false);
 
   const [busyTripId, setBusyTripId] = useState<string | null>(null);
@@ -1152,6 +1154,7 @@ function RittenList() {
     openCombination: setOpenCombinationId,
     openCustomProperties: setCustomPropertiesTrip,
     openNotes: setNotesTrip,
+    openRouteChoice: setRouteChoiceTrip,
   };
 
   /*
@@ -1507,6 +1510,23 @@ function RittenList() {
         where the operator left it — which is what makes the hover panel show
         the new note immediately, with no refetch.
       */}
+      {/*
+        The backend priced the Trip — and, for a Combination, its partner leg —
+        on the choice; the refetched list is what shows both new prices.
+      */}
+      {routeChoiceTrip?.pricing?.routeMatch?.manualChoice ? (
+        <RouteChoiceDialog
+          trip={routeChoiceTrip}
+          kind={routeChoiceTrip.pricing.routeMatch.manualChoice}
+          onChosen={() => {
+            setRouteChoiceTrip(null);
+            trips.reload();
+            setFeedback({ messageKey: "ritten.feedback.routeChosen", isError: false });
+          }}
+          onClose={() => setRouteChoiceTrip(null)}
+        />
+      ) : null}
+
       {notesTrip ? (
         <NotesDialog
           trip={notesTrip}

@@ -22,9 +22,14 @@ export function formatRoad(leg: Pick<RouteMatchLeg, "departure" | "destination">
  *   unmatched    no reliable route: the route components are € 0;
  *   unknown      an older calculation that recorded nothing.
  */
-export type RouteMatchTone = "matched" | "approximate" | "unmatched" | "unknown";
+export type RouteMatchTone = "matched" | "approximate" | "manual" | "unmatched" | "unknown";
 
 export function routeMatchTone(routeMatch: RouteMatch | null | undefined): RouteMatchTone {
+  // Priced on an operator's choice: its own tone, never "not found".
+  if (routeMatch?.selection === "MANUAL" && routeMatch.routePricingId !== null) {
+    return "manual";
+  }
+
   switch (routeMatch?.method ?? null) {
     case null:
       return "unknown";

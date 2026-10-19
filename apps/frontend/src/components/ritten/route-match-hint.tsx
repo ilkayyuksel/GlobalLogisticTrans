@@ -62,11 +62,12 @@ export function RouteMatchHint({ routeMatch }: { routeMatch: RouteMatch | null |
 }
 
 /** The tones of a route that priced the Trip — the only ones with a price to check. */
-const PRICED_TONES: readonly RouteMatchTone[] = ["matched", "approximate"];
+const PRICED_TONES: readonly RouteMatchTone[] = ["matched", "approximate", "manual"];
 
 const TONE_SYMBOLS: Record<RouteMatchTone, string> = {
   matched: "●",
   approximate: "≈",
+  manual: "✎",
   unmatched: "!",
   unknown: "?",
 };
@@ -74,6 +75,7 @@ const TONE_SYMBOLS: Record<RouteMatchTone, string> = {
 const TONE_CLASSES: Record<RouteMatchTone, string> = {
   matched: "text-muted",
   approximate: "font-semibold text-warning",
+  manual: "font-semibold text-primary",
   unmatched: "font-bold text-warning",
   unknown: "text-muted",
 };
@@ -94,12 +96,15 @@ function describe(
 
   const legs = legsInOrder(routeMatch).map((leg) => {
     const position = leg.legPosition === null ? "" : `${t("pricing.route.leg")} ${leg.legPosition}: `;
+    // A chosen road was not matched at all, so it carries no match method.
+    const method = tone === "manual" ? "" : ` (${t(`pricing.route.method.${leg.method}`)})`;
 
-    return `${position}${formatRoad(leg)} (${t(`pricing.route.method.${leg.method}`)})`;
+    return `${position}${formatRoad(leg)}${method}`;
   });
+  const heading = tone === "manual" ? [t("pricing.route.manual")] : [];
   const overSt = routeMatch.overSt?.applied
     ? [`${t("pricing.route.overSt")}: ${t("pricing.route.overSt.applied")}`]
     : [];
 
-  return [...legs, ...overSt].join("\n");
+  return [...heading, ...legs, ...overSt].join("\n");
 }

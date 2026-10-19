@@ -95,6 +95,11 @@ export interface PricingCellsProps {
   onResetOverride: (componentCode: OverridableComponent) => Promise<void>;
   /** True while a lifecycle action is running for this row. */
   isDisabled: boolean;
+  /**
+   * Opens "Route kiezen". Offered only where the backend says a route may be
+   * chosen by hand (`routeMatch.manualChoice`).
+   */
+  onChooseRoute: () => void;
 }
 
 export function PricingCells({
@@ -102,6 +107,7 @@ export function PricingCells({
   onSaveOverride,
   onResetOverride,
   isDisabled,
+  onChooseRoute,
 }: PricingCellsProps) {
   const t = useTranslation();
   const empty = t("ritten.value.empty");
@@ -114,6 +120,7 @@ export function PricingCells({
         onSaveOverride={onSaveOverride}
         onResetOverride={onResetOverride}
         isDisabled={isDisabled}
+        onChooseRoute={onChooseRoute}
       />
       <ReadOnlyAmountCell amount={pricing?.brandstof ?? null} empty={empty} />
       <ReadOnlyAmountCell amount={pricing?.backload ?? null} empty={empty} />
@@ -123,6 +130,7 @@ export function PricingCells({
         onSaveOverride={onSaveOverride}
         onResetOverride={onResetOverride}
         isDisabled={isDisabled}
+        onChooseRoute={onChooseRoute}
       />
       <EditableAmountCell
         column={EDITABLE_COLUMNS.tunnel}
@@ -130,6 +138,7 @@ export function PricingCells({
         onSaveOverride={onSaveOverride}
         onResetOverride={onResetOverride}
         isDisabled={isDisabled}
+        onChooseRoute={onChooseRoute}
       />
       <ReadOnlyAmountCell amount={pricing?.others ?? null} empty={empty} />
       <ReadOnlyAmountCell amount={pricing?.ek ?? null} empty={empty} />
@@ -179,12 +188,14 @@ function EditableAmountCell({
   onSaveOverride,
   onResetOverride,
   isDisabled,
+  onChooseRoute,
 }: {
   column: EditableColumn;
   pricing: EffectivePricing | null;
   onSaveOverride: PricingCellsProps["onSaveOverride"];
   onResetOverride: PricingCellsProps["onResetOverride"];
   isDisabled: boolean;
+  onChooseRoute: () => void;
 }) {
   const t = useTranslation();
   const empty = t("ritten.value.empty");
@@ -210,6 +221,18 @@ function EditableAmountCell({
     <td className="whitespace-nowrap px-1.5 py-2 text-right tabular-nums text-secondary">
       <span className="inline-flex items-center justify-end gap-1">
         {column.showsRouteMatch ? <RouteMatchHint routeMatch={pricing.routeMatch} /> : null}
+        {column.showsRouteMatch && pricing.routeMatch?.manualChoice ? (
+          <button
+            type="button"
+            onClick={onChooseRoute}
+            disabled={isDisabled}
+            title={t("ritten.routeChoice.open")}
+            aria-label={t("ritten.routeChoice.open")}
+            className="inline-flex shrink-0 items-center rounded p-0.5 text-primary hover:bg-primary/10 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            <SearchIcon />
+          </button>
+        ) : null}
         <InlineCell
           label={`${label} ${t("ritten.pricing.editLabel")}`}
           kind="number"
@@ -297,5 +320,23 @@ function isOverriddenComponent(
     (component) =>
       component.componentCode === componentCode &&
       component.source === "OVERRIDE",
+  );
+}
+
+/** A magnifier: look a route up. */
+function SearchIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 20 20"
+      className="h-3.5 w-3.5"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+    >
+      <circle cx="8.5" cy="8.5" r="5" />
+      <path d="M12.5 12.5 16.5 16.5" />
+    </svg>
   );
 }

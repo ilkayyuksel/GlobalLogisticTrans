@@ -10,7 +10,7 @@ import {
   type PricingLifecycle,
 } from "./pricing-lifecycle.harness";
 import { PricingEngineService } from "./pricing-engine.service";
-import { DAY_ONE, DAY_TWO, DOCUMENT, GROUP, LEG1, LEG2, routeMatchActions } from "./route-match-lifecycle.fixtures";
+import { DAY_ONE, DAY_TWO, GROUP, LEG1, LEG2, routeMatchActions } from "./route-match-lifecycle.fixtures";
 
 /**
  * "Route kiezen": a route chosen by hand when automatic matching found none
@@ -345,7 +345,6 @@ describe("choosing a route by hand", () => {
     actions.seedLegs(DAY_ONE);
     await actions.close(LEG1);
     await actions.close(LEG2);
-    void DOCUMENT;
 
     await choose(LEG1, { kind: "COMBINATION", combinationRouteGroupId: HALF_MATCHING_COMBINATION });
 

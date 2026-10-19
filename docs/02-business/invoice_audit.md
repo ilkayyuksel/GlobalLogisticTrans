@@ -167,11 +167,23 @@ rounded to the cent (half up):
 
 Fuel is compared on its own on every reliably priced line — also when the
 Tarief already agrees, and whatever the other components do. The expected
-Fuel is the system's own: the amount the Pricing Engine stored on the snapshot
-(the configured percentage applied to the Tarief, Over ST included), following
-an operator's Tarief correction at the snapshot's rate. A Tarief of zero owes
-no Fuel, and a Fuel on the invoice is never lowered. Proven end to end in
-`invoice-fuel-check.spec.ts`.
+Fuel is **the Trip's own percentage of the line's FINAL Tarief** — the higher
+of the invoice's Tarief and the system's, since a Tarief is only ever raised
+(owner, 19 October 2026). The percentage is the one stored on the snapshot's
+fuel line (or, for an older snapshot, the ratio of its own Fuel to its own
+Tarief), never the current setting; the amount comes from the pricing read
+side (`fuelOnTarief` in `trip-pricing/effective-pricing.ts`, the same rule as
+every screen), so the check has no Fuel rule of its own.
+
+| System Tarief / Fuel | Invoice Tarief | Invoice Fuel | Fuel owed | Result |
+|---|---|---|---|---|
+| 200 / 40 (20%) | 200 | 30 | 40 | raised to 40 |
+| 200 / 40 (20%) | 150 → 200 | 30 | 40 | Tarief and Fuel raised |
+| 200 / 40 (20%) | 250 (stays) | 40 | 50 | raised to 50 |
+| 200 / 40 (20%) | 250 (stays) | 60 | 50 | left; reported as invoice higher |
+
+A Tarief of zero owes no Fuel, and a Fuel on the invoice is never lowered.
+Proven end to end in `invoice-fuel-check.spec.ts`.
 
 The target is the higher of the invoice's Fuel and the system's. Because Excel
 recalculates every formula when the file is opened, the cell is written so it

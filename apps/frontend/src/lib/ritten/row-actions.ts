@@ -64,6 +64,11 @@ export interface RittenActions {
    */
   openNotes: (trip: Trip) => void;
   /**
+   * Opens "Route kiezen" for a Trip whose automatic match is unusable. The
+   * dialog stores the choice through the backend, which prices on it.
+   */
+  openRouteChoice: (trip: Trip) => void;
+  /**
    * The Cost Confirmation's OWN document — never the transport order.
    *
    * A Trip's `pdfDocumentId` is the order it came from; the confirmation is a

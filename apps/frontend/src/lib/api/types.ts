@@ -350,6 +350,12 @@ export type RouteMatchMethod =
  * For a Trip in a group: MATCHED when its pair of roads named one configured
  * Combination, otherwise why it was priced on ordinary routes.
  */
+/** Whether a stored price came from the automatic matcher or an operator's route choice. */
+export type RouteSelectionSource = "AUTOMATIC" | "MANUAL";
+
+/** Which kind of route an operator may choose by hand — the backend's decision. */
+export type ManualRouteChoiceKind = "NORMAL" | "COMBINATION";
+
 export type CombinationMatchOutcome =
   | "MATCHED"
   | "NO_PAIR"
@@ -392,6 +398,18 @@ export interface RouteMatch {
    * Optional: absent from responses of backends older than the field.
    */
   combinationMatch?: CombinationMatchOutcome | null;
+  /**
+   * MANUAL: the automatic matcher found nothing usable (`method` and
+   * `combinationMatch` still say what it found) and an operator's route
+   * choice priced the Trip. Optional: absent from older backends.
+   */
+  selection?: RouteSelectionSource;
+  /**
+   * Which kind of route may be chosen by hand for this Trip, or null when the
+   * automatic match is usable or there is no partner leg. The backend decides;
+   * the screen only offers what it says.
+   */
+  manualChoice?: ManualRouteChoiceKind | null;
   legs: RouteMatchLeg[];
   /** Null unless a Combination priced the Trip. */
   overSt: AppliedOverSt | null;

@@ -4,6 +4,7 @@ import ExcelJS from "exceljs";
 import { Prisma, RouteMatchMethod, TripStatus } from "@prisma/client";
 
 import { AppLoggerService } from "../logger/app-logger.service";
+import { PricingAmountSource } from "../trip-pricing/effective-pricing";
 import { type CurrentTripPricing } from "../trip-pricing/effective-pricing.service";
 import { buildInvoiceAuditService } from "./__fixtures__/invoice-audit-service";
 import { EXACT_ROUTE_MATCH, fuelRatesOf, NO_FUEL_RATES, reliablyPriced } from "./__fixtures__/invoice-pricing";
@@ -39,6 +40,21 @@ function pricing(tarief: string, brandstof: string, extra: Partial<Record<"tol" 
     ek: amount(extra.ek),
     totaal: new Prisma.Decimal(tarief).add(brandstof).add(amount(extra.tol)).add(amount(extra.ek)),
   });
+}
+
+/** The Engine's own Tarief and Fuel lines, as a stored snapshot carries them. */
+function withEngineLines(held: CurrentTripPricing): CurrentTripPricing {
+  const engine = (componentCode: string, amount: Prisma.Decimal) => ({
+    componentCode,
+    engineAmount: amount,
+    effectiveAmount: amount,
+    source: PricingAmountSource.ENGINE,
+  });
+
+  return {
+    ...held,
+    components: [engine("BASE_PRICE", held.tarief), engine("FUEL_SURCHARGE", held.brandstof)],
+  };
 }
 
 const LINE: InvoiceFixtureLine = {
@@ -153,6 +169,70 @@ describe("the Fuel of an invoice line", () => {
     expect(stated.applied.result.rows[0].differences).toEqual([
       expect.objectContaining({ component: "Fuel", kind: "INVOICE_HIGHER" }),
     ]);
+  });
+
+  /*
+   * ── A HIGHER TARIEF ON THE INVOICE (owner, 19 October 2026) ────────────────
+   * That Tarief stays — nothing is lowered — so the Fuel owed is OUR percentage
+   * of IT, not of this system's Tarief. Here: our Tarief 200 at 20% (Fuel 40),
+   * the invoice's Tarief 250, so the Fuel owed is 50.
+   */
+  describe("when the invoice states a higher Tarief than this system", () => {
+    const HELD = withEngineLines(pricing("200", "40"));
+
+    it("raises a Fuel at a lower percentage to ours of the invoice's Tarief", async () => {
+      const { applied, after, changed } = await correct({ tarief: 250, fuel: 40 }, HELD, "20");
+
+      expect(changed).toEqual([`M${ROW}`]);
+      expect(after.getRow(ROW).getCell(COLUMN.tarief).value).toBe(250);
+      expect(after.getRow(ROW).getCell(COLUMN.fuel).formula).toBe(`20%*L${ROW}`);
+      expect(isRed(after, COLUMN.fuel)).toBe(true);
+      expect(isRed(after, COLUMN.tarief)).toBe(false);
+      expect(applied.result.rows[0].differences).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ component: "Fuel", kind: "RAISE", invoiceValue: "40.00", correctedValue: "50.00" }),
+        ]),
+      );
+    });
+
+    it("raises the customer's own lower-percentage formula", async () => {
+      // `10%*L2` on 250 = 25.
+      const { after, changed } = await correct({ tarief: 250, fuel: "formula" }, HELD, "20");
+
+      expect(changed).toEqual([`M${ROW}`]);
+      expect(after.getRow(ROW).getCell(COLUMN.fuel).formula).toBe(`20%*L${ROW}`);
+    });
+
+    it("leaves a Fuel that is already our percentage of it", async () => {
+      const { applied, changed } = await correct({ tarief: 250, fuel: 50 }, HELD, "20");
+
+      expect(changed).toEqual([]);
+      expect(applied.result.rows[0].differences.some((difference) => difference.component === "Fuel")).toBe(false);
+    });
+
+    it("leaves a higher Fuel alone, and reports it", async () => {
+      const { applied, changed } = await correct({ tarief: 250, fuel: 60 }, HELD, "20");
+
+      expect(changed).toEqual([]);
+      expect(applied.result.rows[0].differences).toEqual(
+        expect.arrayContaining([expect.objectContaining({ component: "Fuel", kind: "INVOICE_HIGHER" })]),
+      );
+    });
+
+    /** A snapshot that recorded no rate: the percentage its own amounts imply, 40 / 200. */
+    it("uses the snapshot's own ratio when no rate was recorded, written as an amount", async () => {
+      const { after, changed } = await correct({ tarief: 250, fuel: 40 }, HELD);
+
+      expect(changed).toEqual([`M${ROW}`]);
+      expect(after.getRow(ROW).getCell(COLUMN.fuel).value).toBe(50);
+    });
+
+    it("rounds to the cent, half up", async () => {
+      // 20% of 250.33 = 50.066
+      const { after } = await correct({ tarief: 250.33, fuel: 40 }, HELD);
+
+      expect(after.getRow(ROW).getCell(COLUMN.fuel).value).toBe(50.07);
+    });
   });
 
   /** A price nobody can stand behind is not compared at all — its Fuel neither. */

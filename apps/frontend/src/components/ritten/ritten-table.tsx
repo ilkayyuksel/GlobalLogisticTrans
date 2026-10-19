@@ -736,6 +736,7 @@ function RittenRow({
           onSaveOverride={(componentCode, amount) =>
             actions.savePricingOverride(trip.id, componentCode, amount)
           }
+          onChooseRoute={() => actions.openRouteChoice(trip)}
           onResetOverride={(componentCode) =>
             actions.resetPricingOverride(trip.id, componentCode)
           }

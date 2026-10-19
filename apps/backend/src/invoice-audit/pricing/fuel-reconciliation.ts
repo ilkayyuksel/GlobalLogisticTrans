@@ -1,7 +1,8 @@
 import { Prisma } from "@prisma/client";
 
-import type { EffectivePricing } from "../../trip-pricing/effective-pricing";
+import { fuelOnTarief, type EffectivePricing } from "../../trip-pricing/effective-pricing";
 import { EMPTY_AMOUNT, round } from "../workbook/invoice-amounts";
+import type { InvoiceColumn } from "../workbook/invoice-columns";
 import type { InvoiceSheetRow } from "../workbook/invoice-sheet";
 import { FuelCellAction, planFuelCell } from "./fuel-cell-plan";
 import type { InvoiceComponent } from "./invoice-column-map";
@@ -18,11 +19,19 @@ import type { LineContext } from "./invoice-reconciliation";
 import { statesAny, sumOf } from "./line-amounts";
 import { ComponentDecision, decideComponent } from "./raise-only-policy";
 
+const TARIEF_COLUMNS: readonly InvoiceColumn[] = ["tarief"];
+
 /**
  * The Fuel of a line — see `fuel-cell-plan.ts` for how its cell is written.
  *
  * It is decided AFTER the Tarief, because the customer's Fuel formula reads the
  * row's Tarief: a raised Tarief changes what that formula will calculate.
+ *
+ * ── OUR PERCENTAGE OF THE TARIEF THE INVOICE ENDS UP WITH (owner, 19 Oct 2026)
+ * The Fuel owed is this Trip's own percentage of the line's FINAL Tarief — not
+ * of this system's Tarief. They differ when the invoice states a HIGHER Tarief:
+ * that Tarief stays (nothing is lowered), so its Fuel must be our percentage
+ * of it too, or a Fuel at a lower percentage would pass unnoticed.
  */
 export function reconcileFuel(
   rows: readonly InvoiceSheetRow[],
@@ -31,7 +40,9 @@ export function reconcileFuel(
   context: LineContext,
   decided: readonly InvoicePricingDifference[],
 ): InvoicePricingDifference | null {
-  const expected = round(component.expected(pricing));
+  const expected = round(
+    fuelOnTarief(pricing, finalLineTarief(rows, pricing), context.fuelRate),
+  );
   const stated = sumOf(rows, component.columns);
   const base = compared(component, stated, expected);
   const carriers = rows.filter((row) => statesAny(row, component.columns));
@@ -89,4 +100,18 @@ export function reconcileFuel(
     ),
     keepsFormula: plan.keepsOwnFormula,
   };
+}
+
+/**
+ * The Tarief the line states once this check is done with it: only ever raised,
+ * so the higher of the invoice's and this system's.
+ */
+function finalLineTarief(
+  rows: readonly InvoiceSheetRow[],
+  pricing: EffectivePricing,
+): Prisma.Decimal {
+  const stated = round(sumOf(rows, TARIEF_COLUMNS) ?? new Prisma.Decimal(0));
+  const system = round(pricing.tarief);
+
+  return stated.greaterThan(system) ? stated : system;
 }

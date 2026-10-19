@@ -167,6 +167,7 @@ describe("the route on the Ritten Tarief cell", () => {
                   onSaveOverride={jest.fn()}
                   onResetOverride={jest.fn()}
                   isDisabled={false}
+                  onChooseRoute={jest.fn()}
                 />
               </tr>
             </tbody>
