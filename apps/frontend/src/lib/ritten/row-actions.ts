@@ -82,6 +82,15 @@ export interface RittenActions {
    */
   sendPdf: (trip: Trip) => Promise<void>;
   /**
+   * "Prijs opnieuw berekenen" for ONE finished Trip: the backend's own
+   * reprocess — the route matched again, the whole price calculated again,
+   * only the snapshot written. The list is refetched afterwards, because the
+   * row shows the EFFECTIVE price (manual corrections laid over the snapshot)
+   * and the reprocess answers with the snapshot alone. Reports its own outcome
+   * on the page; never rejects.
+   */
+  reprocessPricing: (trip: Trip) => Promise<void>;
+  /**
    * Corrects one pricing component of one Trip: Tarief, Tol or Tunnel.
    *
    * DELIBERATELY DOES NOT REFETCH THE LIST. The endpoint answers with the whole

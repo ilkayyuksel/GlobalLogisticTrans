@@ -15,6 +15,7 @@ import { CostConfirmationCalculator } from "./cost-confirmation.calculator";
 import { CustomPropertyCalculator } from "./custom-property.calculator";
 import { FuelSurchargeCalculator } from "./fuel-surcharge.calculator";
 import { PricingComponentResolver } from "./pricing-component.resolver";
+import { PairedPricingService } from "./paired-pricing.service";
 import { PricingEngineService } from "./pricing-engine.service";
 import { PricingRecalculationService } from "./pricing-recalculation.service";
 import { PRICING_CALCULATION_STEPS } from "./pricing-line";
@@ -97,6 +98,7 @@ import { WaitingTimeCalculator } from "./waiting-time.calculator";
   ],
   providers: [
     PricingEngineService,
+    PairedPricingService,
     PricingRecalculationService,
     TripClosedPricingListener,
     PricingRuleResolver,
@@ -154,6 +156,6 @@ import { WaitingTimeCalculator } from "./waiting-time.calculator";
       ],
     },
   ],
-  exports: [PricingEngineService, PricingRecalculationService],
+  exports: [PricingEngineService, PairedPricingService, PricingRecalculationService],
 })
 export class PricingEngineModule {}

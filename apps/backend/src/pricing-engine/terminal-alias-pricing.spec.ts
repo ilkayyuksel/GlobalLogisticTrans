@@ -103,7 +103,7 @@ describe("terminal aliases in pricing", () => {
       await actions.close("trip");
       const logger = { setContext: jest.fn(), log: jest.fn(), warn: jest.fn(), error: jest.fn() };
       const bulk = new BulkPricingReprocessService(
-        world.engine,
+        world.pairs,
         world.tripPricing,
         logger as unknown as AppLoggerService,
       );

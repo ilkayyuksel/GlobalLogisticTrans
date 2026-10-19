@@ -18,6 +18,7 @@ import {
   WITHOUT_OVER_ST,
   routeMatchActions,
 } from "../pricing-engine/route-match-lifecycle.fixtures";
+import { PairedPricingService } from "../pricing-engine/paired-pricing.service";
 import { BulkPricingReprocessService } from "./bulk-pricing-reprocess.service";
 
 /**
@@ -51,7 +52,11 @@ describe("reprocessing a selection of Trips", () => {
 
   /** The bulk reprocess over the given Engine — the real one unless a test wraps it. */
   function bulk(engine: PricingEngineService = world.engine) {
-    return new BulkPricingReprocessService(engine, world.tripPricing, silentLogger());
+    return new BulkPricingReprocessService(
+      new PairedPricingService(engine, world.tripRead, silentLogger()),
+      world.tripPricing,
+      silentLogger(),
+    );
   }
 
   async function closed(id: string, destinationCity = "Ghlin"): Promise<string> {
@@ -137,9 +142,10 @@ describe("reprocessing a selection of Trips", () => {
     it("6. a Trip reopened between the write and the read-back is skipped, never shown as priced", async () => {
       await closed("trip");
       const reopenedMidway = {
-        reprocess: async (id: string) => {
-          const answer = await world.engine.reprocess(id);
-          await actions.reopen(id);
+        calculate: (id: string) => world.engine.calculate(id),
+        store: async (result: Awaited<ReturnType<PricingEngineService["calculate"]>>) => {
+          const answer = await world.engine.store(result);
+          await actions.reopen(result.tripId);
           return answer;
         },
       } as unknown as PricingEngineService;
@@ -300,15 +306,16 @@ describe("reprocessing a selection of Trips", () => {
       const badBefore = world.storedSnapshot("bad");
       const dataBefore = await tripData("bad");
       const failing = {
-        reprocess: (id: string) => {
+        calculate: (id: string) => {
           if (id === "bad") {
             return Promise.reject(new MissingPricingSettingException("PRICING", "FUEL_PERCENTAGE"));
           }
           if (id === "broken") {
             return Promise.reject(new Error("database unavailable"));
           }
-          return world.engine.reprocess(id);
+          return world.engine.calculate(id);
         },
+        store: (result: Awaited<ReturnType<PricingEngineService["calculate"]>>) => world.engine.store(result),
       } as unknown as PricingEngineService;
 
       const result = await bulk(failing).reprocessMany(["good", "bad", "broken"]);

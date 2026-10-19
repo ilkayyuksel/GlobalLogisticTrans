@@ -149,6 +149,8 @@ describe("a TAR-nummer change reprices the Trip", () => {
 
     repository = {
       findById: jest.fn(() => Promise.resolve(stored)),
+      findByIdentity: jest.fn().mockResolvedValue(null),
+      findByBookingOnPlanningDate: jest.fn().mockResolvedValue(null),
       update: jest.fn((_id: string, data: Record<string, unknown>) => {
         // Only the fields actually written: an update's absent fields arrive
         // as `undefined` and must not erase what the row already holds.

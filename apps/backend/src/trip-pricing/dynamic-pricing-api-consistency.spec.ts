@@ -2,6 +2,7 @@ import { Prisma } from "@prisma/client";
 
 import { AppLoggerService } from "../logger/app-logger.service";
 import { PricingComponentResolver } from "../pricing-engine/pricing-component.resolver";
+import { PairedPricingService } from "../pricing-engine/paired-pricing.service";
 import { PricingEngineService } from "../pricing-engine/pricing-engine.service";
 import { PricingRecalculationService } from "../pricing-engine/pricing-recalculation.service";
 import { TripReadService } from "../trips/trip-read.service";
@@ -91,20 +92,33 @@ describe("a mutation's pricing equals the Ritten list's pricing", () => {
       { findReviewStatus: async () => NO_REVIEW_STATUS } as unknown as RouteReviewRepository,
     );
 
+    // A finished Trip: the only kind a recalculation prices.
+    const tripRead = {
+      findById: jest.fn((id: string) => Promise.resolve({ id, status: "CLOSED", tripGroupId: null })),
+    } as unknown as TripReadService;
+    const logger = {
+      setContext: jest.fn(),
+      log: jest.fn(),
+      warn: jest.fn(),
+      error: jest.fn(),
+    } as unknown as AppLoggerService;
+
     recalculation = new PricingRecalculationService(
-      {
-        calculateAndStore: jest.fn().mockResolvedValue({
-          tripId: TRIP_ID,
-          isReprocess: true,
-          lines: [],
-          calculationStatus: "CALCULATED",
-        }),
-      } as unknown as PricingEngineService,
+      new PairedPricingService(
+        {
+          calculate: jest.fn().mockResolvedValue({
+            tripId: TRIP_ID,
+            isReprocess: true,
+            lines: [],
+            calculationStatus: "CALCULATED",
+          }),
+          store: jest.fn().mockResolvedValue(undefined),
+        } as unknown as PricingEngineService,
+        tripRead,
+        logger,
+      ),
       effectivePricing,
-      // A finished Trip: the only kind a recalculation prices.
-      {
-        findById: jest.fn((id: string) => Promise.resolve({ id, status: "CLOSED" })),
-      } as unknown as TripReadService,
+      tripRead,
       {} as unknown as PricingComponentResolver,
       {
         setContext: jest.fn(),

@@ -10,6 +10,7 @@ import {
 } from "./exceptions/pricing-engine.exceptions";
 import { TripReadService, TripReadView } from "../trips/trip-read.service";
 import { PricingComponentResolver } from "./pricing-component.resolver";
+import { PairedPricingService } from "./paired-pricing.service";
 import { PricingEngineService } from "./pricing-engine.service";
 import {
   PricingRecalculationService,
@@ -35,7 +36,8 @@ const TRIP_ID = "3f2504e0-4f89-41d3-9a0c-0305e82c3301";
  *   and one call is one calculation.
  */
 describe("PricingRecalculationService", () => {
-  let engine: { calculateAndStore: jest.Mock };
+  /** The Engine's two halves: a pair is calculated in full before either is stored. */
+  let engine: { calculate: jest.Mock; store: jest.Mock };
   let effectivePricing: { findForTrip: jest.Mock };
   let logger: {
     setContext: jest.Mock;
@@ -77,12 +79,13 @@ describe("PricingRecalculationService", () => {
 
   beforeEach(() => {
     engine = {
-      calculateAndStore: jest.fn().mockResolvedValue({
+      calculate: jest.fn().mockResolvedValue({
         tripId: TRIP_ID,
         isReprocess: true,
         lines: [],
         calculationStatus: "CALCULATED",
       }),
+      store: jest.fn().mockResolvedValue(undefined),
     };
     effectivePricing = {
       findForTrip: jest.fn().mockResolvedValue(
@@ -108,7 +111,11 @@ describe("PricingRecalculationService", () => {
     };
 
     recalculation = new PricingRecalculationService(
-      engine as unknown as PricingEngineService,
+      new PairedPricingService(
+        engine as unknown as PricingEngineService,
+        trips as unknown as TripReadService,
+        logger as unknown as AppLoggerService,
+      ),
       effectivePricing as unknown as EffectivePricingService,
       trips as unknown as TripReadService,
       components as unknown as PricingComponentResolver,
@@ -129,7 +136,7 @@ describe("PricingRecalculationService", () => {
 
         const outcome = await recalculation.recalculate(TRIP_ID);
 
-        expect(engine.calculateAndStore).not.toHaveBeenCalled();
+        expect(engine.calculate).not.toHaveBeenCalled();
         expect(outcome).toEqual({
           pricing: null,
           reasonCode: "PRICING_TRIP_NOT_CLOSED",
@@ -160,7 +167,7 @@ describe("PricingRecalculationService", () => {
     it("prices the Trip again and stores the result", async () => {
       await recalculation.recalculate(TRIP_ID);
 
-      expect(engine.calculateAndStore).toHaveBeenCalledWith(TRIP_ID);
+      expect(engine.calculate).toHaveBeenCalledWith(TRIP_ID);
     });
 
     /*
@@ -172,7 +179,7 @@ describe("PricingRecalculationService", () => {
     it("runs exactly one calculation per call", async () => {
       await recalculation.recalculate(TRIP_ID);
 
-      expect(engine.calculateAndStore).toHaveBeenCalledTimes(1);
+      expect(engine.calculate).toHaveBeenCalledTimes(1);
       expect(effectivePricing.findForTrip).toHaveBeenCalledTimes(1);
     });
 
@@ -244,7 +251,7 @@ describe("PricingRecalculationService", () => {
 
   describe("a recalculation that could not price the Trip", () => {
     beforeEach(() => {
-      engine.calculateAndStore.mockRejectedValue(
+      engine.calculate.mockRejectedValue(
         new MissingRoutePricingException("Quay 869", "Nowhere"),
       );
     });
@@ -284,7 +291,7 @@ describe("PricingRecalculationService", () => {
     });
 
     it("passes a Trip that is not CLOSED through the same contract", async () => {
-      engine.calculateAndStore.mockRejectedValue(
+      engine.calculate.mockRejectedValue(
         new TripNotPriceableException(
           TRIP_ID,
           TripStatus.OPEN,
@@ -332,13 +339,13 @@ describe("PricingRecalculationService", () => {
     it("prices nothing by answering", () => {
       recalculation.tripsAffectedByRegrouping(before, after);
 
-      expect(engine.calculateAndStore).not.toHaveBeenCalled();
+      expect(engine.calculate).not.toHaveBeenCalled();
     });
   });
 
   describe("a recalculation that failed unexpectedly", () => {
     beforeEach(() => {
-      engine.calculateAndStore.mockRejectedValue(
+      engine.calculate.mockRejectedValue(
         new Error("database unavailable"),
       );
     });

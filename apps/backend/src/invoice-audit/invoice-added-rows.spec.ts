@@ -275,6 +275,12 @@ describe("the lines added for forgotten transports", () => {
       expect(sheet.getCell("N3").formula).toBe("SUM(N1:N1)");
       // The totals row did not move.
       expect(sheet.getCell("L3").formula).toBe("SUM(L2:L2)");
+      // Its price is reliable, but the corrected invoice does not carry it: not offered.
+      expect(applied.result.payments.find((payment) => payment.tripId === "missing-1")).toMatchObject({
+        payable: false,
+        reasons: ["NOT_ADDED"],
+        rowNumbers: [],
+      });
     });
   });
 });

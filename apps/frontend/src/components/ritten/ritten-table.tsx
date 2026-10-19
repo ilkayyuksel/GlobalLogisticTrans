@@ -13,7 +13,7 @@ import type { Trip, Vehicle } from "@/lib/api/types";
 import { CopyButton } from "@/components/ui/copy-button";
 import { PricingCells } from "@/components/ritten/pricing-cells";
 import { toClockLabel } from "@/lib/calendar/clock";
-import { formatCalendarDateWithWeek } from "@/lib/calendar/iso-week";
+import { formatCalendarDate } from "@/lib/calendar/calendar-dates";
 import { toFleetOptions, type FleetOption } from "@/lib/fleet-options";
 import { toVehicleLabel } from "@/lib/fleet/vehicle-label";
 import { useTranslation } from "@/lib/i18n/language-provider";
@@ -63,6 +63,8 @@ import { RowLifecycleActions } from "./row-lifecycle-actions";
 const CONTAINER_NUMBER_MAX_LENGTH = 100;
 /** Likewise TAR_NUMMER_MAX_LENGTH there. A ceiling, never a format. */
 const TAR_NUMMER_MAX_LENGTH = 100;
+/** Likewise BOOKING_NUMBER_MAX_LENGTH there. */
+const BOOKING_NUMBER_MAX_LENGTH = 100;
 
 const COLUMN_KEYS = [
   "ritten.select.row",
@@ -154,6 +156,12 @@ export interface RittenTableProps {
   selectedTripIds: ReadonlySet<string>;
   onToggleSelection: (tripId: string) => void;
   /**
+   * Ticks or unticks every row of THIS table at once — the header checkbox.
+   * Only the rows on screen: never a Trip a filter, another day or another
+   * page hides. Without it the header carries no checkbox.
+   */
+  onToggleAll?: (tripIds: readonly string[], select: boolean) => void;
+  /**
    * Whether the pricing columns are shown at all.
    *
    * When false they are not rendered — not blanked, not masked. A column of
@@ -176,12 +184,19 @@ export interface RittenTableProps {
    * see `combinationPalette`.
    */
   palette: CombinationPalette;
-  /**
-   * Remembers the table's sideways scroll across Back, which matters once the
-   * money columns make it wider than the screen. One id per day section.
-   */
-  scrollRestorationId?: string;
 }
+
+/**
+ * A column header that stays under its day's sticky heading (`h-12` in
+ * `DateSection`, hence `top-12`) while the day's rows scroll past.
+ *
+ * Sticky on the CELLS, which every browser supports, rather than on `<thead>`.
+ * The background is opaque — the same tint over the card colour — because rows
+ * now slide underneath it; and the line under it is a shadow, because a
+ * collapsed table border stays behind when its cell sticks.
+ */
+const STICKY_HEADER_CELL =
+  "sticky top-12 z-10 bg-card bg-[linear-gradient(rgb(var(--color-hover)/0.5),rgb(var(--color-hover)/0.5))] shadow-[inset_0_-1px_0_rgb(var(--color-border))]";
 
 export function RittenTable(props: RittenTableProps) {
   const t = useTranslation();
@@ -189,89 +204,127 @@ export function RittenTable(props: RittenTableProps) {
   return (
     /*
      * As wide as the section it sits in, with no minimum width of its own: the
-     * columns decide how much room the table needs, and only a screen that
-     * cannot fit even that makes the wrapper scroll sideways.
+     * columns decide how much room the table needs. It has NO scroller of its
+     * own — the whole list scrolls in one, see `RittenScrollRegion` — which is
+     * what lets the column headers below stick to the top.
      */
-    <div
-      className="overflow-x-auto"
-      data-scroll-restoration-id={props.scrollRestorationId}
-    >
-      <table className="w-full text-left text-sm">
-        <caption className="sr-only">{t("ritten.rows.title")}</caption>
-        <thead className="border-b border-border bg-hover/50 text-xs uppercase tracking-wide text-muted">
-          <tr>
-            {COLUMN_KEYS.map((key) => (
-              <th
-                key={key}
-                scope="col"
-                className={[
-                  // Compact padding: enough to tell neighbouring values
-                  // apart, and no more.
-                  "whitespace-nowrap px-1.5 py-2 font-medium",
-                  COMPACT_COLUMN_KEYS.has(key) ? "w-px" : "",
-                ].join(" ")}
-              >
-                {/* The selection column is a control, not a heading. */}
-                <span className={key === "ritten.select.row" ? "sr-only" : ""}>
+    <table className="w-full text-left text-sm">
+      <caption className="sr-only">{t("ritten.rows.title")}</caption>
+      <thead className="text-xs uppercase tracking-wide text-muted">
+        <tr>
+          {COLUMN_KEYS.map((key) => (
+            <th
+              key={key}
+              scope="col"
+              className={[
+                // Compact padding: enough to tell neighbouring values
+                // apart, and no more.
+                "whitespace-nowrap px-1.5 py-2 font-medium",
+                STICKY_HEADER_CELL,
+                COMPACT_COLUMN_KEYS.has(key) ? "w-px" : "",
+              ].join(" ")}
+            >
+              {/* The selection column is a control, not a heading. */}
+              <span className={key === "ritten.select.row" ? "sr-only" : ""}>
+                {t(key)}
+              </span>
+              {key === "ritten.select.row" && props.onToggleAll ? (
+                <SelectAllCheckbox
+                  tripIds={props.trips.map((trip) => trip.id)}
+                  selectedTripIds={props.selectedTripIds}
+                  onToggleAll={props.onToggleAll}
+                />
+              ) : null}
+            </th>
+          ))}
+          {props.showPricing
+            ? PRICING_COLUMN_KEYS.map((key) => (
+                <th
+                  key={key}
+                  scope="col"
+                  // An amount is as wide as its digits: see COMPACT_COLUMN_KEYS.
+                  className={`w-px whitespace-nowrap px-1.5 py-2 text-right font-medium ${STICKY_HEADER_CELL}`}
+                >
                   {t(key)}
-                </span>
-              </th>
-            ))}
-            {props.showPricing
-              ? PRICING_COLUMN_KEYS.map((key) => (
-                  <th
-                    key={key}
-                    scope="col"
-                    // An amount is as wide as its digits: see COMPACT_COLUMN_KEYS.
-                    className="w-px whitespace-nowrap px-1.5 py-2 text-right font-medium"
-                  >
-                    {t(key)}
-                  </th>
-                ))
-              : null}
-          </tr>
-        </thead>
-        {/*
+                </th>
+              ))
+            : null}
+        </tr>
+      </thead>
+      {/*
           One body per truck, so a heading can name it.
 
           Separate <tbody> elements rather than a heading row inside one body:
           that is what the element is for, and it keeps the heading tied to the
           rows it introduces for a screen reader as well as visually.
         */}
-        {toVehicleGroups(props.trips).map((group, index) => (
-          <tbody key={`${group.licensePlate ?? "unassigned"}-${index}`}>
-            <tr>
-              <th
-                scope="colgroup"
-                colSpan={
-                  COLUMN_KEYS.length +
-                  (props.showPricing ? PRICING_COLUMN_KEYS.length : 0)
-                }
-                className="border-b border-border bg-hover/40 px-1.5 py-1.5 text-left text-xs font-semibold text-secondary"
-              >
-                <span className="flex items-center gap-2">
-                  {group.displayColor ? (
-                    <span
-                      aria-hidden="true"
-                      style={{ backgroundColor: group.displayColor }}
-                      className="inline-block h-2.5 w-2.5 shrink-0 rounded-sm"
-                    />
-                  ) : null}
-                  {group.licensePlate ?? t("ritten.sort.noVehicle")}
-                  <span className="font-normal text-muted">
-                    ({group.trips.length})
-                  </span>
+      {toVehicleGroups(props.trips).map((group, index) => (
+        <tbody key={`${group.licensePlate ?? "unassigned"}-${index}`}>
+          <tr>
+            <th
+              scope="colgroup"
+              colSpan={
+                COLUMN_KEYS.length +
+                (props.showPricing ? PRICING_COLUMN_KEYS.length : 0)
+              }
+              className="border-b border-border bg-hover/40 px-1.5 py-1.5 text-left text-xs font-semibold text-secondary"
+            >
+              <span className="flex items-center gap-2">
+                {group.displayColor ? (
+                  <span
+                    aria-hidden="true"
+                    style={{ backgroundColor: group.displayColor }}
+                    className="inline-block h-2.5 w-2.5 shrink-0 rounded-sm"
+                  />
+                ) : null}
+                {group.licensePlate ?? t("ritten.sort.noVehicle")}
+                <span className="font-normal text-muted">
+                  ({group.trips.length})
                 </span>
-              </th>
-            </tr>
+              </span>
+            </th>
+          </tr>
 
-            {group.trips.map((trip) => (
-              <RittenRow key={trip.id} trip={trip} {...props} />
-            ))}
-          </tbody>
-        ))}
-      </table>
-    </div>
+          {group.trips.map((trip) => (
+            <RittenRow key={trip.id} trip={trip} {...props} />
+          ))}
+        </tbody>
+      ))}
+    </table>
+  );
+}
+
+/**
+ * Every row of this table ticked, or none: checked when all are, half-checked
+ * when some are. Unticking takes off only this table's rows; a Trip selected
+ * on another day stays selected.
+ */
+function SelectAllCheckbox({
+  tripIds,
+  selectedTripIds,
+  onToggleAll,
+}: {
+  tripIds: readonly string[];
+  selectedTripIds: ReadonlySet<string>;
+  onToggleAll: (tripIds: readonly string[], select: boolean) => void;
+}) {
+  const t = useTranslation();
+  const selectedHere = tripIds.filter((id) => selectedTripIds.has(id)).length;
+  const allSelected = tripIds.length > 0 && selectedHere === tripIds.length;
+
+  return (
+    <input
+      type="checkbox"
+      aria-label={t("ritten.select.allInTable")}
+      checked={allSelected}
+      ref={(element) => {
+        if (element) {
+          element.indeterminate = selectedHere > 0 && !allSelected;
+        }
+      }}
+      onChange={() => onToggleAll(tripIds, !allSelected)}
+      className="h-4 w-4 rounded border-border accent-primary"
+    />
   );
 }
 
@@ -293,7 +346,8 @@ function RittenRow({
   const isEditable = canEdit(trip);
   const isBusy = busyTripId === trip.id;
 
-  const save = (payload: UpdateTripPayload) => actions.saveTrip(trip.id, payload);
+  const save = (payload: UpdateTripPayload) =>
+    actions.saveTrip(trip.id, payload);
 
   return (
     <tr
@@ -409,8 +463,7 @@ function RittenRow({
       <td className="whitespace-nowrap px-1.5 py-2 tabular-nums text-secondary">
         <InlineCell
           label={t("ritten.edit.planningDate")}
-          // With its ISO week beside it; the stored date itself is what is edited.
-          displayValue={formatCalendarDateWithWeek(trip.planningDate, t("ritten.weekPrefix")) ?? empty}
+          displayValue={formatCalendarDate(trip.planningDate) ?? empty}
           editValue={trip.planningDate ?? ""}
           kind="date"
           isDisabled={!isEditable || isBusy}
@@ -521,17 +574,34 @@ function RittenRow({
         costs no request — not one per row, and not one on hover.
       */}
       <td className="px-1.5 py-2">
-        <HoverNote
-          label={t("ritten.notes.label")}
-          note={trip.internalNotes}
-        >
-          <Link
-            href={`/trips/${trip.id}`}
-            className="font-medium text-primary hover:underline"
-          >
-            {trip.bookingNumber}
-          </Link>
-        </HoverNote>
+        {/*
+          The pencil directly right of the number corrects it, through the same
+          `InlineCell` every other field uses. Whether the new number is free —
+          booking, container and date unique — is the backend's decision; its
+          refusal is shown in the open cell, worded as it sent it.
+        */}
+        <span className="flex items-center gap-1">
+          <HoverNote label={t("ritten.notes.label")} note={trip.internalNotes}>
+            <Link
+              href={`/trips/${trip.id}`}
+              className="font-medium text-primary hover:underline"
+            >
+              {trip.bookingNumber}
+            </Link>
+          </HoverNote>
+          <span>
+            <InlineCell
+              label={t("ritten.edit.bookingNumber")}
+              displayValue={<PencilIcon />}
+              editValue={trip.bookingNumber ?? ""}
+              maxLength={BOOKING_NUMBER_MAX_LENGTH}
+              isDisabled={!isEditable || isBusy}
+              onSave={(value) =>
+                save({ bookingNumber: requireValue(value, t).trim() })
+              }
+            />
+          </span>
+        </span>
         {/*
           SIBLINGS of the link, not children of it: a button inside an anchor is
           not something a browser or a screen reader can make sense of, and the
@@ -797,7 +867,6 @@ function CostConfirmationCell({
           <path d="M4 3.5h5.5L14 8v8.5H4z" />
           <path d="M9.5 3.5V8H14" />
         </PdfButton>
-
         <span className="text-[11px] text-muted">
           {toCostConfirmationLabel(confirmation)}
         </span>{" "}
@@ -836,7 +905,10 @@ function UpdatedValue({
   }
 
   return (
-    <span className={UPDATED_FIELD_CLASS} title={t("ritten.status.revisedField")}>
+    <span
+      className={UPDATED_FIELD_CLASS}
+      title={t("ritten.status.revisedField")}
+    >
       {children}
     </span>
   );
@@ -1137,7 +1209,10 @@ function toInlineOptions(
  * instruction. Refusing it here keeps the cell open with a message instead of
  * sending a request that can only fail.
  */
-function requireValue(value: string, t: (key: "ritten.edit.required") => string): string {
+function requireValue(
+  value: string,
+  t: (key: "ritten.edit.required") => string,
+): string {
   if (value.trim() === "") {
     throw new ApiError("VALIDATION_FAILED", t("ritten.edit.required"), 400);
   }

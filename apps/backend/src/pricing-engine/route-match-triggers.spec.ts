@@ -222,8 +222,9 @@ describe("which route a stored price came from, through every trigger", () => {
         overSt: { applied: false },
       });
       expect(await actions.apiPricing(LEG2)).toMatchObject({ tarief: "120.00", tol: "0.00" });
-      // Leg 1 was not repriced: its stored match is unchanged.
-      expect(world.storedSnapshot(LEG1)?.routeLegs[1]).toMatchObject({ destination: CONFIGURED_TERMINAL });
+      // Leg 1 was repriced with it (owner, October 2026: a trigger on one leg
+      // reaches the other), so both read the configuration as it now is.
+      expect(world.storedSnapshot(LEG1)?.routeLegs[1]).toMatchObject({ destination: "QUAY 869" });
     });
 
     it("keeps showing the route a price came from after that route is removed", async () => {

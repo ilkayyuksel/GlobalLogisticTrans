@@ -26,8 +26,22 @@ export function stubPricingRecalculation(
   tripsAffectedByPlanningDate: jest.Mock;
   tripsAffectedByRoadChange: jest.Mock;
 } {
+  const recalculate = jest.fn().mockResolvedValue(outcome);
+
   return {
-    recalculate: jest.fn().mockResolvedValue(outcome),
+    recalculate,
+    // One `recalculate` per Trip, so a spec reads every repriced Trip from the
+    // calls it already inspects. Pairing partner legs is the real service's
+    // job, proven in its own spec and through the pricing harness.
+    recalculateAll: jest.fn(async (tripIds: readonly string[]) => {
+      const outcomes = new Map<string, PricingRecalculationOutcome>();
+
+      for (const tripId of tripIds) {
+        outcomes.set(tripId, await recalculate(tripId));
+      }
+
+      return outcomes;
+    }),
     // The real rule, not a canned answer: which Trips a regrouping affects is
     // the pricing domain's rule itself, and a double that guessed would let a
     // test pass for a group the Engine would price differently.

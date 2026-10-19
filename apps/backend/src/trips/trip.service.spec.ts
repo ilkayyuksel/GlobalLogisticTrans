@@ -92,6 +92,7 @@ describe("TripService", () => {
       findById: jest.fn().mockResolvedValue(null),
       findByBookingNumber: jest.fn().mockResolvedValue(null),
       findByIdentity: jest.fn().mockResolvedValue(null),
+      findByBookingOnPlanningDate: jest.fn().mockResolvedValue(null),
       findManyByBookingNumber: jest.fn().mockResolvedValue([]),
       pdfDocumentExists: jest.fn().mockResolvedValue(true),
       create: jest.fn().mockResolvedValue(buildTrip()),

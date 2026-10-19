@@ -15,6 +15,7 @@ import {
 } from "@/components/ritten/confirm-dialog";
 import { NewTripDialog } from "@/components/ritten/new-trip-dialog";
 import { PdfViewerDialog } from "@/components/ritten/pdf-viewer-dialog";
+import { RittenScrollRegion } from "@/components/ritten/ritten-scroll-region";
 import { SelectionToolbar } from "@/components/ritten/selection-toolbar";
 import { PeriodNav } from "@/components/ritten/period-nav";
 import { RittenCounters } from "@/components/ritten/ritten-counters";
@@ -49,7 +50,7 @@ import {
   sendTripPdfOverWhatsApp,
   type WhatsAppStatus,
 } from "@/lib/api/whatsapp";
-import { reprocessTrips } from "@/lib/api/pricing";
+import { reprocessTripPricing, reprocessTrips } from "@/lib/api/pricing";
 import { canComplete, canReprice } from "@/lib/trip-actions";
 import {
   changeTripStatus,
@@ -61,6 +62,7 @@ import {
   deleteTrip,
   listTrips,
   markTripsLoose,
+  markTripsUnpaid,
   removeTripFromGroup,
   updateTrip,
   MAX_PAGE_SIZE,
@@ -253,6 +255,7 @@ function RittenList() {
   const [isGroupDialogOpen, setIsGroupDialogOpen] = useState(false);
   /** The Trip whose deletion is being confirmed, or null. */
   const [deletingTrip, setDeletingTrip] = useState<Trip | null>(null);
+  const [isUnpaidDialogOpen, setIsUnpaidDialogOpen] = useState(false);
   /** The CANCELLED Trip whose reopening is being confirmed, or null. */
   const [reopeningTrip, setReopeningTrip] = useState<Trip | null>(null);
   /*
@@ -670,6 +673,23 @@ function RittenList() {
     selectedTripIds.size > 0 &&
     (!isSelectionFullyVisible || selectedVisibleTrips.some(canReprice));
 
+  /** The header checkbox of one day's table: only those rows, on or off. */
+  function toggleMany(tripIds: readonly string[], select: boolean): void {
+    setSelectedTripIds((current) => {
+      const next = new Set(current);
+
+      for (const id of tripIds) {
+        if (select) {
+          next.add(id);
+        } else {
+          next.delete(id);
+        }
+      }
+
+      return next;
+    });
+  }
+
   function toggleSelection(tripId: string): void {
     setSelectedTripIds((current) => {
       const next = new Set(current);
@@ -747,6 +767,24 @@ function RittenList() {
     }
   }
 
+  /**
+   * Marks the selection NOT PAID, after the confirmation said how many.
+   *
+   * Exactly the ids the operator ticked — on screen or on another day, never
+   * anything a filter hides that was not ticked. The backend changes all of
+   * them or none; a refusal throws, and the dialog stays open with its reason.
+   */
+  async function markSelectedUnpaid(): Promise<void> {
+    setFeedback(null);
+
+    await markTripsUnpaid(selectedIds);
+
+    trips.reload();
+    counts.reload();
+    setSelectedTripIds(new Set());
+    setFeedback({ messageKey: "ritten.feedback.markedUnpaid", isError: false });
+  }
+
   async function completeSelected(): Promise<void> {
     setFeedback(null);
 
@@ -816,6 +854,46 @@ function RittenList() {
     }
   }
 
+  /**
+   * "Prijs opnieuw berekenen" on one row, through the SAME reprocess the Trip
+   * detail page and the selection use — nothing here matches or prices.
+   *
+   * The row is busy while it runs, which disables its buttons, and a second
+   * click on the same Trip is ignored. Success refetches the list so the row
+   * shows the stored price and route match; a route the matcher could not find
+   * is said, because a price of nothing is a result an operator must notice.
+   * A failure shows the backend's own reason, and the previous price stays.
+   */
+  async function reprocessRowPricing(trip: Trip): Promise<void> {
+    if (busyTripId === trip.id) {
+      return;
+    }
+
+    setBusyTripId(trip.id);
+    setFeedback(null);
+
+    try {
+      const snapshot = await reprocessTripPricing(trip.id);
+
+      trips.reload();
+      setFeedback({
+        messageKey:
+          snapshot.routeMatch?.method === "NOT_FOUND"
+            ? "ritten.feedback.repricedWithoutRoute"
+            : "ritten.feedback.repriced",
+        isError: false,
+      });
+    } catch (error: unknown) {
+      setFeedback({
+        messageKey: "ritten.feedback.repriceFailed",
+        detail: userFacingMessage(error),
+        isError: true,
+      });
+    } finally {
+      setBusyTripId(null);
+    }
+  }
+
   /** "ANRDUB2602247: niet afgewerkt, overgeslagen; …" for every Trip not done. */
   function describeNotRepriced(results: readonly TripReprocessResult[]): string {
     const bookingOf = new Map(visibleTrips.map((trip) => [trip.id, trip.bookingNumber]));
@@ -863,6 +941,7 @@ function RittenList() {
   }
 
   const actions: RittenActions = {
+    reprocessPricing: reprocessRowPricing,
     /**
      * One field edit on one row.
      *
@@ -1170,6 +1249,7 @@ function RittenList() {
           onClear={() => setSelectedTripIds(new Set())}
           onGroup={() => setIsGroupDialogOpen(true)}
           onMarkLoose={() => void markSelectedLoose()}
+          onMarkUnpaid={() => setIsUnpaidDialogOpen(true)}
           onComplete={() => void completeSelected()}
         />
       ) : null}
@@ -1254,7 +1334,7 @@ function RittenList() {
               }
             />
           ) : (
-            <div className="space-y-4">
+            <RittenScrollRegion>
               {sections.map((section) => (
                 <DateSection
                   key={section.date ?? "unscheduled"}
@@ -1267,6 +1347,7 @@ function RittenList() {
                   busyTripId={busyTripId}
                   selectedTripIds={selectedTripIds}
                   onToggleSelection={toggleSelection}
+                  onToggleAll={toggleMany}
                   showPricing={showPricing}
                   whatsAppStatus={whatsAppStatus}
                   onDeleteTrip={setDeletingTrip}
@@ -1274,7 +1355,7 @@ function RittenList() {
                   palette={palette}
                 />
               ))}
-            </div>
+            </RittenScrollRegion>
           )}
 
           {/*
@@ -1304,6 +1385,27 @@ function RittenList() {
           title={viewing.title}
           onClose={() => setViewing(null)}
         />
+      ) : null}
+
+      {isUnpaidDialogOpen ? (
+        <ConfirmDialog
+          titleKey="ritten.unpaid.title"
+          descriptionKey="ritten.unpaid.description"
+          consequenceKey="ritten.unpaid.consequence"
+          confirmKey="ritten.unpaid.confirm"
+          onConfirm={markSelectedUnpaid}
+          onClose={() => setIsUnpaidDialogOpen(false)}
+        >
+          <p className="text-sm font-medium text-foreground">
+            {selectedTripIds.size} {t("ritten.unpaid.count")}
+          </p>
+          {/* A selection reaches beyond the screen; that must never go unnoticed. */}
+          {selectedTripIds.size > selectedVisibleTrips.length ? (
+            <p className="mt-1 text-xs text-warning">
+              {selectedTripIds.size - selectedVisibleTrips.length} {t("ritten.unpaid.outsideView")}
+            </p>
+          ) : null}
+        </ConfirmDialog>
       ) : null}
 
       {deletingTrip ? (

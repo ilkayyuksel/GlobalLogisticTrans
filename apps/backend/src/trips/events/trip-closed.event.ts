@@ -22,5 +22,14 @@ export const TRIP_CLOSED_EVENT = "trip.closed";
 export class TripClosedEvent implements DomainEvent {
   readonly eventName = TRIP_CLOSED_EVENT;
 
-  constructor(readonly tripId: string) {}
+  constructor(
+    readonly tripId: string,
+    /**
+     * Every Trip closed in the same action, in the order their events are
+     * published — this one included. Lets a listener see that a partner leg
+     * closed alongside and was already handled by an earlier event of the
+     * batch. Empty for a single completion.
+     */
+    readonly closedTogetherWith: readonly string[] = [],
+  ) {}
 }

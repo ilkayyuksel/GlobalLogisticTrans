@@ -1,4 +1,4 @@
-import { addDays, formatCalendarDate, startOfWeek } from "@/lib/calendar/calendar-dates";
+import { addDays, startOfWeek } from "@/lib/calendar/calendar-dates";
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
@@ -39,15 +39,4 @@ function isCalendarDate(isoDate: string | null): isoDate is string {
   const parsed = new Date(`${isoDate}T00:00:00.000Z`);
 
   return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === isoDate;
-}
-
-/**
- * `18/10/2026 (W42)` — the date as every screen shows it, with its ISO week.
- * `weekPrefix` is the language's own abbreviation for "week".
- */
-export function formatCalendarDateWithWeek(isoDate: string | null, weekPrefix: string): string | null {
-  const date = formatCalendarDate(isoDate);
-  const week = isoWeekOf(isoDate);
-
-  return date === null || week === null ? date : `${date} (${weekPrefix}${week})`;
 }

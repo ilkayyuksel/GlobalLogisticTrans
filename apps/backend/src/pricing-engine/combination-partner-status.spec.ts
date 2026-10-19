@@ -212,8 +212,12 @@ describe("pricing partners by status", () => {
     });
   });
 
-  /** 13. A status change that moves no pair reprices no other Trip. */
-  it("13. closing a Trip reprices nobody else's pair", async () => {
+  /**
+   * 13. Closing a leg prices its CLOSED partner with it (owner, October 2026,
+   * replacing "a status change that moves no pair reprices no other Trip"):
+   * every pricing trigger on one leg reaches the other.
+   */
+  it("13. closing a Trip reprices its CLOSED partner with it", async () => {
     await groupedPair();
     await actions.close(BACK);
     const before = world.storedSnapshot(BACK)!.calculatedAt;
@@ -222,6 +226,7 @@ describe("pricing partners by status", () => {
     // OPEN → CLOSED: OUT is a partner before and after.
     await actions.close(OUT);
 
-    expect(world.storedSnapshot(BACK)!.calculatedAt).toEqual(before);
+    expect(world.storedSnapshot(BACK)!.calculatedAt.getTime()).toBeGreaterThan(before.getTime());
+    expect(world.storedSnapshot(OUT)).not.toBeNull();
   });
 });

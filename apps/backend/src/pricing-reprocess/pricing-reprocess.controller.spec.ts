@@ -13,7 +13,7 @@ import {
   TripNotFoundForPricingException,
   TripNotPriceableException,
 } from "../pricing-engine/exceptions/pricing-engine.exceptions";
-import { PricingEngineService } from "../pricing-engine/pricing-engine.service";
+import { PairedPricingService } from "../pricing-engine/paired-pricing.service";
 import { TripNotClosedException } from "../trip-pricing/exceptions/trip-pricing.exceptions";
 import { TripPricingService } from "../trip-pricing/trip-pricing.service";
 import { BulkPricingReprocessService } from "./bulk-pricing-reprocess.service";
@@ -98,12 +98,12 @@ const STORED_ITEMS = [
  */
 describe("PricingReprocessController (integration)", () => {
   let app: INestApplication;
-  let pricingEngine: { reprocess: jest.Mock };
+  let pairs: { reprocessWithPartner: jest.Mock };
   let tripPricingService: { requireCurrentSnapshot: jest.Mock };
   let bulkReprocess: { reprocessMany: jest.Mock };
 
   beforeEach(async () => {
-    pricingEngine = { reprocess: jest.fn().mockResolvedValue({}) };
+    pairs = { reprocessWithPartner: jest.fn().mockResolvedValue([]) };
     bulkReprocess = {
       reprocessMany: jest.fn().mockResolvedValue({
         reprocessedCount: 1,
@@ -132,7 +132,7 @@ describe("PricingReprocessController (integration)", () => {
     const moduleRef = await Test.createTestingModule({
       controllers: [PricingReprocessController],
       providers: [
-        { provide: PricingEngineService, useValue: pricingEngine },
+        { provide: PairedPricingService, useValue: pairs },
         { provide: TripPricingService, useValue: tripPricingService },
         { provide: BulkPricingReprocessService, useValue: bulkReprocess },
         { provide: AppLoggerService, useValue: logger },
@@ -176,8 +176,8 @@ describe("PricingReprocessController (integration)", () => {
     it("delegates to the Engine, which owns every precondition", async () => {
       await request(app.getHttpServer()).post(ROUTE).expect(200);
 
-      expect(pricingEngine.reprocess).toHaveBeenCalledWith(TRIP_ID);
-      expect(pricingEngine.reprocess).toHaveBeenCalledTimes(1);
+      expect(pairs.reprocessWithPartner).toHaveBeenCalledWith(TRIP_ID);
+      expect(pairs.reprocessWithPartner).toHaveBeenCalledTimes(1);
     });
 
     it("exposes every snapshot field a caller needs", async () => {
@@ -269,7 +269,7 @@ describe("PricingReprocessController (integration)", () => {
    */
   describe("the Engine's domain failures are mapped, not hidden", () => {
     it("returns 404 for an unknown Trip", async () => {
-      pricingEngine.reprocess.mockRejectedValue(
+      pairs.reprocessWithPartner.mockRejectedValue(
         new TripNotFoundForPricingException(TRIP_ID),
       );
 
@@ -281,7 +281,7 @@ describe("PricingReprocessController (integration)", () => {
     });
 
     it("returns 409 for a Trip that is not CLOSED", async () => {
-      pricingEngine.reprocess.mockRejectedValue(
+      pairs.reprocessWithPartner.mockRejectedValue(
         new TripNotPriceableException(
           TRIP_ID,
           TripStatus.OPEN,
@@ -297,7 +297,7 @@ describe("PricingReprocessController (integration)", () => {
     });
 
     it("returns 409 for an unusable pricing Setting", async () => {
-      pricingEngine.reprocess.mockRejectedValue(
+      pairs.reprocessWithPartner.mockRejectedValue(
         new MissingPricingSettingException("PRICING", "FUEL_PERCENTAGE"),
       );
 
@@ -309,7 +309,7 @@ describe("PricingReprocessController (integration)", () => {
     });
 
     it("returns 409 for a route-priced property with no route cost", async () => {
-      pricingEngine.reprocess.mockRejectedValue(
+      pairs.reprocessWithPartner.mockRejectedValue(
         new MissingRouteCostException(
           TRIP_ID,
           "component-toll",
@@ -322,7 +322,7 @@ describe("PricingReprocessController (integration)", () => {
     });
 
     it("never reports a pricing failure as a server error", async () => {
-      pricingEngine.reprocess.mockRejectedValue(
+      pairs.reprocessWithPartner.mockRejectedValue(
         new MissingPricingSettingException("PRICING", "FUEL_PERCENTAGE"),
       );
 
@@ -333,7 +333,7 @@ describe("PricingReprocessController (integration)", () => {
     });
 
     it("renders the failure in the standard envelope", async () => {
-      pricingEngine.reprocess.mockRejectedValue(
+      pairs.reprocessWithPartner.mockRejectedValue(
         new MissingPricingSettingException("PRICING", "FUEL_PERCENTAGE"),
       );
 
@@ -347,7 +347,7 @@ describe("PricingReprocessController (integration)", () => {
     });
 
     it("still hides a genuinely unexpected error", async () => {
-      pricingEngine.reprocess.mockRejectedValue(new Error("database on fire"));
+      pairs.reprocessWithPartner.mockRejectedValue(new Error("database on fire"));
 
       const response = await request(app.getHttpServer())
         .post(ROUTE)
@@ -358,7 +358,7 @@ describe("PricingReprocessController (integration)", () => {
     });
 
     it("writes no response body from a failed read-back", async () => {
-      pricingEngine.reprocess.mockRejectedValue(
+      pairs.reprocessWithPartner.mockRejectedValue(
         new MissingPricingSettingException("PRICING", "FUEL_PERCENTAGE"),
       );
 
@@ -406,7 +406,7 @@ describe("PricingReprocessController (integration)", () => {
         .post("/api/v1/trip-pricing/trip/not-a-uuid/reprocess")
         .expect(400);
 
-      expect(pricingEngine.reprocess).not.toHaveBeenCalled();
+      expect(pairs.reprocessWithPartner).not.toHaveBeenCalled();
     });
 
     it("ignores a request body, which the operation does not accept", async () => {

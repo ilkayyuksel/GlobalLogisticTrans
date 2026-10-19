@@ -39,6 +39,7 @@ export function SelectionToolbar({
   onComplete,
   onReprice,
   onMarkLoose,
+  onMarkUnpaid,
 }: {
   /** Everything selected, including Trips on days that are not on screen. */
   selectedCount: number;
@@ -66,6 +67,8 @@ export function SelectionToolbar({
    * and it gives it for the whole selection at once rather than per row.
    */
   onMarkLoose: () => void;
+  /** Asks to confirm, then marks the whole selection NOT PAID. */
+  onMarkUnpaid: () => void;
 }) {
   const t = useTranslation();
 
@@ -133,6 +136,16 @@ export function SelectionToolbar({
         className="rounded-md border border-border bg-card px-3 py-1.5 text-sm font-medium text-foreground hover:bg-hover disabled:cursor-not-allowed disabled:opacity-50"
       >
         {t("ritten.losrit.label")}
+      </button>
+
+      {/* Not routine, and it changes money bookkeeping: it asks first. */}
+      <button
+        type="button"
+        onClick={onMarkUnpaid}
+        disabled={isBusy}
+        className="rounded-md border border-border bg-card px-3 py-1.5 text-sm font-medium text-foreground hover:bg-hover disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        {t("ritten.unpaid.action")}
       </button>
     </div>
   );

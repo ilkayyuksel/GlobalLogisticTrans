@@ -183,6 +183,12 @@ export function createTrip(
  * value", and a field left undefined is simply not part of the update.
  */
 export interface UpdateTripPayload {
+  /**
+   * Corrects the booking number; never null or empty. The backend refuses it
+   * (409) when another Trip already holds the same booking and container on
+   * the same date.
+   */
+  bookingNumber?: string;
   containerNumber?: string | null;
   planningDate?: string;
   vehicleId?: string | null;
@@ -253,6 +259,23 @@ export function markTripsLoose(
   signal?: AbortSignal,
 ): Promise<Trip[]> {
   return request<Trip[]>(`${TRIPS_PATH}/loose`, {
+    method: "POST",
+    body: { tripIds: [...tripIds] },
+    signal,
+  });
+}
+
+/**
+ * Marks the given Trips NOT PAID — an operator's explicit correction.
+ *
+ * The backend writes `isPaid` and nothing else, and refuses the whole list
+ * when one id names no Trip, so no part of a selection is changed on its own.
+ */
+export function markTripsUnpaid(
+  tripIds: readonly string[],
+  signal?: AbortSignal,
+): Promise<Trip[]> {
+  return request<Trip[]>(`${TRIPS_PATH}/unpaid`, {
     method: "POST",
     body: { tripIds: [...tripIds] },
     signal,

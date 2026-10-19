@@ -1176,6 +1176,22 @@ partial unique index declared NULLS NOT DISTINCT.
 
 A DELETED Trip releases its identity, which is why the index is partial.
 
+## Correcting the booking number (October 2026)
+
+The booking number is editable on every Trip (`PATCH /trips/:id` with
+`bookingNumber`, the pencil beside it in the Ritten list). An edit that changes
+the booking, the container or the planning date is refused (409) when another
+Trip that is not DELETED would then share:
+
+- booking + container + original planning date — the identity above; or
+- booking + container + planning date — the same day after re-planning.
+
+An absent container is a value in both checks, and the Trip never conflicts
+with itself. The second rule is checked by `TripService` only; no index backs
+it, so two simultaneous edits could in theory both pass. Accepted consequence of
+an editable booking number: a later UPDATE or CANCEL document names the OLD
+number and no longer finds the corrected Trip.
+
 ---
 
 # Document Lifecycle

@@ -26,7 +26,8 @@ interface TerminalAliasGroup {
 export const TERMINAL_ALIAS_GROUPS: readonly TerminalAliasGroup[] = [
   {
     canonical: "Quay 869",
-    aliases: ["Quay 869", "Quay", "PSA Quay", "PSA Quay 869", "Kaai"],
+    // `K869` confirmed by the owner, October 2026.
+    aliases: ["Quay 869", "Quay", "PSA Quay", "PSA Quay 869", "Kaai", "K869"],
   },
 ];
 

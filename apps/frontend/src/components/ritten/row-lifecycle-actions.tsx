@@ -1,17 +1,21 @@
 "use client";
 
+import { useState } from "react";
+
 import type { Trip } from "@/lib/api/types";
 import type { WhatsAppStatus } from "@/lib/api/whatsapp";
 import {
+  BusyIcon,
   CompleteIcon,
   DeleteIcon,
+  RecalculateIcon,
   ReopenIcon,
   RowActionButton,
 } from "./row-action-button";
 import { SendPdfButton } from "./send-pdf-button";
 import { useTranslation } from "@/lib/i18n/language-provider";
 import { STATUS_LABEL_KEYS, type RittenActions } from "@/lib/ritten/row-actions";
-import { canDelete, primaryRowAction } from "@/lib/trip-actions";
+import { canDelete, canReprice, primaryRowAction } from "@/lib/trip-actions";
 
 /**
  * What a row can do, as buttons rather than as a menu.
@@ -45,6 +49,10 @@ import { canDelete, primaryRowAction } from "@/lib/trip-actions";
  * not: it is routine and the row says so a moment later. Putting a called-off or
  * finished transport back in the planning says it is happening after all, which
  * is worth a sentence.
+ *
+ * PRIJS OPNIEUW BEREKENEN sits beside them on a finished Trip (owner, October
+ * 2026): the price made current again without reopening and closing the Trip.
+ * It never confirms — it writes only the price, and the row shows the result.
  *
  * AND NOTHING ELSE BELONGS HERE. No edit button, no "more", no second menu by
  * another name. Editing a Trip's less common fields is the Trip detail page's
@@ -80,6 +88,23 @@ export function RowLifecycleActions({
 }) {
   const t = useTranslation();
   const action = primaryRowAction(trip);
+  // Its own running state, so the spinner shows on THIS button only — the
+  // row's `isBusy` is also true while it completes or reopens.
+  const [isRepricing, setIsRepricing] = useState(false);
+
+  async function reprice(): Promise<void> {
+    if (isRepricing) {
+      return;
+    }
+
+    setIsRepricing(true);
+
+    try {
+      await actions.reprocessPricing(trip);
+    } finally {
+      setIsRepricing(false);
+    }
+  }
 
   /*
    * The tooltip is one word — "Afwerken" — because the row it sits in says
@@ -120,6 +145,19 @@ export function RowLifecycleActions({
         >
           {/* A row only completes or reopens; cancelling is not offered here. */}
           {action.target === "OPEN" ? <ReopenIcon /> : <CompleteIcon />}
+        </RowActionButton>
+      ) : null}
+
+      {canReprice(trip) ? (
+        <RowActionButton
+          tone="primary"
+          tooltip={isRepricing ? t("ritten.select.repricing") : t("pricing.reprocess")}
+          accessibleName={nameFor(t("pricing.reprocess"))}
+          isDisabled={isBusy || isRepricing}
+          isBusy={isRepricing}
+          onClick={() => void reprice()}
+        >
+          {isRepricing ? <BusyIcon /> : <RecalculateIcon />}
         </RowActionButton>
       ) : null}
 

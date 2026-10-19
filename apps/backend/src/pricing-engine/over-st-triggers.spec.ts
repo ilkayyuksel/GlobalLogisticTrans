@@ -46,7 +46,7 @@ describe("Over ST and the €70 through every trigger", () => {
   }
 
   const bulk = () =>
-    new BulkPricingReprocessService(world.engine, world.tripPricing, {
+    new BulkPricingReprocessService(world.pairs, world.tripPricing, {
       setContext: jest.fn(),
       log: jest.fn(),
       warn: jest.fn(),

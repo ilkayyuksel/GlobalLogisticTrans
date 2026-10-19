@@ -102,15 +102,18 @@ export async function repriceAfterCombinationInputChange(
       ...(changed.road ? await recalculation.tripsAffectedByRoadChange(tripId) : []),
     ]),
   ];
-  const outcomes = new Map<string, PricingRecalculationOutcome>();
+  const closed: string[] = [];
 
   for (const affectedId of affected) {
     const trip = await findTrip(affectedId);
 
     if (trip?.status === TripStatus.CLOSED) {
-      outcomes.set(affectedId, await recalculation.recalculate(affectedId));
+      closed.push(affectedId);
     }
   }
+
+  // Each with its partner leg, and a pair named twice priced once.
+  const outcomes = await recalculation.recalculateAll(closed);
 
   if (affected.length > 0) {
     logger.log("planningDate or road change moved the pricing of Trips", {

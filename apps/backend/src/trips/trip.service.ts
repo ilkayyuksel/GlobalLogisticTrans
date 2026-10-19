@@ -40,6 +40,7 @@ import {
   DeletedTripCannotBeLooseException,
   IncompleteWaitingWindowException,
   DuplicateBookingNumberException,
+  DuplicateTripOnEditException,
   GroupedTripCannotBeLooseException,
   InactiveAssignmentException,
   InvalidTripStatusTransitionException,
@@ -391,6 +392,7 @@ export class TripService {
     const existing = await this.requireTrip(id);
 
     this.assertWaitingWindowIsComplete(dto);
+    await this.assertNotDuplicateAfterEdit(existing, dto);
 
     if (dto.vehicleId !== undefined && dto.vehicleId !== existing.vehicleId) {
       await this.assertAssignable("vehicle", dto.vehicleId);
@@ -696,8 +698,10 @@ export class TripService {
      * same event a single completion publishes, so pricing behaves identically
      * however the Trip was closed.
      */
+    const closedIds = closed.map((trip) => trip.id);
+
     for (const trip of closed) {
-      await this.announceIfClosed(trip);
+      await this.announceIfClosed(trip, closedIds);
     }
 
     // Every requested Trip, in the order the caller asked for them, whether it
@@ -737,6 +741,48 @@ export class TripService {
    * action is idempotent and a mixed selection needs no thought from the
    * operator.
    */
+  /**
+   * Marks several Trips NOT PAID — the bulk form of `changePayment(false)`.
+   *
+   * ── THE SAME RULE, APPLIED TO EACH ────────────────────────────────────────
+   * Payment is independent of the lifecycle, so any status may be marked; only
+   * `isPaid` is written, through `setPaid`, exactly as the single-Trip change.
+   * No pricing is read or recalculated, and the invoice check's own payment
+   * rules are untouched: this is an operator's explicit correction.
+   *
+   * ── ALL OR NOTHING ────────────────────────────────────────────────────────
+   * Every id must name a Trip before anything is written, and the writes share
+   * one transaction — an id that is wrong never leaves half a selection
+   * changed. A Trip already unpaid is left as it is, not written again.
+   */
+  async markManyUnpaid(tripIds: readonly string[]): Promise<TripResponseDto[]> {
+    const trips = await this.repository.findManyByIds(tripIds);
+
+    this.assertAllTripsExist(tripIds, trips);
+
+    const toUnpay = trips.filter((trip) => trip.isPaid);
+    const written = await this.repository.runInTransaction(async (repository) => {
+      const updated: Trip[] = [];
+
+      for (const trip of toUnpay) {
+        updated.push(await repository.setPaid(trip.id, false));
+      }
+
+      return updated;
+    });
+
+    // Identifiers and counts only, never money.
+    this.logger.log("Trips marked as not paid", {
+      tripIds: trips.map((trip) => trip.id),
+      unpaidCount: written.length,
+      alreadyUnpaidCount: trips.length - written.length,
+    });
+
+    const byId = new Map([...trips, ...written].map((trip) => [trip.id, trip] as const));
+
+    return this.toResponses(tripIds.map((id) => byId.get(id) as Trip));
+  }
+
   async markManyLoose(tripIds: readonly string[]): Promise<TripResponseDto[]> {
     const trips = await this.repository.findManyByIds(tripIds);
 
@@ -804,12 +850,15 @@ export class TripService {
    * Pricing Engine subscribes on its own side, which is what keeps the Trip
    * module free of any dependency on pricing.
    */
-  private async announceIfClosed(trip: Trip): Promise<void> {
+  private async announceIfClosed(
+    trip: Trip,
+    closedTogetherWith: readonly string[] = [],
+  ): Promise<void> {
     if (trip.status !== TripStatus.CLOSED) {
       return;
     }
 
-    await this.eventBus.publish(new TripClosedEvent(trip.id));
+    await this.eventBus.publish(new TripClosedEvent(trip.id, closedTogetherWith));
   }
 
   /**
@@ -1045,13 +1094,12 @@ export class TripService {
     const reclassified = new Set(
       this.recalculation.tripsAffectedByRegrouping(before, after),
     );
-    const outcomes = new Map<string, PricingRecalculationOutcome>();
-
-    for (const trip of after) {
-      if (reclassified.has(trip.id) && trip.status === TripStatus.CLOSED) {
-        outcomes.set(trip.id, await this.recalculation.recalculate(trip.id));
-      }
-    }
+    // Each with its partner leg, and a pair named twice priced once.
+    const outcomes = await this.recalculation.recalculateAll(
+      after
+        .filter((trip) => reclassified.has(trip.id) && trip.status === TripStatus.CLOSED)
+        .map((trip) => trip.id),
+    );
 
     if (reclassified.size > 0) {
       this.logger.log("Regrouping changed the pricing of Trips", {
@@ -1256,6 +1304,58 @@ export class TripService {
    * container number counts as a value — but the check stays here so a clash is
    * a domain refusal rather than a constraint violation surfacing as a 500.
    */
+  /**
+   * Refuses an edit that would make this Trip a duplicate (owner, 19 October
+   * 2026). Asked only when the booking, the container or the planning date
+   * changes, and only of a Trip that has a booking number:
+   *
+   *   * the identity — booking, container, ORIGINAL date — must stay free, as
+   *     `trip_identity_key` demands; checked here so a clash is a domain
+   *     refusal rather than a constraint violation;
+   *   * and no other Trip may hold the same booking and container on the
+   *     planning day the edit leaves this Trip on.
+   *
+   * An absent container is a value in both checks, never a reason to skip.
+   * The Trip itself is excluded, and DELETED Trips hold nothing.
+   */
+  private async assertNotDuplicateAfterEdit(existing: Trip, dto: UpdateTripDto): Promise<void> {
+    const bookingNumber = dto.bookingNumber ?? existing.bookingNumber;
+    const containerNumber =
+      dto.containerNumber === undefined ? existing.containerNumber : toContainerIdentity(dto.containerNumber);
+    const planningDate = dto.planningDate === undefined ? existing.planningDate : toUtcDate(dto.planningDate);
+    const changesUniqueness =
+      bookingNumber !== existing.bookingNumber ||
+      containerNumber !== existing.containerNumber ||
+      planningDate?.getTime() !== existing.planningDate?.getTime();
+
+    if (!changesUniqueness || bookingNumber === null) {
+      return;
+    }
+
+    const holder =
+      (await this.repository.findByIdentity({
+        identity: { bookingNumber, containerNumber, originalPlanningDate: existing.originalPlanningDate },
+        statuses: BOOKING_NUMBER_HOLDING_STATUSES,
+        excludeTripId: existing.id,
+      })) ??
+      (await this.repository.findByBookingOnPlanningDate({
+        bookingNumber,
+        containerNumber,
+        planningDate,
+        statuses: BOOKING_NUMBER_HOLDING_STATUSES,
+        excludeTripId: existing.id,
+      }));
+
+    if (holder) {
+      this.logger.warn("Rejected an edit that would duplicate a Trip", {
+        tripId: existing.id,
+        conflictingTripId: holder.id,
+      });
+
+      throw new DuplicateTripOnEditException(bookingNumber, containerNumber);
+    }
+  }
+
   private async assertIdentityFree(
     repository: TripRepository,
     identity: TripIdentity,
@@ -1480,6 +1580,7 @@ export class TripService {
 
   private toUpdateData(dto: UpdateTripDto): Prisma.TripUncheckedUpdateInput {
     return {
+      bookingNumber: dto.bookingNumber,
       containerNumber:
         dto.containerNumber === undefined
           ? undefined

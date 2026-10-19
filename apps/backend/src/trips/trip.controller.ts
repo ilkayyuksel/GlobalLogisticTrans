@@ -20,6 +20,7 @@ import {
 } from "@nestjs/swagger";
 
 import { ChangeTripPaymentDto } from "./dto/change-trip-payment.dto";
+import { MarkTripsUnpaidDto } from "./dto/mark-trips-unpaid.dto";
 import { ChangeTripStatusDto } from "./dto/change-trip-status.dto";
 import { CompleteTripsDto } from "./dto/complete-trips.dto";
 import { MarkTripsLooseDto } from "./dto/mark-trips-loose.dto";
@@ -267,6 +268,28 @@ export class TripController {
   })
   markManyLoose(@Body() dto: MarkTripsLooseDto): Promise<TripResponseDto[]> {
     return this.tripService.markManyLoose(dto.tripIds);
+  }
+
+  /**
+   * Marking several Trips NOT PAID at once — an operator's explicit correction.
+   *
+   * A collection sub-resource like `loose`, and deliberately one-directional:
+   * paying stays with `:id/payment` and the invoice check's confirmed payment.
+   * It writes `isPaid` and nothing else, through the same single-column update
+   * the single-Trip endpoint uses: no status, no pricing.
+   */
+  @Post("unpaid")
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: "Mark several Trips as not paid",
+    description:
+      "Sets isPaid to false on every named Trip and touches nothing else — no status, no pricing, no snapshot. All or nothing: an unknown id refuses the whole request and no Trip is changed. A Trip that already is unpaid is left as it is. Returns every named Trip in the order given.",
+  })
+  @ApiOkResponse({ type: [TripResponseDto] })
+  @ApiBadRequestResponse({ description: "An empty list, duplicate ids, or a malformed UUID." })
+  @ApiNotFoundResponse({ description: "One of the Trips does not exist. No Trip was changed." })
+  markManyUnpaid(@Body() dto: MarkTripsUnpaidDto): Promise<TripResponseDto[]> {
+    return this.tripService.markManyUnpaid(dto.tripIds);
   }
 
   /**

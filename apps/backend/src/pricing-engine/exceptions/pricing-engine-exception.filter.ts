@@ -49,6 +49,7 @@ const STATUS_BY_CODE: Record<PricingEngineErrorCode, number> = {
   [PricingEngineErrorCode.MISSING_CUSTOM_PROPERTY_PRICE]: HttpStatus.CONFLICT,
   [PricingEngineErrorCode.NEGATIVE_TOTAL]: HttpStatus.CONFLICT,
   [PricingEngineErrorCode.UNKNOWN_PRICING_COMPONENT]: HttpStatus.CONFLICT,
+  [PricingEngineErrorCode.PARTNER_LEG_NOT_PRICEABLE]: HttpStatus.CONFLICT,
 };
 
 @Catch(PricingEngineException)

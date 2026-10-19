@@ -89,7 +89,7 @@ describe("COMBINATION #213: a place in brackets", () => {
     configure213();
     expect(world.storedSnapshot("rit-1")).toMatchObject({ routeMatch: "NOT_FOUND" });
 
-    await new BulkPricingReprocessService(world.engine, world.tripPricing, {
+    await new BulkPricingReprocessService(world.pairs, world.tripPricing, {
       setContext: jest.fn(),
       log: jest.fn(),
       warn: jest.fn(),

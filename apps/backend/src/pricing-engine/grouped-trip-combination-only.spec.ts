@@ -219,7 +219,7 @@ describe("a grouped Trip prices only on a Combination", () => {
     actions.seedLegs();
     await actions.close(LEG1);
 
-    await new BulkPricingReprocessService(world.engine, world.tripPricing, {
+    await new BulkPricingReprocessService(world.pairs, world.tripPricing, {
       setContext: jest.fn(),
       log: jest.fn(),
       warn: jest.fn(),

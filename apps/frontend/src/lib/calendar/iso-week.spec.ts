@@ -1,4 +1,4 @@
-import { formatCalendarDateWithWeek, isoWeekOf } from "./iso-week";
+import { isoWeekOf } from "./iso-week";
 
 /** ISO-8601 weeks, Monday-first; the year turns on the week's Thursday. */
 describe("isoWeekOf", () => {
@@ -21,20 +21,5 @@ describe("isoWeekOf", () => {
 
   it.each([[null], [""], ["18/10/2026"], ["2026-02-30"]])("has no week for %p", (date) => {
     expect(isoWeekOf(date)).toBeNull();
-  });
-});
-
-describe("formatCalendarDateWithWeek", () => {
-  it("shows the date as everywhere, with its week", () => {
-    expect(formatCalendarDateWithWeek("2026-10-18", "W")).toBe("18/10/2026 (W42)");
-  });
-
-  it("uses the language's own abbreviation", () => {
-    expect(formatCalendarDateWithWeek("2027-01-01", "H")).toBe("01/01/2027 (H53)");
-  });
-
-  it("passes no date, and anything not a date, through unchanged", () => {
-    expect(formatCalendarDateWithWeek(null, "W")).toBeNull();
-    expect(formatCalendarDateWithWeek("onbekend", "W")).toBe("onbekend");
   });
 });

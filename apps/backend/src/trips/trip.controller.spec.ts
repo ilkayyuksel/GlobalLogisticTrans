@@ -96,6 +96,7 @@ describe("TripController (integration)", () => {
       findById: jest.fn().mockResolvedValue(null),
       findByBookingNumber: jest.fn().mockResolvedValue(null),
       findByIdentity: jest.fn().mockResolvedValue(null),
+      findByBookingOnPlanningDate: jest.fn().mockResolvedValue(null),
       findManyByBookingNumber: jest.fn().mockResolvedValue([]),
       findManyByIds: jest.fn().mockResolvedValue([]),
       pdfDocumentExists: jest.fn().mockResolvedValue(true),
@@ -458,7 +459,6 @@ describe("TripController (integration)", () => {
     });
 
     it.each([
-      ["bookingNumber", "BK-OTHER"],
       ["originalPlanningDate", "2026-08-18"],
       ["pdfDocumentId", PDF_ID],
       ["status", "CLOSED"],
@@ -541,6 +541,60 @@ describe("TripController (integration)", () => {
         .patch(`${BASE}/${TRIP_ID}`)
         .send({ startTime: "half twaalf" })
         .expect(400);
+    });
+
+    /** The booking number is the operator's to correct on any Trip (19 October 2026). */
+    it("corrects the booking number, trimmed", async () => {
+      await request(app.getHttpServer())
+        .patch(`${BASE}/${TRIP_ID}`)
+        .send({ bookingNumber: "  ANRDUB2601111  " })
+        .expect(200);
+
+      expect(repository.update).toHaveBeenCalledWith(
+        TRIP_ID,
+        expect.objectContaining({ bookingNumber: "ANRDUB2601111" }),
+      );
+    });
+
+    it.each([
+      ["empty", ""],
+      ["whitespace only", "   "],
+      ["null", null],
+      ["longer than 100 characters", "B".repeat(101)],
+    ])("refuses a booking number that is %s", async (_case, value) => {
+      await request(app.getHttpServer())
+        .patch(`${BASE}/${TRIP_ID}`)
+        .send({ bookingNumber: value })
+        .expect(400);
+
+      expect(repository.update).not.toHaveBeenCalled();
+    });
+
+    /** Whoever calls the API directly meets the same refusal as the Ritten list. */
+    it.each([
+      ["the identity", "findByIdentity" as const],
+      ["the planning day", "findByBookingOnPlanningDate" as const],
+    ])("returns 409 for a booking another Trip holds on %s", async (_case, query) => {
+      repository[query].mockResolvedValue(buildTrip({ id: OTHER_TRIP_ID }));
+
+      const response = await request(app.getHttpServer())
+        .patch(`${BASE}/${TRIP_ID}`)
+        .send({ bookingNumber: "ANRDUB2609999" })
+        .expect(409);
+
+      expect(JSON.stringify(response.body)).toContain("Er bestaat al een rit met boekingsnummer ANRDUB2609999");
+      expect(repository.update).not.toHaveBeenCalled();
+    });
+
+    it("returns 409 for a date change onto a duplicate", async () => {
+      repository.findByBookingOnPlanningDate.mockResolvedValue(buildTrip({ id: OTHER_TRIP_ID }));
+
+      await request(app.getHttpServer())
+        .patch(`${BASE}/${TRIP_ID}`)
+        .send({ planningDate: "2030-01-02" })
+        .expect(409);
+
+      expect(repository.update).not.toHaveBeenCalled();
     });
 
     it("returns 404 for an unknown Trip", async () => {
@@ -818,6 +872,49 @@ describe("TripController (integration)", () => {
    * bulk update: the ids are the entire body, and the classification is what
    * the endpoint is.
    */
+  /** An operator's explicit correction: only ids, only `isPaid`, all or nothing. */
+  describe("POST /trips/unpaid", () => {
+    function given(...trips: ReturnType<typeof buildTrip>[]): void {
+      (repository.findManyByIds as jest.Mock).mockResolvedValue(trips);
+    }
+
+    it("marks the named Trips not paid", async () => {
+      given(buildTrip({ id: TRIP_ID, isPaid: true }));
+      (repository.setPaid as jest.Mock).mockResolvedValue(buildTrip({ id: TRIP_ID, isPaid: false }));
+
+      const response = await request(app.getHttpServer())
+        .post(`${BASE}/unpaid`)
+        .send({ tripIds: [TRIP_ID] })
+        .expect(200);
+
+      expect(response.body.data[0].isPaid).toBe(false);
+      expect(repository.setPaid).toHaveBeenCalledWith(TRIP_ID, false);
+      expect(repository.update).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ["an empty list", { tripIds: [] }],
+      ["the same id twice", { tripIds: [TRIP_ID, TRIP_ID] }],
+      ["a malformed id", { tripIds: ["not-a-uuid"] }],
+      ["a body that also sets a value", { tripIds: [TRIP_ID], isPaid: true }],
+    ])("refuses %s, and changes nothing", async (_case, body) => {
+      await request(app.getHttpServer()).post(`${BASE}/unpaid`).send(body).expect(400);
+
+      expect(repository.setPaid).not.toHaveBeenCalled();
+    });
+
+    it("returns 404 when a Trip does not exist, and changes nothing", async () => {
+      given();
+
+      await request(app.getHttpServer())
+        .post(`${BASE}/unpaid`)
+        .send({ tripIds: [TRIP_ID] })
+        .expect(404);
+
+      expect(repository.setPaid).not.toHaveBeenCalled();
+    });
+  });
+
   describe("POST /trips/loose", () => {
     const OTHER_ID = "6ba7b810-9dad-41d1-80b4-00c04fd430c8";
     const GROUP_ID = "97777777-7777-4777-8777-777777777777";

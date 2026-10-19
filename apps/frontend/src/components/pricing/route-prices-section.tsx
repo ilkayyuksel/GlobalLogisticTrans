@@ -27,6 +27,7 @@ import {
   ROUTE_SEARCH_PARAM,
 } from "@/components/pricing/route-prices-url-state";
 import { useRouteSelection } from "@/components/pricing/use-route-selection";
+import { useStableOrder } from "@/components/pricing/use-stable-order";
 import { ConfirmDialog } from "@/components/ritten/confirm-dialog";
 import { CollapsibleSection } from "@/components/ui/collapsible-section";
 import { EmptyState, ErrorState, LoadingState } from "@/components/ui/states";
@@ -181,10 +182,11 @@ export function RoutePricesSection({
   const error = routes.error ?? combinations.error;
   const routeOverlay = overlayFor(savedRoutes, routes.data);
   const combinationOverlay = overlayFor(savedCombinations, combinations.data);
-  const configured = (routes.data ?? []).map(
+  // In the order this visit first showed — an edit never moves its row.
+  const configured = useStableOrder(routes.data).map(
     (route) => routeOverlay.get(route.id) ?? route,
   );
-  const configuredCombinations = (combinations.data ?? []).map(
+  const configuredCombinations = useStableOrder(combinations.data).map(
     (combination) => combinationOverlay.get(combination.id) ?? combination,
   );
 

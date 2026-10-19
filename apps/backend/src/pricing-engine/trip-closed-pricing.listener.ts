@@ -7,7 +7,7 @@ import {
   TripClosedEvent,
 } from "../trips/events/trip-closed.event";
 import { PricingEngineException } from "./exceptions/pricing-engine.exceptions";
-import { PricingEngineService } from "./pricing-engine.service";
+import { PairedPricingService } from "./paired-pricing.service";
 
 /**
  * Prices a Trip as soon as it closes.
@@ -28,6 +28,11 @@ import { PricingEngineService } from "./pricing-engine.service";
  * `calculateAndStore` also handles the repeat case, replacing the snapshot
  * atomically, which is what makes a duplicated event harmless.
  *
+ * ── AND ITS PARTNER LEG (OWNER, OCTOBER 2026) ───────────────────────────────
+ * Closing a leg prices its CLOSED partner with it, both or neither — see
+ * `PairedPricingService`. When both legs closed in one action, the first
+ * leg's event priced the pair, so the second leg's event does nothing more.
+ *
  * Amounts are never logged. Identifiers, the event name, a stable error code
  * and counts are.
  */
@@ -35,7 +40,7 @@ import { PricingEngineService } from "./pricing-engine.service";
 export class TripClosedPricingListener implements OnModuleInit {
   constructor(
     private readonly eventBus: DomainEventBus,
-    private readonly pricingEngine: PricingEngineService,
+    private readonly pairs: PairedPricingService,
     private readonly logger: AppLoggerService,
   ) {
     this.logger.setContext(TripClosedPricingListener.name);
@@ -70,11 +75,26 @@ export class TripClosedPricingListener implements OnModuleInit {
     });
 
     try {
-      const result = await this.pricingEngine.calculateAndStore(event.tripId);
+      const { closedPartnerId } = await this.pairs.pairOf(event.tripId);
+
+      if (closedPartnerId && closedEarlierInBatch(event, closedPartnerId)) {
+        this.logger.log("Already priced with its partner leg in this batch", {
+          eventName: event.eventName,
+          tripId: event.tripId,
+          partnerTripId: closedPartnerId,
+        });
+
+        return;
+      }
+
+      const [result] = await this.pairs.calculateAndStoreTogether(
+        closedPartnerId ? [event.tripId, closedPartnerId] : [event.tripId],
+      );
 
       this.logger.log("Automatic pricing completed", {
         eventName: event.eventName,
         tripId: event.tripId,
+        partnerTripId: closedPartnerId,
         isReprocess: result.isReprocess,
         lineCount: result.lines.length,
         calculationStatus: result.calculationStatus,
@@ -103,4 +123,11 @@ export class TripClosedPricingListener implements OnModuleInit {
       reason: error instanceof Error ? error.message : String(error),
     });
   }
+}
+
+/** The partner closed in the same action and its event came first: it priced both. */
+function closedEarlierInBatch(event: TripClosedEvent, partnerId: string): boolean {
+  const partnerPosition = event.closedTogetherWith.indexOf(partnerId);
+
+  return partnerPosition !== -1 && partnerPosition < event.closedTogetherWith.indexOf(event.tripId);
 }

@@ -146,6 +146,8 @@ describe("a waiting-time change reprices the Trip", () => {
   beforeEach(() => {
     repository = {
       findById: jest.fn().mockResolvedValue(buildTrip()),
+      findByIdentity: jest.fn().mockResolvedValue(null),
+      findByBookingOnPlanningDate: jest.fn().mockResolvedValue(null),
       update: jest.fn().mockResolvedValue(
         buildTrip({
           waitingTimeStart: new Date("1970-01-01T10:00:00Z"),

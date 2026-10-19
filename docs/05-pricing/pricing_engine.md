@@ -324,6 +324,38 @@ Historical Trips already priced on a stale group are NOT repaired
 automatically; they are repriced the next time they are grouped, ungrouped or
 otherwise recalculated.
 
+## Every trigger prices both legs of a pair (October 2026)
+
+A leg's price is read from its PAIR — the configured Combination both roads
+select, Over ST from both dates — so every pricing trigger on one leg also
+prices the other. `PairedPricingService` is the one place that decides this;
+every trigger goes through it:
+
+| Trigger | Entry point |
+| --- | --- |
+| Closing a Trip (single or bulk completion) | `TripClosedPricingListener` |
+| A changed pricing input — waiting time, address, TAR-nummer, planning date, Custom Value, Cost Confirmation, grouping, a status change that moves a pair, a document revision | `PricingRecalculationService.recalculate` / `recalculateAll` |
+| "Prijs opnieuw berekenen" on a row and on the Trip detail page | `POST /trip-pricing/trip/{id}/reprocess` |
+| "Prijs herberekenen" for a selection | `POST /trip-pricing/reprocessions` |
+
+The partner is `pricingPartnerOf` — the other leg of the same document, or the
+other member of a group of exactly two — never a booking number or a road. Only
+a CLOSED partner is priced; an OPEN one is priced when it closes. One level
+only: the partner's partner is the Trip itself, so no trigger loops. A pair
+named twice by one trigger — a date change, both legs selected, both legs
+completed together — is priced once (`closedTogetherWith` on the close event
+tells the second leg's event that the first already priced the pair).
+
+Both or neither: both legs are CALCULATED first and stored only when both could
+be priced. When one cannot, neither snapshot is replaced; the reprocess answers
+409 `PRICING_PARTNER_LEG_NOT_PRICEABLE` (naming the other leg and its reason)
+when the partner is the obstacle, a recalculation answers `pricing: null` with
+that code, and the selection reports each leg with its own reason. Each
+snapshot is still written by the Engine's own atomic, stale-guarded store; a
+database failure between the two writes is logged as an error.
+
+A Trip that is not in a pair is priced exactly as before.
+
 ## The failure contract
 
 The underlying write and the recalculation are separate concerns, and a pricing

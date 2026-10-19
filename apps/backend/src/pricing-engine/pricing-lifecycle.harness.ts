@@ -35,6 +35,7 @@ import { CustomPropertyCalculator } from "./custom-property.calculator";
 import { FuelSurchargeCalculator } from "./fuel-surcharge.calculator";
 import { PricingComponentResolver } from "./pricing-component.resolver";
 import { PricingEngineService } from "./pricing-engine.service";
+import { PairedPricingService } from "./paired-pricing.service";
 import { PricingRecalculationService } from "./pricing-recalculation.service";
 import { PricingRuleResolver } from "./pricing-rule.resolver";
 import { PricingStrategy } from "./pricing-settings";
@@ -296,6 +297,26 @@ export function buildPricingLifecycle() {
           ) ?? null,
         ),
     ),
+    /** Another Trip with this booking and container on this planning day, as an edit checks. */
+    findByBookingOnPlanningDate: jest.fn(
+      (query: {
+        bookingNumber: string;
+        containerNumber: string | null;
+        planningDate: Date | null;
+        statuses: readonly TripStatus[];
+        excludeTripId: string;
+      }) =>
+        Promise.resolve(
+          [...trips.values()].find(
+            (trip) =>
+              trip.id !== query.excludeTripId &&
+              trip.bookingNumber === query.bookingNumber &&
+              trip.containerNumber === query.containerNumber &&
+              trip.planningDate?.getTime() === query.planningDate?.getTime() &&
+              query.statuses.includes(trip.status),
+          ) ?? null,
+        ),
+    ),
     runInTransaction: jest.fn(),
   };
   tripRepository.runInTransaction.mockImplementation(
@@ -521,15 +542,16 @@ export function buildPricingLifecycle() {
     ],
     logger,
   );
+  const pairs = new PairedPricingService(engine, tripRead, logger);
   const recalculation = new PricingRecalculationService(
-    engine,
+    pairs,
     effectivePricing,
     tripRead,
     components,
     logger,
   );
   const eventBus = new DomainEventBus(logger);
-  new TripClosedPricingListener(eventBus, engine, logger).onModuleInit();
+  new TripClosedPricingListener(eventBus, pairs, logger).onModuleInit();
 
   /* ── the services an operator's actions go through ──────────────────────── */
   const costConfirmationService = new CostConfirmationService(
@@ -606,6 +628,9 @@ export function buildPricingLifecycle() {
     snapshots,
     items,
     engine,
+    /** What every pricing trigger goes through: a Trip and its partner leg. */
+    pairs,
+    tripRead,
     tripPricing,
     tripService,
     customValues,

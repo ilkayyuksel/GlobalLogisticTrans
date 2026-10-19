@@ -101,6 +101,16 @@ export interface TripIdentityQuery {
   excludeTripId?: string;
 }
 
+/** A booking and container on one PLANNING day — see `findByBookingOnPlanningDate`. */
+export interface BookingOnPlanningDateQuery {
+  bookingNumber: string;
+  /** Exact, null included: an absent container is a value, as in the identity. */
+  containerNumber: string | null;
+  planningDate: Date | null;
+  statuses: readonly TripStatus[];
+  excludeTripId: string;
+}
+
 export interface BookingNumberQuery {
   bookingNumber: string;
   /** Only these statuses count as holding the booking number. */
@@ -531,6 +541,26 @@ export class TripRepository {
         originalPlanningDate: query.identity.originalPlanningDate,
         status: { in: [...query.statuses] },
         ...(query.excludeTripId ? { id: { not: query.excludeTripId } } : {}),
+      },
+    });
+  }
+
+  /**
+   * Another Trip with this booking and container on this PLANNING day.
+   *
+   * Beside the identity, not instead of it: the owner asked (19 October 2026)
+   * that a booking and container appear on one day only, also after a Trip is
+   * re-planned. Only `TripService.update` asks it; the database index stays
+   * the identity on the original date.
+   */
+  findByBookingOnPlanningDate(query: BookingOnPlanningDateQuery): Promise<Trip | null> {
+    return this.prisma.trip.findFirst({
+      where: {
+        bookingNumber: query.bookingNumber,
+        containerNumber: query.containerNumber,
+        planningDate: query.planningDate,
+        status: { in: [...query.statuses] },
+        id: { not: query.excludeTripId },
       },
     });
   }

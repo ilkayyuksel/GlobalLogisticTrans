@@ -444,7 +444,7 @@ October 2026), at the CITY end only: `Antwerp` = `Antwerpen` (whole value);
 in brackets optional as above.
 
 **Confirmed terminal aliases** (`common/terminal-aliases.ts`, owner-confirmed
-October 2026): `Quay`, `PSA Quay`, `PSA Quay 869` and `Kaai` name **`Quay 869`**.
+October 2026): `Quay`, `PSA Quay`, `PSA Quay 869`, `Kaai` and `K869` name **`Quay 869`**.
 Compared as WHOLE values after safe normalisation (case, spaces, harmless
 punctuation), and only at the TERMINAL end of the Trip's road — the departure
 of a delivery, the destination of a collection — never at the city end, never

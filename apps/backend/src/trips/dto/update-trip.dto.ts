@@ -10,12 +10,15 @@ import {
   Max,
   MaxLength,
   Min,
+  MinLength,
+  ValidateIf,
 } from "class-validator";
 
-import { toOptionalBoolean, trimToNull } from "../../common/dto/transforms";
+import { toOptionalBoolean, trim, trimToNull } from "../../common/dto/transforms";
 import { IsCalendarDateString } from "../../common/validators/is-calendar-date-string.validator";
 import { IsClockTimeString } from "../../common/validators/is-clock-time-string.validator";
 import {
+  BOOKING_NUMBER_MAX_LENGTH,
   CONTAINER_NUMBER_MAX_LENGTH,
   DESTINATION_MAX_LENGTH,
   DISTANCE_DECIMAL_PLACES,
@@ -39,10 +42,15 @@ import {
  * actually carried out, so the administrator is its only possible source.
  *
  * Everything else is excluded on purpose:
- *   - `bookingNumber`, `originalPlanningDate` and `pdfDocumentId` are immutable.
+ *   - `originalPlanningDate` and `pdfDocumentId` are immutable.
  *   - `status` moves through the status, deletion and restoration endpoints.
  *   - `containerType` is parser-controlled.
  *   - `parserMetadata` is never a manual field.
+ *
+ * THE BOOKING NUMBER IS EDITABLE ON EVERY TRIP (owner, 19 October 2026).
+ * Known and accepted consequence: a later UPDATE or CANCEL document names the
+ * order by its OLD number and no longer finds a Trip whose number was changed.
+ * The edit must keep the Trip unique — see `assertNotDuplicateAfterEdit`.
  *
  * THE ADDRESS — TERMINAL AND DESTINATION — IS EDITABLE ON EVERY TRIP.
  * The business decided that an operator must be able to correct where a Trip
@@ -77,6 +85,21 @@ import {
 export class UpdateTripDto {
   @ApiPropertyOptional({
     description:
+      "Corrects the booking number. Refused (409) when another Trip that is not DELETED holds the same booking and container on the same original date or on the same planning date.",
+    maxLength: BOOKING_NUMBER_MAX_LENGTH,
+    example: "ANRDUB2602247",
+  })
+  // Trimmed, never emptied: a booking number is corrected here, not removed.
+  // `@IsOptional()` would also wave null through — and write it.
+  @Transform(trim)
+  @ValidateIf((_dto: object, value: unknown) => value !== undefined)
+  @IsString()
+  @MinLength(1)
+  @MaxLength(BOOKING_NUMBER_MAX_LENGTH)
+  bookingNumber?: string;
+
+  @ApiPropertyOptional({
+    description:
       "Entered manually once the driver reports it. Send null to clear.",
     maxLength: CONTAINER_NUMBER_MAX_LENGTH,
     nullable: true,
@@ -90,7 +113,7 @@ export class UpdateTripDto {
 
   @ApiPropertyOptional({
     description:
-      "Moves the Trip to another day. The original planning date is preserved separately and never changes.",
+      "Moves the Trip to another day. The original planning date is preserved separately and never changes. Refused (409) when another Trip that is not DELETED holds the same booking and container on that day.",
     format: "date",
     example: "2026-08-18",
   })

@@ -303,3 +303,27 @@ behind them are in `docs/02-business/invoice_audit.md`.
   Trips already paid are left as they are, so confirming twice changes
   nothing. Answers `{ paidTrips, alreadyPaid, paidTripIds }`. A selection that
   is not a non-empty, duplicate-free list of at most 500 UUIDs is a 400.
+
+
+# Bulk "not paid"
+
+`POST /api/v1/trips/unpaid` — `{ "tripIds": ["<uuid>", …] }`
+
+An operator's explicit correction from the Ritten list: sets `isPaid = false`
+on exactly the named Trips, through the same single-column write as
+`PATCH /trips/:id/payment`. Nothing else changes — no status, no pricing, no
+snapshot, and no event is published, so nothing is recalculated. All or
+nothing: an unknown id refuses the whole request (404) and no Trip changes; a
+Trip already unpaid is left as it is. Deliberately one-directional and ids
+only: paying stays with the single-Trip endpoint and the invoice check's
+confirmed payment, whose automatic rules this does not touch. Protected by the
+global access-token guard, like every endpoint (the system has no roles).
+
+# Booking number correction
+
+`PATCH /api/v1/trips/:id` accepts `bookingNumber` (trimmed, 1–100 characters,
+never null). It and the `containerNumber` and `planningDate` of the same
+endpoint are refused with 409 — Dutch message, nothing written — when another
+Trip that is not DELETED would share booking + container with this Trip on its
+original planning date or on its planning date. See database_model.md,
+"Correcting the booking number".

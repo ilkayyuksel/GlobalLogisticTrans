@@ -10,11 +10,12 @@ import { TripReadService } from "../trips/trip-read.service";
 import { CombinationMember, tripsRepricedByRegrouping } from "./combination-leg";
 import { hasCurrentPrice } from "../trip-pricing/current-pricing";
 import {
+  PartnerLegNotPriceableException,
   PricingEngineErrorCode,
   PricingEngineException,
 } from "./exceptions/pricing-engine.exceptions";
+import { PairedPricingService } from "./paired-pricing.service";
 import { PricingComponentResolver } from "./pricing-component.resolver";
-import { PricingEngineService } from "./pricing-engine.service";
 
 /**
  * What a recalculation reports when it could not produce a price for a reason
@@ -87,7 +88,7 @@ export interface PricingRecalculationOutcome {
 @Injectable()
 export class PricingRecalculationService {
   constructor(
-    private readonly engine: PricingEngineService,
+    private readonly pairs: PairedPricingService,
     private readonly effectivePricing: EffectivePricingService,
     private readonly trips: TripReadService,
     private readonly components: PricingComponentResolver,
@@ -97,57 +98,130 @@ export class PricingRecalculationService {
   }
 
   /**
-   * Prices the Trip again and reports what it is now worth.
+   * Prices the Trip again — together with its partner leg — and reports what
+   * it is now worth.
    *
-   * ONE calculation per call, whatever changed and however many properties the
-   * Trip carries: the Engine resolves every input of a Trip in a single
+   * ONE calculation per Trip, whatever changed and however many properties
+   * the Trip carries: the Engine resolves every input of a Trip in a single
    * preparation, so a caller must never loop over components.
-   *
-   * `calculateAndStore` rather than `reprocess`: both replace the snapshot
-   * atomically, and the first also covers the Trip that has never been priced.
    */
   async recalculate(tripId: string): Promise<PricingRecalculationOutcome> {
+    return (await this.recalculateAll([tripId])).get(tripId) as PricingRecalculationOutcome;
+  }
+
+  /**
+   * Prices these Trips again, each together with its partner leg, and reports
+   * every Trip that was priced — the partners included.
+   *
+   * A Trip already priced as the partner of an earlier one is not priced
+   * twice: a trigger naming both legs prices the pair once.
+   */
+  async recalculateAll(
+    tripIds: readonly string[],
+  ): Promise<Map<string, PricingRecalculationOutcome>> {
+    const outcomes = new Map<string, PricingRecalculationOutcome>();
+
+    for (const tripId of tripIds) {
+      if (outcomes.has(tripId)) {
+        continue;
+      }
+
+      for (const [pricedId, outcome] of await this.recalculateWithPartner(tripId)) {
+        outcomes.set(pricedId, outcome);
+      }
+    }
+
+    return outcomes;
+  }
+
+  /**
+   * This Trip and its CLOSED partner, priced together — see
+   * `PairedPricingService`: both stored, or, when either cannot be priced,
+   * neither, and both answer with a reason.
+   */
+  private async recalculateWithPartner(
+    tripId: string,
+  ): Promise<Map<string, PricingRecalculationOutcome>> {
+    let partnerId: string | null = null;
+
     try {
+      const pair = await this.pairs.pairOf(tripId);
       /*
        * ── ONLY A CLOSED TRIP IS PRICED ────────────────────────────────────────
        * An OPEN Trip whose waiting time, Custom Values, confirmations or group
        * change is not calculated at all: it has no current price, and it is
        * priced in full from whatever it holds when it closes. Checked here,
        * once, for every caller, so no edit path can price a Trip that is not
-       * finished. The answer is the ordinary "no pricing" with its stable
-       * reason. Inside the `try`, so a failed read keeps the contract above.
+       * finished. Its CLOSED partner is still priced: the trigger reaches it.
+       * A Trip that does not exist is handed to the Engine, which refuses it
+       * with its own reason, as before.
        */
-      const trip = await this.trips.findById(tripId);
+      const isOwnPriced = !pair.trip || hasCurrentPrice(pair.trip.status);
+      const scope = [...(isOwnPriced ? [tripId] : []), ...(pair.closedPartnerId ? [pair.closedPartnerId] : [])];
 
-      if (trip && !hasCurrentPrice(trip.status)) {
+      partnerId = pair.closedPartnerId;
+
+      if (!isOwnPriced) {
         this.logger.log("Not recalculated: the Trip is not CLOSED", {
           tripId,
-          tripStatus: trip.status,
+          tripStatus: pair.trip?.status,
         });
-
-        return {
-          pricing: null,
-          reasonCode: PricingEngineErrorCode.TRIP_NOT_CLOSED,
-        };
       }
 
-      this.logger.log("Recalculating a Trip after a pricing input changed", {
-        tripId,
-      });
+      if (scope.length === 0) {
+        return new Map([[tripId, this.notClosed()]]);
+      }
 
-      const result = await this.engine.calculateAndStore(tripId);
+      this.logger.log("Recalculating after a pricing input changed", { tripId, scope });
 
-      this.logger.log("Recalculation stored a new snapshot", {
-        tripId,
-        isReprocess: result.isReprocess,
-        lineCount: result.lines.length,
-        calculationStatus: result.calculationStatus,
-      });
+      await this.pairs.calculateAndStoreTogether(scope);
 
-      return { pricing: await this.readEffective(tripId), reasonCode: null };
+      const outcomes = new Map<string, PricingRecalculationOutcome>([
+        [tripId, isOwnPriced ? await this.priced(tripId) : this.notClosed()],
+      ]);
+
+      if (partnerId) {
+        outcomes.set(partnerId, await this.priced(partnerId));
+      }
+
+      return outcomes;
     } catch (error: unknown) {
-      return { pricing: null, reasonCode: this.reportFailure(tripId, error) };
+      return this.failedPair(tripId, partnerId, error);
     }
+  }
+
+  private async priced(tripId: string): Promise<PricingRecalculationOutcome> {
+    return { pricing: await this.readEffective(tripId), reasonCode: null };
+  }
+
+  private notClosed(): PricingRecalculationOutcome {
+    return { pricing: null, reasonCode: PricingEngineErrorCode.TRIP_NOT_CLOSED };
+  }
+
+  /**
+   * Neither leg was stored, so neither answers with figures: each gets the
+   * reason of its own, and the leg that could have been priced is told its
+   * partner was the obstacle.
+   */
+  private failedPair(
+    tripId: string,
+    partnerId: string | null,
+    error: unknown,
+  ): Map<string, PricingRecalculationOutcome> {
+    const reasonCode = this.reportFailure(tripId, error);
+    const outcomes = new Map([[tripId, { pricing: null, reasonCode }]]);
+
+    if (partnerId) {
+      outcomes.set(partnerId, {
+        pricing: null,
+        reasonCode:
+          error instanceof PartnerLegNotPriceableException
+            ? error.partnerFailure.code
+            : PricingEngineErrorCode.PARTNER_LEG_NOT_PRICEABLE,
+      });
+    }
+
+    return outcomes;
   }
 
   /**

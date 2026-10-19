@@ -133,6 +133,30 @@ export function EditIcon() {
   );
 }
 
+/**
+ * A calculator: the price worked out again. Deliberately not an arrow — the
+ * turning arrow beside it already means Heropenen.
+ */
+export function RecalculateIcon() {
+  return (
+    <ActionIcon>
+      <rect x="4.5" y="2.5" width="11" height="15" rx="1.5" />
+      <path d="M7 6h6" />
+      <path d="M7.5 10h.01M10 10h.01M12.5 10h.01M7.5 13h.01M10 13h.01M12.5 13h.01" />
+    </ActionIcon>
+  );
+}
+
+/** A turning quarter circle: a request is running. */
+export function BusyIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 20 20" className="h-4 w-4 animate-spin" fill="none">
+      <circle cx="10" cy="10" r="6.5" stroke="currentColor" strokeOpacity="0.25" strokeWidth="1.8" />
+      <path d="M16.5 10A6.5 6.5 0 0 0 10 3.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 /** An arrow leaving to the upper right: handed to the driver. */
 export function SendIcon() {
   return (

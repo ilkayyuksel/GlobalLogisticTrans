@@ -273,12 +273,14 @@ describe("TripService — TripClosed event", () => {
       expect(TRIP_CLOSED_EVENT).toBe("trip.closed");
     });
 
-    it("carries nothing but the identity", async () => {
+    /** And, for a batch, which other Trips closed with it — ids, nothing more. */
+    it("carries nothing but identities", async () => {
       await service.changeStatus(TRIP_ID, { status: TripStatus.CLOSED });
 
       const [published] = eventBus.publish.mock.calls[0];
 
-      expect(Object.keys(published).sort()).toEqual(["eventName", "tripId"]);
+      expect(Object.keys(published).sort()).toEqual(["closedTogetherWith", "eventName", "tripId"]);
+      expect(published.closedTogetherWith).toEqual([]);
     });
 
     it("carries no Prisma entity, no pricing result and no money", async () => {

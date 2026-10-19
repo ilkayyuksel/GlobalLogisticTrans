@@ -110,6 +110,7 @@ describe("a Trip keeps the driver it was planned with", () => {
     const table = {
       findById: jest.fn(() => Promise.resolve(trip)),
       findByIdentity: jest.fn().mockResolvedValue(null),
+      findByBookingOnPlanningDate: jest.fn().mockResolvedValue(null),
       findManyByBookingNumberAndOriginalDate: jest.fn(() => Promise.resolve([trip])),
       findManyByGroupId: jest.fn().mockResolvedValue([]),
       create: jest.fn((data: Partial<Trip>) => Promise.resolve(write(data))),

@@ -421,7 +421,7 @@ describe("matchCombinationPair", () => {
 
 /**
  * ── CONFIRMED TERMINAL ALIASES (OCTOBER 2026) ───────────────────────────────
- * `Quay`, `PSA Quay`, `PSA Quay 869` and `Kaai` name `Quay 869` — at the
+ * `Quay`, `PSA Quay`, `PSA Quay 869`, `Kaai` and `K869` name `Quay 869` — at the
  * TERMINAL end of the Trip's road only, as whole values, never another quay.
  */
 describe("terminal aliases", () => {
@@ -493,6 +493,46 @@ describe("terminal aliases", () => {
     // The caller refuses to choose between them (resolver: AMBIGUOUS).
     expect(match.method).toBe(RouteMatchMethod.NORMALIZED);
     expect(ids(match).sort()).toEqual(["kaai", "quay"]);
+  });
+
+  /** `K869` (owner, October 2026): the same terminal, by the same rule as `Kaai`. */
+  describe("K869", () => {
+    it.each(["K869", "k869", " K869 "])("a delivery from %s matches Quay 869 → Ghlin", (terminal) => {
+      const match = matchRoad(delivery(terminal), GHLIN);
+
+      expect(match.method).toBe(RouteMatchMethod.NORMALIZED);
+      expect(ids(match)).toEqual(["ghlin"]);
+    });
+
+    it("a Trip from Quay 869 matches a route configured as K869", () => {
+      expect(ids(matchRoad(delivery("Quay 869"), [road("k869", "K869", "Ghlin")]))).toEqual(["k869"]);
+    });
+
+    it("a collection to K869 matches the configured return", () => {
+      expect(ids(matchRoad(collection("Mons", "K869"), [road("mons-back", "Mons", QUAY)]))).toEqual([
+        "mons-back",
+      ]);
+    });
+
+    it("never matches the road the other way round", () => {
+      expect(matchRoad(collection("Ghlin", "K869"), GHLIN).method).toBe(RouteMatchMethod.NOT_FOUND);
+    });
+
+    it("is a city, not the terminal, at the city end", () => {
+      expect(matchRoad(delivery("Lier", "K869"), [road("lier", "Lier", QUAY)]).method).toBe(
+        RouteMatchMethod.NOT_FOUND,
+      );
+    });
+
+    it("never reaches Quay 170", () => {
+      expect(matchRoad(delivery("K869"), [road("other", "Quay 170", "Ghlin")]).method).toBe(
+        RouteMatchMethod.NOT_FOUND,
+      );
+    });
+
+    it.each(["Quay 170", "K170", "K 869", "K8690"])("%s is no alias of Quay 869", (terminal) => {
+      expect(matchRoad(delivery(terminal), GHLIN).method).toBe(RouteMatchMethod.NOT_FOUND);
+    });
   });
 
   it("applies no alias when the terminal end is unknown", () => {

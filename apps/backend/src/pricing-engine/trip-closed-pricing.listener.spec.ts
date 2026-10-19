@@ -11,6 +11,8 @@ import {
   MissingRouteCostException,
   TripNotPriceableException,
 } from "./exceptions/pricing-engine.exceptions";
+import { TripReadService } from "../trips/trip-read.service";
+import { PairedPricingService } from "./paired-pricing.service";
 import { PricingEngineService } from "./pricing-engine.service";
 import { TripClosedPricingListener } from "./trip-closed-pricing.listener";
 
@@ -26,7 +28,8 @@ const CALCULATION_RESULT = {
 
 describe("TripClosedPricingListener", () => {
   let eventBus: { subscribe: jest.Mock; publish: jest.Mock };
-  let pricingEngine: { calculateAndStore: jest.Mock; reprocess: jest.Mock };
+  /** The Engine's two halves: a pair is calculated in full before either is stored. */
+  let pricingEngine: { calculate: jest.Mock; store: jest.Mock; reprocess: jest.Mock };
   let logger: {
     setContext: jest.Mock;
     log: jest.Mock;
@@ -43,7 +46,8 @@ describe("TripClosedPricingListener", () => {
   beforeEach(() => {
     eventBus = { subscribe: jest.fn(), publish: jest.fn() };
     pricingEngine = {
-      calculateAndStore: jest.fn().mockResolvedValue(CALCULATION_RESULT),
+      calculate: jest.fn().mockResolvedValue(CALCULATION_RESULT),
+      store: jest.fn().mockResolvedValue(CALCULATION_RESULT),
       reprocess: jest.fn(),
     };
     logger = {
@@ -55,7 +59,16 @@ describe("TripClosedPricingListener", () => {
 
     listener = new TripClosedPricingListener(
       eventBus as unknown as DomainEventBus,
-      pricingEngine as unknown as PricingEngineService,
+      new PairedPricingService(
+        pricingEngine as unknown as PricingEngineService,
+        // An ungrouped Trip: no partner leg to price with it.
+        {
+          findById: jest.fn((id: string) =>
+            Promise.resolve({ id, status: TripStatus.CLOSED, tripGroupId: null }),
+          ),
+        } as unknown as TripReadService,
+        logger as unknown as AppLoggerService,
+      ),
       logger as unknown as AppLoggerService,
     );
     listener.onModuleInit();
@@ -78,8 +91,8 @@ describe("TripClosedPricingListener", () => {
     it("calculates and stores the snapshot", async () => {
       await registeredHandler()(new TripClosedEvent(TRIP_ID));
 
-      expect(pricingEngine.calculateAndStore).toHaveBeenCalledWith(TRIP_ID);
-      expect(pricingEngine.calculateAndStore).toHaveBeenCalledTimes(1);
+      expect(pricingEngine.calculate).toHaveBeenCalledWith(TRIP_ID);
+      expect(pricingEngine.calculate).toHaveBeenCalledTimes(1);
     });
 
     /**
@@ -103,9 +116,9 @@ describe("TripClosedPricingListener", () => {
 
       // Three calls to one idempotent operation: the snapshot is replaced
       // atomically each time, so the database still holds exactly one.
-      expect(pricingEngine.calculateAndStore).toHaveBeenCalledTimes(3);
+      expect(pricingEngine.calculate).toHaveBeenCalledTimes(3);
       expect(
-        pricingEngine.calculateAndStore.mock.calls.every(
+        pricingEngine.calculate.mock.calls.every(
           ([tripId]) => tripId === TRIP_ID,
         ),
       ).toBe(true);
@@ -117,6 +130,7 @@ describe("TripClosedPricingListener", () => {
       expect(logger.log).toHaveBeenCalledWith("Automatic pricing completed", {
         eventName: TRIP_CLOSED_EVENT,
         tripId: TRIP_ID,
+        partnerTripId: null,
         isReprocess: false,
         lineCount: 1,
         calculationStatus: PricingCalculationStatus.CALCULATED,
@@ -151,7 +165,7 @@ describe("TripClosedPricingListener", () => {
         "PRICING_TRIP_NOT_CLOSED",
       ],
     ])("swallows %s but logs its code", async (_case, failure, code) => {
-      pricingEngine.calculateAndStore.mockRejectedValue(failure);
+      pricingEngine.calculate.mockRejectedValue(failure);
 
       await expect(
         registeredHandler()(new TripClosedEvent(TRIP_ID)),
@@ -168,7 +182,7 @@ describe("TripClosedPricingListener", () => {
     });
 
     it("never rethrows, so the Trip cannot be reopened by a pricing failure", async () => {
-      pricingEngine.calculateAndStore.mockRejectedValue(
+      pricingEngine.calculate.mockRejectedValue(
         new MissingPricingSettingException("PRICING", "FUEL_PERCENTAGE"),
       );
 
@@ -178,7 +192,7 @@ describe("TripClosedPricingListener", () => {
     });
 
     it("logs an unexpected failure as an error rather than a warning", async () => {
-      pricingEngine.calculateAndStore.mockRejectedValue(
+      pricingEngine.calculate.mockRejectedValue(
         new Error("database on fire"),
       );
 
@@ -196,7 +210,7 @@ describe("TripClosedPricingListener", () => {
     });
 
     it("swallows an unexpected failure too", async () => {
-      pricingEngine.calculateAndStore.mockRejectedValue(new Error("boom"));
+      pricingEngine.calculate.mockRejectedValue(new Error("boom"));
 
       await expect(
         registeredHandler()(new TripClosedEvent(TRIP_ID)),
@@ -204,7 +218,7 @@ describe("TripClosedPricingListener", () => {
     });
 
     it("never logs an amount when reporting a failure", async () => {
-      pricingEngine.calculateAndStore.mockRejectedValue(
+      pricingEngine.calculate.mockRejectedValue(
         new MissingRouteCostException(TRIP_ID, "component-toll", "A", "B"),
       );
 

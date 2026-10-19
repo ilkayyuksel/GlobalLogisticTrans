@@ -244,6 +244,11 @@ describe("identifying the lines of a weekly invoice", () => {
         expect.objectContaining({ tripId: "amandsberg", blockingRowNumbers: [2] }),
       ]);
       expect(applied.result.summary.blockedMissingTrips).toBe(1);
+      // An open conflict, not a price problem — and still never offered for payment.
+      expect(applied.result.payments.find((payment) => payment.tripId === "amandsberg")).toMatchObject({
+        payable: false,
+        reasons: ["OPEN_CONFLICT"],
+      });
     });
   });
 

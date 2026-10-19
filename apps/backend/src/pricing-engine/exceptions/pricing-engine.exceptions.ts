@@ -28,6 +28,7 @@ export const PricingEngineErrorCode = {
   MISSING_CUSTOM_PROPERTY_PRICE: "PRICING_MISSING_CUSTOM_PROPERTY_PRICE",
   NEGATIVE_TOTAL: "PRICING_NEGATIVE_TOTAL",
   UNKNOWN_PRICING_COMPONENT: "PRICING_UNKNOWN_COMPONENT",
+  PARTNER_LEG_NOT_PRICEABLE: "PRICING_PARTNER_LEG_NOT_PRICEABLE",
 } as const;
 
 export type PricingEngineErrorCode =
@@ -220,6 +221,25 @@ export class MissingTripPricingInputException extends PricingEngineException {
     super(
       PricingEngineErrorCode.MISSING_TRIP_INPUT,
       `Trip "${tripId}" has no ${missingInput}, which ${strategy} pricing requires.`,
+    );
+  }
+}
+
+/**
+ * The other leg of a pair cannot be priced, so neither leg was (owner, October
+ * 2026: a trigger on one leg prices both, together or not at all — see
+ * `PairedPricingService`). The partner's own failure is kept, with its code,
+ * as `partnerFailure`, so the reason an administrator has to fix is not lost.
+ */
+export class PartnerLegNotPriceableException extends PricingEngineException {
+  constructor(
+    readonly tripId: string,
+    readonly partnerTripId: string,
+    readonly partnerFailure: PricingEngineException,
+  ) {
+    super(
+      PricingEngineErrorCode.PARTNER_LEG_NOT_PRICEABLE,
+      `The other leg of this pair (Trip "${partnerTripId}") cannot be priced, so neither leg was recalculated: ${partnerFailure.message}`,
     );
   }
 }

@@ -36,13 +36,11 @@ export async function repriceAfterPartnerStatusChange(
   findGroupMembers: (tripGroupId: string) => Promise<Trip[]>,
   logger: AppLoggerService,
 ): Promise<Map<string, PricingRecalculationOutcome>> {
-  const outcomes = new Map<string, PricingRecalculationOutcome>();
-
   if (
     changed.tripGroupId === null ||
     isPricingPartnerStatus(previousStatus) === isPricingPartnerStatus(changed.status)
   ) {
-    return outcomes;
+    return new Map<string, PricingRecalculationOutcome>();
   }
 
   const after = await findGroupMembers(changed.tripGroupId);
@@ -51,11 +49,12 @@ export async function repriceAfterPartnerStatusChange(
   );
   const affected = new Set(recalculation.tripsAffectedByRegrouping(before, after));
 
-  for (const member of after) {
-    if (affected.has(member.id) && member.status === TripStatus.CLOSED) {
-      outcomes.set(member.id, await recalculation.recalculate(member.id));
-    }
-  }
+  // Each with its partner leg, and a pair named twice priced once.
+  const outcomes = await recalculation.recalculateAll(
+    after
+      .filter((member) => affected.has(member.id) && member.status === TripStatus.CLOSED)
+      .map((member) => member.id),
+  );
 
   logger.log("Status change moved a pricing pair", {
     tripId: changed.id,

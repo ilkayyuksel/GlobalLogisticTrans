@@ -198,9 +198,10 @@ export class PricingEngineService {
    * Hands a finished result to the persistence boundary.
    *
    * Shared by the two store operations so they cannot diverge in what they
-   * write or in what they log.
+   * write or in what they log. Public for `PairedPricingService`, which
+   * calculates both legs of a pair before storing either.
    */
-  private async store(
+  async store(
     result: PricingCalculationResult,
   ): Promise<PricingCalculationResult> {
     await this.snapshotWriter.writeSnapshot(result);

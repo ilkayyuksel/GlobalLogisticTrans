@@ -62,6 +62,24 @@ export class DuplicateBookingNumberException extends ConflictException {
 }
 
 /**
+ * An edit would make this Trip a duplicate of another (owner, 19 October 2026):
+ * the same booking and container on the same original order date — the
+ * identity — or on the same planning day. In Dutch, because the operator reads
+ * it straight in the Ritten list; DuplicateBookingNumberException stays the
+ * import's and creation's refusal.
+ */
+export class DuplicateTripOnEditException extends ConflictException {
+  constructor(bookingNumber: string, containerNumber: string | null) {
+    const container =
+      containerNumber === null ? "zonder containernummer" : `met container ${containerNumber}`;
+
+    super(
+      `Er bestaat al een rit met boekingsnummer ${bookingNumber} ${container} op dezelfde datum. De wijziging is niet opgeslagen.`,
+    );
+  }
+}
+
+/**
  * A Trip named in a grouping request already belongs to a group.
  *
  * Moving it is deliberately NOT a side effect of grouping: a Trip that silently

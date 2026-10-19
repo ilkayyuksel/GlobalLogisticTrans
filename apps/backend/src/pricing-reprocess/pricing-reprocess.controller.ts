@@ -9,7 +9,7 @@ import {
 } from "@nestjs/swagger";
 
 import { PricingEngineExceptionFilter } from "../pricing-engine/exceptions/pricing-engine-exception.filter";
-import { PricingEngineService } from "../pricing-engine/pricing-engine.service";
+import { PairedPricingService } from "../pricing-engine/paired-pricing.service";
 import { PricingSnapshotDto } from "../trip-pricing/dto/pricing-snapshot.dto";
 import { BulkPricingReprocessService } from "./bulk-pricing-reprocess.service";
 import { BulkReprocessResultDto, ReprocessTripsDto } from "./dto/reprocess-trips.dto";
@@ -40,7 +40,7 @@ import { TripPricingService } from "../trip-pricing/trip-pricing.service";
 @UseFilters(PricingEngineExceptionFilter)
 export class PricingReprocessController {
   constructor(
-    private readonly pricingEngine: PricingEngineService,
+    private readonly pairs: PairedPricingService,
     private readonly tripPricingService: TripPricingService,
     private readonly bulkReprocess: BulkPricingReprocessService,
   ) {}
@@ -70,7 +70,7 @@ export class PricingReprocessController {
   @ApiOperation({
     summary: "Reprocess the pricing of a Trip",
     description:
-      "Recalculate pricing for a CLOSED Trip, or calculate its first pricing snapshot if none exists. The Trip must exist and be CLOSED; nothing else is required. When a snapshot is already there it keeps its id and its breakdown is replaced in full, so a component that no longer applies does not survive. When there is none — because automatic pricing failed and CLOSED is terminal — this creates it, which is how such a Trip is recovered once the configuration is corrected. Calculation and storage are atomic: if either fails, any previous snapshot is left exactly as it was.",
+      "Recalculate pricing for a CLOSED Trip, or calculate its first pricing snapshot if none exists. Its CLOSED partner leg (the other leg of its document, or the other Trip of a group of two) is recalculated with it: both are calculated first and stored only when both can be priced; otherwise neither changes (409, PRICING_PARTNER_LEG_NOT_PRICEABLE when the partner is the obstacle). The Trip must exist and be CLOSED; nothing else is required. When a snapshot is already there it keeps its id and its breakdown is replaced in full, so a component that no longer applies does not survive. When there is none — because automatic pricing failed and CLOSED is terminal — this creates it, which is how such a Trip is recovered once the configuration is corrected. Calculation and storage are atomic: if either fails, any previous snapshot is left exactly as it was.",
   })
   @ApiOkResponse({
     type: PricingSnapshotDto,
@@ -84,7 +84,7 @@ export class PricingReprocessController {
       "The Trip is not CLOSED, or the current configuration cannot price it — a missing or unusable pricing Setting, no active route pricing, a route-priced property whose route cost is not configured, or a fixed-price property with no price.",
   })
   async reprocess(@Param() params: TripIdParamDto): Promise<PricingSnapshotDto> {
-    await this.pricingEngine.reprocess(params.tripId);
+    await this.pairs.reprocessWithPartner(params.tripId);
 
     return this.readStoredSnapshot(params.tripId);
   }

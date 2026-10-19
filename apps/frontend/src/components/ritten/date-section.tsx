@@ -5,6 +5,7 @@ import { useLanguage, useTranslation } from "@/lib/i18n/language-provider";
 import { sectionLabel } from "@/lib/ritten/date-labels";
 import { isToday } from "@/lib/calendar/calendar-dates";
 import type { RittenView } from "@/lib/ritten/period";
+import { STICKY_VISIBLE_WIDTH } from "./ritten-scroll-region";
 import { RittenTable, type RittenTableProps } from "./ritten-table";
 
 /**
@@ -45,14 +46,23 @@ export function DateSection({
     trips.length === 1 ? "ritten.trips.one" : "ritten.trips.other",
   )}`;
 
+  /*
+   * The heading sticks to the top of the list's scroller while its day is on
+   * screen, with the column headers directly under it — `h-12` here and
+   * `top-12` there, so change them together. One line, so its height is
+   * fixed. As wide as the visible part, so the date and the count stay in view
+   * when the days are scrolled sideways. See `RittenScrollRegion`.
+   */
   return (
     <section className="rounded-lg border border-border bg-card">
-      <header className="flex flex-wrap items-baseline justify-between gap-2 border-b border-border px-4 py-3">
+      <header
+        className={`${STICKY_VISIBLE_WIDTH} top-0 z-20 flex h-12 items-center justify-between gap-2 rounded-t-lg border-b border-border bg-card px-4`}
+      >
         {/* No day to open when the section is the unscheduled work. */}
         {view === "day" || date === null ? (
-          <h2 className="text-base font-semibold text-foreground">{heading}</h2>
+          <h2 className="truncate text-base font-semibold text-foreground">{heading}</h2>
         ) : (
-          <h2 className="text-base font-semibold">
+          <h2 className="truncate text-base font-semibold">
             <button
               type="button"
               onClick={() => onOpenDay(date)}
@@ -63,7 +73,7 @@ export function DateSection({
           </h2>
         )}
 
-        <p className="text-sm text-secondary">
+        <p className="shrink-0 text-sm text-secondary">
           {countLabel}
           {date !== null && isToday(date) ? (
             <span className="ml-2 rounded bg-primary/10 px-1.5 py-0.5 text-xs font-semibold uppercase text-primary">
@@ -74,15 +84,11 @@ export function DateSection({
       </header>
 
       {trips.length === 0 ? (
-        <p className="px-4 py-6 text-center text-sm text-muted">
+        <p className={`${STICKY_VISIBLE_WIDTH} px-4 py-6 text-center text-sm text-muted`}>
           {t("ritten.empty.title")}
         </p>
       ) : (
-        <RittenTable
-          {...table}
-          trips={trips}
-          scrollRestorationId={`ritten-table:${date ?? "unscheduled"}`}
-        />
+        <RittenTable {...table} trips={trips} />
       )}
     </section>
   );

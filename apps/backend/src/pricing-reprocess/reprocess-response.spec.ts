@@ -32,7 +32,7 @@ describe("the reprocess response", () => {
   beforeEach(() => {
     world = buildPricingLifecycle();
     actions = routeMatchActions(world);
-    controller = new PricingReprocessController(world.engine, world.tripPricing, {} as never);
+    controller = new PricingReprocessController(world.pairs, world.tripPricing, {} as never);
   });
 
   const reprocess = (tripId: string) => controller.reprocess({ tripId });

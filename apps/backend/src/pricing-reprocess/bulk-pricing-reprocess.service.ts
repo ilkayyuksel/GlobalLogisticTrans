@@ -2,10 +2,11 @@ import { Injectable } from "@nestjs/common";
 
 import { AppLoggerService } from "../logger/app-logger.service";
 import {
+  PartnerLegNotPriceableException,
   PricingEngineErrorCode,
   PricingEngineException,
 } from "../pricing-engine/exceptions/pricing-engine.exceptions";
-import { PricingEngineService } from "../pricing-engine/pricing-engine.service";
+import { PairedPricingService } from "../pricing-engine/paired-pricing.service";
 import { TripNotClosedException } from "../trip-pricing/exceptions/trip-pricing.exceptions";
 import { TripPricingService } from "../trip-pricing/trip-pricing.service";
 import { TripNotFoundException } from "../trips/exceptions/trip.exceptions";
@@ -46,6 +47,11 @@ const UNEXPECTED_ERROR = "UNEXPECTED_ERROR";
  * snapshot untouched and every other Trip's result stands. Every Trip gets an
  * explicit outcome — never a success it did not have.
  *
+ * ── A PAIR ONCE ─────────────────────────────────────────────────────────────
+ * Each Trip is reprocessed with its CLOSED partner leg, both or neither — see
+ * `PairedPricingService`. When the selection holds both legs, the pair is
+ * priced once and the second leg reports the outcome the pair already had.
+ *
  * The status is the Engine's own check, read when the Trip is priced, not the
  * one the screen showed. A Trip reopened between the write and the read-back
  * has no current price, so it is reported as skipped rather than shown its
@@ -54,7 +60,7 @@ const UNEXPECTED_ERROR = "UNEXPECTED_ERROR";
 @Injectable()
 export class BulkPricingReprocessService {
   constructor(
-    private readonly pricingEngine: PricingEngineService,
+    private readonly pairs: PairedPricingService,
     private readonly tripPricing: TripPricingService,
     private readonly logger: AppLoggerService,
   ) {
@@ -63,11 +69,13 @@ export class BulkPricingReprocessService {
 
   async reprocessMany(tripIds: readonly string[]): Promise<BulkReprocessResultDto> {
     const results: TripReprocessResultDto[] = [];
+    // The outcome of a selected Trip already decided as another one's partner.
+    const decided = new Map<string, TripReprocessResultDto>();
 
     // One at a time: the Engine prices one Trip per call, and running a
     // selection in parallel would only race each Trip's group reads.
     for (const tripId of tripIds) {
-      results.push(await this.reprocessOne(tripId));
+      results.push(decided.get(tripId) ?? (await this.reprocessOne(tripId, tripIds, decided)));
     }
 
     const count = (outcome: TripReprocessOutcome) =>
@@ -89,13 +97,33 @@ export class BulkPricingReprocessService {
     return { ...summary, results };
   }
 
-  private async reprocessOne(tripId: string): Promise<TripReprocessResultDto> {
+  private async reprocessOne(
+    tripId: string,
+    selected: readonly string[],
+    decided: Map<string, TripReprocessResultDto>,
+  ): Promise<TripReprocessResultDto> {
+    let partnerId: string | null;
+
     try {
-      await this.pricingEngine.reprocess(tripId);
+      partnerId = (await this.pairs.pairOf(tripId)).closedPartnerId;
+      await this.pairs.calculateAndStoreTogether(partnerId ? [tripId, partnerId] : [tripId]);
     } catch (error: unknown) {
+      // The partner's own refusal is that leg's outcome too, when it was selected.
+      if (error instanceof PartnerLegNotPriceableException && selected.includes(error.partnerTripId)) {
+        decided.set(error.partnerTripId, this.notReprocessed(error.partnerTripId, error.partnerFailure));
+      }
+
       return this.notReprocessed(tripId, error);
     }
 
+    if (partnerId && selected.includes(partnerId)) {
+      decided.set(partnerId, await this.readBack(partnerId));
+    }
+
+    return this.readBack(tripId);
+  }
+
+  private async readBack(tripId: string): Promise<TripReprocessResultDto> {
     try {
       const snapshot = await this.tripPricing.requireCurrentSnapshot(tripId);
 

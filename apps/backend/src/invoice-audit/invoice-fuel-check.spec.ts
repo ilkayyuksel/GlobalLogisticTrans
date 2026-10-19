@@ -100,6 +100,19 @@ describe("the Fuel of an invoice line", () => {
     ]);
   });
 
+  /** A Fuel higher than this system's is left exactly as the customer wrote it. */
+  it("leaves a Fuel that is too high alone when the Tarief is right, and reports it", async () => {
+    const { applied, after, changed } = await correct({ fuel: 30 }, pricing("200", "20"));
+
+    expect(changed).toEqual([]);
+    expect(after.getRow(ROW).getCell(COLUMN.fuel).value).toBe(30);
+    expect(isRed(after, COLUMN.fuel)).toBe(false);
+    expect(applied.result.rows[0].pricingStatus).toBe("INVOICE_HIGHER");
+    expect(applied.result.rows[0].differences).toEqual([
+      expect.objectContaining({ component: "Fuel", kind: "INVOICE_HIGHER", correctedValue: null }),
+    ]);
+  });
+
   it("corrects an empty Fuel when the Tarief is right", async () => {
     const { after, changed } = await correct({ fuel: null }, pricing("200", "20"));
 

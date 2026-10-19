@@ -1,5 +1,6 @@
 "use client";
 
+import { isoWeekOf } from "@/lib/calendar/iso-week";
 import { useLanguage, useTranslation } from "@/lib/i18n/language-provider";
 import { periodLabel } from "@/lib/ritten/date-labels";
 import {
@@ -113,6 +114,21 @@ export function PeriodNav({
           }}
           className="rounded-md border border-border bg-card px-3 py-1.5 text-sm text-foreground"
         />
+      )}
+
+      {/*
+        The ISO week of the day or week on screen — Monday-first, the year
+        turning on the week's Thursday. Not for a month, which spans several.
+      */}
+      {view === "month" ? null : (
+        <span
+          aria-label={t("ritten.nav.weekNumber")}
+          data-testid="ritten-week-number"
+          className="rounded-md border border-border bg-hover px-2 py-1 text-sm font-medium tabular-nums text-secondary"
+        >
+          {t("ritten.weekPrefix")}
+          {isoWeekOf(anchor)}
+        </span>
       )}
     </div>
   );

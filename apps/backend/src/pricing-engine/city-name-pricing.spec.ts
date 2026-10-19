@@ -41,7 +41,7 @@ describe("city names in pricing", () => {
     expect((await priced("trip")).pricing?.routeMatch?.method).toBe("NOT_FOUND");
 
     configure("route-melsele", "Melsele (Beveren)", "175.00");
-    const bulk = new BulkPricingReprocessService(world.engine, world.tripPricing, {
+    const bulk = new BulkPricingReprocessService(world.pairs, world.tripPricing, {
       setContext: jest.fn(),
       log: jest.fn(),
       warn: jest.fn(),
