@@ -15,22 +15,27 @@ import { toStorableAmount } from "./pricing-money";
 /**
  * Over ST: which road a Trip drives, and whether its Combination owes Over ST.
  *
- * ── THE RULE, AS THE BUSINESS FIXED IT ──────────────────────────────────────
- * A Combination configuration may carry Over ST — a Tarief, a Toll and a
- * Tunnel of its own. It applies to LEG 2 only, and only when all of these
- * hold:
+ * ── THE RULE, AS THE BUSINESS FIXED IT (OWNER, 19 OCTOBER 2026) ────────────
+ * Over ST is owed by the SECOND leg of a pair in TIME: the Trip whose
+ * planningDate is later than its partner's. It applies when all of these hold:
  *
  *   the Trip is a leg of a Combination identified by its PAIR of roads;
- *   both legs have a planningDate, and Leg 2's differs from Leg 1's;
- *   the Combination has Over ST configured — at least one of the three filled
- *     in; 0.00 counts as filled in, all three empty does not.
+ *   both legs have a planningDate, and this Trip's is LATER than its
+ *     partner's. On the same day neither leg owes it; the earlier leg never.
  *
- * When it applies, Leg 2's Tarief, Toll and Tunnel each carry the configured
- * Over ST amount on top of Leg 2's own route price, and Leg 2's Tarief also
- * carries the OVER_ST_SURCHARGE Setting (70.00) once. All of it is produced by
- * the calculation itself, from scratch every time — never added to a stored
- * snapshot — so a second calculation cannot add it twice, and a calculation
- * after the dates are equal again carries none of it.
+ * The leg POSITION of the configuration plays no part: a pair configured with
+ * its return road as Leg 1 still charges the leg driven on the later day. This
+ * replaces the earlier rule (Leg 2 by configured position, and only when Over
+ * ST was configured), under which the later leg could carry nothing.
+ *
+ * When it applies, the later leg's Tarief also carries the OVER_ST_SURCHARGE
+ * Setting (70.00) once — ALWAYS, whether or not the Combination has Over ST
+ * amounts configured. Its Tarief, Toll and Tunnel each carry the configured
+ * Over ST amount on top of its own route price; an amount nobody filled in adds
+ * nothing. All of it is produced by the calculation itself, from scratch every
+ * time — never added to a stored snapshot — so a second calculation cannot add
+ * it twice, and a calculation after the dates are equal again carries none of
+ * it.
  *
  * `planningDate` and nothing else: never the original planning date. Both are
  * calendar dates (`YYYY-MM-DD`) on the read side, so no time zone reaches the
@@ -67,7 +72,7 @@ export type OverStDecision =
   | { readonly applies: true; readonly amounts: PricingOverStInput }
   | {
       readonly applies: false;
-      readonly reason: "NOT_LEG_2" | "DATE_MISSING" | "SAME_DAY" | "NOT_CONFIGURED";
+      readonly reason: "DATE_MISSING" | "SAME_DAY" | "EARLIER_DAY";
     };
 
 const ZERO = "0.00";
@@ -78,17 +83,12 @@ function amountOf(value: string | null): string {
 }
 
 export function decideOverSt(
-  legPosition: number | null,
-  trip: TripReadView,
-  partner: TripReadView,
+  trip: Pick<TripReadView, "planningDate">,
+  partner: Pick<TripReadView, "planningDate">,
   configured: CombinationOverStDto,
 ): OverStDecision {
-  if (legPosition !== 2) {
-    return { applies: false, reason: "NOT_LEG_2" };
-  }
-
-  // Both days must be known: guessing that a missing one "differs" would
-  // charge Over ST on a Trip nobody scheduled.
+  // Both days must be known: guessing which leg is later would charge Over ST
+  // on a Trip nobody scheduled.
   if (trip.planningDate === null || partner.planningDate === null) {
     return { applies: false, reason: "DATE_MISSING" };
   }
@@ -97,8 +97,9 @@ export function decideOverSt(
     return { applies: false, reason: "SAME_DAY" };
   }
 
-  if (configured.tarief === null && configured.toll === null && configured.tunnel === null) {
-    return { applies: false, reason: "NOT_CONFIGURED" };
+  // `YYYY-MM-DD` orders as text exactly as it orders as a calendar date.
+  if (trip.planningDate < partner.planningDate) {
+    return { applies: false, reason: "EARLIER_DAY" };
   }
 
   return {
@@ -117,9 +118,9 @@ export { OVER_ST_DESCRIPTION, OVER_ST_SURCHARGE_DESCRIPTION } from "../trip-pric
  * The Over ST line one pricing step adds, or none.
  *
  * Its own line, under the step's OWN component — Tarief, Toll or Tunnel — so the
- * column reads Leg 2's effective amount (Leg 2 + Over ST) while the breakdown
- * still shows where the addition came from. A zero adds nothing and writes no
- * line, exactly as an absent amount.
+ * column reads the later leg's effective amount (its own + Over ST) while the
+ * breakdown still shows where the addition came from. A zero adds nothing and
+ * writes no line, exactly as an absent amount.
  */
 export function overStLine(
   component: PricingComponentCode,
@@ -151,7 +152,7 @@ export function overStLine(
 }
 
 /**
- * The fixed surcharge on Leg 2's Tarief, once, when Over ST applies.
+ * The fixed surcharge on the later leg's Tarief, once, when Over ST applies.
  *
  * Part of the Tarief — a BASE_PRICE line — so the fuel on it follows exactly
  * as it follows the rest of the Tarief.

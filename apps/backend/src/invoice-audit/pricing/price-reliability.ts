@@ -1,4 +1,4 @@
-import { CombinationMatchOutcome, RouteMatchMethod } from "@prisma/client";
+import { CombinationMatchOutcome, RouteMatchMethod, RouteSelectionSource } from "@prisma/client";
 
 import type { CurrentTripPricing } from "../../trip-pricing/effective-pricing.service";
 import type { RoutableTrip } from "../../trips/trip-route";
@@ -35,6 +35,7 @@ export const PriceProblem = {
   COMBINATION_NOT_PRICED: "COMBINATION_NOT_PRICED",
   /** The snapshot contradicts the Trip's group membership: it is out of date. */
   SNAPSHOT_INCONSISTENT: "SNAPSHOT_INCONSISTENT",
+  MANUAL_ROUTE_REMOVED: "MANUAL_ROUTE_REMOVED",
 } as const;
 
 export type PriceProblem = (typeof PriceProblem)[keyof typeof PriceProblem];
@@ -60,7 +61,10 @@ export function assessPriceReliability(
   }
 
   const route = describeRoutes(trip, pricing.routeMatch);
-  const problem = groupProblem(trip, pricing) ?? matchProblem(pricing.routeMatch.method);
+  const problem =
+    pricing.routeMatch.selection === RouteSelectionSource.MANUAL
+      ? manualProblem(trip, pricing)
+      : (groupProblem(trip, pricing) ?? matchProblem(pricing.routeMatch.method));
 
   return problem === null
     ? { reliable: true, problem: null, explanation: null, route }
@@ -90,6 +94,40 @@ function matchProblem(method: RouteMatchMethod | null): Problem | null {
 interface Problem {
   readonly problem: PriceProblem;
   readonly explanation: string;
+}
+
+/**
+ * ── A ROUTE CHOSEN BY HAND (owner, October 2026) ────────────────────────────
+ * The automatic outcome on such a snapshot (NOT_FOUND, PAIR_NOT_CONFIGURED…)
+ * is the reason the choice was made, not a verdict on the price. The price is
+ * reliable when the snapshot itself confirms the choice — a route recorded, a
+ * whole Combination for a grouped Trip and none for an ungrouped one — and the
+ * chosen configuration still exists. Read from what was stored; nothing is
+ * matched or priced again here.
+ */
+function manualProblem(trip: AssessedTrip, pricing: CurrentTripPricing): Problem | null {
+  const { routePricingId, combinationRouteGroupId, legs, reviewed } = pricing.routeMatch;
+  const isWholeCombination = combinationRouteGroupId !== null && legs.length === 2;
+  const confirmsChoice = trip.tripGroupId
+    ? isWholeCombination
+    : combinationRouteGroupId === null && !pricing.backload.greaterThan(0);
+
+  if (routePricingId === null || !confirmsChoice) {
+    return {
+      problem: PriceProblem.SNAPSHOT_INCONSISTENT,
+      explanation: "De opgeslagen prijs bevestigt de handmatig gekozen route niet.",
+    };
+  }
+
+  // The configuration's own review mark is null once it no longer exists.
+  if (reviewed === null) {
+    return {
+      problem: PriceProblem.MANUAL_ROUTE_REMOVED,
+      explanation: "De handmatig gekozen route bestaat niet meer.",
+    };
+  }
+
+  return null;
 }
 
 /**

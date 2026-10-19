@@ -1,7 +1,8 @@
 import { ApiProperty, ApiPropertyOptional } from "@nestjs/swagger";
-import { CombinationMatchOutcome, RouteMatchMethod } from "@prisma/client";
+import { CombinationMatchOutcome, RouteMatchMethod, RouteSelectionSource } from "@prisma/client";
 
 import { MONEY_DECIMAL_PLACES } from "../../common/dto/money";
+import { type ManualRouteChoiceKind, manualRouteChoiceFor } from "../manual-route-choice";
 import type { RouteMatchView } from "../route-match-view";
 
 /**
@@ -50,7 +51,7 @@ export class AppliedOverStDto {
 
   @ApiProperty({
     type: String,
-    description: "The Over ST surcharge (PRICING.OVER_ST_SURCHARGE) on Leg 2's Tarief.",
+    description: "The Over ST surcharge (PRICING.OVER_ST_SURCHARGE) on the Tarief of the leg planned on the later day.",
     example: "70.00",
   })
   surcharge!: string;
@@ -86,6 +87,22 @@ export class RouteMatchDto {
   combinationMatch!: CombinationMatchOutcome | null;
 
   @ApiProperty({
+    enum: RouteSelectionSource,
+    enumName: "RouteSelectionSource",
+    description:
+      "AUTOMATIC: the route came from the matcher. MANUAL: the matcher found nothing usable (method and combinationMatch still say what it found) and an operator's route choice priced the Trip.",
+  })
+  selection!: RouteSelectionSource;
+
+  @ApiPropertyOptional({
+    enum: ["NORMAL", "COMBINATION"],
+    nullable: true,
+    description:
+      "Which kind of route an operator may choose by hand for this Trip — NORMAL for a Trip in no group, COMBINATION for a grouped one — or null when the automatic match is usable or there is no partner leg. Decided by the backend from the stored automatic outcome.",
+  })
+  manualChoice!: ManualRouteChoiceKind | null;
+
+  @ApiProperty({
     type: [RouteMatchLegDto],
     description:
       "One leg for an ordinary route, both legs of the pair for a Combination, none when nothing matched or nothing was recorded.",
@@ -114,6 +131,8 @@ export function toRouteMatchDto(view: RouteMatchView): RouteMatchDto {
     routePricingId: view.routePricingId,
     combinationRouteGroupId: view.combinationRouteGroupId,
     combinationMatch: view.combinationMatch,
+    selection: view.selection,
+    manualChoice: manualRouteChoiceFor(view),
     legs: view.legs.map((leg) => ({ ...leg })),
     overSt: view.overSt
       ? {

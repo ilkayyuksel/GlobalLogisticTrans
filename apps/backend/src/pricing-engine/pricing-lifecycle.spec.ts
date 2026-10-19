@@ -411,6 +411,7 @@ describe("the pricing lifecycle of a Trip", () => {
         routeMatch: beforeTheEdit.context.routeMatch.method,
         combinationRouteGroupId: null,
         combinationMatch: null,
+        routeSelection: "AUTOMATIC" as const,
         routeLegs: [],
         items: [],
       });

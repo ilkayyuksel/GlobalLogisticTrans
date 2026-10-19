@@ -1,5 +1,6 @@
 import { Prisma, PricingCalculationStatus, TripStatus } from "@prisma/client";
 
+import { TripRouteSelectionRepository } from "../trip-route-selection/trip-route-selection.repository";
 import { DomainEventBus } from "../common/events/domain-event-bus";
 import { AppLoggerService } from "../logger/app-logger.service";
 import {
@@ -68,6 +69,7 @@ describe("TripClosedPricingListener", () => {
           ),
         } as unknown as TripReadService,
         logger as unknown as AppLoggerService,
+        { clearForTrips: jest.fn().mockResolvedValue(0), replace: jest.fn() } as unknown as TripRouteSelectionRepository,
       ),
       logger as unknown as AppLoggerService,
     );
@@ -91,7 +93,8 @@ describe("TripClosedPricingListener", () => {
     it("calculates and stores the snapshot", async () => {
       await registeredHandler()(new TripClosedEvent(TRIP_ID));
 
-      expect(pricingEngine.calculate).toHaveBeenCalledWith(TRIP_ID);
+      // With no route choice offered: closing prices on what is stored.
+      expect(pricingEngine.calculate).toHaveBeenCalledWith(TRIP_ID, new Map());
       expect(pricingEngine.calculate).toHaveBeenCalledTimes(1);
     });
 

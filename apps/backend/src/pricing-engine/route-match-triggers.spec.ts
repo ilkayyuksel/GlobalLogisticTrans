@@ -100,6 +100,9 @@ describe("which route a stored price came from, through every trigger", () => {
       routePricingId: null,
       combinationRouteGroupId: null,
       combinationMatch,
+      selection: "AUTOMATIC",
+      // The automatic outcome decides whether a route may be chosen by hand.
+      manualChoice: combinationMatch === null ? "NORMAL" : combinationMatch === "NO_PAIR" ? null : "COMBINATION",
       legs: [],
       overSt: null,
       reviewed: null,
@@ -118,6 +121,8 @@ describe("which route a stored price came from, through every trigger", () => {
         combinationRouteGroupId: null,
         // In no group: no Combination pair to speak of.
         combinationMatch: null,
+        selection: "AUTOMATIC",
+        manualChoice: null,
         legs: [
           {
             legPosition: null,
@@ -213,15 +218,16 @@ describe("which route a stored price came from, through every trigger", () => {
       // Still the stored calculation, its route and its Over ST.
       await expectCombination(LEG2, true);
 
-      // A waiting time on Leg 2 reprices it: the new spelling, no Over ST.
+      // A waiting time on Leg 2 reprices it: the new spelling, no Over ST
+      // amounts — only the €70, still owed on the later day.
       await world.tripService.update(LEG2, { waitingTimeStart: "10:00", waitingTimeEnd: "11:00" });
 
       expect(await apiRoute(LEG2)).toMatchObject({
         method: "NORMALIZED",
         legs: [{ legPosition: 1 }, { legPosition: 2, destination: "QUAY 869", method: "NORMALIZED" }],
-        overSt: { applied: false },
+        overSt: { applied: true, tarief: "0.00", toll: "0.00", surcharge: "70.00" },
       });
-      expect(await actions.apiPricing(LEG2)).toMatchObject({ tarief: "120.00", tol: "0.00" });
+      expect(await actions.apiPricing(LEG2)).toMatchObject({ tarief: "190.00", tol: "0.00" });
       // Leg 1 was repriced with it (owner, October 2026: a trigger on one leg
       // reaches the other), so both read the configuration as it now is.
       expect(world.storedSnapshot(LEG1)?.routeLegs[1]).toMatchObject({ destination: "QUAY 869" });
@@ -367,6 +373,7 @@ describe("which route a stored price came from, through every trigger", () => {
         routeMatch: older.context.routeMatch.method,
         combinationRouteGroupId: null,
         combinationMatch: older.context.routeMatch.combinationMatch,
+        routeSelection: "AUTOMATIC" as const,
         routeLegs: older.context.routeMatch.legs.map((leg) => ({
           legPosition: leg.legPosition,
           isPricedLeg: leg.isPricedLeg,

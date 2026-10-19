@@ -645,9 +645,8 @@ export class TripRevisionService {
    * another road.
    *
    * A document only ever rewrites an OPEN Trip, which has no price — but its
-   * partner may be CLOSED: when the partner is Leg 2 its Over ST depends on
-   * this Trip's date, and either leg's road decides which configured pair both
-   * are priced on. Which Trips that reaches is the pricing domain's answer;
+   * partner may be CLOSED: its Over ST depends on this Trip's date, and either
+   * leg's road decides which configured pair both are priced on. Which Trips that reaches is the pricing domain's answer;
    * see `repriceAfterCombinationInputChange`. After the transaction has
    * committed, so the Engine reads the new values. Never throws: the revision
    * stands.

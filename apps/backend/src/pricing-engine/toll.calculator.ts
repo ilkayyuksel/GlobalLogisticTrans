@@ -68,7 +68,7 @@ export class TollCalculator implements PricingCalculationStep {
     const tollCost = this.findTollCost(context);
     const lines = [
       ...(tollCost ? [this.tollLine(tollCost)] : []),
-      // Leg 2 of a Combination on another day than Leg 1 adds Over ST's Toll.
+      // The leg of a Combination on the later day adds Over ST's Toll.
       ...overStLine(PricingComponentCode.TOLL, context.overSt?.toll, TOLL_CALCULATION_ORDER),
     ];
 

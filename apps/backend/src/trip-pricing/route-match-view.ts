@@ -2,6 +2,7 @@ import {
   Prisma,
   type CombinationMatchOutcome,
   type RouteMatchMethod,
+  type RouteSelectionSource,
 } from "@prisma/client";
 
 import {
@@ -49,6 +50,8 @@ export interface RouteMatchView {
   readonly combinationRouteGroupId: string | null;
   /** For a grouped Trip, what became of its pair; null otherwise or unrecorded. */
   readonly combinationMatch: CombinationMatchOutcome | null;
+  /** AUTOMATIC, or MANUAL when an operator's route choice priced the Trip. */
+  readonly selection: RouteSelectionSource;
   readonly legs: readonly RouteMatchLegView[];
   /** Null unless a Combination priced the Trip. */
   readonly overSt: AppliedOverStView | null;
@@ -68,6 +71,7 @@ export interface StoredRouteMatch {
   readonly routePricingId: string | null;
   readonly combinationRouteGroupId: string | null;
   readonly combinationMatch: CombinationMatchOutcome | null;
+  readonly routeSelection: RouteSelectionSource;
   readonly routeLegs: readonly {
     readonly legPosition: number | null;
     readonly isPricedLeg: boolean;
@@ -94,6 +98,7 @@ export function toRouteMatchView(
     routePricingId: snapshot.routePricingId,
     combinationRouteGroupId: snapshot.combinationRouteGroupId,
     combinationMatch: snapshot.combinationMatch,
+    selection: snapshot.routeSelection,
     legs: [...snapshot.routeLegs]
       .sort((left, right) => (left.legPosition ?? 0) - (right.legPosition ?? 0))
       .map((leg) => ({

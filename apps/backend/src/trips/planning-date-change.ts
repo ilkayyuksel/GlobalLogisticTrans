@@ -44,10 +44,9 @@ export interface CombinationInputChange {
  * Reprices the CLOSED Trips whose price a planningDate change moved.
  *
  * ── WHY A DATE IS A PRICING INPUT AT ALL ────────────────────────────────────
- * For one Trip only: Leg 2 of a genuine Combination owes Over ST exactly when
- * its planningDate differs from Leg 1's. Changing EITHER date can switch that
- * on or off, and it is always Leg 2's price that moves — possibly a Trip other
- * than the one edited. Which Trips those are is the pricing domain's answer
+ * For a Combination only: the leg planned on the LATER day owes Over ST.
+ * Changing EITHER date can switch that on or off, or move it to the other leg
+ * — possibly a Trip other than the one edited. Which Trips those are is the pricing domain's answer
  * (`tripsAffectedByPlanningDate`), never decided here; for an ordinary Trip it
  * is none, so its behaviour is unchanged.
  *

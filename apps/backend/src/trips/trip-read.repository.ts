@@ -25,6 +25,8 @@ const ENGINE_TRIP_COLUMNS = {
   tarNummer: true,
   tripGroupId: true,
   pdfDocumentId: true,
+  // The operator's route choice, a pricing input like the waiting time.
+  routeSelection: { select: { routePricingId: true } },
 } as const;
 
 /** One Trip row, restricted to the engine columns. */

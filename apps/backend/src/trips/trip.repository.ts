@@ -6,6 +6,10 @@ import { PdfDocumentRepository } from "../pdf-documents/pdf-document.repository"
 import { TripCustomPropertyRepository } from "../trip-custom-properties/trip-custom-property.repository";
 import { TripHistoryEvent } from "./trip-history";
 import { PrismaService } from "../prisma/prisma.service";
+import { TripRouteSelectionRepository } from "../trip-route-selection/trip-route-selection.repository";
+
+/** The statuses whose arrival removes a Trip's route choice: closing and reopening. */
+const CLEARS_ROUTE_SELECTION: readonly TripStatus[] = [TripStatus.OPEN, TripStatus.CLOSED];
 
 /**
  * The repositories a Trip write may span, bound to a single transaction.
@@ -816,6 +820,9 @@ export class TripRepository {
     ids: readonly string[],
     tripGroupId: string,
   ): Promise<number> {
+    // A new group is a new pair: a route chosen for the old one no longer fits.
+    await this.clearRouteSelections(ids);
+
     const { count } = await this.prisma.trip.updateMany({
       where: { id: { in: [...ids] } },
       data: { tripGroupId },
@@ -828,8 +835,22 @@ export class TripRepository {
     return this.prisma.trip.create({ data });
   }
 
-  update(id: string, data: UpdateTripData): Promise<Trip> {
+  async update(id: string, data: UpdateTripData): Promise<Trip> {
+    // Leaving a group ends the pair a route was chosen for.
+    if (data.tripGroupId !== undefined) {
+      await this.clearRouteSelections([id]);
+    }
+
     return this.prisma.trip.update({ where: { id }, data });
+  }
+
+  /**
+   * Removes the operators' route choices of these Trips and of their partner
+   * legs — see `TripRouteSelectionRepository.clearForTrips`. Through this
+   * repository's own client, so inside a transaction it is part of it.
+   */
+  clearRouteSelections(tripIds: readonly string[]): Promise<number> {
+    return new TripRouteSelectionRepository(this.prisma).clearForTrips(tripIds);
   }
 
   /**
@@ -847,6 +868,10 @@ export class TripRepository {
     from: TripStatus,
     to: TripStatus,
   ): Promise<boolean> {
+    if (CLEARS_ROUTE_SELECTION.includes(to)) {
+      await this.clearRouteSelections([id]);
+    }
+
     const { count } = await this.prisma.trip.updateMany({
       where: { id, status: from },
       data: { status: to },
@@ -870,8 +895,18 @@ export class TripRepository {
     return count === 1;
   }
 
-  /** Used by the status endpoint, by soft delete and by restore. */
-  setStatus(id: string, status: TripStatus): Promise<Trip> {
+  /**
+   * Used by the status endpoint, by soft delete and by restore.
+   *
+   * Closing and reopening remove the Trip's route choice in the same write —
+   * the same transaction when called on a transaction's repository — so the
+   * automatic matcher is in charge again (owner, October 2026).
+   */
+  async setStatus(id: string, status: TripStatus): Promise<Trip> {
+    if (CLEARS_ROUTE_SELECTION.includes(status)) {
+      await this.clearRouteSelections([id]);
+    }
+
     return this.prisma.trip.update({ where: { id }, data: { status } });
   }
 

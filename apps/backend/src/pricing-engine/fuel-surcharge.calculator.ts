@@ -51,8 +51,8 @@ export class FuelSurchargeCalculator implements PricingCalculationStep {
 
     /*
      * The Tarief the fuel is charged on: every BASE_PRICE line. There is one,
-     * plus an "Over ST" Tarief line on Leg 2 of a Combination planned on another
-     * day than Leg 1 — and fuel follows the effective Tarief, Over ST included.
+     * plus the "Over ST" Tarief lines on the leg of a Combination planned on the
+     * later day — and fuel follows the effective Tarief, Over ST included.
      */
     const basePriceLines = precedingLines.filter(
       (line) => line.component === PricingComponentCode.BASE_PRICE,

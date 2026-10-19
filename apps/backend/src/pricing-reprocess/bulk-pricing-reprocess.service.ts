@@ -105,8 +105,8 @@ export class BulkPricingReprocessService {
     let partnerId: string | null;
 
     try {
-      partnerId = (await this.pairs.pairOf(tripId)).closedPartnerId;
-      await this.pairs.calculateAndStoreTogether(partnerId ? [tripId, partnerId] : [tripId]);
+      // The same explicit reprocess as one Trip's: the route choice goes too.
+      partnerId = (await this.pairs.reprocessWithPartner(tripId)).closedPartnerId;
     } catch (error: unknown) {
       // The partner's own refusal is that leg's outcome too, when it was selected.
       if (error instanceof PartnerLegNotPriceableException && selected.includes(error.partnerTripId)) {

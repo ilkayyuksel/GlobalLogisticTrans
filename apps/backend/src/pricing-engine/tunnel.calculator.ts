@@ -57,7 +57,7 @@ export class TunnelCalculator implements PricingCalculationStep {
     const tunnelCost = this.findTunnelCost(context);
     const lines = [
       ...(tunnelCost ? [this.tunnelLine(tunnelCost)] : []),
-      // Leg 2 of a Combination on another day than Leg 1 adds Over ST's Tunnel.
+      // The leg of a Combination on the later day adds Over ST's Tunnel.
       ...overStLine(
         PricingComponentCode.TUNNEL,
         context.overSt?.tunnel,

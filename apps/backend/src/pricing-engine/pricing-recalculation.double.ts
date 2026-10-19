@@ -47,7 +47,7 @@ export function stubPricingRecalculation(
     // test pass for a group the Engine would price differently.
     tripsAffectedByRegrouping: jest.fn(tripsRepricedByRegrouping),
     // An ordinary Trip: its planningDate moves no price. A spec about a
-    // Combination's date names the Leg 2 it expects.
+    // Combination's date names the legs it expects.
     tripsAffectedByPlanningDate: jest.fn().mockResolvedValue([]),
     // A Trip in no group: its road moves only its own price.
     tripsAffectedByRoadChange: jest.fn((tripId: string) => Promise.resolve([tripId])),

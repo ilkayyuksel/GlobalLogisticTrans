@@ -96,8 +96,8 @@ export interface CombinationRouteConfiguration {
    * Over ST: the Combination's own Tarief, Toll and Tunnel, beside its legs.
    *
    * Part of the Combination and not a third leg — it has no Van or Naar. Each
-   * is null when nobody has stated it. Charged by the backend on Leg 2 when its
-   * planning date differs from Leg 1's; nothing here calculates it.
+   * is null when nobody has stated it. Charged by the backend on the leg planned
+   * on the later day; nothing here calculates it.
    */
   overSt: CombinationOverSt;
 }

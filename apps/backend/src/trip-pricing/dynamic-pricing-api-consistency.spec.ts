@@ -1,5 +1,6 @@
 import { Prisma } from "@prisma/client";
 
+import { TripRouteSelectionRepository } from "../trip-route-selection/trip-route-selection.repository";
 import { AppLoggerService } from "../logger/app-logger.service";
 import { PricingComponentResolver } from "../pricing-engine/pricing-component.resolver";
 import { PairedPricingService } from "../pricing-engine/paired-pricing.service";
@@ -116,6 +117,7 @@ describe("a mutation's pricing equals the Ritten list's pricing", () => {
         } as unknown as PricingEngineService,
         tripRead,
         logger,
+        { clearForTrips: jest.fn().mockResolvedValue(0), replace: jest.fn() } as unknown as TripRouteSelectionRepository,
       ),
       effectivePricing,
       tripRead,

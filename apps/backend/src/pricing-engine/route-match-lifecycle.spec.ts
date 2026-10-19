@@ -12,6 +12,7 @@ import {
   LEG2,
   LEG2_ROW,
   WITHOUT_OVER_ST,
+  SURCHARGE_ONLY,
   WITH_OVER_ST,
   routeMatchActions,
 } from "./route-match-lifecycle.fixtures";
@@ -175,9 +176,10 @@ describe("route matching and Over ST through the pricing lifecycle", () => {
       expect(await apiPricing(LEG2)).toMatchObject(WITH_OVER_ST);
 
       await world.engine.reprocess(LEG2);
-      // Over ST no longer configured: no Over ST and no €70.
-      expect(await apiPricing(LEG2)).toMatchObject(WITHOUT_OVER_ST);
-      expect(surcharges(LEG2)).toEqual([]);
+      // Over ST no longer configured: no Over ST amounts — the €70 stays, since
+      // Leg 2 is still on the later day.
+      expect(await apiPricing(LEG2)).toMatchObject(SURCHARGE_ONLY);
+      expect(surcharges(LEG2)).toHaveLength(1);
     });
   });
 

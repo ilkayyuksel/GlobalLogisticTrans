@@ -65,7 +65,7 @@ export class BasePriceCalculator implements PricingCalculationStep {
         ? this.fromConfiguredRoute(context.baseSource, context.route)
         : this.fromDistance(context.baseSource);
 
-    // Leg 2 of a Combination on another day than Leg 1 adds Over ST's Tarief,
+    // The leg of a Combination on the later day adds Over ST's Tarief,
     // and the fixed Over ST surcharge once — see `combination-over-st.ts`.
     const overSt = [
       ...overStLine(

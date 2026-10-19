@@ -248,8 +248,8 @@ export class PricingRecalculationService {
    * The Trips whose price a change to this Trip's planningDate can move.
    *
    * Asked AFTER the new date is stored, so the answer reads the dates pricing
-   * will read. For a genuine Combination that is its Leg 2, whichever leg's
-   * date changed — Over ST is owed by Leg 2 exactly when the two dates differ.
+   * will read. For a Combination that is both its legs, whichever leg's date
+   * changed — Over ST is owed by the leg on the later day, and can move.
    * For every other Trip it is nothing: planningDate is not one of its pricing
    * inputs, and an ordinary Trip keeps the repricing it always had.
    *

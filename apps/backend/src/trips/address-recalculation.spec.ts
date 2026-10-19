@@ -142,6 +142,8 @@ describe("an address change reprices the Trip", () => {
   beforeEach(() => {
     repository = {
       findById: jest.fn().mockResolvedValue(buildTrip()),
+      // A changed road removes a route chosen by hand for the old one.
+      clearRouteSelections: jest.fn().mockResolvedValue(0),
       update: jest.fn().mockResolvedValue(
         buildTrip({
           waitingTimeStart: new Date("1970-01-01T10:00:00Z"),

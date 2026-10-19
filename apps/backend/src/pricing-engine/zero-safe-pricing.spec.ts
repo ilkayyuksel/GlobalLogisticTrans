@@ -58,6 +58,7 @@ function buildTrip(overrides: Partial<TripReadView> = {}): TripReadView {
   return {
     id: TRIP_ID,
     pdfDocumentId: "pdf-1",
+    manualRoutePricingId: null,
     // A stated TAR-nummer, because eligibility now depends on it. These
     // fixtures are about ALLOCATION — which leg owes the charge — so they must
     // clear the new precondition to keep testing what they were written for.

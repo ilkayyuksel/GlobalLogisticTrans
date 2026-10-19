@@ -2,6 +2,7 @@ import { Injectable } from "@nestjs/common";
 
 import { AppLoggerService } from "../logger/app-logger.service";
 import { hasCurrentPrice } from "../trip-pricing/current-pricing";
+import { TripRouteSelectionRepository } from "../trip-route-selection/trip-route-selection.repository";
 import { TripReadService, TripReadView } from "../trips/trip-read.service";
 import { pricingPartnerOf } from "./combination-leg";
 import {
@@ -10,6 +11,18 @@ import {
 } from "./exceptions/pricing-engine.exceptions";
 import { PricingCalculationResult } from "./pricing-calculation-result";
 import { PricingEngineService } from "./pricing-engine.service";
+import { NO_ROUTE_CHOICES, type RouteChoices } from "./manual-route-selection";
+
+/** How a pair is priced together, beyond the defaults. */
+export interface PricingTogetherOptions {
+  /** Route choices to price with before they are stored. */
+  readonly choices?: RouteChoices;
+  /**
+   * Runs once every Trip is calculated and before any is stored; throwing
+   * stores nothing. Where a route choice is checked and kept.
+   */
+  readonly beforeStore?: (results: readonly PricingCalculationResult[]) => Promise<void>;
+}
 
 /** One pricing trigger's reach: the Trip it was fired on, and its partner leg. */
 export interface PricingPair {
@@ -54,6 +67,7 @@ export class PairedPricingService {
     private readonly engine: PricingEngineService,
     private readonly trips: TripReadService,
     private readonly logger: AppLoggerService,
+    private readonly routeChoices: TripRouteSelectionRepository,
   ) {
     this.logger.setContext(PairedPricingService.name);
   }
@@ -79,13 +93,28 @@ export class PairedPricingService {
    * The explicit reprocess of one Trip: itself and its CLOSED partner,
    * together. The Trip's own refusal — not CLOSED, unknown, unpriceable — is
    * thrown exactly as before.
+   *
+   * It hands the route back to the automatic matcher: the pair's route choice
+   * is removed first, and stays removed whatever the matcher then finds
+   * (owner, October 2026).
    */
-  async reprocessWithPartner(tripId: string): Promise<PricingCalculationResult[]> {
+  async reprocessWithPartner(
+    tripId: string,
+  ): Promise<{ readonly closedPartnerId: string | null; readonly results: PricingCalculationResult[] }> {
     const { closedPartnerId } = await this.pairOf(tripId);
+    const removedChoices = await this.routeChoices.clearForTrips([tripId]);
 
-    this.logger.log("Pricing reprocess requested", { tripId, partnerTripId: closedPartnerId });
+    this.logger.log("Pricing reprocess requested", {
+      tripId,
+      partnerTripId: closedPartnerId,
+      removedRouteChoices: removedChoices,
+    });
 
-    return this.calculateAndStoreTogether(closedPartnerId ? [tripId, closedPartnerId] : [tripId]);
+    const results = await this.calculateAndStoreTogether(
+      closedPartnerId ? [tripId, closedPartnerId] : [tripId],
+    );
+
+    return { closedPartnerId, results };
   }
 
   /**
@@ -99,13 +128,16 @@ export class PairedPricingService {
    */
   async calculateAndStoreTogether(
     tripIds: readonly string[],
+    options: PricingTogetherOptions = {},
   ): Promise<PricingCalculationResult[]> {
     const [triggeredId] = tripIds;
     const results: PricingCalculationResult[] = [];
 
     for (const tripId of tripIds) {
-      results.push(await this.calculate(tripId, triggeredId));
+      results.push(await this.calculate(tripId, triggeredId, options.choices ?? NO_ROUTE_CHOICES));
     }
+
+    await options.beforeStore?.(results);
 
     for (const result of results) {
       await this.engine.store(result);
@@ -121,9 +153,10 @@ export class PairedPricingService {
   private async calculate(
     tripId: string,
     triggeredId: string,
+    choices: RouteChoices,
   ): Promise<PricingCalculationResult> {
     try {
-      return await this.engine.calculate(tripId);
+      return await this.engine.calculate(tripId, choices);
     } catch (error: unknown) {
       if (tripId === triggeredId) {
         throw error;

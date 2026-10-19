@@ -1133,7 +1133,7 @@ written or deleted here.
 |---|---|---|---|---|
 | `id` | `UUID` | NO | `gen_random_uuid()` | Primary key |
 | `notes` | `TEXT` | YES | `NULL` | |
-| `over_st_base_price` | `NUMERIC(12,2)` | YES | `NULL` | Over ST Tarief. Added to Leg 2 when its `planning_date` differs from Leg 1's. `NULL` = not stated. |
+| `over_st_base_price` | `NUMERIC(12,2)` | YES | `NULL` | Over ST Tarief. Added to the leg whose `planning_date` is later than its partner's. `NULL` = not stated. |
 | `over_st_toll` | `NUMERIC(12,2)` | YES | `NULL` | Over ST Toll. As above. |
 | `over_st_tunnel` | `NUMERIC(12,2)` | YES | `NULL` | Over ST Tunnel. As above. A CHECK keeps all three ≥ 0. |
 | `created_at` | `TIMESTAMPTZ` | NO | `now()` | |

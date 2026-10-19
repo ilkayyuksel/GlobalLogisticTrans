@@ -4603,7 +4603,7 @@ A RoutePricing should contain:
   a Combination). The former `kilometres` column is kept unused; see
   pricing_rules.md, "History".
 - For a Combination: Over ST — its own Tarief, Toll and Tunnel on the group
-  (charged on Leg 2 when its planningDate differs from Leg 1's).
+  (charged on the leg whose planningDate is later than its partner's).
 - Combination Group and Leg Position — the discriminator described below.
   Both are absent for an ordinary route.
 - Notes (optional)

@@ -38,6 +38,7 @@ function buildTrip(overrides: Partial<TripReadView> = {}): TripReadView {
   return {
     id: TRIP_ID,
     pdfDocumentId: "pdf-1",
+    manualRoutePricingId: null,
     // A stated TAR-nummer, because eligibility now depends on it. These
     // fixtures are about ALLOCATION — which leg owes the charge — so they must
     // clear the new precondition to keep testing what they were written for.
@@ -297,6 +298,7 @@ describe("PricingComponentResolver", () => {
           method: "EXACT",
           combinationRouteGroupId: null,
           combinationMatch: null,
+          selection: "AUTOMATIC",
           legs: [
             {
               legPosition: null,
@@ -352,6 +354,7 @@ describe("PricingComponentResolver", () => {
             method: "NOT_FOUND",
             combinationRouteGroupId: null,
             combinationMatch: null,
+            selection: "AUTOMATIC",
             legs: [],
           },
       });
@@ -393,6 +396,7 @@ describe("PricingComponentResolver", () => {
             method: "AMBIGUOUS",
             combinationRouteGroupId: null,
             combinationMatch: null,
+            selection: "AUTOMATIC",
             legs: [],
           },
       });
@@ -448,6 +452,7 @@ describe("PricingComponentResolver", () => {
             method: "NOT_FOUND",
             combinationRouteGroupId: null,
             combinationMatch: null,
+            selection: "AUTOMATIC",
             legs: [],
           },
       });
@@ -568,6 +573,7 @@ describe("PricingComponentResolver", () => {
           method: "EXACT",
           combinationRouteGroupId: "combo-1",
           combinationMatch: "MATCHED",
+          selection: "AUTOMATIC",
           legs: [
             {
               legPosition: 1,
@@ -642,6 +648,7 @@ describe("PricingComponentResolver", () => {
           method: reason === "AMBIGUOUS" ? "AMBIGUOUS" : "NOT_FOUND",
           combinationRouteGroupId: null,
           combinationMatch: reason,
+          selection: "AUTOMATIC",
           legs: [],
         },
       });
@@ -714,8 +721,9 @@ describe("PricingComponentResolver", () => {
 
     /**
      * ── OVER ST ────────────────────────────────────────────────────────────
-     * Leg 2 only, planningDates that differ, Over ST configured. The amounts
-     * travel on the match; the calculators add them (and the €70) — see
+     * The leg on the LATER planningDate, whatever its configured position;
+     * Over ST configured or not. The amounts travel on the match; the
+     * calculators add them (and the €70) — see
      * combination-over-st.pricing.spec.ts.
      */
     describe("Over ST", () => {
@@ -739,15 +747,28 @@ describe("PricingComponentResolver", () => {
         ).route?.overSt;
       }
 
-      it("applies to Leg 2 planned on another day, unstated amounts as zero", async () => {
+      it("applies to the leg planned on the later day, unstated amounts as zero", async () => {
         expect(
           await overStOf({ first: "2026-08-17", second: "2026-08-18" }),
         ).toEqual({ tarief: "50.00", toll: "0.00", tunnel: "0.00" });
       });
 
-      it("never applies to Leg 1", async () => {
+      it("never applies to the leg planned on the earlier day", async () => {
         expect(
           await overStOf({ first: "2026-08-17", second: "2026-08-18" }, OVER_ST, "first"),
+        ).toBeNull();
+        expect(logger.log).toHaveBeenCalledWith(
+          "Combination matched by its pair of roads",
+          expect.objectContaining({ overStApplies: false, overStReason: "EARLIER_DAY" }),
+        );
+      });
+
+      it("applies to configured Leg 1 when it is planned on the later day", async () => {
+        expect(
+          await overStOf({ first: "2026-08-19", second: "2026-08-18" }, OVER_ST, "first"),
+        ).toEqual({ tarief: "50.00", toll: "0.00", tunnel: "0.00" });
+        expect(
+          await overStOf({ first: "2026-08-19", second: "2026-08-18" }, OVER_ST, "second"),
         ).toBeNull();
       });
 
@@ -765,13 +786,14 @@ describe("PricingComponentResolver", () => {
         );
       });
 
-      it("does not apply when the Combination has no Over ST configured", async () => {
+      /** The €70 is owed without Over ST amounts (owner, 19 October 2026). */
+      it("applies, at zero, when the Combination has no Over ST configured", async () => {
         expect(
           await overStOf({ first: "2026-08-17", second: "2026-08-18" }, NO_OVER_ST),
-        ).toBeNull();
+        ).toEqual({ tarief: "0.00", toll: "0.00", tunnel: "0.00" });
         expect(logger.log).toHaveBeenCalledWith(
           "Combination matched by its pair of roads",
-          expect.objectContaining({ overStApplies: false, overStReason: "NOT_CONFIGURED" }),
+          expect.objectContaining({ overStApplies: true }),
         );
       });
 
@@ -824,20 +846,31 @@ describe("PricingComponentResolver", () => {
       });
     });
 
-    /** Found by the same pair match, so the Trips named are the ones whose price moves. */
+    /**
+     * Found by the same pair lookup. Either date decides which leg is later, so
+     * both legs are named, whichever moved.
+     */
     describe("the Trips a planningDate change reprices", () => {
-      it("names the partner when the Trip is Leg 1", async () => {
+      it("names both legs when Leg 1 moves", async () => {
         const [first] = pair();
         combinationPricing.findAll.mockResolvedValue([combination("combo-1", "Gent")]);
 
-        expect(await resolver.legsPricedByPlanningDate(first)).toEqual([OTHER_TRIP_ID]);
+        expect(await resolver.legsPricedByPlanningDate(first)).toEqual([TRIP_ID, OTHER_TRIP_ID]);
       });
 
-      it("names the Trip itself when it is Leg 2", async () => {
+      it("names both legs when Leg 2 moves", async () => {
         const [, second] = pair();
         combinationPricing.findAll.mockResolvedValue([combination("combo-1", "Gent")]);
 
-        expect(await resolver.legsPricedByPlanningDate(second)).toEqual([OTHER_TRIP_ID]);
+        expect(await resolver.legsPricedByPlanningDate(second)).toEqual([OTHER_TRIP_ID, TRIP_ID]);
+      });
+
+      /** The choice is written for both legs; the moved Trip may be the one without it read. */
+      it("names both legs of a pair priced on an operator's Combination choice", async () => {
+        const [first] = pair({}, { manualRoutePricingId: "leg-chosen" });
+        combinationPricing.findAll.mockResolvedValue([combination("combo-1", "Brugge")]);
+
+        expect(await resolver.legsPricedByPlanningDate(first)).toEqual([TRIP_ID, OTHER_TRIP_ID]);
       });
 
       it("names nobody when the pair is not configured", async () => {

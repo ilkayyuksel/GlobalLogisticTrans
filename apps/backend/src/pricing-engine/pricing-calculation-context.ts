@@ -1,4 +1,4 @@
-import { TripStatus } from "@prisma/client";
+import { RouteSelectionSource, TripStatus } from "@prisma/client";
 import type { RouteMatchMethod } from "../route-pricing/route-matcher";
 import type { CombinationMatchOutcome } from "./route-match-trace";
 
@@ -29,7 +29,7 @@ export interface PricingRuleConfiguration {
   /** Percentage applied to the base price only, never to the other components. */
   readonly fuelPercentage: string;
   readonly combinationSurcharge: string;
-  /** Added once to Leg 2's Tarief when Over ST applies. */
+  /** Added once to the later leg's Tarief when Over ST applies. */
   readonly overStSurcharge: string;
   /**
    * The Custom Property the Engine applies without anyone assigning it — TAR.
@@ -220,10 +220,10 @@ export interface PricingCalculationContext {
   /**
    * The Over ST this Trip owes, or null when it owes none.
    *
-   * Set only for Leg 2 of a Combination matched by its PAIR of roads, and only
-   * when Leg 2's planningDate differs from Leg 1's — see `combination-over-st.ts`.
-   * The Base Price, Toll and Tunnel steps each add their own amount as a line of
-   * their own component, so the columns read Leg 2's effective amounts.
+   * Set only for the leg of a Combination whose planningDate is LATER than its
+   * partner's — see `combination-over-st.ts`. The Base Price, Toll and Tunnel
+   * steps each add their own amount as a line of their own component, so the
+   * columns read that leg's effective amounts.
    */
   readonly overSt: PricingOverStInput | null;
 
@@ -248,6 +248,11 @@ export interface PricingRouteMatchTrace {
   readonly combinationRouteGroupId: string | null;
   /** For a grouped Trip, what became of its pair; null for one in no group. */
   readonly combinationMatch: CombinationMatchOutcome | null;
+  /**
+   * AUTOMATIC, or MANUAL when the operator's route choice priced the Trip
+   * because the automatic outcome above was unusable — see `TripRouteSelection`.
+   */
+  readonly selection: RouteSelectionSource;
   /**
    * The configured road(s) matched, as they read now: one for an ordinary
    * route, both legs of the pair for a Combination, none without a match.

@@ -88,8 +88,9 @@ had been used. The same goes for `active`, which route prices no longer have.
 Over ST travels with its Combination (14 October 2026): an optional `overSt`
 with the screen's three amounts, each a number or `null` (`0` counts as
 configured). The JSON export writes it whenever one is configured. Before this,
-an imported or re-imported Combination always arrived WITHOUT Over ST, and so
-never owed Over ST or the €70 surcharge.
+an imported or re-imported Combination always arrived WITHOUT Over ST amounts.
+Since 19 October 2026 the €70 surcharge no longer depends on them: the leg on
+the later day owes it either way.
 
 ## A Combination is exactly two legs
 

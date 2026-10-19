@@ -42,6 +42,7 @@ function pricedOn(destination: string, method: RouteMatchMethod | null, match: P
       routePricingId: "route-1",
       combinationRouteGroupId: null,
       combinationMatch: null,
+      selection: "AUTOMATIC" as const,
       // A snapshot without a recorded match has no legs either.
       legs:
         method === null

@@ -7,8 +7,8 @@
  * never drift apart.
  */
 
-/** An Over ST addition to Leg 2's Tarief, Toll or Tunnel. */
+/** An Over ST addition to the later leg's Tarief, Toll or Tunnel. */
 export const OVER_ST_DESCRIPTION = "Over ST";
 
-/** The fixed Over ST surcharge on Leg 2's Tarief. */
+/** The fixed Over ST surcharge on the later leg's Tarief. */
 export const OVER_ST_SURCHARGE_DESCRIPTION = "Over ST toeslag";

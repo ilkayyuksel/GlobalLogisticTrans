@@ -51,6 +51,15 @@ export const WITHOUT_OVER_ST = {
   totaal: "188.00",
 };
 
+/** Leg 2 on a later day of a Combination with no Over ST: the €70 alone. */
+export const SURCHARGE_ONLY = {
+  tarief: "190.00",
+  brandstof: "28.50",
+  backload: "50.00",
+  tol: "0.00",
+  totaal: "268.50",
+};
+
 const SURCHARGE_DESCRIPTION = "Over ST toeslag";
 
 export function routeMatchActions(world: PricingLifecycle) {

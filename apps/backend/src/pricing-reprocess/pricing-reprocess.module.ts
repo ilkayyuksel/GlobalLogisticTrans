@@ -4,6 +4,7 @@ import { PricingEngineModule } from "../pricing-engine/pricing-engine.module";
 import { TripPricingModule } from "../trip-pricing/trip-pricing.module";
 import { BulkPricingReprocessService } from "./bulk-pricing-reprocess.service";
 import { PricingReprocessController } from "./pricing-reprocess.controller";
+import { TripRouteChoiceController } from "./trip-route-choice.controller";
 
 /**
  * The REST adapter for the Pricing Engine.
@@ -23,7 +24,7 @@ import { PricingReprocessController } from "./pricing-reprocess.controller";
  */
 @Module({
   imports: [PricingEngineModule, TripPricingModule],
-  controllers: [PricingReprocessController],
+  controllers: [PricingReprocessController, TripRouteChoiceController],
   providers: [BulkPricingReprocessService],
 })
 export class PricingReprocessModule {}

@@ -29,6 +29,7 @@ function stored(overrides: Partial<StoredRouteMatch> = {}): StoredRouteMatch {
     routePricingId: "route-1",
     combinationRouteGroupId: null,
     combinationMatch: null,
+    routeSelection: "AUTOMATIC" as const,
     routeLegs: [ORDINARY_LEG],
     items: [line("BASE_PRICE", "Quay 869 - Ghlin", "200.00")],
     ...overrides,
@@ -42,6 +43,8 @@ describe("the route a stored price was matched to", () => {
       routePricingId: "route-1",
       combinationRouteGroupId: null,
       combinationMatch: null,
+      selection: "AUTOMATIC",
+      manualChoice: null,
       legs: [
         {
           legPosition: null,

@@ -34,7 +34,7 @@ function buildContext(
     isCombination,
     waitingTimeMinutes: 0,
     route: { departure: "PSA Antwerp", destination: "Dourges" },
-    routeMatch: { routePricingId: "route-1", method: "EXACT", combinationRouteGroupId: null, combinationMatch: null, legs: [] },
+    routeMatch: { routePricingId: "route-1", method: "EXACT", combinationRouteGroupId: null, combinationMatch: null, selection: "AUTOMATIC", legs: [] },
     baseSource: {
       strategy: PricingStrategy.ROUTE_BASED,
       routePricingId: "route-1",

@@ -416,6 +416,12 @@ export class TripService {
      */
     const updated = await this.writeUpdate(existing, dto);
 
+    // A new road is a new question for the automatic matcher: a route chosen
+    // by hand for the old one no longer applies (owner, October 2026).
+    if (movesRoad(existing, updated)) {
+      await this.repository.clearRouteSelections([id]);
+    }
+
     this.logger.log("Trip updated", {
       tripId: id,
       changedFields: changedFieldNames(dto),
@@ -444,8 +450,8 @@ export class TripService {
    * only the recalculation entry point, never the Engine itself.
    *
    * ── AND THE PLANNING DATE ───────────────────────────────────────────────
-   * A date is a pricing input only for a genuine Combination, where it decides
-   * Leg 2's Over ST — and Leg 2 may be the OTHER Trip. So it is not one of the
+   * A date is a pricing input only for a Combination, where it decides which
+   * leg owes Over ST — possibly the OTHER Trip. So it is not one of the
    * fields above: `repriceAfterCombinationInputChange` asks the pricing domain
    * which CLOSED Trips the move affects and reprices exactly those, once each.
    *

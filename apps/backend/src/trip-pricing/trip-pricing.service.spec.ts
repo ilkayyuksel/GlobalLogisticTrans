@@ -30,6 +30,7 @@ function buildTripPricing(overrides: Partial<TripPricing> = {}): TripPricing {
     routeMatch: RouteMatchMethod.EXACT,
     combinationRouteGroupId: null,
     combinationMatch: null,
+    routeSelection: "AUTOMATIC",
     notes: null,
     createdAt: new Date("2026-08-11T09:15:00.000Z"),
     updatedAt: new Date("2026-08-11T09:15:00.000Z"),

@@ -105,6 +105,7 @@ const nl = {
   "invoiceAudit.reliability.ROUTE_NOT_FOUND": "Geen route gevonden",
   "invoiceAudit.reliability.ROUTE_AMBIGUOUS": "Meerdere routes mogelijk",
   "invoiceAudit.reliability.COMBINATION_NOT_PRICED": "Combinatie niet geprijsd",
+  "invoiceAudit.reliability.MANUAL_ROUTE_REMOVED": "Gekozen route bestaat niet meer",
   "invoiceAudit.reliability.SNAPSHOT_INCONSISTENT":
     "De opgeslagen prijs past niet bij de groep van de rit",
   "invoiceAudit.summary.priceChecked": "Prijs gecontroleerd",
@@ -1361,6 +1362,7 @@ const tr: Translations = {
   "invoiceAudit.reliability.ROUTE_NOT_FOUND": "Rota bulunamadı",
   "invoiceAudit.reliability.ROUTE_AMBIGUOUS": "Birden fazla rota mümkün",
   "invoiceAudit.reliability.COMBINATION_NOT_PRICED": "Kombinasyon fiyatlandırılmadı",
+  "invoiceAudit.reliability.MANUAL_ROUTE_REMOVED": "Seçilen rota artık mevcut değil",
   "invoiceAudit.reliability.SNAPSHOT_INCONSISTENT":
     "Kayıtlı fiyat seferin grubuyla uyuşmuyor",
   "invoiceAudit.summary.priceChecked": "Fiyatı kontrol edilen",

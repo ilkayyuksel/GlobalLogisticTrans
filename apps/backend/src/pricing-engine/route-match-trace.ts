@@ -1,3 +1,5 @@
+import { RouteSelectionSource } from "@prisma/client";
+
 import type { RoadEndpoints } from "../route-pricing/route-identity";
 import type { RouteMatchMethod } from "../route-pricing/route-matcher";
 import type {
@@ -51,6 +53,7 @@ export function ordinaryRouteTrace(
     method,
     combinationRouteGroupId: null,
     combinationMatch,
+    selection: RouteSelectionSource.AUTOMATIC,
     legs: route ? [legTrace(route, null, true, method)] : [],
   };
 }
@@ -81,6 +84,7 @@ export function combinationTrace(
     method,
     combinationRouteGroupId,
     combinationMatch: CombinationMatchOutcome.MATCHED,
+    selection: RouteSelectionSource.AUTOMATIC,
     legs,
   };
 }

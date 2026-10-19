@@ -27,13 +27,14 @@ import { WaitingTimeCalculator } from "./waiting-time.calculator";
 /**
  * Over ST, priced end to end through the real calculators.
  *
- * ── THE RULE ────────────────────────────────────────────────────────────────
- * A Combination's Over ST (Tarief, Toll, Tunnel) is added to LEG 2, component
- * by component, ONLY when Leg 2's planningDate differs from Leg 1's and Over ST
- * is configured; Leg 2's Tarief then also carries the OVER_ST_SURCHARGE Setting
- * (€70) once. Leg 1 never carries any of it. Fuel follows the effective
- * Tarief. The €50 Backload, waiting time, Cost Confirmations and EK are
- * untouched.
+ * ── THE RULE (OWNER, 19 OCTOBER 2026) ───────────────────────────────────────
+ * The leg planned on the LATER day owes Over ST — whichever leg position the
+ * configuration gives it. Its Tarief carries the OVER_ST_SURCHARGE Setting
+ * (€70) once, always — Over ST configured or not — and the configured Over ST
+ * Tarief, Toll and Tunnel are added component by component. On the same day,
+ * or with a date missing, neither leg carries any of it; the earlier leg
+ * never. Fuel follows the effective Tarief. The €50 Backload, waiting time,
+ * Cost Confirmations and EK are untouched.
  *
  * Leg 1 delivers Quay 869 → GENT; Leg 2 collects LESSINES → Quay 869 — each
  * configured in its real driving direction.
@@ -76,6 +77,7 @@ function trip(overrides: Partial<TripReadView>): TripReadView {
     tarNummer: null,
     tripGroupId: GROUP,
     pdfDocumentId: DOCUMENT,
+    manualRoutePricingId: null,
     ...overrides,
   };
 }
@@ -116,11 +118,12 @@ type OverSt = { tarief: string | null; toll: string | null; tunnel: string | nul
 
 const FULL_OVER_ST: OverSt = { tarief: "50.00", toll: "10.00", tunnel: "3.00" };
 
-describe("Over ST on Leg 2 of a Combination", () => {
+describe("Over ST on the later leg of a Combination", () => {
   let leg1: TripReadView;
   let leg2: TripReadView;
   let overSt: OverSt;
   let configuredPair: boolean;
+  let configuredLegs: ReturnType<typeof legRow>[];
   let surcharge: string;
   let costConfirmation: { ccNumbers: string[]; amount: string } | null;
   let snapshotWriter: { findExistingSnapshot: jest.Mock; writeSnapshot: jest.Mock };
@@ -138,6 +141,10 @@ describe("Over ST on Leg 2 of a Combination", () => {
     surcharge = "70.00";
     overSt = { ...FULL_OVER_ST };
     configuredPair = true;
+    configuredLegs = [
+      legRow(LEG1_ROW, 1, "Quay 869", "GENT", "100.00"),
+      legRow(LEG2_ROW, 2, "LESSINES", "Quay 869", "80.00"),
+    ];
     costConfirmation = null;
 
     const logger = {
@@ -158,10 +165,7 @@ describe("Over ST on Leg 2 of a Combination", () => {
               {
                 id: "combination-1",
                 reviewed: false,
-                legs: [
-                  legRow(LEG1_ROW, 1, "Quay 869", "GENT", "100.00"),
-                  legRow(LEG2_ROW, 2, "LESSINES", "Quay 869", "80.00"),
-                ],
+                legs: configuredLegs,
                 overSt,
                 createdAt: new Date(),
                 updatedAt: new Date(),
@@ -287,7 +291,7 @@ describe("Over ST on Leg 2 of a Combination", () => {
     }
   });
 
-  it("H. never touches Leg 1, whatever the dates", async () => {
+  it("H. never touches the leg on the earlier day", async () => {
     const { lines, columns: amounts } = await priced(LEG1_TRIP);
 
     expect(amounts).toMatchObject({ BASE_PRICE: "100.00", TOLL: "20.00", TUNNEL: "10.00" });
@@ -375,11 +379,11 @@ describe("Over ST on Leg 2 of a Combination", () => {
 
   /**
    * ── THE €70 OVER ST SURCHARGE ─────────────────────────────────────────────
-   * Once, on Leg 2's Tarief, exactly when Over ST applies. Produced by every
+   * Once, on the later leg's Tarief, exactly when Over ST applies. Produced by every
    * calculation from scratch, so it can neither accumulate nor outlive the rule.
    */
   describe("the Over ST surcharge", () => {
-    it("adds it once to Leg 2's Tarief, as its own Tarief line", async () => {
+    it("adds it once to the later leg's Tarief, as its own Tarief line", async () => {
       const { lines } = await priced(LEG2_TRIP);
 
       expect(
@@ -414,15 +418,12 @@ describe("Over ST on Leg 2 of a Combination", () => {
     });
 
     it.each([
-      ["Leg 1", () => undefined, LEG1_TRIP],
+      ["the leg on the earlier day", () => undefined, LEG1_TRIP],
       ["the same day", () => (leg2 = { ...leg2, planningDate: "2026-10-06" }), LEG2_TRIP],
+      ["the same day, either leg", () => (leg2 = { ...leg2, planningDate: "2026-10-06" }), LEG1_TRIP],
       ["a missing planningDate", () => (leg2 = { ...leg2, planningDate: null }), LEG2_TRIP],
+      ["a missing partner planningDate", () => (leg1 = { ...leg1, planningDate: null }), LEG2_TRIP],
       ["a pair not configured as a Combination", () => (configuredPair = false), LEG2_TRIP],
-      [
-        "a Combination with no Over ST configured",
-        () => (overSt = { tarief: null, toll: null, tunnel: null }),
-        LEG2_TRIP,
-      ],
     ])("is not charged for %s", async (_name, arrange, tripId) => {
       arrange();
 
@@ -437,6 +438,19 @@ describe("Over ST on Leg 2 of a Combination", () => {
 
       expect(overStLines(lines)).toEqual([]);
       expect(surchargeLines(lines)).toHaveLength(1);
+      expect(amounts).toMatchObject({ BASE_PRICE: "150.00", TOLL: "15.00", TUNNEL: "5.00" });
+    });
+
+    /** The €70 does not depend on Over ST being configured (owner, 19 October 2026). */
+    it("is charged on a Combination with no Over ST configured, alone", async () => {
+      overSt = { tarief: null, toll: null, tunnel: null };
+
+      const { lines, columns: amounts } = await priced(LEG2_TRIP);
+
+      expect(overStLines(lines)).toEqual([]);
+      expect(
+        surchargeLines(lines).map((line) => [line.component, line.amount.toFixed(2)]),
+      ).toEqual([["BASE_PRICE", "70.00"]]);
       expect(amounts).toMatchObject({ BASE_PRICE: "150.00", TOLL: "15.00", TUNNEL: "5.00" });
     });
 
@@ -457,11 +471,67 @@ describe("Over ST on Leg 2 of a Combination", () => {
         method: "EXACT",
         combinationRouteGroupId: "combination-1",
         combinationMatch: "MATCHED",
+        selection: "AUTOMATIC",
         legs: [
           expect.objectContaining({ legPosition: 1, isPricedLeg: false, routePricingId: LEG1_ROW }),
           expect.objectContaining({ legPosition: 2, isPricedLeg: true, routePricingId: LEG2_ROW }),
         ],
       });
+    });
+  });
+
+  /*
+   * ── THE LATER DAY DECIDES, NOT THE LEG POSITION ──────────────────────────
+   * The configuration's Leg 1 / Leg 2 says which road is which; it does not
+   * say which Trip is driven second. The calendar does.
+   */
+  describe("the later leg, whatever its configured position", () => {
+    it("charges configured Leg 1 when it is planned after Leg 2", async () => {
+      leg1 = { ...leg1, planningDate: "2026-10-08" };
+
+      const later = await priced(LEG1_TRIP);
+      const earlier = await priced(LEG2_TRIP);
+
+      // 100 + 50 Over ST + 70; 20 + 10; 10 + 3
+      expect(later.columns).toMatchObject({ BASE_PRICE: "220.00", TOLL: "30.00", TUNNEL: "13.00" });
+      expect(surchargeLines(later.lines)).toHaveLength(1);
+      expect(earlier.columns).toMatchObject({ BASE_PRICE: "80.00", TOLL: "15.00", TUNNEL: "5.00" });
+      expect(surchargeLines(earlier.lines)).toEqual([]);
+    });
+
+    it("moves to the other leg when the days are swapped", async () => {
+      expect(surchargeLines((await priced(LEG2_TRIP)).lines)).toHaveLength(1);
+
+      leg1 = { ...leg1, planningDate: "2026-10-07" };
+      leg2 = { ...leg2, planningDate: "2026-10-06" };
+
+      expect(surchargeLines((await priced(LEG2_TRIP)).lines)).toEqual([]);
+      expect(surchargeLines((await priced(LEG1_TRIP)).lines)).toHaveLength(1);
+    });
+
+    it("compares calendar dates across a month and a year", async () => {
+      leg1 = { ...leg1, planningDate: "2026-12-31" };
+      leg2 = { ...leg2, planningDate: "2027-01-01" };
+
+      expect(surchargeLines((await priced(LEG2_TRIP)).lines)).toHaveLength(1);
+      expect(surchargeLines((await priced(LEG1_TRIP)).lines)).toEqual([]);
+    });
+
+    it("is charged on the later leg while its partner is still OPEN", async () => {
+      leg1 = { ...leg1, status: TripStatus.OPEN };
+
+      expect(surchargeLines((await priced(LEG2_TRIP)).lines)).toHaveLength(1);
+    });
+
+    it("charges only the later of two Trips driving the same road", async () => {
+      leg2 = trip({ id: LEG2_TRIP, planningDate: "2026-10-07" });
+      configuredLegs = [
+        legRow(LEG1_ROW, 1, "Quay 869", "GENT", "100.00"),
+        legRow(LEG2_ROW, 2, "Quay 869", "GENT", "100.00"),
+      ];
+
+      expect(surchargeLines((await priced(LEG2_TRIP)).lines)).toHaveLength(1);
+      expect(surchargeLines((await priced(LEG1_TRIP)).lines)).toEqual([]);
     });
   });
 
@@ -502,20 +572,26 @@ describe("Over ST on Leg 2 of a Combination", () => {
 
   /*
    * Which Trips a planningDate change reprices — asked after the new date is
-   * stored. Always Leg 2 of the configured pair, whichever leg moved, because
-   * Over ST is Leg 2's and either date can switch it on or off.
+   * stored. Both legs of the configured pair, whichever leg moved, because
+   * either date can switch Over ST on or off, or move it to the other leg.
    */
   describe("the Trips a planningDate change reprices", () => {
-    it("1. names Leg 2 when Leg 1's date changes", async () => {
+    it("1. names both legs when Leg 1's date changes", async () => {
       leg1 = { ...leg1, planningDate: "2026-10-07" };
 
-      await expect(components.legsPricedByPlanningDate(leg1)).resolves.toEqual([LEG2_TRIP]);
+      await expect(components.legsPricedByPlanningDate(leg1)).resolves.toEqual([
+        LEG1_TRIP,
+        LEG2_TRIP,
+      ]);
     });
 
-    it("2. names Leg 2 when Leg 2's own date changes", async () => {
+    it("2. names both legs when Leg 2's own date changes", async () => {
       leg2 = { ...leg2, planningDate: "2026-10-08" };
 
-      await expect(components.legsPricedByPlanningDate(leg2)).resolves.toEqual([LEG2_TRIP]);
+      await expect(components.legsPricedByPlanningDate(leg2)).resolves.toEqual([
+        LEG2_TRIP,
+        LEG1_TRIP,
+      ]);
     });
 
     it("3. Leg 1 moved onto Leg 2's day: Leg 2 loses its Over ST", async () => {

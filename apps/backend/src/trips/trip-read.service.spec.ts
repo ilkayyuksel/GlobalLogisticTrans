@@ -15,7 +15,7 @@ const GROUP_ID = "97777777-7777-4777-8777-777777777777";
  * Trip domain has to call the Engine after a waiting-time change. Two things
  * about it are therefore load-bearing, and both are asserted here.
  *
- *   1. it reads the ELEVEN engine columns and no others. A `select` that grew
+ *   1. it reads the engine columns and no others. A `select` that grew
  *      would let pricing quietly start depending on a field nobody decided it
  *      should — the whole point of a narrow read is that widening it is a
  *      deliberate act;
@@ -34,6 +34,8 @@ const ENGINE_COLUMNS = [
   "id",
   "pdfDocumentId",
   "planningDate",
+  // The operator's route choice (October 2026): a pricing input, widened on purpose.
+  "routeSelection",
   "status",
   // Whether TAR may be charged at all is decided from this column.
   "tarNummer",
@@ -56,9 +58,16 @@ function buildRow(overrides: Record<string, unknown> = {}) {
     tarNummer: "TAR-2026-0042",
     tripGroupId: null,
     pdfDocumentId: "pdf-1",
+    routeSelection: null,
     ...overrides,
   };
 }
+
+/** The view carries the choice as an id, not as the relation it is read from. */
+const VIEW_FIELDS = [
+  ...ENGINE_COLUMNS.filter((column) => column !== "routeSelection"),
+  "manualRoutePricingId",
+].sort();
 
 describe("TripReadRepository", () => {
   let prisma: { trip: { findUnique: jest.Mock; findMany: jest.Mock } };
@@ -81,9 +90,10 @@ describe("TripReadRepository", () => {
     const [{ select }] = prisma.trip.findUnique.mock.calls[0];
 
     expect(Object.keys(select).sort()).toEqual(ENGINE_COLUMNS);
-    expect(Object.values(select).every((included) => included === true)).toBe(
-      true,
-    );
+    // Every column whole, and of the route choice only the chosen route.
+    const { routeSelection, ...columns } = select;
+    expect(Object.values(columns).every((included) => included === true)).toBe(true);
+    expect(routeSelection).toEqual({ select: { routePricingId: true } });
   });
 
   it("reads one Trip by primary key", async () => {
@@ -137,7 +147,7 @@ describe("TripReadService", () => {
   it("returns the engine shape and nothing else", async () => {
     const trip = await service.findById(TRIP_ID);
 
-    expect(Object.keys(trip as object).sort()).toEqual(ENGINE_COLUMNS);
+    expect(Object.keys(trip as object).sort()).toEqual(VIEW_FIELDS);
   });
 
   /**
@@ -201,6 +211,7 @@ describe("TripReadService", () => {
       tarNummer: null,
       tripGroupId: null,
       pdfDocumentId: "pdf-1",
+      manualRoutePricingId: null,
     });
   });
 
@@ -228,7 +239,7 @@ describe("TripReadService", () => {
       TripDirection.COLLECTION,
     ]);
     for (const member of members) {
-      expect(Object.keys(member).sort()).toEqual(ENGINE_COLUMNS);
+      expect(Object.keys(member).sort()).toEqual(VIEW_FIELDS);
     }
   });
 

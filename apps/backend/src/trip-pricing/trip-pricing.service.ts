@@ -4,6 +4,7 @@ import {
   PricingCalculationStatus,
   Prisma,
   RouteMatchMethod,
+  RouteSelectionSource,
   TripPricing,
 } from "@prisma/client";
 
@@ -107,6 +108,8 @@ export interface ReplacePricingSnapshotCommand {
   readonly combinationRouteGroupId: string | null;
   /** For a grouped Trip, what became of its pair; null for one in no group. */
   readonly combinationMatch: CombinationMatchOutcome | null;
+  /** Whether the route was matched automatically or chosen by an operator. */
+  readonly routeSelection: RouteSelectionSource;
   /** The road(s) matched: none, one ordinary route, or both legs of a pair. */
   readonly routeLegs: readonly PricingSnapshotRouteLegData[];
   readonly items: readonly PricingSnapshotItemData[];
@@ -362,6 +365,7 @@ export class TripPricingService {
         routeMatch: command.routeMatch,
         combinationRouteGroupId: command.combinationRouteGroupId,
         combinationMatch: command.combinationMatch,
+        routeSelection: command.routeSelection,
       };
 
       if (!existing) {

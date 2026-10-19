@@ -1,5 +1,6 @@
 import { Prisma } from "@prisma/client";
 
+import { TripRouteSelectionRepository } from "../trip-route-selection/trip-route-selection.repository";
 import { AppLoggerService } from "../logger/app-logger.service";
 import { EffectivePricingService } from "../trip-pricing/effective-pricing.service";
 import { resolveEffectivePricing } from "../trip-pricing/effective-pricing";
@@ -115,6 +116,7 @@ describe("PricingRecalculationService", () => {
         engine as unknown as PricingEngineService,
         trips as unknown as TripReadService,
         logger as unknown as AppLoggerService,
+        { clearForTrips: jest.fn().mockResolvedValue(0), replace: jest.fn() } as unknown as TripRouteSelectionRepository,
       ),
       effectivePricing as unknown as EffectivePricingService,
       trips as unknown as TripReadService,
@@ -167,7 +169,8 @@ describe("PricingRecalculationService", () => {
     it("prices the Trip again and stores the result", async () => {
       await recalculation.recalculate(TRIP_ID);
 
-      expect(engine.calculate).toHaveBeenCalledWith(TRIP_ID);
+      // With no route choice offered: a recalculation prices on what is stored.
+      expect(engine.calculate).toHaveBeenCalledWith(TRIP_ID, new Map());
     });
 
     /*

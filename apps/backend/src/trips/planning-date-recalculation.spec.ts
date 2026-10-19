@@ -101,6 +101,7 @@ describe("a planningDate change reprices the Combination's Leg 2", () => {
       findById: jest.fn(async (id: string) => stored.get(id) ?? null),
       findByIdentity: jest.fn().mockResolvedValue(null),
       findByBookingOnPlanningDate: jest.fn().mockResolvedValue(null),
+      clearRouteSelections: jest.fn().mockResolvedValue(0),
       update: jest.fn(async (id: string, data: { planningDate?: Date | null }) =>
         storeUpdate(id, data),
       ),

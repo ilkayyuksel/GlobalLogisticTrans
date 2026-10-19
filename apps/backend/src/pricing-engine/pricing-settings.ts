@@ -15,7 +15,7 @@ export const PricingSettingKey = {
   FUEL_PERCENTAGE: "FUEL_PERCENTAGE",
   COMBINATION_SURCHARGE: "COMBINATION_SURCHARGE",
   /**
-   * The fixed extra on Leg 2's Tarief when Over ST applies — see
+   * The fixed extra on the later leg's Tarief when Over ST applies — see
    * `combination-over-st.ts`. Added once per calculation, never otherwise.
    */
   OVER_ST_SURCHARGE: "OVER_ST_SURCHARGE",

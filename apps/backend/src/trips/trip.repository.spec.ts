@@ -21,6 +21,7 @@ describe("TripRepository", () => {
       updateMany: jest.Mock;
     };
     pdfDocument: { findUnique: jest.Mock };
+    tripRouteSelection: { findMany: jest.Mock; deleteMany: jest.Mock };
     $transaction: jest.Mock;
   };
   let repository: TripRepository;
@@ -37,6 +38,11 @@ describe("TripRepository", () => {
         updateMany: jest.fn().mockResolvedValue({ count: 1 }),
       },
       pdfDocument: { findUnique: jest.fn().mockResolvedValue(null) },
+      // The operators' route choices, removed on closing and reopening.
+      tripRouteSelection: {
+        findMany: jest.fn().mockResolvedValue([]),
+        deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
+      },
       $transaction: jest.fn().mockResolvedValue([[], 0]),
     };
 

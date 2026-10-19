@@ -15,10 +15,11 @@ import {
   LEG1,
   LEG2,
   WITH_OVER_ST,
-  WITHOUT_OVER_ST,
+  SURCHARGE_ONLY,
   routeMatchActions,
 } from "../pricing-engine/route-match-lifecycle.fixtures";
 import { PairedPricingService } from "../pricing-engine/paired-pricing.service";
+import { TripRouteSelectionRepository } from "../trip-route-selection/trip-route-selection.repository";
 import { BulkPricingReprocessService } from "./bulk-pricing-reprocess.service";
 
 /**
@@ -53,7 +54,12 @@ describe("reprocessing a selection of Trips", () => {
   /** The bulk reprocess over the given Engine — the real one unless a test wraps it. */
   function bulk(engine: PricingEngineService = world.engine) {
     return new BulkPricingReprocessService(
-      new PairedPricingService(engine, world.tripRead, silentLogger()),
+      new PairedPricingService(
+        engine,
+        world.tripRead,
+        silentLogger(),
+        world.routeChoiceRepository as unknown as TripRouteSelectionRepository,
+      ),
       world.tripPricing,
       silentLogger(),
     );
@@ -242,8 +248,9 @@ describe("reprocessing a selection of Trips", () => {
 
       await bulk().reprocessMany([LEG1, LEG2]);
 
-      expect(await actions.apiPricing(LEG2)).toMatchObject(WITHOUT_OVER_ST);
-      expect(actions.surcharges(LEG2)).toEqual([]);
+      // No Over ST configured: the later leg still owes the €70 alone.
+      expect(await actions.apiPricing(LEG2)).toMatchObject(SURCHARGE_ONLY);
+      expect(actions.surcharges(LEG2)).toHaveLength(1);
 
       world.combinations[0].overSt = { tarief: "40.00", toll: "10.00", tunnel: null };
       await bulk().reprocessMany([LEG2]);

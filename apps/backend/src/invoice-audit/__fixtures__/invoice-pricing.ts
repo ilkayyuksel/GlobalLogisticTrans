@@ -17,6 +17,7 @@ export const EXACT_ROUTE_MATCH: RouteMatchView = {
   routePricingId: "route-1",
   combinationRouteGroupId: null,
   combinationMatch: null,
+  selection: "AUTOMATIC" as const,
   legs: [],
   overSt: null,
   // The invoice check never reads the price-check mark of a route.

@@ -25,7 +25,7 @@ import { DAY_ONE, DAY_TWO, routeMatchActions } from "./route-match-lifecycle.fix
  *   ghlin-mons      Leg 1 Quay 869 → Ghlin 150 · Leg 2 Mons → Quay 869 120
  *                   Over ST 40 / 10 / — (Leg 2 Tarief 120 + 40 + 70 = 230)
  *   ghlin-charleroi Leg 1 Quay 869 → Ghlin 160 · Leg 2 Charleroi → Quay 869 130
- *                   no Over ST
+ *                   no Over ST (the later leg still owes the €70: 130 + 70 = 200)
  * Both share the outbound Quay 869 → Ghlin: one leg, two Combinations.
  * ────────────────────────────────────────────────────────────────────────────
  */
@@ -164,7 +164,8 @@ describe("operational groups priced as Combinations", () => {
       await world.tripService.createGroup([OUT, OTHER]);
 
       expect((await stored(OUT)).route.combinationRouteGroupId).toBe("ghlin-charleroi");
-      expect((await stored(OTHER)).pricing.tarief).toBe("130.00");
+      // A day after OUT, with no Over ST configured: its Tarief and the €70 alone.
+      expect((await stored(OTHER)).pricing.tarief).toBe("200.00");
     });
 
     it("3. both roads are legs, but of different Combinations: no route at all, and why", async () => {
@@ -264,7 +265,7 @@ describe("operational groups priced as Combinations", () => {
 
       expect((await stored(OUT)).route.combinationRouteGroupId).toBe("ghlin-charleroi");
       expect((await stored(OUT)).pricing.tarief).toBe("160.00");
-      expect((await stored(OTHER)).pricing.tarief).toBe("130.00");
+      expect((await stored(OTHER)).pricing.tarief).toBe("200.00");
     });
 
     it("12. a leg's road changes: the pair names another Combination, both legs repriced", async () => {
@@ -276,7 +277,9 @@ describe("operational groups priced as Combinations", () => {
       expect((await stored(BACK)).route.combinationRouteGroupId).toBe("ghlin-charleroi");
       // The partner was repriced too, though its own data did not change.
       expect((await stored(OUT)).route.combinationRouteGroupId).toBe("ghlin-charleroi");
-      expect(surcharges(BACK)).toEqual([]);
+      // Ghlin–Charleroi has no Over ST: the later leg keeps only the €70.
+      expect(surcharges(BACK)).toHaveLength(1);
+      expect((await stored(BACK)).pricing.tarief).toBe("200.00");
     });
 
     it("13. the €70 once, however often the pair is regrouped and repriced", async () => {
@@ -357,6 +360,7 @@ describe("operational groups priced as Combinations", () => {
       routeMatch: older.context.routeMatch.method,
       combinationRouteGroupId: older.context.routeMatch.combinationRouteGroupId,
       combinationMatch: older.context.routeMatch.combinationMatch,
+      routeSelection: "AUTOMATIC" as const,
       routeLegs: [],
       items: [],
     });

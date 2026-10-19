@@ -561,7 +561,7 @@ owes TAR once, on the COLLECTION; every other group member pays as before.
 | grouping (`createGroup`) | every Trip that joins |
 | ungrouping (`removeFromGroup`) | the Trip taken out, and every member whose TAR leg **or pricing partner** changed — e.g. the member left alone in a group of two, or the two left behind when a third leaves |
 | a leg's terminal, destination or direction | the Trip, its same-document group members and its pricing partner |
-| either leg's `planningDate` | Leg 2 of the matched pair (Over ST) |
+| either leg's `planningDate` | both legs of the pair (Over ST follows the later day) |
 | reopen → close again | the Trip, on the group, roads and dates it has then |
 | a member cancelled or deleted, or reopened / restored (`changeStatus`, `softDelete`, `restore`, a CANCEL document, a NEW/UPDATE document reopening it) | every CLOSED member whose pricing partner changed (`repriceAfterPartnerStatusChange`) — nothing when the change keeps the Trip on the same side (OPEN ↔ CLOSED) |
 
@@ -656,33 +656,38 @@ For a period the toll was derived as `route_pricing.kilometres` ×
   distance (`quantity`) and the rate (`unit_price`) it was charged with. No
   snapshot is changed.
 
-## Over ST: Leg 2, on another day than Leg 1
+## Over ST: the leg on the later day
 
 A Combination carries **Over ST** — its own Tarief, Toll and Tunnel — beside its
-two legs, stored on `combination_route_group`. It is charged:
+two legs, stored on `combination_route_group`. Owner's rule, 19 October 2026
+(it replaces "Leg 2 by configured position, only when Over ST is configured"):
 
-- on **Leg 2** only — never on Leg 1 (the leg position is the configured
-  Combination's, identified by the pair);
-- only when Leg 2's `planningDate` **differs** from Leg 1's. The original
-  planning date, a document date or a creation date play no part; a leg with no
-  planning date owes no Over ST;
-- only when the Combination **has Over ST configured**: at least one of its three
-  amounts filled in. `0.00` counts as filled in; all three empty means no Over
-  ST — and no surcharge — logged with the reason `NOT_CONFIGURED`;
-- **component by component**: Leg 2's Tarief + Over ST Tarief, Toll + Over ST
-  Toll, Tunnel + Over ST Tunnel. An unstated or zero component adds nothing;
-- plus the **Over ST surcharge** — the Setting `PRICING.OVER_ST_SURCHARGE`,
-  70.00 by default — **once**, on Leg 2's Tarief.
+- it is charged on the **second leg in time**: the leg whose `planningDate` is
+  **later** than its partner's. The configured leg POSITION plays no part — a
+  pair configured with its return road as Leg 1 still charges the leg driven on
+  the later day. The earlier leg never carries any of it;
+- on the **same day**, neither leg owes it (`SAME_DAY`). A leg or partner with
+  no `planningDate` owes none either (`DATE_MISSING`): which leg is later is
+  never guessed. The original planning date, a document date or a creation
+  date play no part;
+- the **Over ST surcharge** — the Setting `PRICING.OVER_ST_SURCHARGE`, 70.00 by
+  default — is added **once** to the later leg's Tarief, **always**, whether or
+  not the Combination has Over ST amounts configured;
+- **component by component**, the configured amounts: Tarief + Over ST Tarief,
+  Toll + Over ST Toll, Tunnel + Over ST Tunnel. An unstated or zero component
+  adds nothing.
 
-| Leg 1 date | Leg 2 date | Leg 2 Tarief / Toll / Tunnel (80 / 15 / 5) with Over ST 50 / 10 / 3 |
-|---|---|---|
-| 2026-10-06 | 2026-10-06 | 80 / 15 / 5 |
-| 2026-10-06 | 2026-10-07 | 200 (80 + 50 + 70) / 25 / 8 |
+| Leg 1 date | Leg 2 date | Leg 1 (100 / 20 / 10) | Leg 2 (80 / 15 / 5) — Over ST 50 / 10 / 3 |
+|---|---|---|---|
+| 2026-10-06 | 2026-10-06 | 100 / 20 / 10 | 80 / 15 / 5 |
+| 2026-10-06 | 2026-10-07 | 100 / 20 / 10 | 200 (80 + 50 + 70) / 25 / 8 |
+| 2026-10-08 | 2026-10-07 | 220 (100 + 50 + 70) / 30 / 13 | 80 / 15 / 5 |
+| 2026-10-06 | 2026-10-07, no Over ST configured | 100 / 20 / 10 | 150 (80 + 70) / 15 / 5 |
 
 The additions are written as lines of their own — BASE_PRICE, TOLL and TUNNEL
 described "Over ST", and a BASE_PRICE line "Over ST toeslag" for the surcharge —
 so the Tarief, Tol and Tunnel columns, the exports and the invoice check read
-Leg 2's effective amounts from the snapshot, and nothing recalculates them.
+the later leg's effective amounts from the snapshot, and nothing recalculates them.
 **Fuel** is charged on the effective Tarief (Over ST and the surcharge
 included), as decided by the business. The €50 Backload, the waiting time, the
 Cost Confirmations and the EK rule are unaffected.
@@ -703,16 +708,17 @@ route of its road — and owes no Over ST.
 Over ST reaches a Trip only when it is priced (closed or repriced); stored
 snapshots do not change until then.
 
-### A date change reprices Leg 2 automatically
+### A date change reprices both legs automatically
 
 Because Over ST reads both legs' `planningDate`, moving **either** leg to
-another day can switch it on or off — always on Leg 2. So a `planningDate`
-change reprices Leg 2 by itself, without "Prijs opnieuw berekenen":
+another day can switch it on or off, or move it from one leg to the other. So a
+`planningDate` change reprices both CLOSED legs by itself, without "Prijs
+opnieuw berekenen":
 
 | Change | Repriced |
 |---|---|
-| Leg 1's date | Leg 2 (its Over ST may appear or disappear) |
-| Leg 2's date | Leg 2 |
+| either leg's date | both legs (Over ST may appear, disappear or change leg) |
+| a date in a pair priced on an operator's Combination choice | both legs |
 | An ordinary Trip's date | nothing — its pricing does not read the date |
 
 - **Who decides which Trips:** the pricing domain —
@@ -728,7 +734,7 @@ change reprices Leg 2 by itself, without "Prijs opnieuw berekenen":
   priced when it closes, with the dates it has then.
 - **Write paths:** the Trip edit (`TripService.update`), and a revised or
   repeated NEW document (`TripRevisionService`) — a document rewrites only OPEN
-  Trips, but may date one whose CLOSED partner is Leg 2. Shared helper:
+  Trips, but may date one whose partner is CLOSED. Shared helper:
   `trips/planning-date-change.ts`.
 - `originalPlanningDate` triggers nothing: Over ST does not read it.
 
@@ -1022,7 +1028,7 @@ Examples include:
 - Waiting Time Billing Interval
 - Waiting Time Block Price
 - Combination Surcharge
-- Over ST Surcharge (Leg 2, when Over ST applies)
+- Over ST Surcharge (the leg on the later day)
 - Route Prices
 - Route Costs (Toll, Tunnel)
 - Distance Rate

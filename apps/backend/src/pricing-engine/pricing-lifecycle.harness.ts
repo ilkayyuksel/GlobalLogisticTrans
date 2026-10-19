@@ -36,6 +36,8 @@ import { FuelSurchargeCalculator } from "./fuel-surcharge.calculator";
 import { PricingComponentResolver } from "./pricing-component.resolver";
 import { PricingEngineService } from "./pricing-engine.service";
 import { PairedPricingService } from "./paired-pricing.service";
+import { ManualRouteSelectionService } from "./manual-route-selection.service";
+import { TripRouteSelectionRepository } from "../trip-route-selection/trip-route-selection.repository";
 import { PricingRecalculationService } from "./pricing-recalculation.service";
 import { PricingRuleResolver } from "./pricing-rule.resolver";
 import { PricingStrategy } from "./pricing-settings";
@@ -240,6 +242,47 @@ export function buildPricingLifecycle() {
   const tripsInGroup = (groupId: string) =>
     [...trips.values()].filter((trip) => trip.tripGroupId === groupId);
 
+  /* ── the operators' route choices (trip_route_selection) ─────────────────── */
+  const routeChoices = new Map<string, string>();
+  const combinationOfLeg = (routePricingId: string) =>
+    combinations.find((each) => each.legs.some((leg) => leg.id === routePricingId))?.id ?? null;
+  /** As the real repository: replaced together, removed with the partner leg's. */
+  const routeChoiceRepository = {
+    replace: jest.fn((choices: readonly { tripId: string; routePricingId: string }[]) => {
+      for (const choice of choices) {
+        routeChoices.set(choice.tripId, choice.routePricingId);
+      }
+      return Promise.resolve();
+    }),
+    clearForTrips: jest.fn((tripIds: readonly string[]) => {
+      const pairs = tripIds.flatMap((id) => {
+        const chosen = routeChoices.get(id);
+        const tripGroupId = requireTrip(id)?.tripGroupId ?? null;
+        const combination = chosen ? combinationOfLeg(chosen) : null;
+        return tripGroupId && combination ? [{ tripGroupId, combination }] : [];
+      });
+      let removed = 0;
+      for (const [tripId, routePricingId] of [...routeChoices]) {
+        const ofPair = pairs.some(
+          (pair) =>
+            requireTrip(tripId)?.tripGroupId === pair.tripGroupId &&
+            combinationOfLeg(routePricingId) === pair.combination,
+        );
+        if (tripIds.includes(tripId) || ofPair) {
+          routeChoices.delete(tripId);
+          removed += 1;
+        }
+      }
+      return Promise.resolve(removed);
+    }),
+  };
+  /** A Trip row as the read side loads it: with its route choice. */
+  const withRouteChoice = (trip: Trip | null) =>
+    trip && {
+      ...trip,
+      routeSelection: routeChoices.has(trip.id) ? { routePricingId: routeChoices.get(trip.id) } : null,
+    };
+
   /* ── the Trip table ─────────────────────────────────────────────────────── */
   const tripRepository = {
     findById: jest.fn((id: string) => Promise.resolve(requireTrip(id))),
@@ -249,28 +292,36 @@ export function buildPricingLifecycle() {
     findManyByGroupId: jest.fn((groupId: string) =>
       Promise.resolve(tripsInGroup(groupId)),
     ),
-    update: jest.fn((id: string, data: Record<string, unknown>) => {
+    clearRouteSelections: jest.fn((ids: readonly string[]) => routeChoiceRepository.clearForTrips(ids)),
+    update: jest.fn(async (id: string, data: Record<string, unknown>) => {
+      if (data.tripGroupId !== undefined) {
+        await routeChoiceRepository.clearForTrips([id]);
+      }
       const defined = Object.fromEntries(
         Object.entries(data).filter(([, value]) => value !== undefined),
       );
       const updated = { ...(requireTrip(id) as Trip), ...defined } as Trip;
       trips.set(id, updated);
-      return Promise.resolve(updated);
+      return updated;
     }),
-    setStatus: jest.fn((id: string, status: TripStatus) => {
+    setStatus: jest.fn(async (id: string, status: TripStatus) => {
+      if (status === TripStatus.OPEN || status === TripStatus.CLOSED) {
+        await routeChoiceRepository.clearForTrips([id]);
+      }
       const updated = { ...(requireTrip(id) as Trip), status };
       trips.set(id, updated);
-      return Promise.resolve(updated);
+      return updated;
     }),
     createTripGroup: jest.fn(() => {
       groupCount += 1;
       return Promise.resolve({ id: `group-${groupCount}` });
     }),
-    assignToGroup: jest.fn((ids: readonly string[], tripGroupId: string) => {
+    assignToGroup: jest.fn(async (ids: readonly string[], tripGroupId: string) => {
+      await routeChoiceRepository.clearForTrips(ids);
       for (const id of ids) {
         trips.set(id, { ...(requireTrip(id) as Trip), tripGroupId });
       }
-      return Promise.resolve(ids.length);
+      return ids.length;
     }),
     findCustomPropertiesForTrips: jest.fn((ids: readonly string[]) =>
       Promise.resolve(assignments.filter((row) => ids.includes(row.tripId))),
@@ -324,8 +375,8 @@ export function buildPricingLifecycle() {
   );
 
   const tripRead = new TripReadService({
-    findById: (id: string) => Promise.resolve(requireTrip(id)),
-    findByGroupId: (groupId: string) => Promise.resolve(tripsInGroup(groupId)),
+    findById: (id: string) => Promise.resolve(withRouteChoice(requireTrip(id))),
+    findByGroupId: (groupId: string) => Promise.resolve(tripsInGroup(groupId).map(withRouteChoice)),
   } as never);
 
   /* ── the pricing tables ─────────────────────────────────────────────────── */
@@ -464,14 +515,16 @@ export function buildPricingLifecycle() {
       ),
     ),
   } as unknown as CustomPropertyService;
+  const routePricingService = {
+    // Read afresh on every calculation, as the real table is.
+    findAllOrdinary: () => Promise.resolve(ordinaryRoutes.map((route) => ({ ...route }))),
+  } as unknown as RoutePricingService;
+  const combinationPricingService = {
+    findAll: () => Promise.resolve(combinations.map((group) => ({ ...group }))),
+  } as unknown as CombinationRoutePricingService;
   const components = new PricingComponentResolver(
-    {
-      // Read afresh on every calculation, as the real table is.
-      findAllOrdinary: () => Promise.resolve(ordinaryRoutes.map((route) => ({ ...route }))),
-    } as unknown as RoutePricingService,
-    {
-      findAll: () => Promise.resolve(combinations.map((group) => ({ ...group }))),
-    } as unknown as CombinationRoutePricingService,
+    routePricingService,
+    combinationPricingService,
     new TripCustomPropertyReadService({
       findByTripId: (tripId: string) =>
         Promise.resolve(assignments.filter((row) => row.tripId === tripId)),
@@ -542,7 +595,22 @@ export function buildPricingLifecycle() {
     ],
     logger,
   );
-  const pairs = new PairedPricingService(engine, tripRead, logger);
+  const pairs = new PairedPricingService(
+    engine,
+    tripRead,
+    logger,
+    routeChoiceRepository as unknown as TripRouteSelectionRepository,
+  );
+  /** "Route kiezen": the real service over the same Engine, tables and choices. */
+  const routeChoice = new ManualRouteSelectionService(
+    tripRead,
+    components,
+    routePricingService,
+    combinationPricingService,
+    pairs,
+    routeChoiceRepository as unknown as TripRouteSelectionRepository,
+    logger,
+  );
   const recalculation = new PricingRecalculationService(
     pairs,
     effectivePricing,
@@ -631,6 +699,10 @@ export function buildPricingLifecycle() {
     /** What every pricing trigger goes through: a Trip and its partner leg. */
     pairs,
     tripRead,
+    /** The operators' route choices, by Trip id, and the repository over them. */
+    routeChoices,
+    routeChoiceRepository,
+    routeChoice,
     tripPricing,
     tripService,
     customValues,

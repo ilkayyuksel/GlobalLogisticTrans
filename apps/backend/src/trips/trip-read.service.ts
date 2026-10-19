@@ -59,6 +59,11 @@ export interface TripReadView {
   readonly tarNummer: string | null;
   readonly tripGroupId: string | null;
   readonly pdfDocumentId: string | null;
+  /**
+   * The route an operator chose because automatic matching found none usable,
+   * or null. Read by pricing only as a fallback — see `TripRouteSelection`.
+   */
+  readonly manualRoutePricingId: string | null;
 }
 
 /**
@@ -117,5 +122,7 @@ function toTripReadView(row: EngineTripRow): TripReadView {
     tarNummer: row.tarNummer,
     tripGroupId: row.tripGroupId,
     pdfDocumentId: row.pdfDocumentId,
+    // Optional chaining: a row read without the relation has no choice.
+    manualRoutePricingId: row.routeSelection?.routePricingId ?? null,
   };
 }

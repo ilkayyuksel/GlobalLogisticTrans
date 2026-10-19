@@ -280,7 +280,7 @@ export class CombinationRouteConfigurationDto {
   @ApiProperty({
     type: CombinationOverStDto,
     description:
-      "Over ST: the Combination's own Tarief, Toll and Tunnel, beside its two legs. Added to Leg 2's amounts when Leg 2's planningDate differs from Leg 1's.",
+      "Over ST: the Combination's own Tarief, Toll and Tunnel, beside its two legs. Added to the amounts of the leg whose planningDate is later than its partner's.",
   })
   overSt!: CombinationOverStDto;
 }

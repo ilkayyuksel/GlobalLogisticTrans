@@ -33,6 +33,7 @@ import { CostConfirmationReadService } from "../cost-confirmations/cost-confirma
 import { PRICED_TRIP_STATUS } from "../trip-pricing/current-pricing";
 import { PricingSnapshotWriter } from "./pricing-snapshot.writer";
 import { RouteCostResolver } from "./route-cost.resolver";
+import { NO_ROUTE_CHOICES, type RouteChoices } from "./manual-route-selection";
 
 /**
  * pricing_rules.md: pricing exists only for a finished Trip — the same status
@@ -92,7 +93,10 @@ export class PricingEngineService {
    * stored: the result is returned for a caller to inspect, and the persistence
    * phase will be responsible for keeping it.
    */
-  async calculate(tripId: string): Promise<PricingCalculationResult> {
+  async calculate(
+    tripId: string,
+    choices: RouteChoices = NO_ROUTE_CHOICES,
+  ): Promise<PricingCalculationResult> {
     /*
      * Taken BEFORE a single input is read, and stored as `calculatedAt`. It is
      * what orders two calculations of one Trip that run at once: the snapshot
@@ -100,7 +104,7 @@ export class PricingEngineService {
      * started later (see `TripPricingService.replaceSnapshot`).
      */
     const startedReadingAt = new Date();
-    const preparation = await this.prepareCalculation(tripId);
+    const preparation = await this.prepareCalculation(tripId, choices);
     const lines = this.runCalculationSteps(preparation.context);
     const totalPrice = sumLineAmounts(lines.map((line) => line.amount));
 
@@ -249,7 +253,11 @@ export class PricingEngineService {
    * inputs — base source, assigned properties, route costs. A failure at any
    * step aborts before the later, more expensive lookups run.
    */
-  async prepareCalculation(tripId: string): Promise<PricingPreparation> {
+  async prepareCalculation(
+    tripId: string,
+    /** Route choices to price with before they are stored — see `ManualRouteSelectionService`. */
+    choices: RouteChoices = NO_ROUTE_CHOICES,
+  ): Promise<PricingPreparation> {
     this.logger.log("Pricing calculation requested", { tripId });
 
     const startedAtMs = Date.now();
@@ -280,13 +288,13 @@ export class PricingEngineService {
 
     /*
      * The configured route, matched ONCE for this Trip and then read by three
-     * components: the Tarief, the toll and the tunnel — and, for Leg 2 of a
-     * Combination planned on another day than Leg 1, the Over ST on top. A
+     * components: the Tarief, the toll and the tunnel — and, for the leg of a
+     * Combination planned on the later day, the Over ST on top. A
      * road may be configured twice — as an ordinary route and as a leg of a
      * Combination — so three separate lookups could match three different rows
      * and price a Trip with a mixture of them.
      */
-    const selection = await this.componentResolver.resolveRouteSelection(trip);
+    const selection = await this.componentResolver.resolveRouteSelection(trip, choices);
     const matchedRoute = selection.route;
 
     const baseSource = await this.componentResolver.resolveBaseSource(

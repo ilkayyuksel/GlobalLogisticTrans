@@ -30,7 +30,7 @@ function buildContext(
     isCombination: false,
     waitingTimeMinutes: 0,
     route,
-    routeMatch: { routePricingId: "route-1", method: "EXACT", combinationRouteGroupId: null, combinationMatch: null, legs: [] },
+    routeMatch: { routePricingId: "route-1", method: "EXACT", combinationRouteGroupId: null, combinationMatch: null, selection: "AUTOMATIC", legs: [] },
     baseSource,
     rules: {
       strategy: baseSource.strategy,

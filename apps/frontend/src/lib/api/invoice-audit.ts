@@ -56,6 +56,7 @@ export type InvoicePriceProblem =
   | "ROUTE_NOT_FOUND"
   | "ROUTE_AMBIGUOUS"
   | "COMBINATION_NOT_PRICED"
+  | "MANUAL_ROUTE_REMOVED"
   | "SNAPSHOT_INCONSISTENT";
 
 /** How the system matched a route, as the stored price recorded it. */

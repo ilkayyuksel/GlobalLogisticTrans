@@ -7,6 +7,7 @@ import {
 import { TripNotPriceableException } from "../pricing-engine/exceptions/pricing-engine.exceptions";
 import {
   COMBINATION_ID,
+  DAY_ONE,
   LEG1_ROW,
   LEG2,
   LEG2_ROW,
@@ -77,6 +78,8 @@ describe("the reprocess response", () => {
       routePricingId: "route-1",
       combinationRouteGroupId: null,
       combinationMatch: null,
+      selection: "AUTOMATIC",
+      manualChoice: null,
       legs: [
         {
           legPosition: null,
@@ -136,6 +139,8 @@ describe("the reprocess response", () => {
       routePricingId: null,
       combinationRouteGroupId: null,
       combinationMatch: null,
+      selection: "AUTOMATIC",
+      manualChoice: "NORMAL",
       legs: [],
       overSt: null,
       reviewed: null,
@@ -206,7 +211,7 @@ describe("the reprocess response", () => {
       await actions.closedCombination();
       expect((await reprocess(LEG2)).routeMatch.overSt?.applied).toBe(true);
 
-      world.combinations[0].overSt = { tarief: null, toll: null, tunnel: null };
+      await actions.moveTo(LEG2, DAY_ONE);
       const response = await reprocess(LEG2);
 
       expect(response.routeMatch.overSt).toEqual({

@@ -36,6 +36,8 @@ import {
   PricingRuleConfiguration,
 } from "./pricing-calculation-context";
 import { PricingStrategy } from "./pricing-settings";
+import { manualRouteChoiceFor } from "../trip-pricing/manual-route-choice";
+import { chooseManualRoute, NO_ROUTE_CHOICES, type RouteChoices } from "./manual-route-selection";
 
 /**
  * What a Trip is priced at when its route has no configuration.
@@ -404,7 +406,57 @@ export class PricingComponentResolver {
    * warning and stored on the snapshot: never mistaken for a configured route
    * priced at zero.
    */
-  async resolveRouteSelection(trip: TripReadView): Promise<RouteSelection> {
+  async resolveRouteSelection(
+    trip: TripReadView,
+    choices: RouteChoices = NO_ROUTE_CHOICES,
+  ): Promise<RouteSelection> {
+    const automatic = await this.resolveAutomaticRouteSelection(trip);
+    const kind = automatic.route === null ? manualRouteChoiceFor(automatic.trace) : null;
+    const chosenId = choices.get(trip.id) ?? trip.manualRoutePricingId;
+
+    // A usable automatic match always wins; a choice is only the fallback.
+    if (kind === null || chosenId === null) {
+      return automatic;
+    }
+
+    const chosen = chooseManualRoute({
+      trip,
+      kind,
+      chosenId,
+      automatic: automatic.trace,
+      choices,
+      ordinaryRoutes: kind === "NORMAL" ? await this.routePricingService.findAllOrdinary() : [],
+      combinations: kind === "COMBINATION" ? await this.combinationPricing.findAll() : [],
+      members: kind === "COMBINATION" ? await this.groupMembers(trip) : [],
+    });
+
+    if (chosen.kind === "NOT_USABLE") {
+      this.logger.warn("The operator's route choice cannot price this Trip; not used", {
+        tripId: trip.id,
+        routePricingId: chosenId,
+        reason: chosen.reason,
+      });
+
+      return automatic;
+    }
+
+    this.logger.log("Priced on the operator's route choice", {
+      tripId: trip.id,
+      routePricingId: chosenId,
+      kind,
+      automaticMatch: automatic.trace.method,
+      combinationMatch: automatic.trace.combinationMatch,
+    });
+
+    return chosen.selection;
+  }
+
+  /**
+   * What the AUTOMATIC matcher alone makes of this Trip — the rule described
+   * above, without any operator's choice. Public for the route-choice
+   * endpoint, which may only offer a choice when this is unusable.
+   */
+  async resolveAutomaticRouteSelection(trip: TripReadView): Promise<RouteSelection> {
     const road = pricingRoadOf(trip);
 
     if (!road) {
@@ -518,7 +570,7 @@ export class PricingComponentResolver {
   ): RouteSelection {
     const { group, legs, method, methods } = match;
     const ownLeg = legs[0];
-    const overSt = decideOverSt(ownLeg.combinationLegPosition, trip, partner, group.overSt);
+    const overSt = decideOverSt(trip, partner, group.overSt);
 
     this.logger.log("Combination matched by its pair of roads", {
       tripId: trip.id,
@@ -596,13 +648,13 @@ export class PricingComponentResolver {
    * The Trips whose pricing reads the planningDate of this Trip's Combination.
    *
    * ── WHY A DATE CHANGE REACHES ANOTHER TRIP ────────────────────────────────
-   * Over ST is owed by LEG 2 when its planningDate differs from LEG 1's, so a
-   * change to EITHER leg's date can switch it on or off — and always on Leg 2.
-   * So the answer is the leg of this Trip's genuine pair that the configured
-   * Combination holds at position 2: this Trip itself, its partner, or neither.
+   * Over ST is owed by the leg on the LATER day (`decideOverSt`), so a change
+   * to EITHER leg's date can switch it on or off, and can move it from one leg
+   * to the other. So the answer is BOTH legs of the pair: this Trip and its
+   * partner — whichever of them is CLOSED is repriced.
    *
-   * Found exactly as pricing finds it — the same pair match — so the Trips
-   * named are the Trips whose price would move.
+   * Found exactly as pricing finds it — the same pair lookup — so a Trip whose
+   * price cannot read the dates (no partner, no Combination) names nothing.
    */
   async legsPricedByPlanningDate(trip: TripReadView): Promise<string[]> {
     const road = pricingRoadOf(trip);
@@ -613,18 +665,18 @@ export class PricingComponentResolver {
 
     const lookup = await this.findCombinationPair(trip, road);
 
-    if (lookup.kind === "NO_PARTNER" || lookup.match.kind !== "MATCHED") {
+    if (lookup.kind === "NO_PARTNER") {
       return [];
     }
 
-    const [ownLeg, partnerLeg] = lookup.match.legs;
+    // A pair priced on an operator's Combination choice reads the dates too;
+    // the choice is written for both legs together, so either one tells.
+    const pricedOnCombination =
+      lookup.match.kind === "MATCHED" ||
+      trip.manualRoutePricingId !== null ||
+      lookup.partner.manualRoutePricingId !== null;
 
-    return [
-      { id: trip.id, leg: ownLeg },
-      { id: lookup.partner.id, leg: partnerLeg },
-    ]
-      .filter((member) => member.leg.combinationLegPosition === 2)
-      .map((member) => member.id);
+    return pricedOnCombination ? [trip.id, lookup.partner.id] : [];
   }
 
   /**

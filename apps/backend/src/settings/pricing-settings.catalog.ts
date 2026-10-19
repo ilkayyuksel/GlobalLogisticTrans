@@ -77,7 +77,7 @@ export const PRICING_SETTING_CATALOG: readonly PricingSettingDefinition[] = [
     key: "OVER_ST_SURCHARGE",
     valueType: SettingValueType.DECIMAL,
     description:
-      "Added once to the Tarief of Leg 2 of a Combination when Over ST applies: the two legs are planned on different days and the Combination has Over ST configured. Never added otherwise.",
+      "Added once to the Tarief of the leg of a Combination planned on the later day, whether or not the Combination has Over ST amounts configured. Never added when both legs share a day.",
     defaultValue: "70.00",
   },
   {

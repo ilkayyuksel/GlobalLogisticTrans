@@ -66,6 +66,7 @@ function buildTrip(overrides: Partial<TripReadView> = {}): TripReadView {
   return {
     id: TRIP_ID,
     pdfDocumentId: DOCUMENT_ID,
+    manualRoutePricingId: null,
     // No TAR-nummer: the automatic property is not what these tests are about,
     // and a charge for it would only obscure the four amounts that are.
     tarNummer: null,

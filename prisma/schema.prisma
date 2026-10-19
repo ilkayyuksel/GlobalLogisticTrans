@@ -169,6 +169,16 @@ enum CombinationMatchOutcome {
   @@map("combination_match_outcome")
 }
 
+/// Whether the route a snapshot was priced on was found automatically or chosen
+/// by an operator. Deliberately apart from `RouteMatchMethod`, which only ever
+/// describes how the AUTOMATIC matcher fared — see `TripRouteSelection`.
+enum RouteSelectionSource {
+  AUTOMATIC
+  MANUAL
+
+  @@map("route_selection_source")
+}
+
 enum RouteMatchMethod {
   EXACT
   NORMALIZED
@@ -515,6 +525,8 @@ model Trip {
 
   pricing           TripPricing?
   pricingOverrides  TripPricingOverride[]
+  /// An operator's choice of route when automatic matching found none usable.
+  routeSelection    TripRouteSelection?
   history           TripHistory[]
   customProperties  TripCustomProperty[]
   costConfirmations CostConfirmation[]
@@ -1113,6 +1125,9 @@ model RoutePricing {
   /// destination as they always have been. See `RouteCost.routePricingId`.
   routeCosts RouteCost[]
 
+  /// Trips an operator priced on this route by hand — see `TripRouteSelection`.
+  tripRouteSelections TripRouteSelection[]
+
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 
@@ -1336,6 +1351,11 @@ model TripPricing {
   /// on snapshots written before this was recorded.
   combinationMatch CombinationMatchOutcome? @map("combination_match")
 
+  /// AUTOMATIC: the route came from the matcher, as before. MANUAL: the
+  /// matcher found nothing usable — `routeMatch` and `combinationMatch` still
+  /// say what it found — and the operator's `TripRouteSelection` priced it.
+  routeSelection RouteSelectionSource @default(AUTOMATIC) @map("route_selection")
+
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 
@@ -1526,4 +1546,29 @@ model Note {
   /// Supports most-recently-edited ordering in the notes list.
   @@index([updatedAt])
   @@map("note")
+}
+
+/// The route an operator chose for a Trip whose automatic match was unusable
+/// (owner, October 2026). An INPUT to pricing, like a Custom Value: the Engine
+/// prices on it only while the automatic matcher still finds nothing usable,
+/// and the snapshot it writes records `route_selection = MANUAL`.
+///
+/// One row per Trip. `route_pricing_id` is an ordinary route for a Trip in no
+/// group, or one LEG of a Combination for a grouped Trip — the row itself says
+/// which Combination and which leg, and the partner leg holds the other leg of
+/// the same Combination: both are written together, never one.
+///
+/// Removed by an explicit reprocess, a change of the Trip's road or group, and
+/// a status change to OPEN or CLOSED; kept through ordinary edits. CASCADE on
+/// the route: a removed configuration takes the choice with it.
+model TripRouteSelection {
+  tripId         String   @id @map("trip_id") @db.Uuid
+  routePricingId String   @map("route_pricing_id") @db.Uuid
+  selectedAt     DateTime @default(now()) @map("selected_at") @db.Timestamptz(6)
+
+  trip         Trip         @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  routePricing RoutePricing @relation(fields: [routePricingId], references: [id], onDelete: Cascade)
+
+  @@index([routePricingId])
+  @@map("trip_route_selection")
 }
