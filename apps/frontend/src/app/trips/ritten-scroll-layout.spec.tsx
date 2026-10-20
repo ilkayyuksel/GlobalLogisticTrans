@@ -17,15 +17,17 @@ jest.mock("@/lib/calendar/calendar-dates", () => ({
 const requestMock = request as jest.MockedFunction<typeof request>;
 
 /**
- * How the Ritten list scrolls: ONE scroller for every day, so one sideways
- * movement takes the whole week along and the headers can stick.
+ * How the Ritten list scrolls: by the PAGE, down and sideways, every day at
+ * once — with the day headings and column headers stuck to the window like a
+ * frozen row in Excel.
  *
- * jsdom has no layout, so it cannot show a header staying in view; that was
- * checked in a real browser. What it CAN hold is the structure that makes it
- * work: every day's table inside the same scroller, no scroller of its own
- * between them, and the sticky rules on the headings and column headers. A
- * table regaining its own `overflow` box would silently bring back both
- * problems, which is what these tests stop.
+ * jsdom has no layout, so it cannot show a header staying in view or the last
+ * Trip being reachable; that was checked in a real browser. What it CAN hold
+ * is the structure that makes it work: no box with an `overflow` or a height
+ * limit anywhere between a table and the page — any such box becomes the
+ * headers' scroll container, which either lets them scroll away or shuts the
+ * list in a scroll box of its own, cut off at the screen's height — and the
+ * sticky rules on the headings and column headers.
  */
 
 const WEEK = [
@@ -53,16 +55,19 @@ async function showView(view: "Dag" | "Week" | "Maand") {
 
 const region = () => screen.getByTestId("ritten-scroll-region");
 
-/** Every element from the table up to (not including) the region. */
-function boxesBetween(table: HTMLElement): HTMLElement[] {
+/** Every element from the table up to the page itself. */
+function boxesUpToThePage(table: HTMLElement): HTMLElement[] {
   const boxes: HTMLElement[] = [];
 
-  for (let element = table.parentElement; element && element !== region(); element = element.parentElement) {
+  for (let element = table.parentElement; element && element !== document.body; element = element.parentElement) {
     boxes.push(element);
   }
 
   return boxes;
 }
+
+/** A class that would make a box a scroll container or cap its height. */
+const SCROLL_BOX = /overflow|max-h-|\bh-screen\b|\bh-\[/;
 
 describe("the Ritten list's scrolling", () => {
   it("puts every day of the week in one scroller", async () => {
@@ -74,33 +79,30 @@ describe("the Ritten list's scrolling", () => {
     expect(screen.getAllByTestId("ritten-scroll-region")).toHaveLength(1);
   });
 
-  it("gives no day a sideways scroller of its own", async () => {
+  /** The page scrolls the list: nothing between a table and it is a scroll box. */
+  it("puts no scroll box and no height limit between any day and the page", async () => {
     await showView("Week");
 
     for (const table of within(region()).getAllByRole("table")) {
-      for (const box of boxesBetween(table)) {
-        expect(box.className).not.toMatch(/overflow/);
+      for (const box of boxesUpToThePage(table)) {
+        expect(box.className).not.toMatch(SCROLL_BOX);
       }
     }
   });
 
-  it("scrolls both ways, bounded by the screen", async () => {
+  it("makes every day as wide as the widest, so they move sideways as one", async () => {
     await showView("Week");
 
-    expect(region().className).toMatch(/\boverflow-auto\b/);
-    expect(region().className).toMatch(/max-h-\[calc\(100vh-3rem\)\]/);
-    // All days as wide as the widest, so they move as one.
     expect(region().firstElementChild?.className).toMatch(/\bw-fit\b.*\bmin-w-full\b/);
+    // The frame the sticky headings take their width from.
+    expect(region().className).toMatch(/\[container-type:inline-size\]/);
   });
 
-  it("remembers one position for the whole list, not one per day", async () => {
+  /** The window's own position is what Back restores; the list keeps none of its own. */
+  it("keeps no scroll position of its own", async () => {
     await showView("Week");
 
-    const remembered = [...document.querySelectorAll("[data-scroll-restoration-id]")].map((element) =>
-      element.getAttribute("data-scroll-restoration-id"),
-    );
-
-    expect(remembered).toEqual(["ritten-list"]);
+    expect(document.querySelectorAll("[data-scroll-restoration-id]")).toHaveLength(0);
   });
 
   it("sticks every day heading to the top, held in view sideways", async () => {
@@ -137,11 +139,11 @@ describe("the Ritten list's scrolling", () => {
     }
   });
 
-  it.each(["Dag", "Maand"] as const)("uses the same scroller in the %s view", async (view) => {
+  it.each(["Dag", "Maand"] as const)("is scrolled by the page in the %s view too", async (view) => {
     await showView(view);
 
     for (const table of within(region()).getAllByRole("table")) {
-      expect(boxesBetween(table).some((box) => /overflow/.test(box.className))).toBe(false);
+      expect(boxesUpToThePage(table).some((box) => SCROLL_BOX.test(box.className))).toBe(false);
     }
   });
 });

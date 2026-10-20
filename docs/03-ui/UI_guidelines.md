@@ -388,6 +388,14 @@ Column visibility (future)
 
 Tables should remain readable with many rows.
 
+A sticky header sticks to the PAGE, like a frozen row in Excel: the page
+scrolls the table, down and — when it is wider than the screen — sideways.
+Never put a long table in a box with `overflow` or a fixed or maximum height to
+make its header stick: any such box becomes the header's scroll container, so
+the header either scrolls away or the table is shut in a second scroll area,
+cut off at the screen's height. The Ritten list is the reference
+(`ritten-scroll-region.tsx`, guarded by `ritten-scroll-layout.spec.tsx`).
+
 ---
 
 # Editing In Place

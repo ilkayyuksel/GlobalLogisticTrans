@@ -142,7 +142,7 @@ describe("the container number in the Ritten list", () => {
 
     /**
      * The table still scrolls sideways when a screen is too narrow for it —
-     * in the list's one shared scroller, not in a box of its own.
+     * with the page, every day at once, not in a box of its own.
      */
     it("leaves the table's horizontal scrolling intact", async () => {
       const row = await show(REAL);
@@ -151,7 +151,9 @@ describe("the container number in the Ritten list", () => {
       // As wide as its section, with no fixed minimum of its own.
       expect(table.className).toMatch(/\bw-full\b/);
       expect(table.className).not.toMatch(/min-w-/);
-      expect(table.closest("[data-testid='ritten-scroll-region']")?.className).toMatch(/\boverflow-auto\b/);
+      const region = table.closest("[data-testid='ritten-scroll-region']") as HTMLElement;
+      expect(region.className).not.toMatch(/overflow|max-h-/);
+      expect(region.firstElementChild?.className).toMatch(/\bw-fit\b.*\bmin-w-full\b/);
     });
 
     it("stays on one line when the pricing columns are shown", async () => {
