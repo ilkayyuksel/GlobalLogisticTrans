@@ -84,4 +84,37 @@ describeWithDatabase("current pricing against a real database", () => {
     await client.trip.update({ where: { id: tripId }, data: { status: "CLOSED" } });
     expect((await repository.findCurrentByTripId(tripId))?.tripId).toBe(tripId);
   });
+
+  /*
+   * A later calculation failed to replace the snapshot: it is kept as history
+   * and no longer offered as the price (owner, 20 October 2026).
+   */
+  describe("a snapshot a later calculation failed to replace", () => {
+    it("is marked FAILED, kept, and no longer offered as the price", async () => {
+      const tripId = await pricedTrip("CLOSED");
+
+      expect(await repository.markFailed([tripId], new Date(Date.now() + 1000))).toBe(1);
+
+      expect(await repository.findCurrentByTripId(tripId)).toBeNull();
+      expect(await repository.findCurrentByTripIds([tripId])).toEqual([]);
+      expect(await repository.findByTripId(tripId)).toMatchObject({ tripId, calculationStatus: "FAILED" });
+    });
+
+    it("leaves a snapshot written after the failed calculation started", async () => {
+      const startedBefore = new Date(Date.now() - 60_000);
+      const tripId = await pricedTrip("CLOSED");
+
+      expect(await repository.markFailed([tripId], startedBefore)).toBe(0);
+      expect((await repository.findCurrentByTripId(tripId))?.calculationStatus).toBe("CALCULATED");
+    });
+
+    it("is offered again once a calculation succeeds", async () => {
+      const tripId = await pricedTrip("CLOSED");
+      await repository.markFailed([tripId], new Date(Date.now() + 1000));
+
+      await client.tripPricing.update({ where: { tripId }, data: { calculationStatus: "CALCULATED" } });
+
+      expect((await repository.findCurrentByTripId(tripId))?.tripId).toBe(tripId);
+    });
+  });
 });

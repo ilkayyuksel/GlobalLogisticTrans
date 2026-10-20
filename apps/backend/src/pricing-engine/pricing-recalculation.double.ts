@@ -51,6 +51,9 @@ export function stubPricingRecalculation(
     tripsAffectedByPlanningDate: jest.fn().mockResolvedValue([]),
     // A Trip in no group: its road moves only its own price.
     tripsAffectedByRoadChange: jest.fn((tripId: string) => Promise.resolve([tripId])),
+    // Nobody else states the TAR-nummer that day. A spec about a released TAR
+    // charge names the Trips it expects.
+    tripsSharingTarDay: jest.fn().mockResolvedValue([]),
   } as unknown as PricingRecalculationService & {
     recalculate: jest.Mock;
     tripsAffectedByRegrouping: jest.Mock;

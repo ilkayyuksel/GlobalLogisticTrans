@@ -127,6 +127,7 @@ export class CustomPropertyCalculator implements PricingCalculationStep {
       quantity: null,
       unitPrice: null,
       customPropertyId: property.customPropertyId,
+      isAutomatic: property.isAutomatic === true,
     };
   }
 }

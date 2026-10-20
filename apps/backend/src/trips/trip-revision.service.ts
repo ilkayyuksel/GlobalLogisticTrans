@@ -28,6 +28,7 @@ import {
   type CombinationInputChange,
 } from "./planning-date-change";
 import { repriceAfterPartnerStatusChange } from "./partner-status-change";
+import { repriceAfterTarChargeReleased } from "./tar-charge-release";
 import { TripDriverPinningService } from "./trip-driver-pinning.service";
 import { TripIdentity, TripRepository } from "./trip.repository";
 
@@ -689,6 +690,14 @@ export class TripRevisionService {
       previousStatus,
       this.recalculation,
       (tripGroupId) => this.repository.findManyByGroupId(tripGroupId),
+      this.logger,
+    );
+    // Cancelled or deleted, it no longer holds its TAR: see `tar-charge-release.ts`.
+    await repriceAfterTarChargeReleased(
+      changed.id,
+      { ...changed, status: previousStatus },
+      changed,
+      this.recalculation,
       this.logger,
     );
   }

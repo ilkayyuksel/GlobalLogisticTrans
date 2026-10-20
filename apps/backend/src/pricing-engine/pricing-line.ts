@@ -38,6 +38,14 @@ export interface PricingLine {
    * two it is instead of leaving the field off by accident.
    */
   readonly customPropertyId: string | null;
+
+  /**
+   * True for the Engine's own automatic charge of a Custom Property (TAR), set
+   * by the Custom Property step alone. Stored with the line: it is what tells
+   * the automatic TAR from an operator's manual one when deciding who holds a
+   * TAR-nummer's charge for the day (`tar-charge-read.repository.ts`).
+   */
+  readonly isAutomatic?: boolean;
 }
 
 /**

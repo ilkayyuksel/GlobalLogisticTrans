@@ -1,5 +1,6 @@
 import { TripDirection } from "@prisma/client";
 
+import type { ManualRouteFacts } from "../pricing/manual-route-facts.reader";
 import { assessPriceReliability, type PriceReliability } from "../pricing/price-reliability";
 import { toCustomerRemarkParts } from "../remarks/customer-remark-vocabulary";
 import type { TripRemarkFacts } from "../remarks/remark-plan";
@@ -36,9 +37,14 @@ export function planAddedRows(
   missing: readonly MissingTrip[],
   factsByTrip: ReadonlyMap<string, TripRemarkFacts>,
   groupSizes: ReadonlyMap<string, number>,
+  manualByTrip: ReadonlyMap<string, ManualRouteFacts>,
 ): AddedRow[] {
   const rows = missing.map((trip): AddedRow => {
-    const reliability = assessPriceReliability(trip.trip, trip.pricing);
+    const reliability = assessPriceReliability(
+      trip.trip,
+      trip.pricing,
+      manualByTrip.get(trip.trip.id) ?? null,
+    );
     const facts = factsByTrip.get(trip.trip.id);
     const { parts, unexpressed } = toCustomerRemarkParts({
       propertyNames: reliability.reliable ? (facts?.propertyNames ?? []) : [],

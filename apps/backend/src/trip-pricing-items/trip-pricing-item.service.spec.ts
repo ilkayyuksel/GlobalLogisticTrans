@@ -31,6 +31,7 @@ function buildItem(
     quantity: null,
     unitPrice: null,
     notes: null,
+    isAutomatic: false,
     createdAt: new Date("2026-08-11T09:15:00.000Z"),
     updatedAt: new Date("2026-08-11T09:15:00.000Z"),
     ...overrides,

@@ -3,6 +3,7 @@ import type { Trip } from "@prisma/client";
 import type {
   InvoiceAuditReadRepository,
   InvoiceCostConfirmation,
+  RouteChoiceMember,
 } from "../invoice-audit-read.repository";
 
 /**
@@ -19,6 +20,11 @@ export interface InvoiceReadsDouble {
   countGroupMembers: jest.Mock<Promise<Map<string, number>>, [readonly string[]]>;
   findCustomPropertyNames: jest.Mock<Promise<Map<string, string[]>>, [readonly string[]]>;
   findCostConfirmationNumbers: jest.Mock<Promise<Map<string, string[]>>, [readonly string[]]>;
+  /** By default no route choice is stored for any Trip. */
+  findRouteChoiceMembers: jest.Mock<
+    Promise<RouteChoiceMember[]>,
+    [readonly string[], readonly string[]]
+  >;
 }
 
 export function invoiceReads(): InvoiceReadsDouble {
@@ -36,6 +42,9 @@ export function invoiceReads(): InvoiceReadsDouble {
     ),
     findCostConfirmationNumbers: jest.fn(
       async (_tripIds: readonly string[]) => new Map<string, string[]>(),
+    ),
+    findRouteChoiceMembers: jest.fn(
+      async (_tripIds: readonly string[], _groupIds: readonly string[]) => [] as RouteChoiceMember[],
     ),
   };
 }

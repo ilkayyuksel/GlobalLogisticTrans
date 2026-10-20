@@ -2,6 +2,7 @@ import { Injectable } from "@nestjs/common";
 
 import { AppLoggerService } from "../../logger/app-logger.service";
 import { InvoiceAuditReadRepository } from "../invoice-audit-read.repository";
+import { ManualRouteFactsReader } from "../pricing/manual-route-facts.reader";
 import { InvoiceRemarksService } from "../remarks/invoice-remarks.service";
 import { planAddedRows, type AddedRow } from "./added-rows";
 import type { MissingTrip } from "./missing-trips.service";
@@ -19,6 +20,7 @@ export class AddedRowsService {
   constructor(
     private readonly reads: InvoiceAuditReadRepository,
     private readonly remarks: InvoiceRemarksService,
+    private readonly manualRoutes: ManualRouteFactsReader,
     private readonly logger: AppLoggerService,
   ) {
     this.logger.setContext(AddedRowsService.name);
@@ -36,11 +38,18 @@ export class AddedRowsService {
           .filter((groupId): groupId is string => groupId !== null && groupId !== undefined),
       ),
     ];
-    const [facts, groupSizes] = await Promise.all([
+    const pricingByTrip = new Map(
+      missing.flatMap((trip) => (trip.pricing ? [[trip.trip.id, trip.pricing] as const] : [])),
+    );
+    const [facts, groupSizes, manualByTrip] = await Promise.all([
       this.remarks.factsFor(missing.map((trip) => trip.trip)),
       this.reads.countGroupMembers(groupIds),
+      this.manualRoutes.findForTrips(
+        missing.map((trip) => trip.trip),
+        pricingByTrip,
+      ),
     ]);
-    const rows = planAddedRows(missing, facts, groupSizes);
+    const rows = planAddedRows(missing, facts, groupSizes, manualByTrip);
 
     this.logger.log("Lines for missing transports planned", {
       lines: rows.length,

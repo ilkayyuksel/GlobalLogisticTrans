@@ -7,6 +7,7 @@ import { UnknownPricingComponentException } from "./exceptions/pricing-engine.ex
 import { PricingCalculationResult } from "./pricing-calculation-result";
 import { PricingComponentCode, PricingLine } from "./pricing-line";
 import { PricingSnapshotWriter } from "./pricing-snapshot.writer";
+import { TarChargeGuard } from "./tar-charge-guard";
 
 const TRIP_ID = "3f2504e0-4f89-41d3-9a0c-0305e82c3301";
 const PRICING_ID = "9c858901-8a57-4791-81fe-4c455b099bc9";
@@ -63,6 +64,7 @@ describe("PricingSnapshotWriter", () => {
     resolvePricingComponentIds: jest.Mock;
   };
   let logger: { setContext: jest.Mock; log: jest.Mock; warn: jest.Mock };
+  let tarGuard: { assertStillFree: jest.Mock };
   let writer: PricingSnapshotWriter;
 
   beforeEach(() => {
@@ -80,10 +82,12 @@ describe("PricingSnapshotWriter", () => {
         .mockResolvedValue(new Map(COMPONENT_IDS)),
     };
     logger = { setContext: jest.fn(), log: jest.fn(), warn: jest.fn() };
+    tarGuard = { assertStillFree: jest.fn().mockResolvedValue(undefined) };
 
     writer = new PricingSnapshotWriter(
       tripPricingService as unknown as TripPricingService,
       tripPricingItemService as unknown as TripPricingItemService,
+      tarGuard as unknown as TarChargeGuard,
       logger as unknown as AppLoggerService,
     );
   });
@@ -280,6 +284,7 @@ describe("PricingSnapshotWriter", () => {
         calculationOrder: 7,
         quantity: null,
         unitPrice: null,
+        isAutomatic: false,
       });
     });
 

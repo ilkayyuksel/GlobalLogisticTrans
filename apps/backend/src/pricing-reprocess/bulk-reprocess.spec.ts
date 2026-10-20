@@ -59,6 +59,7 @@ describe("reprocessing a selection of Trips", () => {
         world.tripRead,
         silentLogger(),
         world.routeChoiceRepository as unknown as TripRouteSelectionRepository,
+        world.tarSettlement,
       ),
       world.tripPricing,
       silentLogger(),

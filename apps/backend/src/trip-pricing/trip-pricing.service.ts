@@ -10,6 +10,7 @@ import {
 
 import { changedFieldNames } from "../common/changed-fields";
 import { AppLoggerService } from "../logger/app-logger.service";
+import { PrismaService } from "../prisma/prisma.service";
 import { TripNotFoundException } from "../trips/exceptions/trip.exceptions";
 import { TripReadService } from "../trips/trip-read.service";
 import { toTripPricingItemResponse } from "../trip-pricing-items/dto/trip-pricing-item-response.dto";
@@ -58,6 +59,7 @@ function toItemRows(
     calculationOrder: item.calculationOrder,
     quantity: item.quantity,
     unitPrice: item.unitPrice,
+    isAutomatic: item.isAutomatic === true,
   }));
 }
 
@@ -70,6 +72,8 @@ export interface PricingSnapshotItemData {
   readonly calculationOrder: number;
   readonly quantity: Prisma.Decimal | null;
   readonly unitPrice: Prisma.Decimal | null;
+  /** The Engine's own automatic charge (TAR); false for everything else. */
+  readonly isAutomatic?: boolean;
 }
 
 /** One configured road a snapshot was priced against, as it read then. */
@@ -113,6 +117,12 @@ export interface ReplacePricingSnapshotCommand {
   /** The road(s) matched: none, one ordinary route, or both legs of a pair. */
   readonly routeLegs: readonly PricingSnapshotRouteLegData[];
   readonly items: readonly PricingSnapshotItemData[];
+  /**
+   * Runs FIRST inside the write's own transaction; throwing rolls the whole
+   * write back. Where the Pricing Engine re-checks, under a lock, a charge it
+   * decided before the write (the automatic TAR — `TarChargeGuard`).
+   */
+  readonly beforeWrite?: (transaction: PrismaService) => Promise<void>;
 }
 
 /**
@@ -314,6 +324,27 @@ export class TripPricingService {
   }
 
   /**
+   * Marks these Trips' snapshots as no longer current: a calculation that
+   * started at `calculationStartedAt` failed to replace them — see
+   * `current-pricing.ts`. Kept as history, never deleted.
+   */
+  async markCalculationFailed(
+    tripIds: readonly string[],
+    calculationStartedAt: Date,
+  ): Promise<number> {
+    const marked = await this.repository.markFailed(tripIds, calculationStartedAt);
+
+    if (marked > 0) {
+      this.logger.warn("Pricing snapshots marked FAILED: a recalculation could not replace them", {
+        tripIds,
+        marked,
+      });
+    }
+
+    return marked;
+  }
+
+  /**
    * One snapshot write, retried once when it lost the race to create the first.
    *
    * Closing a Trip prices it, and an operator editing it straight afterwards
@@ -353,7 +384,9 @@ export class TripPricingService {
   private writeSnapshotOnce(
     command: ReplacePricingSnapshotCommand,
   ): Promise<StoredSnapshot> {
-    return this.repository.runInTransaction(async ({ pricing, items }) => {
+    return this.repository.runInTransaction(async ({ pricing, items, transaction }) => {
+      await command.beforeWrite?.(transaction);
+
       const existing = await pricing.findByTripId(command.tripId);
       const header = {
         totalPrice: command.totalPrice,

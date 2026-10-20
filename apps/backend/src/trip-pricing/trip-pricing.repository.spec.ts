@@ -79,23 +79,28 @@ describe("TripPricingRepository", () => {
   /*
    * ── A CURRENT PRICE BELONGS TO A CLOSED TRIP ──────────────────────────────
    * The guard is the Trip's status in the WHERE clause: a reopened, cancelled
-   * or deleted Trip's snapshot stays stored and is simply not found here.
+   * or deleted Trip's snapshot stays stored and is simply not found here. So is
+   * a snapshot a later calculation FAILED to replace.
    */
   describe("the current reads", () => {
-    it("reads one Trip's snapshot only while the Trip is CLOSED", async () => {
+    it("reads one Trip's snapshot only while the Trip is CLOSED and it is not FAILED", async () => {
       await repository.findCurrentByTripId("trip-1");
 
       expect(prisma.tripPricing.findFirst).toHaveBeenCalledWith({
-        where: { tripId: "trip-1", trip: { status: "CLOSED" } },
+        where: { tripId: "trip-1", trip: { status: "CLOSED" }, calculationStatus: { not: "FAILED" } },
       });
     });
 
-    it("reads many Trips' snapshots only for CLOSED Trips", async () => {
+    it("reads many Trips' snapshots only for CLOSED Trips, never a FAILED one", async () => {
       await repository.findCurrentByTripIds(["trip-1", "trip-2"]);
 
       expect(prisma.tripPricing.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: { tripId: { in: ["trip-1", "trip-2"] }, trip: { status: "CLOSED" } },
+          where: {
+            tripId: { in: ["trip-1", "trip-2"] },
+            trip: { status: "CLOSED" },
+            calculationStatus: { not: "FAILED" },
+          },
         }),
       );
     });

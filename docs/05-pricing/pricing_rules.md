@@ -905,15 +905,20 @@ no code change.
 
 ### Which Trips pay it
 
-| Trip | TAR |
+The automatic charge needs a stated `tar_nummer` on the Trip itself
+(`hasTarNummer`; whitespace is absence) — the number is what the charge refers
+to. Then:
+
+| Trip | Automatic TAR |
 |---|---|
 | An ordinary Trip | charged |
 | A Trip in a manually created group | charged — a manual group is not a Combination |
-| The COLLECTION leg of a genuine Combination | charged |
-| The DELIVERY leg of a genuine Combination | **not** charged |
+| The DELIVERY leg of a genuine Combination | charged |
+| The COLLECTION leg of a genuine Combination | **not** charged |
 
-A genuine Combination therefore carries **exactly one** TAR charge in total: the
-two legs are one truck movement, and the movement is charged once.
+A genuine Combination therefore carries at most **one** automatic TAR: the two
+legs are one truck movement (`withAutomaticProperty` in
+`pricing-component.resolver.ts`).
 
 ### What counts as a genuine Combination
 
@@ -932,35 +937,116 @@ group membership — see Combination Surcharge above.
 
 If the Trips of one document are grouped but do **not** form exactly one
 DELIVERY and one COLLECTION, they are not a genuine Combination. Each is then
-priced as a member of a manual group: it keeps its own Combination Surcharge and
-owes TAR under the ordinary rule, on its own stated number. The shape is logged
-as the data fault it is.
+priced as a member of a manual group and owes TAR under the ordinary rule, on
+its own stated number. The shape is logged as the data fault it is.
 
-Pricing used to refuse such a group outright. It no longer does: the Combination
-Surcharge follows plain membership, so refusing took away a charge that was
-never in doubt — and with it the Trip's whole price.
+### One number, once a day
 
-### The assignments are overruled, not trusted
+A TAR-nummer is charged once per operational day (`planning_date`): the first
+Trip priced with it holds the charge, and the others stating it that day are
+priced without it (`TarChargeReadRepository.hasBeenChargedToday`; who holds it
+is decided in `tar-charge-holders.ts`). Holding it means an **automatic** TAR
+line on the Trip's snapshot — `trip_pricing_item.is_automatic`, written by the
+calculation that produced the line:
 
-The automatic property is removed from the Trip's assignments and then applied
-again where the rule says it belongs. Every starting state therefore produces
-the same answer:
+- a **manual** TAR line is never the automatic charge, so an operator's extra
+  TAR — added, changed or removed, on any Trip, reopened or not — never takes,
+  blocks or hands over the automatic one. (Until 20 October 2026 the two were
+  told apart by comparing the snapshot with the Trip's CURRENT assignments,
+  which went wrong while a reopened Trip was not repriced.)
+- a CANCELLED or DELETED Trip holds nothing;
+- a snapshot marked FAILED holds nothing (see "A failed calculation" below);
+- a reopened Trip still holds its charge **until something replaces it**: a
+  CLOSED Trip charged LATER than the reopened Trip's snapshot. That can only
+  happen while the reopened Trip did not hold it — it was cancelled or deleted
+  and came back, or let the number go — so its old charge does not revive and
+  the Trip that rightly took it keeps it (owner, 20 October 2026).
 
-| Stored assignments | Result |
+**Every change that moves the charge settles it at once** (owner, 20 October
+2026), so it is always on exactly one CLOSED Trip that owes it:
+
+| Change | What is repriced |
 |---|---|
-| none | charged where the rule says |
-| assigned by hand as well | charged once, not twice |
-| assigned to the wrong leg | charged on the correct leg only |
-| assigned to both legs | one charge, on the collection |
+| the holder's TAR-nummer changes or is cleared, it moves to another day, it is cancelled or deleted | every other CLOSED Trip stating the number that day (`trips/tar-charge-release.ts`) |
+| any pricing of a Trip that held the automatic charge and no longer does — it became a genuine Combination's COLLECTION leg by a group change, or anything else withdrew it | every other CLOSED Trip stating the number that day (`TarChargeSettlement`) |
+| two Trips priced at the same moment both took it | all but the first priced (earliest `calculated_at`, then Trip id) give it up (`TarChargeSettlement`) |
+| a cancelled or deleted Trip becomes active again (any path: status change, restore, a document) | nothing — the Trip that took the charge keeps it; the returning Trip finds it taken when it closes |
 
-An operator never has to tick TAR, and a tick left over from before this rule
-existed cannot produce a second charge.
+`TarChargeSettlement` runs after every store in `PairedPricingService`, which
+every pricing trigger goes through; the Trips it reprices are priced with their
+partner leg and do not settle again. Only the Trips sharing the number and day
+are ever touched.
+
+**Under real concurrency** (20 October 2026). Whether a number is free is
+decided while a Trip is calculated; the charge is written later. So the write
+that carries an automatic TAR line decides again INSIDE its own transaction,
+first of all: a transaction-scoped advisory lock on the number and day
+(`pg_advisory_xact_lock`), then the day's holders read under it — held by
+another Trip, and the write is rolled back, nothing of it stored
+(`TarChargeGuard`, through `TripPricingService`'s `beforeWrite`). The refused
+Trip is calculated again and stored without the TAR (`PairedPricingService`,
+at most three attempts). Two sessions therefore never both commit the charge:
+the one that stores first keeps it. Writes of other numbers or days never
+wait. Proven with two real database sessions in
+`tar-charge-concurrency.db.spec.ts`.
+
+What stays after a commit: moving a RELEASED charge to the next Trip
+(`TarChargeSettlement`) runs after the write. If the process stops between the
+two, that Trip has no TAR until it is priced again — never a double charge.
+`tar-diagnose.sql` (query B) lists such Trips.
+
+**Snapshots stored before the mark existed** were classified by migration
+`20261020120000` from what the rows hold: two lines → one automatic; one line
+with the manual assignment created before the calculation → manual; created
+after → automatic; no assignment → automatic. The last is certain only for a
+CLOSED Trip with a current snapshot; a reopened, cancelled or deleted Trip or a
+FAILED snapshot may have lost a manual assignment without trace. Those are
+listed by `tar-diagnose.sql` (query A) and resolved by pricing the Trip again.
+
+### A manual TAR is an extra
+
+An operator may assign TAR by hand. It is priced as its own line BESIDE any
+automatic charge, never instead of it:
+
+| Situation | TAR lines |
+|---|---|
+| number stated, nobody assigned it | 1 automatic |
+| number stated, also assigned by hand | 2 — automatic + manual |
+| no number, assigned by hand | 1 manual |
+| number already charged that day, assigned by hand | 1 manual |
+
+### Other priced Custom Properties (Flat, Genset, …)
+
+Every assigned property with its own `default_price` is one CUSTOM_PROPERTY
+line of that price (`CustomPropertyCalculator`); together they are **Others**,
+never part of the Tarief or the Fuel. A property without a price adds no line
+and logs a warning; a price of `0.00` adds a line of 0,00. A property linked to
+a pricing component carries no price of its own (enforced on configuration) and
+is charged through that component's route cost. Flat is assigned automatically
+for a flat-rack container type when the Trip is created
+(`AutomaticFlatPropertyService`) and is then priced like any other.
 
 ### Historical pricing is never rewritten
 
 A stored snapshot records what was charged and is left alone. The rule applies to
 **new** calculations only — a Trip closing, or an administrator asking for a
 reprocess.
+
+### A failed calculation leaves no old price on screen
+
+When a Trip is priced again — on closing (also after reopening), after an edit
+while CLOSED, on any automatic trigger or an explicit reprocess — and that
+calculation fails, the stored snapshot describes the Trip as it WAS. It is kept
+as history and marked `calculation_status = FAILED`
+(`PairedPricingService` → `TripPricingRepository.markFailed`), and no screen,
+export or invoice check shows it as the Trip's price
+(`current-pricing.ts`). The next successful calculation stores CALCULATED
+again. Only a snapshot older than the failed calculation is marked, so a newer
+successful one is never touched.
+
+Two failures mark nothing, because they change nothing about the Trip: an
+operator's route choice that cannot price the pair (the choice is refused and
+the stored prices stand), and a Trip that is not CLOSED or does not exist.
 
 ---
 

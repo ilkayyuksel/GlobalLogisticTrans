@@ -143,4 +143,55 @@ describeWithDatabase("the invoice check's reads against a real database", () => 
       expect(counts.get(three)).toBe(3);
     });
   });
+
+  describe("findRouteChoiceMembers", () => {
+    async function aRoute(): Promise<string> {
+      const [{ id }] = await client.$queryRaw<{ id: string }[]>`
+        INSERT INTO route_pricing (route_name, departure, destination, base_price)
+        VALUES ('Quay 869 - LILLE', 'Quay 869', ${`LILLE ${unique()}`}, 150)
+        RETURNING id`;
+
+      return id;
+    }
+
+    async function choose(tripId: string, routePricingId: string): Promise<void> {
+      await client.$executeRaw`
+        INSERT INTO trip_route_selection (trip_id, route_pricing_id) VALUES (${tripId}::uuid, ${routePricingId}::uuid)`;
+    }
+
+    it("answers the Trips and their groups with each one's choice as stored now", async () => {
+      const group = await aGroup();
+      const route = await aRoute();
+      const chosen = await aTrip({ tripGroupId: group });
+      const partner = await aTrip({ tripGroupId: group, status: "OPEN" });
+      await aTrip({ tripGroupId: group, status: "DELETED" });
+      const alone = await aTrip();
+      await choose(chosen, route);
+
+      const members = await reads.findRouteChoiceMembers([chosen, alone], [group]);
+      const byId = new Map(members.map((member) => [member.id, member]));
+
+      expect(members).toHaveLength(3);
+      expect(byId.get(chosen)).toMatchObject({ tripGroupId: group, status: "CLOSED", currentChoice: route });
+      expect(byId.get(partner)).toMatchObject({ tripGroupId: group, status: "OPEN", currentChoice: null });
+      expect(byId.get(alone)).toMatchObject({ tripGroupId: null, currentChoice: null });
+    });
+
+    /** Removing a route configuration removes the choices on it (ON DELETE CASCADE). */
+    it("answers no choice once the chosen route is removed", async () => {
+      const route = await aRoute();
+      const trip = await aTrip();
+      await choose(trip, route);
+
+      await client.$executeRaw`DELETE FROM route_pricing WHERE id = ${route}::uuid`;
+
+      const [member] = await reads.findRouteChoiceMembers([trip], []);
+
+      expect(member.currentChoice).toBeNull();
+    });
+
+    it("asks nothing for nothing", async () => {
+      await expect(reads.findRouteChoiceMembers([], [])).resolves.toEqual([]);
+    });
+  });
 });

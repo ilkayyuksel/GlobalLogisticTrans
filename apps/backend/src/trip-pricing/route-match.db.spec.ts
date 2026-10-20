@@ -100,6 +100,42 @@ describeWithDatabase("the matched route of a snapshot, against a real database",
     ]);
   });
 
+  /** The mark that tells the automatic TAR from a manual one is stored with the line. */
+  it("stores whether each line is the Engine's automatic charge", async () => {
+    const tripId = await closedTrip();
+    const component =
+      (await client.pricingComponent.findFirst({ where: { code: "CUSTOM_PROPERTY" } })) ??
+      (await client.pricingComponent.create({
+        data: { code: "CUSTOM_PROPERTY", name: "Custom", description: "Custom", displayOrder: 7 },
+      }));
+    const line = (description: string, isAutomatic?: boolean) => ({
+      pricingComponentId: component.id,
+      customPropertyId: null,
+      description,
+      amount: new Prisma.Decimal("20.00"),
+      calculationOrder: 7,
+      quantity: null,
+      unitPrice: null,
+      ...(isAutomatic === undefined ? {} : { isAutomatic }),
+    });
+
+    await service.replaceSnapshot(
+      command(tripId, new Date("2026-10-10T10:00:00Z"), {
+        totalPrice: new Prisma.Decimal("60.00"),
+        items: [line("automatic", true), line("manual", false), line("unmarked")],
+      }),
+    );
+    const [snapshot] = await repository.findCurrentByTripIds([tripId]);
+
+    expect(
+      snapshot.items.map((item) => [item.description, item.isAutomatic]).sort(),
+    ).toEqual([
+      ["automatic", true],
+      ["manual", false],
+      ["unmarked", false],
+    ]);
+  });
+
   it("replaces the legs with a newer calculation, leaving no stale leg", async () => {
     const tripId = await closedTrip();
     await service.replaceSnapshot(command(tripId, new Date("2026-10-10T10:00:00Z")));

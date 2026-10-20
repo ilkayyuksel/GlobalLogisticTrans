@@ -964,12 +964,13 @@ describe("PricingComponentResolver", () => {
    * ──────────────────────────────────────────────────────────────────────────
    */
   describe("the properties a Trip is priced against", () => {
-    /** The automatic property as it comes back from the resolver. */
+    /** The automatic property as it comes back from the resolver — marked as automatic. */
     const AUTOMATIC = {
       customPropertyId: AUTOMATIC_PROPERTY_ID,
       name: "TAR",
       pricingComponentId: null,
       defaultPrice: "20.00",
+      isAutomatic: true,
     };
 
     function resolve(trip: TripReadView = buildTrip()) {

@@ -1,7 +1,9 @@
 import { CombinationMatchOutcome, RouteMatchMethod, RouteSelectionSource } from "@prisma/client";
 
 import type { CurrentTripPricing } from "../../trip-pricing/effective-pricing.service";
+import type { RouteMatchLegView, RouteMatchView } from "../../trip-pricing/route-match-view";
 import type { RoutableTrip } from "../../trips/trip-route";
+import type { ManualPartnerFacts, ManualRouteFacts } from "./manual-route-facts.reader";
 import { describeRoutes, type RouteDescription } from "./route-description";
 
 /**
@@ -52,9 +54,14 @@ export interface PriceReliability {
 /** The Trip facts this judgement reads. */
 export type AssessedTrip = RoutableTrip & { readonly tripGroupId: string | null };
 
+/**
+ * `manual` is what is stored NOW about a route choice (`ManualRouteFactsReader`);
+ * it is read only for a snapshot priced on one, and null for any other.
+ */
 export function assessPriceReliability(
   trip: AssessedTrip,
   pricing: CurrentTripPricing | null,
+  manual: ManualRouteFacts | null,
 ): PriceReliability {
   if (pricing === null) {
     return unreliable(PriceProblem.NO_SNAPSHOT, "De rit is nooit geprijsd.", null);
@@ -63,7 +70,7 @@ export function assessPriceReliability(
   const route = describeRoutes(trip, pricing.routeMatch);
   const problem =
     pricing.routeMatch.selection === RouteSelectionSource.MANUAL
-      ? manualProblem(trip, pricing)
+      ? manualProblem(trip, pricing, manual)
       : (groupProblem(trip, pricing) ?? matchProblem(pricing.routeMatch.method));
 
   return problem === null
@@ -104,8 +111,23 @@ interface Problem {
  * whole Combination for a grouped Trip and none for an ungrouped one — and the
  * chosen configuration still exists. Read from what was stored; nothing is
  * matched or priced again here.
+ *
+ * ── AND THE CHOICE STILL STANDS (owner, 20 October 2026) ────────────────────
+ * The choice stored NOW must be the route the snapshot was priced on. An
+ * explicit reprocess (or a road, group or status change) removes a choice; a
+ * snapshot still claiming one it no longer has is out of date, and an old
+ * choice is never brought back to vouch for it.
+ *
+ * For a chosen Combination, the PAIR must confirm it too: the snapshot's two
+ * legs complementary (positions 1 and 2, this Trip priced on one of them), and
+ * the partner leg chosen and priced on the OTHER leg of the same Combination.
+ * Half a pair, or a pair on two different Combinations, is never relied on.
  */
-function manualProblem(trip: AssessedTrip, pricing: CurrentTripPricing): Problem | null {
+function manualProblem(
+  trip: AssessedTrip,
+  pricing: CurrentTripPricing,
+  manual: ManualRouteFacts | null,
+): Problem | null {
   const { routePricingId, combinationRouteGroupId, legs, reviewed } = pricing.routeMatch;
   const isWholeCombination = combinationRouteGroupId !== null && legs.length === 2;
   const confirmsChoice = trip.tripGroupId
@@ -127,7 +149,67 @@ function manualProblem(trip: AssessedTrip, pricing: CurrentTripPricing): Problem
     };
   }
 
-  return null;
+  if (manual === null || manual.currentChoice !== routePricingId) {
+    return {
+      problem: PriceProblem.SNAPSHOT_INCONSISTENT,
+      explanation:
+        "De handmatige routekeuze waarop de prijs berekend werd, is intussen gewist of gewijzigd.",
+    };
+  }
+
+  return trip.tripGroupId ? chosenPairProblem(pricing.routeMatch, manual.partner) : null;
+}
+
+/** A chosen Combination, confirmed by its own two legs and by its partner leg. */
+function chosenPairProblem(
+  routeMatch: RouteMatchView,
+  partner: ManualPartnerFacts | null,
+): Problem | null {
+  const otherLeg = complementaryLeg(routeMatch);
+
+  if (otherLeg === null) {
+    return {
+      problem: PriceProblem.SNAPSHOT_INCONSISTENT,
+      explanation: "De opgeslagen legs van de gekozen combinatie zijn niet complementair.",
+    };
+  }
+
+  const partnerMatch = partner?.pricing?.routeMatch ?? null;
+  const partnerOnOtherLeg =
+    partner !== null &&
+    partner.currentChoice === otherLeg.routePricingId &&
+    partnerMatch !== null &&
+    partnerMatch.combinationRouteGroupId === routeMatch.combinationRouteGroupId &&
+    partnerMatch.routePricingId === otherLeg.routePricingId;
+
+  return partnerOnOtherLeg
+    ? null
+    : {
+        problem: PriceProblem.COMBINATION_NOT_PRICED,
+        explanation:
+          "De partnerrit is niet gekozen en geprijsd op de andere leg van dezelfde combinatie.",
+      };
+}
+
+/**
+ * The leg this Trip was NOT priced on, when the snapshot's legs are exactly
+ * Leg 1 and Leg 2 of one pair with this Trip priced on one of them; else null.
+ */
+function complementaryLeg(routeMatch: RouteMatchView): RouteMatchLegView | null {
+  const { legs, routePricingId } = routeMatch;
+  const positions = legs.map((leg) => leg.legPosition ?? 0).sort((left, right) => left - right);
+  const priced = legs.filter((leg) => leg.isPricedLeg);
+  const other = legs.filter((leg) => !leg.isPricedLeg);
+
+  const isComplementary =
+    legs.length === 2 &&
+    positions[0] === 1 &&
+    positions[1] === 2 &&
+    priced.length === 1 &&
+    priced[0].routePricingId === routePricingId &&
+    other[0].routePricingId !== routePricingId;
+
+  return isComplementary ? other[0] : null;
 }
 
 /**

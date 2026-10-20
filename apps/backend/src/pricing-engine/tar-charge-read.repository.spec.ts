@@ -1,142 +1,147 @@
-import { TripStatus } from "@prisma/client";
+import { PricingCalculationStatus, TripStatus } from "@prisma/client";
 
 import { PrismaService } from "../prisma/prisma.service";
 import { TarChargeReadRepository } from "./tar-charge-read.repository";
 
 const TRIP_ID = "11111111-1111-4111-8111-111111111111";
-const TAR_ID = "b36469b0-37ec-40ba-81da-9bc272e05d60";
+const OTHER_TRIP = "22222222-2222-4222-8222-222222222222";
 const DAY = new Date("2026-09-07T00:00:00.000Z");
 
 /**
- * The query that decides whether a TAR-nummer has already been charged today.
+ * The reads behind "has this TAR-nummer already been charged today?".
  *
  * A wrong `where` here silently charges twice or silently charges nothing, and
- * neither shows up as an error — so the query SHAPE is the assertion, the same
- * way it is for every other repository in this codebase.
+ * neither shows up as an error — so the query SHAPE is the assertion. WHO holds
+ * the charge from what is read is `tar-charge-holders.spec.ts`; the same reads
+ * against a real database are `tar-charge-read.repository.db.spec.ts`.
  */
 describe("TarChargeReadRepository", () => {
-  let prisma: { tripPricingItem: { findFirst: jest.Mock } };
+  let prisma: { tripPricingItem: { findMany: jest.Mock }; trip: { findMany: jest.Mock } };
   let repository: TarChargeReadRepository;
 
   beforeEach(() => {
-    prisma = { tripPricingItem: { findFirst: jest.fn().mockResolvedValue(null) } };
+    prisma = {
+      tripPricingItem: { findMany: jest.fn().mockResolvedValue([]) },
+      trip: { findMany: jest.fn().mockResolvedValue([]) },
+    };
 
-    repository = new TarChargeReadRepository(
-      prisma as unknown as PrismaService,
-    );
+    repository = new TarChargeReadRepository(prisma as unknown as PrismaService);
   });
 
-  function ask() {
-    return repository.hasBeenChargedToday({
-      tripId: TRIP_ID,
-      planningDate: DAY,
-      tarNummer: "TAR123",
-      automaticCustomPropertyId: TAR_ID,
-    });
+  const ask = () =>
+    repository.hasBeenChargedToday({ tripId: TRIP_ID, planningDate: DAY, tarNummer: "TAR123" });
+
+  /** Held by these Trips, CLOSED, priced in this order. */
+  function holders(...tripIds: string[]) {
+    prisma.tripPricingItem.findMany.mockResolvedValue(
+      tripIds.map((tripId, index) => ({
+        tripPricing: {
+          tripId,
+          calculatedAt: new Date(DAY.getTime() + index * 1000),
+          trip: { status: TripStatus.CLOSED },
+        },
+      })),
+    );
   }
 
-  /** The whole rule, in one `where`. */
-  it("looks for a CHARGE, on another Trip, that day, with that number", async () => {
+  const where = () => prisma.tripPricingItem.findMany.mock.calls[0][0].where;
+
+  /** The whole rule of what counts as a charge, in one `where`. */
+  it("reads the AUTOMATIC TAR lines of that number and day, of snapshots that may count", async () => {
     await ask();
 
-    expect(prisma.tripPricingItem.findFirst).toHaveBeenCalledWith({
+    expect(prisma.tripPricingItem.findMany).toHaveBeenCalledWith({
       where: {
-        customPropertyId: TAR_ID,
+        isAutomatic: true,
         tripPricing: {
+          calculationStatus: { not: PricingCalculationStatus.FAILED },
           trip: {
-            id: { not: TRIP_ID },
+            status: { notIn: [TripStatus.DELETED, TripStatus.CANCELLED] },
             planningDate: DAY,
             tarNummer: { equals: "TAR123", mode: "insensitive" },
-            status: { notIn: [TripStatus.DELETED, TripStatus.CANCELLED] },
           },
         },
       },
-      select: { id: true },
+      select: {
+        tripPricing: {
+          select: { tripId: true, calculatedAt: true, trip: { select: { status: true } } },
+        },
+      },
     });
   });
 
-  /**
-   * The distinction the whole rule rests on: the evidence is a pricing ITEM,
-   * not a Trip row carrying the same string. A number typed on a Trip nobody
-   * closed produces no item, so it cannot block a real charge.
-   */
-  it("reads pricing items, never Trips", async () => {
+  /** A manual TAR has no mark: it is never read as the day's charge. */
+  it("never reads a manual TAR line", async () => {
     await ask();
 
-    expect(prisma).not.toHaveProperty("trip");
-    expect(prisma.tripPricingItem.findFirst).toHaveBeenCalledTimes(1);
+    expect(where().isAutomatic).toBe(true);
   });
 
-  /** An existence check: no rows are loaded and nothing is counted. */
-  it("selects nothing but the key", async () => {
-    await ask();
-
-    const [{ select }] = prisma.tripPricingItem.findFirst.mock.calls[0];
-
-    expect(select).toEqual({ id: true });
-  });
-
-  it("answers true when such a charge exists", async () => {
-    prisma.tripPricingItem.findFirst.mockResolvedValue({ id: "item-1" });
+  it("answers true when another Trip holds the charge", async () => {
+    holders(OTHER_TRIP);
 
     expect(await ask()).toBe(true);
   });
 
-  it("answers false when none does", async () => {
-    prisma.tripPricingItem.findFirst.mockResolvedValue(null);
+  it("answers false when nobody, or only the Trip itself, holds it", async () => {
+    expect(await ask()).toBe(false);
 
+    holders(TRIP_ID);
     expect(await ask()).toBe(false);
   });
 
-  describe("which Trips are disregarded", () => {
-    function statusFilter() {
-      const [{ where }] = prisma.tripPricingItem.findFirst.mock.calls[0];
+  describe("which snapshots are disregarded", () => {
+    const statusFilter = () => where().tripPricing.trip.status.notIn;
 
-      return where.tripPricing.trip.status.notIn;
-    }
-
-    /**
-     * Soft delete is the model's remedy for a Trip "created incorrectly or is a
-     * duplicate". A record nobody should be billed for must not stop somebody
-     * else being billed.
-     */
-    it("disregards a DELETED Trip's charge", async () => {
+    it("a DELETED or CANCELLED Trip's", async () => {
       await ask();
 
-      expect(statusFilter()).toContain(TripStatus.DELETED);
+      expect(statusFilter()).toEqual([TripStatus.DELETED, TripStatus.CANCELLED]);
     });
 
-    /**
-     * CANCELLED is "a business cancellation of the underlying transport": a
-     * transport that was called off did not incur the charge.
-     */
-    it("disregards a CANCELLED Trip's charge", async () => {
+    it("a FAILED snapshot", async () => {
       await ask();
 
-      expect(statusFilter()).toContain(TripStatus.CANCELLED);
+      expect(where().tripPricing.calculationStatus).toEqual({ not: PricingCalculationStatus.FAILED });
     });
 
-    /**
-     * OPEN is deliberately NOT disregarded. A Trip that was closed, charged and
-     * then reopened still holds a real charge, and ignoring it would let a
-     * second Trip take the same TAR while the first still has it — a double
-     * charge produced by reopening.
-     */
-    it("still counts a reopened Trip's charge", async () => {
+    /** A reopened Trip still holds its charge — until a later CLOSED one replaces it. */
+    it("never a reopened Trip's, by its status alone", async () => {
       await ask();
 
       expect(statusFilter()).not.toContain(TripStatus.OPEN);
-      expect(statusFilter()).not.toContain(TripStatus.CLOSED);
     });
   });
 
-  /** One number, however it was typed. */
-  it("compares the number case-insensitively", async () => {
-    await ask();
+  it("names the Trips holding an automatic TAR among those given, asking nothing for none", async () => {
+    prisma.tripPricingItem.findMany.mockResolvedValue([{ tripPricing: { tripId: TRIP_ID } }]);
 
-    const [{ where }] = prisma.tripPricingItem.findFirst.mock.calls[0];
+    expect(await repository.findTripsHoldingAutomaticTar([])).toEqual(new Set());
+    expect(prisma.tripPricingItem.findMany).not.toHaveBeenCalled();
 
-    expect(where.tripPricing.trip.tarNummer.mode).toBe("insensitive");
+    expect(await repository.findTripsHoldingAutomaticTar([TRIP_ID, OTHER_TRIP])).toEqual(new Set([TRIP_ID]));
+    expect(prisma.tripPricingItem.findMany).toHaveBeenCalledWith({
+      where: { isAutomatic: true, tripPricing: { tripId: { in: [TRIP_ID, OTHER_TRIP] } } },
+      select: { tripPricing: { select: { tripId: true } } },
+    });
+  });
+
+  it("names the other CLOSED Trips stating the number that day, in a stable order", async () => {
+    prisma.trip.findMany.mockResolvedValue([{ id: OTHER_TRIP }]);
+
+    expect(await repository.findClosedTripsStating({ tarNummer: "TAR123", planningDate: DAY }, TRIP_ID)).toEqual([
+      OTHER_TRIP,
+    ]);
+    expect(prisma.trip.findMany).toHaveBeenCalledWith({
+      where: {
+        id: { not: TRIP_ID },
+        status: TripStatus.CLOSED,
+        planningDate: DAY,
+        tarNummer: { equals: "TAR123", mode: "insensitive" },
+      },
+      select: { id: true },
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+    });
   });
 
   /** Read-only by construction: the Engine must not be able to write here. */

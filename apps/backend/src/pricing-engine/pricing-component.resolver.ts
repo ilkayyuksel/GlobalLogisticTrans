@@ -336,7 +336,6 @@ export class PricingComponentResolver {
         tripId: trip.id,
         planningDate: toUtcDate(trip.planningDate),
         tarNummer,
-        automaticCustomPropertyId: rules.automaticCustomPropertyId,
       });
 
       if (alreadyCharged) {
@@ -367,6 +366,8 @@ export class PricingComponentResolver {
       pricingComponentId: property.pricingComponentId,
       // The configured price, whatever it currently is. Never a literal.
       defaultPrice: property.defaultPrice,
+      // Its line says so: an operator's TAR of the same property never does.
+      isAutomatic: true,
     };
   }
 

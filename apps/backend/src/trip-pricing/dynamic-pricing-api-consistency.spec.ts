@@ -1,11 +1,13 @@
 import { Prisma } from "@prisma/client";
 
 import { TripRouteSelectionRepository } from "../trip-route-selection/trip-route-selection.repository";
+import { noTarSettlement } from "../pricing-engine/tar-charge-settlement.double";
 import { AppLoggerService } from "../logger/app-logger.service";
 import { PricingComponentResolver } from "../pricing-engine/pricing-component.resolver";
 import { PairedPricingService } from "../pricing-engine/paired-pricing.service";
 import { PricingEngineService } from "../pricing-engine/pricing-engine.service";
 import { PricingRecalculationService } from "../pricing-engine/pricing-recalculation.service";
+import { TarChargeReadRepository } from "../pricing-engine/tar-charge-read.repository";
 import { TripReadService } from "../trips/trip-read.service";
 import { toEffectivePricingDto } from "./dto/effective-pricing.dto";
 import { EffectivePricingService } from "./effective-pricing.service";
@@ -118,10 +120,12 @@ describe("a mutation's pricing equals the Ritten list's pricing", () => {
         tripRead,
         logger,
         { clearForTrips: jest.fn().mockResolvedValue(0), replace: jest.fn() } as unknown as TripRouteSelectionRepository,
+        noTarSettlement(),
       ),
       effectivePricing,
       tripRead,
       {} as unknown as PricingComponentResolver,
+      { findClosedTripsStating: jest.fn().mockResolvedValue([]) } as unknown as TarChargeReadRepository,
       {
         setContext: jest.fn(),
         log: jest.fn(),

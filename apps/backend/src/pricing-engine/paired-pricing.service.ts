@@ -7,11 +7,17 @@ import { TripReadService, TripReadView } from "../trips/trip-read.service";
 import { pricingPartnerOf } from "./combination-leg";
 import {
   PartnerLegNotPriceableException,
+  PricingEngineErrorCode,
   PricingEngineException,
 } from "./exceptions/pricing-engine.exceptions";
 import { PricingCalculationResult } from "./pricing-calculation-result";
 import { PricingEngineService } from "./pricing-engine.service";
 import { NO_ROUTE_CHOICES, type RouteChoices } from "./manual-route-selection";
+import { AutomaticTarAlreadyChargedException } from "./tar-charge-guard";
+import { TarChargeSettlement } from "./tar-charge-settlement";
+
+/** How often a Trip is priced again after losing an automatic TAR to a concurrent write. */
+const TAR_CLAIM_ATTEMPTS = 3;
 
 /** How a pair is priced together, beyond the defaults. */
 export interface PricingTogetherOptions {
@@ -68,6 +74,7 @@ export class PairedPricingService {
     private readonly trips: TripReadService,
     private readonly logger: AppLoggerService,
     private readonly routeChoices: TripRouteSelectionRepository,
+    private readonly tarSettlement: TarChargeSettlement,
   ) {
     this.logger.setContext(PairedPricingService.name);
   }
@@ -130,24 +137,166 @@ export class PairedPricingService {
     tripIds: readonly string[],
     options: PricingTogetherOptions = {},
   ): Promise<PricingCalculationResult[]> {
+    return this.priceTogether(tripIds, options, true);
+  }
+
+  /**
+   * `settlesTar`: after storing, the Trips sharing a TAR-nummer whose charge
+   * moved are priced too (`TarChargeSettlement`). Off for those Trips
+   * themselves, so one settlement never sets off another.
+   */
+  private async priceTogether(
+    tripIds: readonly string[],
+    options: PricingTogetherOptions,
+    settlesTar: boolean,
+  ): Promise<PricingCalculationResult[]> {
     const [triggeredId] = tripIds;
     const results: PricingCalculationResult[] = [];
+    const startedAt = new Date();
 
-    for (const tripId of tripIds) {
-      results.push(await this.calculate(tripId, triggeredId, options.choices ?? NO_ROUTE_CHOICES));
+    try {
+      for (const tripId of tripIds) {
+        results.push(await this.calculate(tripId, triggeredId, options.choices ?? NO_ROUTE_CHOICES));
+      }
+    } catch (error: unknown) {
+      await this.markNotCurrent(tripIds, startedAt, error, options);
+      throw error;
     }
 
     await options.beforeStore?.(results);
 
-    for (const result of results) {
-      await this.engine.store(result);
+    const heldTarBefore = settlesTar ? await this.tarSettlement.holdingBefore(tripIds) : null;
+
+    try {
+      for (const [index, result] of results.entries()) {
+        results[index] = await this.storeClaimingTarOnce(result, options.choices ?? NO_ROUTE_CHOICES);
+      }
+    } catch (error: unknown) {
+      // A leg already stored here was calculated after `startedAt` and keeps
+      // its new snapshot; only older ones are marked.
+      await this.markNotCurrent(tripIds, startedAt, error, options);
+      throw error;
     }
 
     if (results.length > 1) {
       this.logger.log("Priced a pair of legs together", { tripIds });
     }
 
+    if (heldTarBefore !== null) {
+      await this.settleTarCharges(tripIds, heldTarBefore);
+    }
+
     return results;
+  }
+
+  /**
+   * Stores a result. When its automatic TAR was charged to another Trip after
+   * this calculation found the number free — two sessions pricing at once —
+   * the write is refused inside its transaction (`TarChargeGuard`), and the
+   * Trip is calculated again from its current data, which now finds the
+   * charge taken. Bounded: a Trip that keeps losing the race is reported.
+   */
+  private async storeClaimingTarOnce(
+    result: PricingCalculationResult,
+    choices: RouteChoices,
+  ): Promise<PricingCalculationResult> {
+    let current = result;
+
+    for (let attempt = 1; ; attempt += 1) {
+      try {
+        return await this.engine.store(current);
+      } catch (error: unknown) {
+        if (!(error instanceof AutomaticTarAlreadyChargedException) || attempt >= TAR_CLAIM_ATTEMPTS) {
+          throw error;
+        }
+
+        this.logger.log("The automatic TAR was charged to another Trip meanwhile; pricing again", {
+          tripId: current.tripId,
+          attempt,
+        });
+        current = await this.engine.calculate(current.tripId, choices);
+      }
+    }
+  }
+
+  /**
+   * Prices again, each with its partner leg, the Trips a moved TAR charge now
+   * belongs to — or no longer belongs to — see `TarChargeSettlement`.
+   *
+   * Never throws: the Trips priced above are stored and stand. A Trip that
+   * cannot be priced here has its old snapshot marked as not current, like any
+   * failed calculation, and is logged.
+   */
+  private async settleTarCharges(
+    tripIds: readonly string[],
+    heldBefore: ReadonlySet<string>,
+  ): Promise<void> {
+    let reprice: string[];
+
+    try {
+      reprice = await this.tarSettlement.tripsToReprice(tripIds, heldBefore);
+    } catch (error: unknown) {
+      this.logger.error("Could not settle the TAR charges of a pricing", {
+        tripIds,
+        reason: error instanceof Error ? error.message : String(error),
+      });
+
+      return;
+    }
+
+    for (const tripId of reprice) {
+      try {
+        const { closedPartnerId } = await this.pairOf(tripId);
+
+        await this.priceTogether(closedPartnerId ? [tripId, closedPartnerId] : [tripId], {}, false);
+      } catch (error: unknown) {
+        this.logger.warn("A Trip whose TAR charge moved could not be priced again", {
+          tripId,
+          pricingErrorCode: error instanceof PricingEngineException ? error.code : null,
+        });
+      }
+    }
+  }
+
+  /**
+   * ── A FAILED CALCULATION LEAVES NO OLD PRICE ON SCREEN ─────────────────────
+   * Both legs were to be priced from their data as it is now, and neither
+   * could be stored. Their old snapshots describe the Trips as they were, so
+   * they are marked FAILED and no screen, export or invoice check shows them
+   * as current (`current-pricing.ts`) — until a calculation succeeds.
+   *
+   * Two failures change nothing about a Trip and mark nothing: an operator's
+   * route choice that cannot price the pair (its data is unchanged; the choice
+   * is refused and the stored prices stand), and a Trip that is not CLOSED or
+   * does not exist (there is no current price to withdraw).
+   *
+   * Never hides the original failure: a marking that fails is logged and the
+   * caller still receives the calculation's own error.
+   */
+  private async markNotCurrent(
+    tripIds: readonly string[],
+    startedAt: Date,
+    error: unknown,
+    options: PricingTogetherOptions,
+  ): Promise<void> {
+    const isRouteChoice = (options.choices?.size ?? 0) > 0;
+    const leavesPriceAlone =
+      error instanceof PricingEngineException &&
+      (error.code === PricingEngineErrorCode.TRIP_NOT_CLOSED ||
+        error.code === PricingEngineErrorCode.TRIP_NOT_FOUND);
+
+    if (isRouteChoice || leavesPriceAlone) {
+      return;
+    }
+
+    try {
+      await this.engine.markCalculationFailed(tripIds, startedAt);
+    } catch (markingError: unknown) {
+      this.logger.error("Could not mark the old pricing snapshots as not current", {
+        tripIds,
+        reason: markingError instanceof Error ? markingError.message : String(markingError),
+      });
+    }
   }
 
   private async calculate(

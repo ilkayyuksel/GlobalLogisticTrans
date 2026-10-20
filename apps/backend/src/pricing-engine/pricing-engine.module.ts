@@ -25,6 +25,8 @@ import { PricingRuleResolver } from "./pricing-rule.resolver";
 import { PricingSnapshotWriter } from "./pricing-snapshot.writer";
 import { RouteCostResolver } from "./route-cost.resolver";
 import { TarChargeReadRepository } from "./tar-charge-read.repository";
+import { TarChargeGuard } from "./tar-charge-guard";
+import { TarChargeSettlement } from "./tar-charge-settlement";
 import { TollCalculator } from "./toll.calculator";
 import { TripClosedPricingListener } from "./trip-closed-pricing.listener";
 import { TunnelCalculator } from "./tunnel.calculator";
@@ -108,6 +110,8 @@ import { WaitingTimeCalculator } from "./waiting-time.calculator";
     PricingRuleResolver,
     PricingComponentResolver,
     TarChargeReadRepository,
+    TarChargeSettlement,
+    TarChargeGuard,
     RouteCostResolver,
     PricingSnapshotWriter,
     BasePriceCalculator,

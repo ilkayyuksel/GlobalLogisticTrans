@@ -1,6 +1,7 @@
 import { Injectable } from "@nestjs/common";
 import { Prisma, Trip, TripStatus } from "@prisma/client";
 
+import type { CombinationMember } from "../pricing-engine/combination-leg";
 import { PrismaService } from "../prisma/prisma.service";
 
 /** One Cost Confirmation, as the invoice check compares an EC line with it. */
@@ -9,6 +10,12 @@ export interface InvoiceCostConfirmation {
   /** Eucon's own number, digits only — the customer prints it as `EC <nr>`. */
   readonly ccNumber: string;
   readonly amount: Prisma.Decimal;
+}
+
+/** A Trip as the route-choice check reads it: its pair facts and its choice NOW. */
+export interface RouteChoiceMember extends CombinationMember {
+  /** The route `trip_route_selection` holds for it now; null when none. */
+  readonly currentChoice: string | null;
 }
 
 /**
@@ -167,5 +174,40 @@ export class InvoiceAuditReadRepository {
     }
 
     return counts;
+  }
+
+  /**
+   * These Trips and every member of these groups, each with the route choice
+   * stored for it NOW — never what a snapshot remembers. A choice an explicit
+   * reprocess, a road, group or status change removed is simply absent.
+   */
+  async findRouteChoiceMembers(
+    tripIds: readonly string[],
+    tripGroupIds: readonly string[],
+  ): Promise<RouteChoiceMember[]> {
+    if (tripIds.length === 0 && tripGroupIds.length === 0) {
+      return [];
+    }
+
+    const rows = await this.prisma.trip.findMany({
+      where: {
+        OR: [{ id: { in: [...tripIds] } }, { tripGroupId: { in: [...tripGroupIds] } }],
+        status: { not: TripStatus.DELETED },
+      },
+      select: {
+        id: true,
+        tripGroupId: true,
+        pdfDocumentId: true,
+        direction: true,
+        status: true,
+        routeSelection: { select: { routePricingId: true } },
+      },
+      orderBy: [{ id: "asc" }],
+    });
+
+    return rows.map(({ routeSelection, ...member }) => ({
+      ...member,
+      currentChoice: routeSelection?.routePricingId ?? null,
+    }));
   }
 }

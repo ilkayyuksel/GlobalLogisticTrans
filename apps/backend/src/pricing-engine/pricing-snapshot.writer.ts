@@ -1,7 +1,10 @@
 import { Injectable } from "@nestjs/common";
 
+import { toUtcDate } from "../common/dates";
 import { AppLoggerService } from "../logger/app-logger.service";
+import { PrismaService } from "../prisma/prisma.service";
 import { TripPricingItemService } from "../trip-pricing-items/trip-pricing-item.service";
+import { meaningfulTarNummer } from "../trips/tar-nummer";
 import {
   PricingSnapshotItemData,
   TripPricingService,
@@ -10,6 +13,8 @@ import { UnknownPricingComponentException } from "./exceptions/pricing-engine.ex
 import { ExistingPricingSnapshot } from "./pricing-calculation-context";
 import { PricingCalculationResult } from "./pricing-calculation-result";
 import { PricingLine } from "./pricing-line";
+import { TarChargeGuard } from "./tar-charge-guard";
+import type { TarDay } from "./tar-charge-read.repository";
 
 /**
  * The Pricing Engine's boundary to the pricing store.
@@ -30,6 +35,7 @@ export class PricingSnapshotWriter {
   constructor(
     private readonly tripPricingService: TripPricingService,
     private readonly tripPricingItemService: TripPricingItemService,
+    private readonly tarGuard: TarChargeGuard,
     private readonly logger: AppLoggerService,
   ) {
     this.logger.setContext(PricingSnapshotWriter.name);
@@ -90,6 +96,7 @@ export class PricingSnapshotWriter {
    */
   async writeSnapshot(result: PricingCalculationResult): Promise<string> {
     const items = await this.toItemData(result.lines);
+    const tarClaim = automaticTarClaimOf(result);
 
     const stored = await this.tripPricingService.replaceSnapshot({
       tripId: result.tripId,
@@ -112,6 +119,13 @@ export class PricingSnapshotWriter {
         matchMethod: leg.method,
       })),
       items,
+      // A charge decided while calculating is checked again where it is written.
+      ...(tarClaim === null
+        ? {}
+        : {
+            beforeWrite: (transaction: PrismaService) =>
+              this.tarGuard.assertStillFree(transaction, tarClaim, result.tripId),
+          }),
     });
 
     this.logger.log("Pricing snapshot written", {
@@ -123,6 +137,14 @@ export class PricingSnapshotWriter {
     });
 
     return stored.id;
+  }
+
+  /**
+   * Records that a calculation started at `calculationStartedAt` could not
+   * replace these Trips' snapshots, so none of them is shown as current.
+   */
+  markFailed(tripIds: readonly string[], calculationStartedAt: Date): Promise<number> {
+    return this.tripPricingService.markCalculationFailed(tripIds, calculationStartedAt);
   }
 
   /**
@@ -146,6 +168,7 @@ export class PricingSnapshotWriter {
       calculationOrder: line.calculationOrder,
       quantity: line.quantity,
       unitPrice: line.unitPrice,
+      isAutomatic: line.isAutomatic === true,
     }));
   }
 
@@ -174,4 +197,17 @@ export class PricingSnapshotWriter {
 
     return resolved;
   }
+}
+
+/**
+ * The number and day whose automatic TAR this result charges, or null when it
+ * charges none — the claim `TarChargeGuard` checks again where it is written.
+ */
+function automaticTarClaimOf(result: PricingCalculationResult): TarDay | null {
+  const tarNummer = meaningfulTarNummer(result.context.tarNummer);
+  const { planningDate } = result.context;
+
+  return result.lines.some((line) => line.isAutomatic === true) && tarNummer !== null && planningDate !== null
+    ? { tarNummer, planningDate: toUtcDate(planningDate) }
+    : null;
 }

@@ -1,6 +1,7 @@
 import { Prisma, PricingCalculationStatus, TripStatus } from "@prisma/client";
 
 import { TripRouteSelectionRepository } from "../trip-route-selection/trip-route-selection.repository";
+import { noTarSettlement } from "./tar-charge-settlement.double";
 import { DomainEventBus } from "../common/events/domain-event-bus";
 import { AppLoggerService } from "../logger/app-logger.service";
 import {
@@ -70,6 +71,7 @@ describe("TripClosedPricingListener", () => {
         } as unknown as TripReadService,
         logger as unknown as AppLoggerService,
         { clearForTrips: jest.fn().mockResolvedValue(0), replace: jest.fn() } as unknown as TripRouteSelectionRepository,
+        noTarSettlement(),
       ),
       logger as unknown as AppLoggerService,
     );

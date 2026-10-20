@@ -45,6 +45,7 @@ describe("planAddedRows", () => {
         [missing("a", { tripGroupId: "g", direction: TripDirection.DELIVERY })],
         new Map(),
         new Map([["g", 2]]),
+        new Map(),
       );
 
       expect(row.combinationEnd).toBe("endPoint");
@@ -55,6 +56,7 @@ describe("planAddedRows", () => {
         [missing("a", { tripGroupId: "g", direction: TripDirection.COLLECTION })],
         new Map(),
         new Map([["g", 2]]),
+        new Map(),
       );
 
       expect(row.combinationEnd).toBe("startPoint");
@@ -65,13 +67,14 @@ describe("planAddedRows", () => {
         [missing("a", { tripGroupId: "g" })],
         new Map(),
         new Map([["g", 3]]),
+        new Map(),
       );
 
       expect(row.combinationEnd).toBeNull();
     });
 
     it("marks nothing for a Trip in no group", () => {
-      expect(planAddedRows([missing("a")], new Map(), new Map())[0].combinationEnd).toBeNull();
+      expect(planAddedRows([missing("a")], new Map(), new Map(), new Map())[0].combinationEnd).toBeNull();
     });
   });
 
@@ -84,6 +87,7 @@ describe("planAddedRows", () => {
       ],
       new Map(),
       new Map([["g", 2]]),
+      new Map(),
     );
 
     expect(rows.map((row) => row.trip.id)).toEqual(["out", "back", "other"]);
@@ -93,6 +97,7 @@ describe("planAddedRows", () => {
     const [row] = planAddedRows(
       [missing("a")],
       new Map([["a", facts({ propertyNames: ["Flat"], tarCharged: true, ccNumbers: ["4220981"] })]]),
+      new Map(),
       new Map(),
     );
 
@@ -108,6 +113,7 @@ describe("planAddedRows", () => {
     const [row] = planAddedRows(
       [missing("a", { priced: false })],
       new Map([["a", facts({ propertyNames: ["Flat"], tarCharged: true, ccNumbers: ["4220981"] })]]),
+      new Map(),
       new Map(),
     );
 

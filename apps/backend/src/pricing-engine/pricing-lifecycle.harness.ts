@@ -1,6 +1,7 @@
 import {
   CostConfirmation,
   Prisma,
+  PricingCalculationStatus,
   RouteMatchMethod,
   Trip,
   TripStatus,
@@ -39,6 +40,15 @@ import { PairedPricingService } from "./paired-pricing.service";
 import { ManualRouteSelectionService } from "./manual-route-selection.service";
 import { TripRouteSelectionRepository } from "../trip-route-selection/trip-route-selection.repository";
 import { PricingRecalculationService } from "./pricing-recalculation.service";
+import {
+  TarChargeReadRepository,
+  canHoldTarCharge,
+  type TarChargeQuery,
+  type TarDay,
+} from "./tar-charge-read.repository";
+import { isHeldByAnother, type TarHolder } from "./tar-charge-holders";
+import { TarChargeSettlement } from "./tar-charge-settlement";
+import { AutomaticTarAlreadyChargedException, TarChargeGuard } from "./tar-charge-guard";
 import { PricingRuleResolver } from "./pricing-rule.resolver";
 import { PricingStrategy } from "./pricing-settings";
 import { PricingSnapshotWriter } from "./pricing-snapshot.writer";
@@ -109,12 +119,17 @@ function catalogEntry(id: string, name: string, price: string | null) {
   };
 }
 
-/** The Custom Values an operator can assign. One deliberately has no price. */
+/**
+ * The Custom Values an operator can assign. One deliberately has no price, and
+ * one is explicitly priced at zero — two different things.
+ */
 export const PROPERTIES = {
   genset: catalogEntry("property-genset", "Genset", "35.00"),
   douane: catalogEntry("property-douane", "Douane", "12.50"),
   unpriced: catalogEntry("property-unpriced", "Label zonder prijs", null),
   tar: catalogEntry(TAR_ID, "TAR", "20.00"),
+  flat: catalogEntry("property-flat", "Flat", "45.00"),
+  free: catalogEntry("property-free", "Gratis", "0.00"),
 };
 
 type CatalogEntry = (typeof PROPERTIES)[keyof typeof PROPERTIES];
@@ -166,6 +181,8 @@ export interface StoredItem {
   calculationOrder: number;
   quantity: Prisma.Decimal | null;
   unitPrice: Prisma.Decimal | null;
+  /** The Engine's own automatic TAR, as opposed to an operator's manual one. */
+  isAutomatic: boolean;
 }
 
 const COMPONENT_PREFIX = "component-";
@@ -387,11 +404,16 @@ export function buildPricingLifecycle() {
     findByTripId: jest.fn((tripId: string) =>
       Promise.resolve(snapshots.find((row) => row.tripId === tripId) ?? null),
     ),
-    /** CLOSED Trips only, exactly as the real query joins on `trip.status`. */
+    /** CLOSED Trips and no FAILED snapshot, exactly as the real query filters. */
     findCurrentByTripIds: jest.fn((tripIds: readonly string[]) =>
       Promise.resolve(
         snapshots
-          .filter((row) => tripIds.includes(row.tripId) && isCurrent(row.tripId))
+          .filter(
+            (row) =>
+              tripIds.includes(row.tripId) &&
+              isCurrent(row.tripId) &&
+              row.calculationStatus !== PricingCalculationStatus.FAILED,
+          )
           .map((row) => ({
             ...row,
             items: itemsOf(row.id),
@@ -401,11 +423,27 @@ export function buildPricingLifecycle() {
     ),
     findCurrentByTripId: jest.fn((tripId: string) =>
       Promise.resolve(
-        isCurrent(tripId)
-          ? (snapshots.find((row) => row.tripId === tripId) ?? null)
-          : null,
+        snapshots.find(
+          (row) =>
+            row.tripId === tripId &&
+            isCurrent(tripId) &&
+            row.calculationStatus !== PricingCalculationStatus.FAILED,
+        ) ?? null,
       ),
     ),
+    /** As the real conditional UPDATE: older, not yet FAILED snapshots only. */
+    markFailed: jest.fn((tripIds: readonly string[], calculationStartedAt: Date) => {
+      const marked = snapshots.filter(
+        (row) =>
+          tripIds.includes(row.tripId) &&
+          row.calculatedAt.getTime() < calculationStartedAt.getTime() &&
+          row.calculationStatus !== PricingCalculationStatus.FAILED,
+      );
+      for (const row of marked) {
+        row.calculationStatus = PricingCalculationStatus.FAILED;
+      }
+      return Promise.resolve(marked.length);
+    }),
     create: jest.fn((data: Record<string, unknown>) => {
       const row = {
         id: `pricing-${snapshots.length + 1}`,
@@ -470,7 +508,8 @@ export function buildPricingLifecycle() {
   };
   pricingRepository.runInTransaction.mockImplementation(
     (work: (repositories: unknown) => unknown) =>
-      work({ pricing: pricingRepository, items: itemRepository }),
+      // No database here: the TAR guard below reads the tables directly.
+      work({ pricing: pricingRepository, items: itemRepository, transaction: undefined }),
   );
 
   function isCurrent(tripId: string): boolean {
@@ -522,6 +561,60 @@ export function buildPricingLifecycle() {
   const combinationPricingService = {
     findAll: () => Promise.resolve(combinations.map((group) => ({ ...group }))),
   } as unknown as CombinationRoutePricingService;
+  /**
+   * The TAR reads over the tables above, exactly as the real queries select:
+   * automatic TAR lines of snapshots not FAILED, of Trips not CANCELLED or
+   * DELETED. Who holds the charge is the real rule (`tar-charge-holders.ts`).
+   */
+  const sameTar = (trip: Trip, day: TarDay) =>
+    trip.planningDate?.getTime() === day.planningDate.getTime() &&
+    trip.tarNummer?.trim().toLowerCase() === day.tarNummer.toLowerCase();
+  const holdsAutomaticTar = (snapshot: Prisma.TripPricingGetPayload<object>) =>
+    itemsOf(snapshot.id).some((item) => item.isAutomatic === true);
+  const findHolders = (day: TarDay): TarHolder[] =>
+    snapshots
+      .filter((snapshot) => {
+        const trip = trips.get(snapshot.tripId);
+
+        return (
+          !!trip &&
+          canHoldTarCharge(trip.status) &&
+          snapshot.calculationStatus !== PricingCalculationStatus.FAILED &&
+          sameTar(trip, day) &&
+          holdsAutomaticTar(snapshot)
+        );
+      })
+      .map((snapshot) => ({
+        tripId: snapshot.tripId,
+        status: trips.get(snapshot.tripId)!.status,
+        calculatedAt: snapshot.calculatedAt,
+      }));
+  const tarCharges = {
+    hasBeenChargedToday: (query: TarChargeQuery) =>
+      Promise.resolve(isHeldByAnother(findHolders(query), query.tripId)),
+    findHolders: (day: TarDay) => Promise.resolve(findHolders(day)),
+    findTripsHoldingAutomaticTar: (tripIds: readonly string[]) =>
+      Promise.resolve(
+        new Set(
+          snapshots
+            .filter((snapshot) => tripIds.includes(snapshot.tripId) && holdsAutomaticTar(snapshot))
+            .map((snapshot) => snapshot.tripId),
+        ),
+      ),
+    findClosedTripsStating: (day: TarDay, excludeTripId: string) =>
+      Promise.resolve(
+        [...trips.values()]
+          .filter((trip) => trip.id !== excludeTripId && trip.status === TripStatus.CLOSED && sameTar(trip, day))
+          .map((trip) => trip.id),
+      ),
+  };
+  /** The write's own re-check of an automatic TAR — the real rule, without the lock. */
+  const tarGuard = {
+    assertStillFree: (_transaction: unknown, day: TarDay, tripId: string) =>
+      isHeldByAnother(findHolders(day), tripId)
+        ? Promise.reject(new AutomaticTarAlreadyChargedException(tripId))
+        : Promise.resolve(),
+  } as unknown as TarChargeGuard;
   const components = new PricingComponentResolver(
     routePricingService,
     combinationPricingService,
@@ -532,7 +625,7 @@ export function buildPricingLifecycle() {
     customPropertyCatalog,
     tripRead,
     ruleResolver,
-    { hasBeenChargedToday: () => Promise.resolve(false) } as never,
+    tarCharges as unknown as TarChargeReadRepository,
     logger,
   );
   const ccRepository = {
@@ -580,6 +673,7 @@ export function buildPricingLifecycle() {
     new PricingSnapshotWriter(
       tripPricing,
       new TripPricingItemService(itemRepository as never, tripPricing, logger),
+      tarGuard,
       logger,
     ),
     costConfirmationRead,
@@ -595,11 +689,17 @@ export function buildPricingLifecycle() {
     ],
     logger,
   );
+  const tarSettlement = new TarChargeSettlement(
+    tarCharges as unknown as TarChargeReadRepository,
+    tripRead,
+    logger,
+  );
   const pairs = new PairedPricingService(
     engine,
     tripRead,
     logger,
     routeChoiceRepository as unknown as TripRouteSelectionRepository,
+    tarSettlement,
   );
   /** "Route kiezen": the real service over the same Engine, tables and choices. */
   const routeChoice = new ManualRouteSelectionService(
@@ -616,6 +716,7 @@ export function buildPricingLifecycle() {
     effectivePricing,
     tripRead,
     components,
+    tarCharges as unknown as TarChargeReadRepository,
     logger,
   );
   const eventBus = new DomainEventBus(logger);
@@ -696,6 +797,12 @@ export function buildPricingLifecycle() {
     snapshots,
     items,
     engine,
+    /** The pricing rules every calculation reads; reject it to make one fail. */
+    ruleResolver: ruleResolver as unknown as { resolve: jest.Mock },
+    /** The read every screen, export and the invoice check share. */
+    effectivePricing,
+    /** Who must be priced again when a TAR charge moves. */
+    tarSettlement,
     /** What every pricing trigger goes through: a Trip and its partner leg. */
     pairs,
     tripRead,
@@ -721,6 +828,21 @@ export function buildPricingLifecycle() {
     seed(trip: Trip): Trip {
       trips.set(trip.id, trip);
       return trip;
+    },
+    /**
+     * The automatic Flat assignment the importer writes for a flat-rack
+     * container (`AutomaticFlatPropertyService`) — an operator cannot assign
+     * Flat by hand.
+     */
+    seedAutomaticFlat(tripId: string): void {
+      assignments.push({
+        id: `assignment-${assignments.length + 1}`,
+        tripId,
+        customPropertyId: PROPERTIES.flat.id,
+        isAutomatic: true,
+        createdAt: new Date(),
+        customProperty: PROPERTIES.flat,
+      });
     },
     /** The stored snapshot of a Trip, with its items and route legs, or null. */
     storedSnapshot(tripId: string) {

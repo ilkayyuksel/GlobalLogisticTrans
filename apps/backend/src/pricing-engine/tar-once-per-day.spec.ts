@@ -198,7 +198,6 @@ describe("TAR is charged once per day per number", () => {
         tripId: TRIP_ID,
         planningDate: new Date("2026-09-07T00:00:00.000Z"),
         tarNummer: "TAR123",
-        automaticCustomPropertyId: TAR_ID,
       });
     });
 

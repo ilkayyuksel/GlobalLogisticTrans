@@ -1485,6 +1485,11 @@ model TripPricingItem {
   unitPrice Decimal? @map("unit_price") @db.Decimal(12, 2)
   notes     String?  @db.Text
 
+  /// The Engine's own automatic charge of a Custom Property (TAR), as opposed
+  /// to one an operator assigned by hand. Decides who holds the day's
+  /// automatic TAR — see `tar-charge-read.repository.ts`.
+  isAutomatic Boolean @default(false) @map("is_automatic")
+
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 

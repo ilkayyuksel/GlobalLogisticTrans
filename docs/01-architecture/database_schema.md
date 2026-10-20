@@ -1357,6 +1357,7 @@ One individual component of a pricing calculation. Every pricing element — bas
 | `calculation_order` | `INTEGER` | NO | — | Preserves the order defined in `pricing_rules.md` |
 | `quantity` | `NUMERIC(12,2)` | YES | `NULL` | e.g. billable waiting blocks, kilometres |
 | `unit_price` | `NUMERIC(12,2)` | YES | `NULL` | |
+| `is_automatic` | `BOOLEAN` | NO | `false` | True only on the Engine's own automatic charge of a Custom Property (TAR); an operator's manual TAR line is false. Decides who holds a TAR-nummer's charge for the day. Backfilled for older snapshots (migration `20261020120000`) from the stored evidence: two lines → one marked; one line → marked unless the Trip's manual assignment was created before the snapshot was calculated. Lines that cannot be reconstructed (no assignment now, Trip not CLOSED or snapshot FAILED) are listed by `docs/05-pricing/tar-diagnose.sql`. |
 | `notes` | `TEXT` | YES | `NULL` | |
 | `created_at` | `TIMESTAMPTZ` | NO | `now()` | |
 | `updated_at` | `TIMESTAMPTZ` | NO | `now()` | |

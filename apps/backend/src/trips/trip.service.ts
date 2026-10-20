@@ -35,6 +35,7 @@ import {
   repriceAfterCombinationInputChange,
 } from "./planning-date-change";
 import { repriceAfterPartnerStatusChange } from "./partner-status-change";
+import { repriceAfterTarChargeReleased } from "./tar-charge-release";
 import {
   AssignmentSubject,
   DeletedTripCannotBeLooseException,
@@ -427,7 +428,13 @@ export class TripService {
       changedFields: changedFieldNames(dto),
     });
 
-    return this.respondToUpdate(existing, updated, dto);
+    const response = await this.respondToUpdate(existing, updated, dto);
+
+    // After this Trip was repriced: a TAR-nummer or day it let go may now
+    // belong to another Trip — see `tar-charge-release.ts`.
+    await repriceAfterTarChargeReleased(id, existing, updated, this.recalculation, this.logger);
+
+    return response;
   }
 
   /**
@@ -1243,6 +1250,14 @@ export class TripService {
       previousStatus,
       this.recalculation,
       (tripGroupId) => this.repository.findManyByGroupId(tripGroupId),
+      this.logger,
+    );
+    // Cancelled or deleted, it no longer holds its TAR: see `tar-charge-release.ts`.
+    await repriceAfterTarChargeReleased(
+      changed.id,
+      { ...changed, status: previousStatus },
+      changed,
+      this.recalculation,
       this.logger,
     );
   }

@@ -16,6 +16,7 @@ import {
 } from "./exceptions/pricing-engine.exceptions";
 import { PairedPricingService } from "./paired-pricing.service";
 import { PricingComponentResolver } from "./pricing-component.resolver";
+import { TarChargeReadRepository, type TarDay } from "./tar-charge-read.repository";
 
 /**
  * What a recalculation reports when it could not produce a price for a reason
@@ -92,6 +93,7 @@ export class PricingRecalculationService {
     private readonly effectivePricing: EffectivePricingService,
     private readonly trips: TripReadService,
     private readonly components: PricingComponentResolver,
+    private readonly tarCharges: TarChargeReadRepository,
     private readonly logger: AppLoggerService,
   ) {
     this.logger.setContext(PricingRecalculationService.name);
@@ -291,6 +293,29 @@ export class PricingRecalculationService {
     } catch (error) {
       this.logger.error("Could not determine which Trips a road change reprices", {
         tripId,
+        reason: error instanceof Error ? error.message : String(error),
+      });
+
+      return [];
+    }
+  }
+
+  /**
+   * The CLOSED Trips a TAR charge released on `day` may now belong to.
+   *
+   * The automatic TAR of one number is charged once a day, on the first Trip
+   * priced with it (`TarChargeReadRepository`). When the Trip holding it lets
+   * it go — its number or day changes, it is cancelled or deleted — the other
+   * Trips stating that number that day were priced WITHOUT it and owe it now,
+   * so they are named here to be priced again. Asked after the write; never
+   * throws, as `tripsAffectedByPlanningDate`.
+   */
+  async tripsSharingTarDay(day: TarDay, excludeTripId: string): Promise<string[]> {
+    try {
+      return await this.tarCharges.findClosedTripsStating(day, excludeTripId);
+    } catch (error) {
+      this.logger.error("Could not determine which Trips a released TAR charge reprices", {
+        tripId: excludeTripId,
         reason: error instanceof Error ? error.message : String(error),
       });
 

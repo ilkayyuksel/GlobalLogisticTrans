@@ -10,6 +10,7 @@ import type { InvoicePaymentRepository } from "../payment/invoice-payment.reposi
 import { InvoicePaymentService } from "../payment/invoice-payment.service";
 import type { InvoiceFuelRateReader } from "../pricing/invoice-fuel-rate.reader";
 import { InvoicePricingService } from "../pricing/invoice-pricing.service";
+import { ManualRouteFactsReader } from "../pricing/manual-route-facts.reader";
 import type { InvoiceRemarksService } from "../remarks/invoice-remarks.service";
 import { InvoiceSheetReader } from "../workbook/invoice-sheet.reader";
 import { InvoiceSheetWriter } from "../workbook/invoice-sheet.writer";
@@ -40,14 +41,15 @@ export function buildInvoiceExamination(
   const effectivePricing = doubles.effectivePricing as EffectivePricingService;
   const reads = doubles.reads ?? invoiceReads();
   const remarks = doubles.remarks ?? noRemarks(reads);
+  const manualRoutes = new ManualRouteFactsReader(asReads(reads), effectivePricing);
 
   return new InvoiceExaminationService(
     new InvoiceSheetReader(logger),
     new InvoiceRowMatchingService(trips, asReads(reads), logger),
-    new InvoicePricingService(effectivePricing, doubles.fuelRates ?? NO_FUEL_RATES, logger),
+    new InvoicePricingService(effectivePricing, doubles.fuelRates ?? NO_FUEL_RATES, manualRoutes, logger),
     remarks,
     new MissingTripsService(trips, effectivePricing, logger),
-    new AddedRowsService(asReads(reads), remarks, logger),
+    new AddedRowsService(asReads(reads), remarks, manualRoutes, logger),
     logger,
   );
 }

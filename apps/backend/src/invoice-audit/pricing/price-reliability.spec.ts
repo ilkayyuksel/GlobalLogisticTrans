@@ -7,6 +7,7 @@ import {
 
 import type { CurrentTripPricing } from "../../trip-pricing/effective-pricing.service";
 import type { RouteMatchView } from "../../trip-pricing/route-match-view";
+import type { ManualPartnerFacts, ManualRouteFacts } from "./manual-route-facts.reader";
 import { assessPriceReliability, type AssessedTrip } from "./price-reliability";
 
 /**
@@ -69,7 +70,7 @@ function pricing(
 
 describe("assessPriceReliability", () => {
   it("relies on a price found on an exact route", () => {
-    expect(assessPriceReliability(TRIP, pricing())).toMatchObject({
+    expect(assessPriceReliability(TRIP, pricing(), null)).toMatchObject({
       reliable: true,
       problem: null,
       route: { matchMethod: "EXACT", tripRoute: "Quay 869 → Zemst", pricedRoute: "Quay 869 → ZEMST" },
@@ -78,7 +79,7 @@ describe("assessPriceReliability", () => {
 
   /** A Trip never priced is not a Trip that costs nothing. */
   it("does not rely on a Trip that was never priced", () => {
-    expect(assessPriceReliability(TRIP, null)).toMatchObject({
+    expect(assessPriceReliability(TRIP, null, null)).toMatchObject({
       reliable: false,
       problem: "NO_SNAPSHOT",
     });
@@ -89,7 +90,7 @@ describe("assessPriceReliability", () => {
     [RouteMatchMethod.AMBIGUOUS, "ROUTE_AMBIGUOUS"],
     [null, "METADATA_MISSING"],
   ])("does not rely on a route match of %s", (method, problem) => {
-    expect(assessPriceReliability(TRIP, pricing({ method }))).toMatchObject({
+    expect(assessPriceReliability(TRIP, pricing({ method }), null)).toMatchObject({
       reliable: false,
       problem,
     });
@@ -122,7 +123,7 @@ describe("assessPriceReliability", () => {
       const eindhout = { ...TRIP, destinationCity: "Eindhout" };
 
       expect(
-        assessPriceReliability(eindhout, pricedOn("LAAKDAL (EINDHOUT)", RouteMatchMethod.NORMALIZED)),
+        assessPriceReliability(eindhout, pricedOn("LAAKDAL (EINDHOUT)", RouteMatchMethod.NORMALIZED), null),
       ).toEqual({
         reliable: true,
         problem: null,
@@ -139,7 +140,7 @@ describe("assessPriceReliability", () => {
       const kallo = { ...TRIP, destinationCity: "Kallo" };
 
       expect(
-        assessPriceReliability(kallo, pricedOn("Kallo (Beveren)", RouteMatchMethod.NORMALIZED)),
+        assessPriceReliability(kallo, pricedOn("Kallo (Beveren)", RouteMatchMethod.NORMALIZED), null),
       ).toMatchObject({ reliable: true, problem: null });
     });
 
@@ -148,7 +149,7 @@ describe("assessPriceReliability", () => {
       const beveren = { ...TRIP, destinationCity: "Beveren" };
 
       expect(
-        assessPriceReliability(beveren, pricedOn("Kallo (Beveren)", RouteMatchMethod.NORMALIZED)),
+        assessPriceReliability(beveren, pricedOn("Kallo (Beveren)", RouteMatchMethod.NORMALIZED), null),
       ).toMatchObject({ reliable: true, problem: null });
     });
 
@@ -156,20 +157,20 @@ describe("assessPriceReliability", () => {
     it("relies on a FUZZY match", () => {
       const typo = { ...TRIP, destinationCity: "Zemts" };
 
-      expect(assessPriceReliability(typo, pricedOn("ZEMST", RouteMatchMethod.FUZZY))).toMatchObject({
+      expect(assessPriceReliability(typo, pricedOn("ZEMST", RouteMatchMethod.FUZZY), null)).toMatchObject({
         reliable: true,
       });
     });
 
     it("relies on a found route even when the snapshot recorded no leg to show", () => {
       expect(
-        assessPriceReliability(TRIP, pricing({ method: RouteMatchMethod.NORMALIZED, legs: [] })),
+        assessPriceReliability(TRIP, pricing({ method: RouteMatchMethod.NORMALIZED, legs: [] }), null),
       ).toMatchObject({ reliable: true, route: { pricedRoute: null } });
     });
 
     it("still shows both roads beside a route that was not found", () => {
       expect(
-        assessPriceReliability(TRIP, pricedOn("ZEMST", RouteMatchMethod.NOT_FOUND)),
+        assessPriceReliability(TRIP, pricedOn("ZEMST", RouteMatchMethod.NOT_FOUND), null),
       ).toMatchObject({
         reliable: false,
         problem: "ROUTE_NOT_FOUND",
@@ -193,6 +194,7 @@ describe("assessPriceReliability", () => {
             },
             "50",
           ),
+          null,
         ),
       ).toMatchObject({ reliable: true });
     });
@@ -204,12 +206,12 @@ describe("assessPriceReliability", () => {
       CombinationMatchOutcome.NO_PAIR,
     ])("does not rely on a grouped Trip whose Combination came out %s", (outcome) => {
       expect(
-        assessPriceReliability(grouped, pricing({ combinationMatch: outcome }, "50")),
+        assessPriceReliability(grouped, pricing({ combinationMatch: outcome }, "50"), null),
       ).toMatchObject({ reliable: false, problem: "COMBINATION_NOT_PRICED" });
     });
 
     it("does not rely on a grouped Trip whose price records no Combination", () => {
-      expect(assessPriceReliability(grouped, pricing())).toMatchObject({
+      expect(assessPriceReliability(grouped, pricing(), null)).toMatchObject({
         reliable: false,
         problem: "SNAPSHOT_INCONSISTENT",
       });
@@ -217,7 +219,7 @@ describe("assessPriceReliability", () => {
 
     /** The Backload follows membership: a Trip that left its group owes none. */
     it("does not rely on an ungrouped Trip still priced with a Backload", () => {
-      expect(assessPriceReliability(TRIP, pricing({}, "50"))).toMatchObject({
+      expect(assessPriceReliability(TRIP, pricing({}, "50"), null)).toMatchObject({
         reliable: false,
         problem: "SNAPSHOT_INCONSISTENT",
       });
@@ -231,15 +233,18 @@ describe("assessPriceReliability", () => {
             combinationMatch: CombinationMatchOutcome.MATCHED,
             combinationRouteGroupId: "combination-1",
           }),
+          null,
         ),
       ).toMatchObject({ reliable: false, problem: "SNAPSHOT_INCONSISTENT" });
     });
   });
 
   /**
-   * A route chosen by hand (owner, October 2026): the stored NOT_FOUND or
-   * PAIR_NOT_CONFIGURED is why it was chosen, not a verdict on the price. The
-   * snapshot must confirm the choice, and the route must still exist.
+   * A route chosen by hand (owner, October 2026): the stored NOT_FOUND,
+   * AMBIGUOUS or PAIR_NOT_CONFIGURED is why it was chosen, not a verdict on the
+   * price. The snapshot must confirm the choice, the route must still exist,
+   * the choice stored NOW must be the one it was priced on, and a chosen
+   * Combination must be confirmed by its partner leg (owner, 20 October 2026).
    */
   describe("a route chosen by hand", () => {
     const manual = (overrides: Partial<RouteMatchView> = {}) =>
@@ -249,52 +254,132 @@ describe("assessPriceReliability", () => {
       { legPosition: 1, isPricedLeg: true, routePricingId: "leg-1", departure: "Quay 869", destination: "Zemst", method: RouteMatchMethod.NOT_FOUND },
       { legPosition: 2, isPricedLeg: false, routePricingId: "leg-2", departure: "Zemst", destination: "Quay 869", method: RouteMatchMethod.NOT_FOUND },
     ];
-
-    it("relies on an ordinary route the snapshot confirms", () => {
-      expect(assessPriceReliability(TRIP, manual())).toMatchObject({ reliable: true, problem: null });
+    const chosenCombination = (overrides: Partial<RouteMatchView> = {}) =>
+      manual({
+        routePricingId: "leg-1",
+        combinationRouteGroupId: "combination-1",
+        combinationMatch: CombinationMatchOutcome.PAIR_NOT_CONFIGURED,
+        legs: twoLegs,
+        ...overrides,
+      });
+    /** The partner leg, chosen and priced on Leg 2 of the same Combination. */
+    const partnerOnLeg2 = (overrides: Partial<RouteMatchView> = {}): ManualPartnerFacts => ({
+      tripId: "partner",
+      currentChoice: "leg-2",
+      pricing: chosenCombination({
+        routePricingId: "leg-2",
+        legs: twoLegs.map((leg) => ({ ...leg, isPricedLeg: leg.routePricingId === "leg-2" })),
+        ...overrides,
+      }),
+    });
+    const facts = (currentChoice: string | null, partner: ManualPartnerFacts | null = null): ManualRouteFacts => ({
+      currentChoice,
+      partner,
     });
 
-    it("relies on a whole Combination for a grouped Trip", () => {
+    it("1. relies on an ordinary route chosen after NOT_FOUND", () => {
+      expect(assessPriceReliability(TRIP, manual(), facts("route-1"))).toMatchObject({ reliable: true, problem: null });
+    });
+
+    it("2. relies on an ordinary route chosen after AMBIGUOUS", () => {
       expect(
-        assessPriceReliability(
-          GROUPED,
-          manual({
-            routePricingId: "leg-1",
-            combinationRouteGroupId: "combination-1",
-            combinationMatch: CombinationMatchOutcome.PAIR_NOT_CONFIGURED,
-            legs: twoLegs,
-          }),
-        ),
+        assessPriceReliability(TRIP, manual({ method: RouteMatchMethod.AMBIGUOUS }), facts("route-1")),
       ).toMatchObject({ reliable: true, problem: null });
     });
 
-    it("does not rely on a choice whose route no longer exists", () => {
-      expect(assessPriceReliability(TRIP, manual({ reviewed: null }))).toMatchObject({
+    it("6. relies on a whole Combination confirmed by its partner leg", () => {
+      expect(
+        assessPriceReliability(GROUPED, chosenCombination(), facts("leg-1", partnerOnLeg2())),
+      ).toMatchObject({ reliable: true, problem: null });
+    });
+
+    it("4. does not rely on a choice whose route no longer exists", () => {
+      expect(assessPriceReliability(TRIP, manual({ reviewed: null }), facts(null))).toMatchObject({
         reliable: false,
         problem: "MANUAL_ROUTE_REMOVED",
       });
     });
 
     it("does not rely on a snapshot that records no route", () => {
-      expect(assessPriceReliability(TRIP, manual({ routePricingId: null }))).toMatchObject({
+      expect(assessPriceReliability(TRIP, manual({ routePricingId: null }), facts("route-1"))).toMatchObject({
         reliable: false,
         problem: "SNAPSHOT_INCONSISTENT",
       });
     });
 
-    it("does not rely on half a Combination", () => {
-      expect(
-        assessPriceReliability(
-          GROUPED,
-          manual({ routePricingId: "leg-1", combinationRouteGroupId: "combination-1", legs: [twoLegs[0]] }),
-        ),
-      ).toMatchObject({ reliable: false, problem: "SNAPSHOT_INCONSISTENT" });
-    });
-
     it("does not rely on an ordinary choice for a grouped Trip", () => {
-      expect(assessPriceReliability(GROUPED, manual())).toMatchObject({
+      expect(assessPriceReliability(GROUPED, manual(), facts("route-1"))).toMatchObject({
         reliable: false,
         problem: "SNAPSHOT_INCONSISTENT",
+      });
+    });
+
+    /*
+     * 7. An explicit reprocess removed the choice, and its own pricing failed:
+     * the snapshot still says MANUAL. The current situation decides — the old
+     * choice is never used to vouch for it.
+     */
+    describe("7. a choice that is no longer stored", () => {
+      it("does not rely on a snapshot whose choice was removed", () => {
+        expect(assessPriceReliability(TRIP, manual(), facts(null))).toMatchObject({
+          reliable: false,
+          problem: "SNAPSHOT_INCONSISTENT",
+          explanation: expect.stringContaining("gewist of gewijzigd"),
+        });
+      });
+
+      it("does not rely on a snapshot priced on another route than the one chosen now", () => {
+        expect(assessPriceReliability(TRIP, manual(), facts("route-2"))).toMatchObject({
+          reliable: false,
+          problem: "SNAPSHOT_INCONSISTENT",
+        });
+      });
+
+      it("does not rely on a MANUAL snapshot when nothing about the choice was read", () => {
+        expect(assessPriceReliability(TRIP, manual(), null)).toMatchObject({ reliable: false });
+      });
+
+      it("follows a snapshot the automatic matcher wrote after the choice was removed", () => {
+        expect(assessPriceReliability(TRIP, pricing(), null)).toMatchObject({ reliable: true });
+        expect(
+          assessPriceReliability(TRIP, pricing({ method: RouteMatchMethod.NOT_FOUND }), null),
+        ).toMatchObject({ reliable: false, problem: "ROUTE_NOT_FOUND" });
+      });
+    });
+
+    describe("5. an incomplete or inconsistent chosen Combination", () => {
+      it("does not rely on half a Combination", () => {
+        expect(
+          assessPriceReliability(
+            GROUPED,
+            chosenCombination({ legs: [twoLegs[0]] }),
+            facts("leg-1", partnerOnLeg2()),
+          ),
+        ).toMatchObject({ reliable: false, problem: "SNAPSHOT_INCONSISTENT" });
+      });
+
+      it.each([
+        ["two legs at the same position", twoLegs.map((leg) => ({ ...leg, legPosition: 1 }))],
+        ["no leg marked as priced", twoLegs.map((leg) => ({ ...leg, isPricedLeg: false }))],
+        ["both legs marked as priced", twoLegs.map((leg) => ({ ...leg, isPricedLeg: true }))],
+        ["the priced leg not the route it was priced on", twoLegs.map((leg) => ({ ...leg, isPricedLeg: !leg.isPricedLeg }))],
+      ])("does not rely on %s", (_name, legs) => {
+        expect(
+          assessPriceReliability(GROUPED, chosenCombination({ legs }), facts("leg-1", partnerOnLeg2())),
+        ).toMatchObject({ reliable: false, problem: "SNAPSHOT_INCONSISTENT" });
+      });
+
+      it.each<[string, ManualPartnerFacts | null]>([
+        ["no partner leg", null],
+        ["a partner without a current price", { ...partnerOnLeg2(), pricing: null }],
+        ["a partner whose choice was removed", { ...partnerOnLeg2(), currentChoice: null }],
+        ["a partner chosen on the same leg", { ...partnerOnLeg2(), currentChoice: "leg-1" }],
+        ["a partner priced on another Combination", partnerOnLeg2({ combinationRouteGroupId: "combination-2" })],
+        ["a partner priced on the same leg", partnerOnLeg2({ routePricingId: "leg-1" })],
+      ])("does not rely on %s", (_name, partner) => {
+        expect(
+          assessPriceReliability(GROUPED, chosenCombination(), facts("leg-1", partner)),
+        ).toMatchObject({ reliable: false, problem: "COMBINATION_NOT_PRICED" });
       });
     });
   });

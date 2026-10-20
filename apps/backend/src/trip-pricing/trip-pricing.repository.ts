@@ -2,9 +2,15 @@ import { Injectable } from "@nestjs/common";
 import { Prisma, TripPricing, TripPricingRouteLeg } from "@prisma/client";
 
 import { PrismaService } from "../prisma/prisma.service";
-import { PRICED_TRIP_STATUS } from "./current-pricing";
+import { FAILED_CALCULATION_STATUS, PRICED_TRIP_STATUS } from "./current-pricing";
 import { TripPricingItemRepository } from "../trip-pricing-items/trip-pricing-item.repository";
 import type { TripPricingItemWithComponent } from "../trip-pricing-items/dto/trip-pricing-item-response.dto";
+
+/** What makes a stored snapshot a Trip's current price — see `current-pricing.ts`. */
+const CURRENT_SNAPSHOT = {
+  trip: { status: PRICED_TRIP_STATUS },
+  calculationStatus: { not: FAILED_CALCULATION_STATUS },
+} satisfies Prisma.TripPricingWhereInput;
 
 /** A snapshot together with its breakdown, as one read returns it. */
 export type TripPricingWithItems = TripPricing & {
@@ -45,6 +51,8 @@ export type UpdateTripPricingData = Prisma.TripPricingUncheckedUpdateInput;
 export interface PricingSnapshotRepositories {
   readonly pricing: TripPricingRepository;
   readonly items: TripPricingItemRepository;
+  /** The transaction itself, for a check that must run inside it. */
+  readonly transaction: PrismaService;
 }
 
 /**
@@ -83,6 +91,7 @@ export class TripPricingRepository {
       return work({
         pricing: new TripPricingRepository(scoped),
         items: new TripPricingItemRepository(scoped),
+        transaction: scoped,
       });
     });
   }
@@ -100,21 +109,19 @@ export class TripPricingRepository {
    * total happens to be zero.
    */
   /**
-   * The CURRENT snapshots of many Trips: those of CLOSED Trips only.
+   * The CURRENT snapshots of many Trips: those of CLOSED Trips only, and not
+   * one a later calculation failed to replace.
    *
    * A reopened, cancelled or deleted Trip keeps its snapshot as history, and
-   * it is simply absent here — the same answer as a Trip never priced. See
-   * `current-pricing.ts`.
+   * it is simply absent here — the same answer as a Trip never priced. So is
+   * a FAILED one. See `current-pricing.ts`.
    */
   findCurrentByTripIds(
     tripIds: readonly string[],
   ): Promise<TripPricingWithItemsAndRoute[]> {
     return this.readConsistently((client) =>
       client.tripPricing.findMany({
-        where: {
-          tripId: { in: [...tripIds] },
-          trip: { status: PRICED_TRIP_STATUS },
-        },
+        where: { tripId: { in: [...tripIds] }, ...CURRENT_SNAPSHOT },
         include: { items: ITEMS_WITH_COMPONENT, routeLegs: ROUTE_LEGS_IN_ORDER },
       }),
     );
@@ -168,11 +175,35 @@ export class TripPricingRepository {
     return this.prisma.tripPricing.findUnique({ where: { tripId } });
   }
 
-  /** The Trip's CURRENT snapshot: only while the Trip is CLOSED. */
+  /** The Trip's CURRENT snapshot: only while the Trip is CLOSED and it is not FAILED. */
   findCurrentByTripId(tripId: string): Promise<TripPricing | null> {
     return this.prisma.tripPricing.findFirst({
-      where: { tripId, trip: { status: PRICED_TRIP_STATUS } },
+      where: { tripId, ...CURRENT_SNAPSHOT },
     });
+  }
+
+  /**
+   * Marks these Trips' snapshots FAILED: a calculation that started at
+   * `calculationStartedAt` could not replace them. A snapshot written at or
+   * after that moment is a newer, successful one and is left alone — the same
+   * ordering the stale guard of `updateUnlessNewerStored` keeps. Returns how
+   * many were marked.
+   */
+  async markFailed(tripIds: readonly string[], calculationStartedAt: Date): Promise<number> {
+    if (tripIds.length === 0) {
+      return 0;
+    }
+
+    const { count } = await this.prisma.tripPricing.updateMany({
+      where: {
+        tripId: { in: [...tripIds] },
+        calculatedAt: { lt: calculationStartedAt },
+        calculationStatus: { not: FAILED_CALCULATION_STATUS },
+      },
+      data: { calculationStatus: FAILED_CALCULATION_STATUS },
+    });
+
+    return count;
   }
 
   create(data: CreateTripPricingData): Promise<TripPricing> {

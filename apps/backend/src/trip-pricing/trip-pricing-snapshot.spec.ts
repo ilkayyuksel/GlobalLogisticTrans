@@ -6,6 +6,7 @@ import {
 } from "@prisma/client";
 
 import { AppLoggerService } from "../logger/app-logger.service";
+import { PrismaService } from "../prisma/prisma.service";
 import { TripPricingItemRepository } from "../trip-pricing-items/trip-pricing-item.repository";
 import { TripReadService } from "../trips/trip-read.service";
 import {
@@ -169,6 +170,7 @@ describe("TripPricingService — atomic snapshot write", () => {
         const result = await work({
           pricing: pricingRepository as unknown as TripPricingRepository,
           items: itemRepository as unknown as TripPricingItemRepository,
+          transaction: {} as unknown as PrismaService,
         });
 
         committed = [...journal];
@@ -251,6 +253,7 @@ describe("TripPricingService — atomic snapshot write", () => {
         calculationOrder: 7,
         quantity: null,
         unitPrice: null,
+        isAutomatic: false,
       });
     });
 

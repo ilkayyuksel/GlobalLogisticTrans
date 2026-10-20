@@ -1,4 +1,4 @@
-import { TripStatus } from "@prisma/client";
+import { PricingCalculationStatus, TripStatus } from "@prisma/client";
 
 /**
  * Which Trips have a CURRENT price.
@@ -21,3 +21,16 @@ export const PRICED_TRIP_STATUS = TripStatus.CLOSED;
 export function hasCurrentPrice(status: TripStatus): boolean {
   return status === PRICED_TRIP_STATUS;
 }
+
+/**
+ * ── AND NOT A SNAPSHOT A LATER CALCULATION FAILED TO REPLACE ────────────────
+ * When a Trip is priced again — on closing, after an edit, on a reprocess —
+ * and that calculation fails, the stored snapshot describes the Trip as it
+ * WAS, not as it is: closing a reopened Trip, or changing one while closed,
+ * must never leave the old figures on screen as its price. Such a snapshot is
+ * marked FAILED (`PricingSnapshotWriter.markFailed`) and is kept as history,
+ * exactly like a reopened Trip's; the next successful calculation replaces it
+ * as CALCULATED.
+ * ────────────────────────────────────────────────────────────────────────────
+ */
+export const FAILED_CALCULATION_STATUS = PricingCalculationStatus.FAILED;

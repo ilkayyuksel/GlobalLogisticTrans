@@ -205,6 +205,17 @@ export class PricingEngineService {
    * write or in what they log. Public for `PairedPricingService`, which
    * calculates both legs of a pair before storing either.
    */
+  /**
+   * A calculation of these Trips that started at `calculationStartedAt`
+   * failed: their stored snapshots no longer describe them.
+   */
+  markCalculationFailed(
+    tripIds: readonly string[],
+    calculationStartedAt: Date,
+  ): Promise<number> {
+    return this.snapshotWriter.markFailed(tripIds, calculationStartedAt);
+  }
+
   async store(
     result: PricingCalculationResult,
   ): Promise<PricingCalculationResult> {
@@ -334,6 +345,7 @@ export class PricingEngineService {
       bookingNumber: trip.bookingNumber,
       tripStatus: trip.status,
       planningDate: trip.planningDate,
+      tarNummer: trip.tarNummer,
       /*
        * The Backload follows group membership: every Trip in a group carries
        * its own, whatever kind of group it is and whenever it joined. Which leg

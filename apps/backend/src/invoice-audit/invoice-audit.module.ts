@@ -20,6 +20,7 @@ import { InvoicePaymentRepository } from "./payment/invoice-payment.repository";
 import { InvoicePaymentService } from "./payment/invoice-payment.service";
 import { InvoiceFuelRateReader } from "./pricing/invoice-fuel-rate.reader";
 import { InvoicePricingService } from "./pricing/invoice-pricing.service";
+import { ManualRouteFactsReader } from "./pricing/manual-route-facts.reader";
 import { InvoiceRemarksService } from "./remarks/invoice-remarks.service";
 import { InvoiceSheetReader } from "./workbook/invoice-sheet.reader";
 import { InvoiceSheetWriter } from "./workbook/invoice-sheet.writer";
@@ -97,6 +98,7 @@ const BYTES_PER_MEGABYTE = 1024 * 1024;
     InvoiceRowMatchingService,
     InvoicePricingService,
     InvoiceFuelRateReader,
+    ManualRouteFactsReader,
     InvoiceAuditReadRepository,
     InvoiceRemarksService,
     MissingTripsService,

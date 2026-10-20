@@ -1,6 +1,7 @@
 import { Prisma } from "@prisma/client";
 
 import { TripRouteSelectionRepository } from "../trip-route-selection/trip-route-selection.repository";
+import { noTarSettlement } from "./tar-charge-settlement.double";
 import { AppLoggerService } from "../logger/app-logger.service";
 import { EffectivePricingService } from "../trip-pricing/effective-pricing.service";
 import { resolveEffectivePricing } from "../trip-pricing/effective-pricing";
@@ -17,6 +18,7 @@ import {
   PricingRecalculationService,
   UNEXPECTED_RECALCULATION_FAILURE,
 } from "./pricing-recalculation.service";
+import { TarChargeReadRepository } from "./tar-charge-read.repository";
 import { TripStatus } from "@prisma/client";
 
 const TRIP_ID = "3f2504e0-4f89-41d3-9a0c-0305e82c3301";
@@ -38,7 +40,7 @@ const TRIP_ID = "3f2504e0-4f89-41d3-9a0c-0305e82c3301";
  */
 describe("PricingRecalculationService", () => {
   /** The Engine's two halves: a pair is calculated in full before either is stored. */
-  let engine: { calculate: jest.Mock; store: jest.Mock };
+  let engine: { calculate: jest.Mock; store: jest.Mock; markCalculationFailed: jest.Mock };
   let effectivePricing: { findForTrip: jest.Mock };
   let logger: {
     setContext: jest.Mock;
@@ -48,6 +50,7 @@ describe("PricingRecalculationService", () => {
   };
   let trips: { findById: jest.Mock };
   let components: { legsPricedByPlanningDate: jest.Mock };
+  let tarCharges: { findClosedTripsStating: jest.Mock };
   let recalculation: PricingRecalculationService;
 
   /** A stored breakdown, as the shared effective read produces one. */
@@ -87,6 +90,7 @@ describe("PricingRecalculationService", () => {
         calculationStatus: "CALCULATED",
       }),
       store: jest.fn().mockResolvedValue(undefined),
+      markCalculationFailed: jest.fn().mockResolvedValue(1),
     };
     effectivePricing = {
       findForTrip: jest.fn().mockResolvedValue(
@@ -104,6 +108,7 @@ describe("PricingRecalculationService", () => {
       findById: jest.fn().mockResolvedValue({ id: TRIP_ID, status: "CLOSED" }),
     };
     components = { legsPricedByPlanningDate: jest.fn().mockResolvedValue([]) };
+    tarCharges = { findClosedTripsStating: jest.fn().mockResolvedValue([]) };
     logger = {
       setContext: jest.fn(),
       log: jest.fn(),
@@ -117,10 +122,12 @@ describe("PricingRecalculationService", () => {
         trips as unknown as TripReadService,
         logger as unknown as AppLoggerService,
         { clearForTrips: jest.fn().mockResolvedValue(0), replace: jest.fn() } as unknown as TripRouteSelectionRepository,
+        noTarSettlement(),
       ),
       effectivePricing as unknown as EffectivePricingService,
       trips as unknown as TripReadService,
       components as unknown as PricingComponentResolver,
+      tarCharges as unknown as TarChargeReadRepository,
       logger as unknown as AppLoggerService,
     );
   });

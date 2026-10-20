@@ -7,6 +7,7 @@ import type { InvoiceColumnPositions } from "../workbook/invoice-columns";
 import { toColumnLetter } from "../workbook/invoice-columns";
 import { InvoiceFuelRateReader } from "./invoice-fuel-rate.reader";
 import { InvoicePricingStatus, type InvoiceRowPricing } from "./invoice-reconciliation";
+import { ManualRouteFactsReader } from "./manual-route-facts.reader";
 import { assessPriceReliability } from "./price-reliability";
 import { reconcileTripRows } from "./trip-reconciliation";
 
@@ -41,6 +42,7 @@ export class InvoicePricingService {
   constructor(
     private readonly effectivePricing: EffectivePricingService,
     private readonly fuelRates: InvoiceFuelRateReader,
+    private readonly manualRoutes: ManualRouteFactsReader,
     private readonly logger: AppLoggerService,
   ) {
     this.logger.setContext(InvoicePricingService.name);
@@ -56,6 +58,10 @@ export class InvoicePricingService {
       this.effectivePricing.findForTrips(tripIds),
       this.fuelRates.findForTrips(tripIds),
     ]);
+    const manualByTrip = await this.manualRoutes.findForTrips(
+      matched.map((match) => match.trip!),
+      pricingByTrip,
+    );
 
     const byRow = new Map<number, InvoiceRowPricing>();
     const tariefColumnLetter = toColumnLetter(columns.tarief ?? 0);
@@ -71,7 +77,7 @@ export class InvoicePricingService {
       const outcomes = reconcileTripRows({
         rows,
         pricing,
-        reliability: assessPriceReliability(rows[0].trip!, pricing),
+        reliability: assessPriceReliability(rows[0].trip!, pricing, manualByTrip.get(tripId) ?? null),
         tariefColumnLetter,
         fuelRate: ratesByTrip.get(tripId) ?? null,
         pricingOfRow,

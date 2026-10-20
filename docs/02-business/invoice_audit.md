@@ -138,6 +138,26 @@ the check reconstructed a "relation" between the two names for every
 found route still proves nothing about its pair: the Combination conditions
 above apply unchanged.
 
+**A route chosen by hand** (snapshot `routeSelection = MANUAL`, owner,
+October 2026, completed 20 October 2026). The automatic `NOT_FOUND`,
+`AMBIGUOUS` or `PAIR_NOT_CONFIGURED` the choice was made for is no reason to
+distrust the price. It is relied on when what is stored NOW confirms it:
+
+| Stored now | Otherwise |
+|---|---|
+| the snapshot records a route: a whole Combination for a grouped Trip, none for an ungrouped one | `SNAPSHOT_INCONSISTENT` |
+| the chosen configuration still exists | `MANUAL_ROUTE_REMOVED` |
+| `trip_route_selection` holds the very route the snapshot was priced on — a choice an explicit reprocess (or a road, group or status change) removed is never used | `SNAPSHOT_INCONSISTENT` |
+| a chosen Combination: the snapshot's legs are Leg 1 and Leg 2, this Trip priced on one of them | `SNAPSHOT_INCONSISTENT` |
+| a chosen Combination: the pricing partner (`pricingPartnerOf`) is chosen AND priced on the other leg of the same Combination — read from its own stored price, also when it is not on the invoice | `COMBINATION_NOT_PRICED` |
+
+These facts are read, never decided: `pricing/manual-route-facts.reader.ts`
+(one query for the choices and group members, one for partner prices not
+already read). Nothing is matched or priced again. A reliable chosen route is
+then compared component by component exactly like any other line, so a real
+difference is still corrected or reported. Proven end to end in
+`invoice-manual-route.spec.ts`.
+
 The Trip's road, the priced road and the stored match method are shown beside
 an unreliable price for information (`pricing/route-description.ts`), never as
 a reason of their own. All messages the check shows are Dutch.

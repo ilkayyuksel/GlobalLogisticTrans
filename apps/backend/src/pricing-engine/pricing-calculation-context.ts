@@ -124,6 +124,11 @@ export interface PricingCustomPropertyInput {
   readonly name: string;
   readonly pricingComponentId: string | null;
   readonly defaultPrice: string | null;
+  /**
+   * True only for the property the Engine applies itself (TAR), never for an
+   * operator's assignment of the same property — see `withAutomaticProperty`.
+   */
+  readonly isAutomatic?: boolean;
 }
 
 /**
@@ -170,6 +175,11 @@ export interface PricingCalculationContext {
   readonly tripStatus: TripStatus;
   /** Null on a Trip that has not been scheduled. */
   readonly planningDate: string | null;
+  /**
+   * The Trip's TAR-nummer as it was read for this calculation. The day and
+   * number an automatic TAR line is charged for — see `TarChargeGuard`.
+   */
+  readonly tarNummer?: string | null;
 
   /**
    * Whether the Trip belongs to a TripGroup, and so carries its own
