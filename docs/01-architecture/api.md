@@ -328,3 +328,27 @@ endpoint are refused with 409 — Dutch message, nothing written — when anothe
 Trip that is not DELETED would share booking + container with this Trip on its
 original planning date or on its planning date. See database_model.md,
 "Correcting the booking number".
+
+
+# "Route nakijken" — the route-attention filter
+
+`GET /api/v1/trips?routeAttention=true`
+
+Narrows the Ritten list to the Trips whose route or route price needs
+attention, with OR logic, so a Trip appears once whichever reason holds. Only
+the Trip's CURRENT price is read (a CLOSED Trip whose snapshot is not FAILED):
+
+- **no usable route** — the snapshot recorded how it matched (`route_match`)
+  and priced no route (`route_pricing_id` null): `NOT_FOUND`, `AMBIGUOUS`, or a
+  grouped Trip whose pair is no configured Combination. A route an operator
+  chose is a route. A snapshot from before the match was recorded is not
+  counted as unmatched;
+- **price unchecked** — priced on a route not marked as checked on the
+  Routeprijzen page: a Combination by its own group mark, never a leg's; an
+  ordinary route by its own.
+
+It is one condition in the database query, beside every other filter, so the
+period, search, sort, paging, the status counts and the day sections all apply
+to the filtered set. Omitted or `false`: no such filter. Nothing is matched or
+priced. The rule: `apps/backend/src/trip-pricing/route-attention.ts`; proven
+against a real database in `apps/backend/src/trips/route-attention.db.spec.ts`.

@@ -289,7 +289,7 @@ function RittenList() {
 
   const debouncedSearch = useDebounced(filters.search, SEARCH_DEBOUNCE_MS);
 
-  const { status, vehicleId, terminal, customPropertyId, isPaid } = filters;
+  const { status, vehicleId, terminal, customPropertyId, isPaid, routeAttention } = filters;
 
   // Built from the individual values so a keystroke in an unrelated field
   // cannot retrigger the request through a new object identity.
@@ -297,7 +297,7 @@ function RittenList() {
     () => ({
       ...periodQuery(view, anchor),
       ...toFilterParams(
-        { search: "", status, vehicleId, terminal, customPropertyId, isPaid },
+        { search: "", status, vehicleId, terminal, customPropertyId, isPaid, routeAttention },
         debouncedSearch,
       ),
       // The DATABASE orders the rows. Sorting the page in the browser would
@@ -313,6 +313,7 @@ function RittenList() {
       terminal,
       customPropertyId,
       isPaid,
+      routeAttention,
       debouncedSearch,
       sort,
     ],

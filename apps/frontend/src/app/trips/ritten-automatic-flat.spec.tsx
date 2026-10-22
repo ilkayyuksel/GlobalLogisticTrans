@@ -145,7 +145,7 @@ describe("the automatic Flat property in Ritten", () => {
       ).not.toBeInTheDocument();
       expect(within(row).getByText("Verplicht")).toBeInTheDocument();
       expect(
-        within(dialog).getByText(/verplicht voor containertype 20FL en 20ST/),
+        within(dialog).getByText(/verplicht voor dit containertype/),
       ).toBeInTheDocument();
     });
 
@@ -298,7 +298,7 @@ describe("the automatic Flat property in Ritten", () => {
 
       expect(within(dialog).getByText("Zorunlu")).toBeInTheDocument();
       expect(
-        within(dialog).getByText(/konteyner tipleri için zorunludur/),
+        within(dialog).getByText(/için zorunludur ve kaldırılamaz/),
       ).toBeInTheDocument();
     });
 

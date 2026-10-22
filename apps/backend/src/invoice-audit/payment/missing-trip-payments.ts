@@ -37,8 +37,8 @@ export interface MissingTripsForPayment {
  * customer does not pay for them on this document:
  *   * not added — the document's totals would have left the line out, so the
  *     corrected invoice does not carry it;
- *   * blocked — an unresolved line may be this very transport, an open conflict
- *     like any other.
+ *   * blocked — an unresolved line may be this very transport; the rows that
+ *     block it are named, so a person knows which line to fix.
  */
 export function assessMissingTripPayments(
   missing: MissingTripsForPayment,
@@ -51,7 +51,7 @@ export function assessMissingTripPayments(
     notPayable(row.trip, [], [NotPayableReason.NOT_ADDED]),
   );
   const blocked = missing.blocked.map((row) =>
-    notPayable(row.trip, [], [NotPayableReason.OPEN_CONFLICT]),
+    notPayable(row.trip, [], [NotPayableReason.BLOCKED_BY_UNRESOLVED_LINE], row.blockingRowNumbers),
   );
 
   // Never a second entry for a Trip a line of the document already charges.
@@ -80,6 +80,7 @@ function toAddedPayment(row: AddedRow, rowNumbers: number[]): TripPayment {
         payable: true,
         category: PaymentCategory.ADDED,
         reasons: [],
+        blockingRowNumbers: [],
         alreadyPaid: row.trip.isPaid,
       };
 }
@@ -88,6 +89,7 @@ function notPayable(
   trip: TripPayment["trip"],
   rowNumbers: number[],
   reasons: NotPayableReason[],
+  blockingRowNumbers: readonly number[] = [],
 ): TripPayment {
-  return { trip, rowNumbers, payable: false, category: null, reasons, alreadyPaid: trip.isPaid };
+  return { trip, rowNumbers, payable: false, category: null, reasons, blockingRowNumbers, alreadyPaid: trip.isPaid };
 }

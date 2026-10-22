@@ -46,6 +46,7 @@ export function withIdentityConflicts(
       candidates: [match.trip],
       containerCorrection: null,
       bookingCorrection: null,
+      dateCorrection: null,
       problem: `Door deze regel te corrigeren, zou hij dezelfde rit krijgen als rij ${others
         .map((other) => other.row.rowNumber)
         .join(", ")}.`,
@@ -54,7 +55,7 @@ export function withIdentityConflicts(
 }
 
 function isCorrected(match: InvoiceRowMatch): boolean {
-  return match.containerCorrection !== null || match.bookingCorrection !== null;
+  return match.containerCorrection !== null || match.bookingCorrection !== null || match.dateCorrection !== null;
 }
 
 function identityKey(match: InvoiceRowMatch): string {

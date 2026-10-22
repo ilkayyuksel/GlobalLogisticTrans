@@ -3,6 +3,7 @@
 import Link from "next/link";
 
 import { InvoicePricingCell } from "@/components/invoice-audit/invoice-pricing-cell";
+import { InvoiceRowAdviceList } from "@/components/invoice-audit/invoice-row-advice";
 import {
   ContainerCorrectionNote,
   InvoiceRowNotes,
@@ -107,6 +108,9 @@ export function InvoiceAuditRows({
             <th scope="col" className="px-3 py-2">
               {t("invoiceAudit.column.pricing")}
             </th>
+            <th scope="col" className="px-3 py-2">
+              {t("invoiceAudit.column.advice")}
+            </th>
           </tr>
         </thead>
         <tbody>
@@ -139,6 +143,15 @@ function InvoiceAuditRowLine({ row, marked }: { row: InvoiceAuditRow; marked: bo
       </td>
       <td className="px-3 py-2 tabular-nums text-secondary">
         {row.planningDate}
+        {row.dateCorrection ? (
+          <span
+            className="ml-2 inline-flex items-center gap-1 whitespace-nowrap rounded border border-warning/40 bg-warning/10 px-1.5 py-0.5 text-xs font-medium text-warning"
+            title={`${t("invoiceAudit.dateCorrected.detail")} ${row.dateCorrection.invoicePlanningDate} → ${row.dateCorrection.tripPlanningDate}`}
+          >
+            <span aria-hidden="true">⚠</span>
+            {t("invoiceAudit.dateCorrected")} → {row.dateCorrection.tripPlanningDate}
+          </span>
+        ) : null}
       </td>
       <td className="px-3 py-2 font-medium text-foreground">
         {row.bookingNumber}
@@ -165,6 +178,10 @@ function InvoiceAuditRowLine({ row, marked }: { row: InvoiceAuditRow; marked: bo
       </td>
       <td className="px-3 py-2 align-top">
         <InvoicePricingCell row={row} />
+      </td>
+      <td className="px-3 py-2 align-top">
+        {/* Older answers carry no advice; they show what they always showed. */}
+        <InvoiceRowAdviceList advice={row.advice ?? []} />
       </td>
     </tr>
   );

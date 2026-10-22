@@ -111,7 +111,7 @@ export function writeAddedRow(
 
   if (pricing && added.reliability.reliable) {
     write("tarief", toNumber(pricing.tarief), true);
-    write("fuel", toFuelCell(template, pricing, sheet, rowNumber), true);
+    write("fuel", toFuelCell([added.fuelRate, template.fuelPercentage], pricing, sheet, rowNumber), true);
     write("backload", toNumber(pricing.backload), true);
     // The same toll convention as a correction: the figure goes to Tol B, and
     // the columns the customer leaves empty stay empty.
@@ -125,16 +125,24 @@ export function writeAddedRow(
 }
 
 /**
- * The Fuel cell of an added line.
+ * The Fuel cell of an added line: a FORMULA on this row's own Tarief, so Excel
+ * calculates the Fuel from the Tarief like on the customer's own lines.
  *
- * When the document writes Fuel as a percentage of the Tarief, the new line is
- * written the same way — and only when that formula produces exactly what this
- * system holds. Where it would not (their percentage differs from ours), the
- * amount is written instead, because the figure that must be right is the
- * amount and not the arithmetic that produced it.
+ * ── WHICH PERCENTAGE ────────────────────────────────────────────────────────
+ * The Trip's OWN — the rate its stored price was calculated at, which is the
+ * rule the Fuel follows everywhere in this system (`resolveFuel`). Never a
+ * constant of ours and never the current setting: a Trip keeps the rate it
+ * was priced at. Failing that (a snapshot from before the rate was recorded),
+ * the percentage the document itself writes. In the customer's own shape,
+ * `24%*L5`.
+ *
+ * A percentage is used only when its formula comes to exactly the Fuel this
+ * system holds, to the cent, so Excel shows what the check stands behind.
+ * When none does, the amount is written as a figure: the amount is what must
+ * be right, not the arithmetic that produced it.
  */
 function toFuelCell(
-  template: AddedRowTemplate,
+  percentages: readonly (Prisma.Decimal | null)[],
   pricing: { tarief: Prisma.Decimal; brandstof: Prisma.Decimal },
   sheet: InvoiceSheet,
   rowNumber: number,
@@ -146,18 +154,17 @@ function toFuelCell(
     return null;
   }
 
-  if (template.fuelPercentage === null) {
+  const percentage = percentages.find(
+    (candidate): candidate is Prisma.Decimal =>
+      candidate !== null && candidate.greaterThan(0) && fuelFormulaProduces(candidate, pricing),
+  );
+
+  if (percentage === undefined || sheet.columns.tarief === undefined) {
     return toNumber(brandstof);
   }
-
-  if (!fuelFormulaProduces(template.fuelPercentage, pricing)) {
-    return toNumber(brandstof);
-  }
-
-  const tariefLetter = toColumnLetter(sheet.columns.tarief ?? 0);
 
   return {
-    formula: `${template.fuelPercentage.toString()}%*${tariefLetter}${rowNumber}`,
+    formula: `${percentage.toString()}%*${toColumnLetter(sheet.columns.tarief)}${rowNumber}`,
     // Never zero here: a zero fuel returned an empty cell above.
     result: Number(brandstof.toFixed(MONEY_DECIMAL_PLACES)),
   };

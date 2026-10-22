@@ -46,6 +46,12 @@ export interface RittenFilterValues {
    * say "Alle" without conflating it with "Niet betaald".
    */
   isPaid: PaymentFilter;
+  /**
+   * Only Trips whose route or route price needs attention: no usable route
+   * match, or a route price not yet checked on the Routeprijzen page. The
+   * BACKEND decides which those are; off means no such filter.
+   */
+  routeAttention: boolean;
 }
 
 /** Alle / Betaald / Niet betaald, in the order the control offers them. */
@@ -60,6 +66,7 @@ export const EMPTY_RITTEN_FILTERS: RittenFilterValues = {
   terminal: "",
   customPropertyId: "",
   isPaid: "",
+  routeAttention: false,
 };
 
 export function hasActiveRittenFilters(values: RittenFilterValues): boolean {
@@ -69,7 +76,8 @@ export function hasActiveRittenFilters(values: RittenFilterValues): boolean {
     values.vehicleId !== "" ||
     values.terminal.trim() !== "" ||
     values.customPropertyId !== "" ||
-    values.isPaid !== ""
+    values.isPaid !== "" ||
+    values.routeAttention
   );
 }
 
@@ -91,6 +99,8 @@ export function toFilterParams(
      * question — and exactly the mistake a boolean here would invite.
      */
     isPaid: values.isPaid === "" ? undefined : values.isPaid === "paid",
+    // Not sent when off: the backend then applies no such filter at all.
+    routeAttention: values.routeAttention ? true : undefined,
   };
 }
 
@@ -252,6 +262,23 @@ export function RittenFilters({
           </button>
         ))}
       </div>
+
+      {/*
+        One switch for both reasons a route needs attention — the backend
+        combines them, so a Trip is listed once whichever applies.
+      */}
+      <label
+        className="flex items-center gap-2 rounded-md border border-border bg-card px-3 py-1.5 text-sm text-secondary"
+        title={t("ritten.filter.routeAttentionHint")}
+      >
+        <input
+          type="checkbox"
+          checked={values.routeAttention}
+          onChange={(event) => update({ routeAttention: event.target.checked })}
+          className="h-4 w-4 rounded border-border accent-primary"
+        />
+        {t("ritten.filter.routeAttention")}
+      </label>
 
       <div role="radiogroup" aria-label={t("ritten.filter.status")} className="inline-flex rounded-md border border-border bg-card p-0.5">
         {STATUS_CHOICES.map((status) => (

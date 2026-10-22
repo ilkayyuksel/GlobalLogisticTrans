@@ -40,19 +40,46 @@ the Trip's two dates, exactly; DELETED Trips are never candidates.
 
 1. date + booking + container: one CLOSED Trip is `MATCHED`, several are
    `AMBIGUOUS`, only unfinished ones `NOT_FINISHED`;
-2. date + booking, when no Trip holds the container: exactly one Trip, CLOSED
-   and stating a container → `MATCHED` with the container corrected (red);
-3. date + container, when no Trip holds the booking on that day: exactly one
-   Trip on that day holding the container, CLOSED and stating a booking →
-   `MATCHED` with the booking corrected (red). Containers are reused — a
-   Combination's two legs often share one on one day — so two Trips are
-   `AMBIGUOUS`.
+2. any TWO of the three, when no Trip matches all three (`decideByTwoValues`,
+   candidates in `matching/two-value-candidates.ts`):
+   - date + booking → the container is corrected;
+   - date + container → the booking is corrected;
+   - booking + container on another day → the date is corrected to the Trip's
+     `planningDate` (owner, October 2026).
 
-Never both numbers at once, never a fuzzy number. A correction that would reach
-a Trip another line of the document already names is withdrawn: the line is
-`CONFLICT` (`matching/identity-conflicts.ts`). Rows stating the same date,
-booking and container are one transport split over several rows and never
-conflict.
+   The three pairs are judged together. Exactly one Trip, CLOSED and stating
+   the value the line is corrected to → `MATCHED` with that one value
+   corrected (red); not CLOSED → `NOT_FINISHED`; two or more → `AMBIGUOUS`,
+   nothing chosen; none → `NOT_FOUND`. One shared value is never enough.
+
+The lines are matched in two passes over the whole document, so the order of
+the lines never changes the answer. First every exact match; then step 2, where
+a Trip another line already matches EXACTLY is no candidate — it is accounted
+for. That is how a second line of one booking with a misprinted date finds its
+own Trip instead of colliding with the first line's. When only such Trips share
+two values, the line is `CONFLICT` naming that row: it may be the same transport
+invoiced twice, and a person decides.
+
+Never two values at once, never a fuzzy number. Two lines whose corrections
+reach the same Trip are both `CONFLICT` (`matching/identity-conflicts.ts`) and
+nothing is corrected. Rows stating the same date, booking and container are one
+transport split over several rows and never conflict.
+
+A corrected date is written in the form the cell held a date — a date cell, an
+Excel serial or `YYYY-MM-DD` text — so the customer's number format stays. A
+correction never makes a price reliable: the matched line is compared under the
+same price rules as every other line.
+
+### Advice per line
+
+Every line carries its advice (`advice/row-advice.ts`, `advice` in the API):
+the problem, the explanation (what was found and what became of the line) and
+the recommended action, as three separate sentences, with a severity — INFO
+(nothing to do), WARNING (a value was corrected, or a waiting time could not be
+written) or ERROR (unresolved, marked yellow). It restates what the matching and
+the Remarks plan decided; nothing is matched or priced again. An unresolved EC
+line says whether its transport WAS matched on another row — the transport is
+then checked and payable as usual, and only the EC line's EK is not compared.
 
 ### Cost Confirmation (EC) lines
 
@@ -102,10 +129,12 @@ The period is Monday to Friday of the ISO week of the transport lines
 (`toInvoicePeriod`); lines in more than one ISO week name no period and nothing
 is added. A CLOSED, unpaid Trip planned (`planningDate`) in that period whose
 identity no line states and that no line resolved to is missing — unless an
-UNRESOLVED line (not found, ambiguous, conflict, unresolved Cost Confirmation
-line, incomplete row) states its booking or container: then it may be that very
+UNRESOLVED line (not found, ambiguous, conflict, incomplete row — never an EC
+line, which is not a transport's own line) states its booking or container: then it may be that very
 transport with a typo, and it is reported as blocked instead of added
-(`missing/missing-trip-blocking.ts`).
+(`missing/missing-trip-blocking.ts`). Missing transports are decided only after
+the whole matching above, so a Trip a line reaches through a corrected value is
+on the invoice and is neither added nor blocked.
 
 How each missing transport is written is phase 4 — see "Added lines" below.
 
@@ -314,8 +343,13 @@ the summary; every formula is rewritten for the move (`openRowsAt`).
   DELIVERY leg first.
 - **Amounts**: only when the stored price is reliable (see "Only a reliable
   price is used"). Otherwise the line is added with no amounts and the whole row
-  is yellow. Zero is an empty cell. Fuel follows the document's formula
-  convention when that formula produces the amount exactly; otherwise a figure.
+  is yellow. Zero is an empty cell (a Tarief of zero: no Fuel, an empty cell).
+  **Fuel is a formula on the line's own Tarief** (`24%*L5`), so Excel
+  calculates it like on the customer's own lines, at the Trip's OWN percentage
+  — the rate its stored price was calculated at, never a constant and never
+  today's setting; for a snapshot that recorded none, the document's own
+  percentage (October 2026). A percentage is used only when its formula comes
+  to the stored Fuel exactly; otherwise the amount is written as a figure.
 - An added line with a reliable price is settled like any other (see "When a
   transport is payable"); one without stays unpaid. The document records every
   added line (see `invoice-audit-marker.ts`) so a later upload recognises it.
@@ -370,8 +404,18 @@ confirmation alike.
   `INVOICE_HIGHER` — which requires a reliable price
   (`PRICE_NOT_SETTLED`);
 - none of its lines is yellow (`LINE_MARKED`);
-- no unresolved line names it as a candidate, and every line of it is resolved
-  (`OPEN_CONFLICT`).
+- no unresolved TRANSPORT line names it as a candidate
+  (`payment/unresolved-line-claims.ts`): an ambiguous line (`AMBIGUOUS_MATCH`)
+  or a conflict (`MATCH_CONFLICT`). An EC line that could not be linked never
+  holds its transport back — it is never the transport's own line, and only its
+  EK stays unchecked.
+
+**A transport only unresolved lines name** — no line resolved to it — is listed
+too, not payable, with those reasons (`NOT_CLOSED` for an unfinished one), so
+no transport of the invoice stays unpaid without the check saying why.
+
+Every transport not payable for a match problem carries `blockingRowNumbers`:
+the rows to fix. The preview shows each reason with those rows and what to do.
 
 **A transport this system holds that the invoice did not state** (owner,
 October 2026) is paid when it was added to the corrected document with a price
@@ -380,7 +424,7 @@ Only a price problem keeps it unpaid: added without amounts, yellow
 (`PRICE_NOT_SETTLED`). Two kinds are not on the corrected invoice and stay
 unpaid for that reason: not added because the document's totals deviate
 (`NOT_ADDED`), and blocked because an unresolved line could be that transport
-(`OPEN_CONFLICT`). Until October 2026 an added transport was never settled.
+(`BLOCKED_BY_UNRESOLVED_LINE`, with the blocking rows). Until October 2026 an added transport was never settled.
 
 A payable transport has a category: `UNCHANGED`, `RAISED`, `ADDED` (not on
 the customer's invoice, added to the corrected one), or `INVOICE_HIGHER` —

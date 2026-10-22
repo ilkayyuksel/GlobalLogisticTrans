@@ -202,7 +202,7 @@ describe("Flat through a Trip's revisions", () => {
   }
 
   describe("a revision that makes the Trip a flat rack", () => {
-    it.each(["20FL", "20ST", "45FL", "45OS"])(
+    it.each(["20FL", "40FL", "45OS"])(
       "assigns Flat when 45PH becomes %s",
       async (containerType) => {
         await service.applyDocumentRevision(revisionWith(containerType));
@@ -213,8 +213,8 @@ describe("Flat through a Trip's revisions", () => {
     );
 
     it("assigns it once, however many revisions arrive", async () => {
-      await service.applyDocumentRevision(revisionWith("20FL"));
-      await service.applyDocumentRevision(revisionWith("20ST"));
+      await service.applyDocumentRevision(revisionWith("40FL"));
+      await service.applyDocumentRevision(revisionWith("45OS"));
       await service.applyDocumentRevision(revisionWith("20FL"));
 
       expect(assignments).toHaveLength(1);
@@ -223,9 +223,9 @@ describe("Flat through a Trip's revisions", () => {
 
   describe("a revision that makes it something else", () => {
     it.each(["45PH", "20TK", "45RH"])(
-      "removes the automatic Flat when 20FL becomes %s",
+      "removes the automatic Flat when 40FL becomes %s",
       async (containerType) => {
-        trip = buildTrip("20FL");
+        trip = buildTrip("40FL");
         given(FLAT_ID, true);
 
         await service.applyDocumentRevision(revisionWith(containerType));
@@ -234,8 +234,8 @@ describe("Flat through a Trip's revisions", () => {
       },
     );
 
-    it("removes it when 20ST becomes 45PH", async () => {
-      trip = buildTrip("20ST");
+    it("removes it when 45OS becomes 45PH", async () => {
+      trip = buildTrip("45OS");
       given(FLAT_ID, true);
 
       await service.applyDocumentRevision(revisionWith("45PH"));
@@ -244,12 +244,47 @@ describe("Flat through a Trip's revisions", () => {
     });
 
     /**
+     * From one of the three to a near neighbour that is not one of them: the
+     * open side and flat rack variants outside the list get no Flat.
+     */
+    it.each([
+      ["20FL", "20ST"],
+      ["40FL", "40OS"],
+      ["45OS", "45FL"],
+    ])("removes the automatic Flat when %s becomes %s, and assigns none", async (from, to) => {
+      trip = buildTrip(from);
+      given(FLAT_ID, true);
+
+      await service.applyDocumentRevision(revisionWith(to));
+
+      expect(trip.containerType).toBe(to);
+      expect(flat()).toBeUndefined();
+      expect(assignments).toHaveLength(0);
+    });
+
+    it.each(["20ST", "40OS", "45FL"])("assigns nothing when 45PH becomes %s", async (containerType) => {
+      await service.applyDocumentRevision(revisionWith(containerType));
+
+      expect(flat()).toBeUndefined();
+    });
+
+    it("keeps a manual Flat when 20FL becomes 20ST, still marked manual", async () => {
+      trip = buildTrip("20FL");
+      const manual = given(FLAT_ID, false);
+
+      await service.applyDocumentRevision(revisionWith("20ST"));
+
+      expect(flat()).toEqual(manual);
+      expect(flat()?.isAutomatic).toBe(false);
+    });
+
+    /**
      * The line this rule may not cross. The operator assigned Flat for a reason
      * this document has no view on, and a container type changing is not an
      * instruction to undo their work.
      */
     it("keeps a manually assigned Flat", async () => {
-      trip = buildTrip("20FL");
+      trip = buildTrip("40FL");
       const manual = given(FLAT_ID, false);
 
       await service.applyDocumentRevision(revisionWith("45PH"));
@@ -258,7 +293,7 @@ describe("Flat through a Trip's revisions", () => {
     });
 
     it("leaves every other property where it is", async () => {
-      trip = buildTrip("20FL");
+      trip = buildTrip("40FL");
       const tar = given(TAR_ID, false);
       given(FLAT_ID, true);
 
@@ -269,12 +304,12 @@ describe("Flat through a Trip's revisions", () => {
   });
 
   describe("a revision that changes something else entirely", () => {
-    it("leaves a 20FL Trip's Flat alone", async () => {
-      trip = buildTrip("20FL");
+    it("leaves a 40FL Trip's Flat alone", async () => {
+      trip = buildTrip("40FL");
       const existing = given(FLAT_ID, true);
 
       await service.applyDocumentRevision({
-        ...revisionWith("20FL"),
+        ...revisionWith("40FL"),
         containerNumber: "TCLU9999999",
       });
 
@@ -301,7 +336,7 @@ describe("Flat through a Trip's revisions", () => {
     it("changes nothing on a CLOSED Trip", async () => {
       trip = { ...buildTrip("45PH"), status: TripStatus.CLOSED };
 
-      await service.applyDocumentRevision(revisionWith("20FL"));
+      await service.applyDocumentRevision(revisionWith("40FL"));
 
       expect(trip.containerType).toBe("45PH");
       expect(assignments).toEqual([]);
@@ -311,15 +346,15 @@ describe("Flat through a Trip's revisions", () => {
     it("reopens a CANCELLED Trip and applies the rule to it", async () => {
       trip = { ...buildTrip("45PH"), status: TripStatus.CANCELLED };
 
-      await service.applyDocumentRevision(revisionWith("20FL"));
+      await service.applyDocumentRevision(revisionWith("40FL"));
 
       expect(trip.status).toBe(TripStatus.OPEN);
-      expect(trip.containerType).toBe("20FL");
+      expect(trip.containerType).toBe("40FL");
       expect(flat()).toMatchObject({ isAutomatic: true });
     });
 
-    it("leaves a CLOSED 20FL Trip's Flat exactly as it was", async () => {
-      trip = { ...buildTrip("20FL"), status: TripStatus.CLOSED };
+    it("leaves a CLOSED 40FL Trip's Flat exactly as it was", async () => {
+      trip = { ...buildTrip("40FL"), status: TripStatus.CLOSED };
       const existing = given(FLAT_ID, true);
 
       await service.applyDocumentRevision(revisionWith("45PH"));

@@ -8,12 +8,15 @@ import type { IncompleteInvoiceRow } from "../workbook/invoice-sheet";
  * ── A LINE THAT COULD BE THE TRANSPORT BLOCKS ADDING IT ─────────────────────
  * A finished transport is only added to the invoice when nothing on it could
  * already be that transport. A line that found no Trip, several, one in
- * conflict, a Cost Confirmation line that could not be resolved, a row too
- * incomplete to be a line — each still NAMES a booking or a container. When a
+ * conflict, a row too incomplete to be a line — each still NAMES a booking or
+ * a container. When a
  * candidate transport shares either with such a line, the line may simply be
  * that transport with a typo in its date or booking, and adding it would put it
  * on the invoice twice. So it is NOT added: it is reported beside the line that
  * blocks it, and a person decides.
+ *
+ * A Cost Confirmation line is never a transport's own line, so one that could
+ * not be linked blocks nothing: it leaves its EK unchecked, not the transport.
  *
  * A booking or container stated only by lines that WERE resolved — to other
  * Trips — blocks nothing: week 41 invoices four containers under booking
@@ -23,7 +26,6 @@ const UNRESOLVED: readonly InvoiceRowStatus[] = [
   InvoiceRowStatus.NOT_FOUND,
   InvoiceRowStatus.AMBIGUOUS,
   InvoiceRowStatus.CONFLICT,
-  InvoiceRowStatus.COST_LINE_UNRESOLVED,
 ];
 
 export interface BlockingIdentities {

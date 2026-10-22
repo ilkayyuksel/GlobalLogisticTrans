@@ -19,6 +19,7 @@ function match(
     sharedKeyRowNumbers: [],
     containerCorrection: null,
     bookingCorrection: null,
+    dateCorrection: null,
     costConfirmation: null,
     combination: null,
     problem: null,
@@ -84,7 +85,52 @@ describe("assessPayments", () => {
       new Set([3]),
     );
 
-    expect(payment).toMatchObject({ payable: false, reasons: ["OPEN_CONFLICT"] });
+    expect(payment).toMatchObject({ payable: false, reasons: ["AMBIGUOUS_MATCH"], blockingRowNumbers: [3] });
+  });
+
+  /**
+   * An EC line whose booking does not match its confirmation's Trip names that
+   * Trip, but it is never the transport's own line: only its EK is unchecked.
+   */
+  it("pays a transport whose EC line could not be linked", () => {
+    const ecLine = {
+      ...match(3, InvoiceRowStatus.COST_LINE_UNRESOLVED, null, [ONE]),
+      row: sheetRow({ rowNumber: 3, costLine: { ccNumbers: ["4214683"] } }),
+    };
+    const [payment] = assessPayments(
+      [match(2, InvoiceRowStatus.MATCHED, ONE), ecLine],
+      priced([2, InvoicePricingStatus.MATCHED_NO_CHANGES]),
+      new Set([3]),
+    );
+
+    expect(payment).toMatchObject({ payable: true, reasons: [], blockingRowNumbers: [] });
+  });
+
+  it("lists a transport only an ambiguous line names, with that row, never silently", () => {
+    const payments = assessPayments(
+      [match(9, InvoiceRowStatus.AMBIGUOUS, null, [ONE, tripRecord({ id: "two" })])],
+      new Map(),
+      new Set([9]),
+    );
+
+    expect(payments).toEqual([
+      expect.objectContaining({ trip: ONE, payable: false, reasons: ["AMBIGUOUS_MATCH"], blockingRowNumbers: [9] }),
+      expect.objectContaining({ payable: false, reasons: ["AMBIGUOUS_MATCH"], blockingRowNumbers: [9] }),
+    ]);
+  });
+
+  it("names a conflict as a conflict, and an unfinished candidate as not closed", () => {
+    const open = tripRecord({ id: "open", status: TripStatus.OPEN });
+    const payments = assessPayments(
+      [match(4, InvoiceRowStatus.CONFLICT, null, [ONE]), match(5, InvoiceRowStatus.NOT_FINISHED, null, [open])],
+      new Map(),
+      new Set([4, 5]),
+    );
+
+    expect(payments.map((payment) => [payment.trip.id, payment.reasons, payment.blockingRowNumbers])).toEqual([
+      ["one", ["MATCH_CONFLICT"], [4]],
+      ["open", ["NOT_CLOSED"], [5]],
+    ]);
   });
 
   /** A line this check added earlier is the transport's own line. */

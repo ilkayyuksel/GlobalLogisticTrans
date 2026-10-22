@@ -2,6 +2,7 @@ import { TripStatus, type Trip } from "@prisma/client";
 
 import { InvoiceRowStatus, type InvoiceRowMatch } from "../matching/invoice-row-match";
 import { InvoicePricingStatus, type InvoiceRowPricing } from "../pricing/invoice-reconciliation";
+import { UnresolvedClaim, claimsByTrip, type TripClaims } from "./unresolved-line-claims";
 
 /** How the invoice's amounts for a payable transport compared with this system's. */
 export const PaymentCategory = {
@@ -39,8 +40,15 @@ export const NotPayableReason = {
   LINE_MARKED: "LINE_MARKED",
   /** One of its lines was not priced reliably and completely. */
   PRICE_NOT_SETTLED: "PRICE_NOT_SETTLED",
-  /** An unresolved line could be this very transport. */
-  OPEN_CONFLICT: "OPEN_CONFLICT",
+  /** A line could be this transport or another one; nothing was chosen. */
+  AMBIGUOUS_MATCH: "AMBIGUOUS_MATCH",
+  /** Two lines lead to this transport; neither was corrected. */
+  MATCH_CONFLICT: "MATCH_CONFLICT",
+  /**
+   * Not on the invoice and not added: an unresolved line states its booking or
+   * container and may be this very transport with a typo.
+   */
+  BLOCKED_BY_UNRESOLVED_LINE: "BLOCKED_BY_UNRESOLVED_LINE",
 } as const;
 
 export type NotPayableReason = (typeof NotPayableReason)[keyof typeof NotPayableReason];
@@ -55,6 +63,11 @@ export interface TripPayment {
   readonly category: PaymentCategory | null;
   /** Empty when payable. */
   readonly reasons: readonly NotPayableReason[];
+  /**
+   * The rows a person has to look at for it to become payable: the unresolved
+   * lines that name it, or that block adding it. Empty when none do.
+   */
+  readonly blockingRowNumbers: readonly number[];
   /** Already paid: re-invoiced, and never paid a second time. */
   readonly alreadyPaid: boolean;
 }
@@ -76,13 +89,6 @@ const OWN_LINE_STATUSES: readonly InvoiceRowStatus[] = [
   InvoiceRowStatus.ADDED_MISSING,
 ];
 
-/** The line statuses that name one transport for certain. */
-const RESOLVED_LINE_STATUSES: readonly InvoiceRowStatus[] = [
-  InvoiceRowStatus.MATCHED,
-  InvoiceRowStatus.COST_LINE,
-  InvoiceRowStatus.ADDED_MISSING,
-];
-
 /**
  * Which transports this invoice may settle — see `invoice_audit.md`, "When a
  * transport is payable".
@@ -98,7 +104,13 @@ const RESOLVED_LINE_STATUSES: readonly InvoiceRowStatus[] = [
  *   * every line came out UNCHANGED, RAISED or INVOICE_HIGHER — which already
  *     requires a reliable price, route evidence included;
  *   * none of its lines is marked yellow;
- *   * no unresolved line names it as a candidate.
+ *   * no unresolved TRANSPORT line names it as a candidate — an ambiguous
+ *     line or a conflict (`unresolved-line-claims.ts`); an EC line that could
+ *     not be linked never holds its transport back.
+ *
+ * A transport that NO line resolved to, but that an unresolved line names as a
+ * candidate, is listed too — not payable, with the reason and the rows to fix —
+ * so no transport stays unpaid without the check saying why.
  *
  * The transports the invoice did not state at all are judged beside these —
  * see `invoice-payments.ts`. Deciding is all this does. Paying is a separate,
@@ -109,10 +121,9 @@ export function assessPayments(
   pricing: ReadonlyMap<number, InvoiceRowPricing>,
   markedRowNumbers: ReadonlySet<number>,
 ): TripPayment[] {
-  const contested = contestedTripIds(matches);
-
-  return [...linesByTrip(matches).values()].map(({ trip, lines }) => {
-    const reasons = reasonsAgainst(trip, lines, pricing, markedRowNumbers, contested);
+  const claims = claimsByTrip(matches);
+  const charged = [...linesByTrip(matches).values()].map(({ trip, lines }): TripPayment => {
+    const reasons = reasonsAgainst(trip, lines, pricing, markedRowNumbers, claims.get(trip.id));
     const payable = reasons.length === 0;
 
     return {
@@ -121,9 +132,40 @@ export function assessPayments(
       payable,
       category: payable ? categoryOf(lines, pricing) : null,
       reasons,
+      blockingRowNumbers: claims.get(trip.id)?.rowNumbers ?? [],
       alreadyPaid: trip.isPaid,
     };
   });
+  const chargedIds = new Set(charged.map((payment) => payment.trip.id));
+  const onlyClaimed = [...claims.values()]
+    .filter((claimed) => !chargedIds.has(claimed.trip.id))
+    .map(toClaimedOnlyPayment);
+
+  return [...charged, ...onlyClaimed];
+}
+
+/** A transport only unresolved lines name: never payable until they are fixed. */
+function toClaimedOnlyPayment({ trip, claims, rowNumbers }: TripClaims): TripPayment {
+  return {
+    trip,
+    rowNumbers: [],
+    payable: false,
+    category: null,
+    reasons: [
+      ...(trip.status !== TripStatus.CLOSED ? [NotPayableReason.NOT_CLOSED] : []),
+      ...toClaimReasons(claims),
+    ],
+    blockingRowNumbers: rowNumbers,
+    alreadyPaid: trip.isPaid,
+  };
+}
+
+/** The match problems among the claims; an unfinished Trip is NOT_CLOSED already. */
+function toClaimReasons(claims: ReadonlySet<UnresolvedClaim>): NotPayableReason[] {
+  return [
+    ...(claims.has(UnresolvedClaim.AMBIGUOUS_MATCH) ? [NotPayableReason.AMBIGUOUS_MATCH] : []),
+    ...(claims.has(UnresolvedClaim.MATCH_CONFLICT) ? [NotPayableReason.MATCH_CONFLICT] : []),
+  ];
 }
 
 function reasonsAgainst(
@@ -131,7 +173,7 @@ function reasonsAgainst(
   lines: readonly InvoiceRowMatch[],
   pricing: ReadonlyMap<number, InvoiceRowPricing>,
   markedRowNumbers: ReadonlySet<number>,
-  contested: ReadonlySet<string>,
+  claimed: TripClaims | undefined,
 ): NotPayableReason[] {
   const reasons: NotPayableReason[] = [];
   const add = (reason: NotPayableReason, applies: boolean) => {
@@ -153,12 +195,10 @@ function reasonsAgainst(
     NotPayableReason.PRICE_NOT_SETTLED,
     lines.some((line) => !isSettled(pricing.get(line.row.rowNumber))),
   );
-  add(
-    NotPayableReason.OPEN_CONFLICT,
-    contested.has(trip.id) || lines.some((line) => !RESOLVED_LINE_STATUSES.includes(line.status)),
-  );
 
-  return reasons;
+  // Every line that names a Trip is resolved (MATCHED, COST_LINE, ADDED_MISSING);
+  // what can still hold it back is an unresolved line naming it as a candidate.
+  return [...reasons, ...toClaimReasons(claimed?.claims ?? new Set())];
 }
 
 function categoryOf(
@@ -198,16 +238,4 @@ function linesByTrip(
   }
 
   return byTrip;
-}
-
-/**
- * The Trips an unresolved line could be — the candidates of a line that found
- * several, or whose correction would reach a Trip another line already is.
- */
-function contestedTripIds(matches: readonly InvoiceRowMatch[]): Set<string> {
-  return new Set(
-    matches
-      .filter((match) => !RESOLVED_LINE_STATUSES.includes(match.status))
-      .flatMap((match) => match.candidates.map((candidate) => candidate.id)),
-  );
 }

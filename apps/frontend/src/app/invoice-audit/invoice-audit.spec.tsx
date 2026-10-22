@@ -435,6 +435,77 @@ describe("Excel factuurcontrole", () => {
   describe("how lines were identified", () => {
     const matchedRow = result().rows[0];
 
+    /**
+     * The recommended action is the backend's, worded from the line's actual
+     * outcome; the screen lays out its three parts separately.
+     */
+    it("shows a corrected date and the recommended action, problem, explanation and action apart", async () => {
+      requestMock.mockResolvedValue(
+        result({
+          rows: [
+            {
+              ...matchedRow,
+              planningDate: "2026-03-23",
+              dateCorrection: { invoicePlanningDate: "2026-03-23", tripPlanningDate: "2026-03-24" },
+              advice: [
+                {
+                  severity: "WARNING",
+                  problem: "Datum komt niet overeen",
+                  explanation: "Boekingsnummer en containernummer komen overeen met één unieke rit in Trano.",
+                  action: "Corrigeer de datum in Excel van 23/03/2026 naar 24/03/2026.",
+                },
+              ],
+            },
+          ],
+        }),
+      );
+
+      await check();
+
+      const transport = rowFor("DUBANR2718284");
+      expect(screen.getByRole("columnheader", { name: "Aanbevolen actie" })).toBeInTheDocument();
+      expect(within(transport).getByText(/Datum gecorrigeerd → 2026-03-24/)).toBeInTheDocument();
+      expect(within(transport).getByText("Waarschuwing")).toBeInTheDocument();
+      expect(within(transport).getByText("Datum komt niet overeen")).toBeInTheDocument();
+      expect(
+        within(transport).getByText("Boekingsnummer en containernummer komen overeen met één unieke rit in Trano."),
+      ).toBeInTheDocument();
+      expect(within(transport).getByText("Corrigeer de datum in Excel van 23/03/2026 naar 24/03/2026.")).toBeInTheDocument();
+    });
+
+    it("shows an unresolved line's advice instead of repeating its short problem", async () => {
+      requestMock.mockResolvedValue(
+        result({
+          rows: [
+            {
+              ...matchedRow,
+              status: "COST_LINE_UNRESOLVED",
+              trip: null,
+              pricingStatus: "NOT_COMPARED",
+              differences: [],
+              matchProblem: "Geen kostenbevestiging gevonden voor EC 4214683.",
+              advice: [
+                {
+                  severity: "ERROR",
+                  problem: "EC-kostenbevestiging niet gekoppeld",
+                  explanation:
+                    "De ritmatch is wel succesvol: de rit zelf staat op Excel-rij 39 en is daar gewoon gecontroleerd. Geen kostenbevestiging gevonden voor EC 4214683.",
+                  action: "Controleer het EC-nummer (4214683).",
+                },
+              ],
+            },
+          ],
+        }),
+      );
+
+      await check();
+
+      const line = rowFor("DUBANR2718284");
+      expect(within(line).getByText("Fout")).toBeInTheDocument();
+      expect(within(line).getByText(/De ritmatch is wel succesvol/)).toBeInTheDocument();
+      expect(within(line).queryByText("Geen kostenbevestiging gevonden voor EC 4214683.")).not.toBeInTheDocument();
+    });
+
     it("shows a corrected booking, an EC line and a Combination verdict", async () => {
       requestMock.mockResolvedValue(
         result({
@@ -1236,6 +1307,60 @@ describe("Excel factuurcontrole", () => {
       expect(groupOf("Factuur hoger dan systeem")).toHaveTextContent("ANRDUB2799999");
       expect(groupOf("Niet te betalen")).toHaveTextContent("PVDU0000001");
       expect(groupOf("Niet te betalen")).toHaveTextContent("rit niet afgesloten");
+    });
+
+    /**
+     * The screen offers exactly the backend's payable transports, chooses them
+     * all to begin with, counts them on the button, and says for each other
+     * transport why — with the rows to fix and what to do.
+     */
+    it("chooses exactly the backend's payable transports and explains the rest with their rows", async () => {
+      const AMBIGUOUS_TRIP = "3f1b0d2e-0000-4000-8000-000000000021";
+
+      requestMock.mockImplementation((path: string) =>
+        path === PAYMENT_PATH
+          ? Promise.resolve({ paidTrips: 2, alreadyPaid: 0, paidTripIds: [] })
+          : Promise.resolve(
+              result({
+                payments: [
+                  ...withPayments().payments,
+                  {
+                    tripId: AMBIGUOUS_TRIP,
+                    planningDate: "2026-03-24",
+                    bookingNumber: "ANRDUB2810007",
+                    containerNumber: "EUCU1000071",
+                    rowNumbers: [],
+                    payable: false,
+                    category: null,
+                    reasons: ["AMBIGUOUS_MATCH"],
+                    blockingRowNumbers: [9],
+                    alreadyPaid: false,
+                  },
+                ],
+              }),
+            ),
+      );
+
+      await check();
+      await userEvent.click(screen.getByRole("button", { name: "Verwerken en downloaden" }));
+      await screen.findByText("Excel verwerkt");
+
+      const payable = withPayments().payments.filter(
+        (payment: { payable: boolean; alreadyPaid: boolean }) => payment.payable && !payment.alreadyPaid,
+      );
+      const checked = screen.getAllByRole("checkbox").filter((box) => (box as HTMLInputElement).checked);
+
+      expect(checked).toHaveLength(payable.length);
+      expect(screen.getByRole("button", { name: `Betaling bevestigen (${payable.length})` })).toBeInTheDocument();
+
+      const notPayable = screen.getByText("Niet te betalen").closest("section") as HTMLElement;
+      expect(notPayable).toHaveTextContent("ANRDUB2810007");
+      expect(notPayable).toHaveTextContent("een Excel-regel kan deze rit of een andere zijn (Rij 9)");
+      expect(notPayable).toHaveTextContent("corrigeer de datum, het boekingsnummer of het containernummer van die regel");
+
+      await userEvent.click(screen.getByRole("button", { name: `Betaling bevestigen (${payable.length})` }));
+
+      expect(paymentCalls()).toHaveLength(1);
     });
 
     /** In the system, not in the Excel: paid with the rest unless its price is a problem. */

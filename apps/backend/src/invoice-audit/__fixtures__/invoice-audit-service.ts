@@ -49,7 +49,7 @@ export function buildInvoiceExamination(
     new InvoicePricingService(effectivePricing, doubles.fuelRates ?? NO_FUEL_RATES, manualRoutes, logger),
     remarks,
     new MissingTripsService(trips, effectivePricing, logger),
-    new AddedRowsService(asReads(reads), remarks, manualRoutes, logger),
+    new AddedRowsService(asReads(reads), remarks, manualRoutes, doubles.fuelRates ?? NO_FUEL_RATES, logger),
     logger,
   );
 }

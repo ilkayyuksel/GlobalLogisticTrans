@@ -35,6 +35,7 @@ function added(id: string, reliable = true): AddedRow {
     reliability: reliable
       ? { reliable: true, problem: null, explanation: null, route: null }
       : { reliable: false, problem: PriceProblem.NO_SNAPSHOT, explanation: "De rit is nooit geprijsd.", route: null },
+    fuelRate: null,
   };
 }
 
@@ -78,7 +79,7 @@ describe("assessMissingTripPayments", () => {
     const blocked = { trip: tripRecord({ id: "a" }), blockingRowNumbers: [7] };
 
     expect(assessMissingTripPayments(missing({ blocked: [blocked] }), new Set())).toEqual([
-      expect.objectContaining({ payable: false, reasons: ["OPEN_CONFLICT"] }),
+      expect.objectContaining({ payable: false, reasons: ["BLOCKED_BY_UNRESOLVED_LINE"], blockingRowNumbers: [7] }),
     ]);
   });
 

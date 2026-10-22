@@ -23,6 +23,7 @@ function matched(
     sharedKeyRowNumbers: [],
     containerCorrection: null,
     bookingCorrection: null,
+    dateCorrection: null,
     costConfirmation: null,
     combination: null,
     problem: null,

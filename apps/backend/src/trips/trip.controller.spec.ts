@@ -321,6 +321,41 @@ describe("TripController (integration)", () => {
         expect.objectContaining({ skip: 20, take: 10 }),
       );
     });
+
+    /** "Route nakijken": decided in the database, see `route-attention.db.spec.ts`. */
+    describe("the route-attention filter", () => {
+      it.each([
+        ["routeAttention=true", true],
+        ["routeAttention=false", false],
+        ["", undefined],
+      ])("passes %p through as %p", async (query, needsRouteAttention) => {
+        await request(app.getHttpServer()).get(`${BASE}?${query}`).expect(200);
+
+        expect(repository.findPage).toHaveBeenCalledWith(
+          expect.objectContaining({ needsRouteAttention }),
+        );
+      });
+
+      it("combines with the period, the search and the paging", async () => {
+        await request(app.getHttpServer())
+          .get(`${BASE}?routeAttention=true&planningDate=2026-08-17&search=rot&page=2&pageSize=10`)
+          .expect(200);
+
+        expect(repository.findPage).toHaveBeenCalledWith(
+          expect.objectContaining({
+            needsRouteAttention: true,
+            planningDate: new Date("2026-08-17T00:00:00.000Z"),
+            search: "rot",
+            skip: 10,
+            take: 10,
+          }),
+        );
+      });
+
+      it("rejects a value that is not a boolean", async () => {
+        await request(app.getHttpServer()).get(`${BASE}?routeAttention=soms`).expect(400);
+      });
+    });
   });
 
   describe("GET /trips/:id", () => {

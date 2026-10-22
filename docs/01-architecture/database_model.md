@@ -4963,11 +4963,16 @@ A record is also created and removed by the automatic Flat rule described below.
 
 ## Automatic Flat assignment
 
-A Trip whose containerType is 20FL, 20ST, 40FL, 40OS, 45FL or 45OS must carry the
-Custom Property named Flat. (45FL and 45OS were added in September 2026.)
+A Trip whose containerType is 20FL, 40FL or 45OS — exactly these three
+(owner, 22 October 2026) — must carry the Custom Property named Flat. Every
+other type, 20ST, 40OS and 45FL included, never receives it automatically.
+An automatic Flat a Trip received under the earlier, wider list is left
+standing: no migration withdraws it and no price changes. It goes only when the
+rule runs again for that Trip (a document revising it), and, no longer
+required, an operator may remove it. A manual Flat is never withdrawn.
 
 The comparison trims surrounding whitespace and ignores capitalisation. It is an
-exact match on the code: 20FLX, 20STUFF, 40OSX and 45PH require nothing.
+exact match on the code: 20FLX, 40FLX, 45OSX and 45PH require nothing.
 
 Trips that already existed when a container type was added receive the same
 automatic assignment through a one-time migration

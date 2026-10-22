@@ -144,6 +144,8 @@ export interface InvoiceAuditRow {
   readonly containerCorrection: InvoiceContainerCorrection | null;
   /** Null unless the invoice's booking number was wrong and is corrected. */
   readonly bookingCorrection: InvoiceBookingCorrection | null;
+  /** Null unless the invoice's date was wrong and is corrected. */
+  readonly dateCorrection: InvoiceDateCorrection | null;
   /** The confirmation a Cost Confirmation line charges. */
   readonly costConfirmation: InvoiceCostConfirmation | null;
   /** Set on a line the Excel marks as half of a Combination. */
@@ -152,6 +154,27 @@ export interface InvoiceAuditRow {
   readonly matchProblem: string | null;
   /** What this check adds to the line's Remarks; null when nothing. */
   readonly remarks: InvoiceRemarks | null;
+  /**
+   * What is wrong, what became of the line and what to do — decided and
+   * worded by the backend from the line's actual outcome. Empty when nothing.
+   */
+  readonly advice: readonly InvoiceRowAdvice[];
+}
+
+export interface InvoiceDateCorrection {
+  readonly invoicePlanningDate: string;
+  /** The Trip's own planning date, written in red in the corrected workbook. */
+  readonly tripPlanningDate: string;
+}
+
+/** INFO: nothing to do. WARNING: look. ERROR: act. */
+export type InvoiceAdviceSeverity = "INFO" | "WARNING" | "ERROR";
+
+export interface InvoiceRowAdvice {
+  readonly severity: InvoiceAdviceSeverity;
+  readonly problem: string;
+  readonly explanation: string;
+  readonly action: string;
 }
 
 export interface InvoiceRemarks {
@@ -256,6 +279,7 @@ export interface InvoiceAuditSummary {
   readonly containerCorrected: number;
   readonly blockedMissingTrips: number;
   readonly bookingCorrected: number;
+  readonly dateCorrected: number;
   readonly conflicts: number;
   readonly costLines: number;
   readonly costLinesUnresolved: number;
@@ -304,7 +328,9 @@ export type InvoiceNotPayableReason =
   | "NOT_ADDED"
   | "LINE_MARKED"
   | "PRICE_NOT_SETTLED"
-  | "OPEN_CONFLICT";
+  | "AMBIGUOUS_MATCH"
+  | "MATCH_CONFLICT"
+  | "BLOCKED_BY_UNRESOLVED_LINE";
 
 /** One transport the invoice charges — decided by the backend, shown here. */
 export interface InvoiceTripPayment {
@@ -317,6 +343,8 @@ export interface InvoiceTripPayment {
   /** Null when not payable. */
   readonly category: InvoicePaymentCategory | null;
   readonly reasons: readonly InvoiceNotPayableReason[];
+  /** The rows to fix for it to become payable; empty when none. */
+  readonly blockingRowNumbers: readonly number[];
   /** Re-invoiced: already paid, never paid again. */
   readonly alreadyPaid: boolean;
 }

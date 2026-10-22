@@ -1,6 +1,7 @@
 import { Injectable } from "@nestjs/common";
 
 import { PrismaService } from "../prisma/prisma.service";
+import type { UnreviewedConfigurations } from "./route-attention";
 
 /** Whether an administrator has been through each configuration's prices, by id. */
 export interface RouteReviewStatus {
@@ -53,6 +54,28 @@ export class RouteReviewRepository {
     return {
       routes: new Map(routes.map((route) => [route.id, route.reviewed])),
       combinations: new Map(combinations.map((group) => [group.id, group.reviewed])),
+    };
+  }
+
+  /**
+   * Every configuration not marked as checked, by the same rule: an ordinary
+   * route's own mark, a Combination's group mark — never a leg's.
+   */
+  async findUnreviewed(): Promise<UnreviewedConfigurations> {
+    const [routes, combinations] = await Promise.all([
+      this.prisma.routePricing.findMany({
+        where: { reviewed: false, combinationGroupId: null },
+        select: { id: true },
+      }),
+      this.prisma.combinationRouteGroup.findMany({
+        where: { reviewed: false },
+        select: { id: true },
+      }),
+    ]);
+
+    return {
+      routePricingIds: routes.map((route) => route.id),
+      combinationRouteGroupIds: combinations.map((group) => group.id),
     };
   }
 }

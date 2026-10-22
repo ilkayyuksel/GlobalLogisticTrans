@@ -1,4 +1,4 @@
-import { TripDirection } from "@prisma/client";
+import { Prisma, TripDirection } from "@prisma/client";
 
 import type { ManualRouteFacts } from "../pricing/manual-route-facts.reader";
 import { assessPriceReliability, type PriceReliability } from "../pricing/price-reliability";
@@ -31,6 +31,11 @@ export interface AddedRow extends MissingTrip {
   readonly remarkNotes: readonly string[];
   readonly combinationEnd: CombinationEnd | null;
   readonly reliability: PriceReliability;
+  /**
+   * The Fuel percentage the Trip's stored price was calculated at, or null for
+   * a snapshot that recorded none — what its Fuel formula is written with.
+   */
+  readonly fuelRate: Prisma.Decimal | null;
 }
 
 export function planAddedRows(
@@ -38,6 +43,7 @@ export function planAddedRows(
   factsByTrip: ReadonlyMap<string, TripRemarkFacts>,
   groupSizes: ReadonlyMap<string, number>,
   manualByTrip: ReadonlyMap<string, ManualRouteFacts>,
+  fuelRates: ReadonlyMap<string, Prisma.Decimal> = new Map(),
 ): AddedRow[] {
   const rows = missing.map((trip): AddedRow => {
     const reliability = assessPriceReliability(
@@ -60,6 +66,7 @@ export function planAddedRows(
       remarkNotes: unexpressed,
       combinationEnd: combinationEndOf(trip, groupSizes),
       reliability,
+      fuelRate: fuelRates.get(trip.trip.id) ?? null,
     };
   });
 

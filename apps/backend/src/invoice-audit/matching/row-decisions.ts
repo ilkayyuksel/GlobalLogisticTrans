@@ -7,6 +7,7 @@ import {
   InvoiceRowStatus,
   type BookingCorrection,
   type ContainerCorrection,
+  type DateCorrection,
 } from "./invoice-row-match";
 
 /**
@@ -14,16 +15,13 @@ import {
  * first:
  *
  *   1. date + booking + container — `decideByContainer`;
- *   2. date + booking alone — `decideByBookingAndDate`, reached only when no
- *      Trip of any status holds the line's container: the container was
- *      misprinted;
- *   3. date + container alone — `decideByContainerAndDate`, reached only when
- *      no Trip of any status holds the line's BOOKING on that day: the booking
- *      was misprinted.
+ *   2. any TWO of the three — `decideByTwoValues`: date + booking (the
+ *      container was misprinted), date + container (the booking was), or
+ *      booking + container (the date was), judged together.
  *
- * Each correcting step answers MATCHED only for exactly one CLOSED Trip that
+ * The correcting step answers MATCHED only for exactly one CLOSED Trip that
  * states the value it corrects to. Never a fuzzy number, never two values at
- * once: a line whose booking AND container both match nothing is NOT_FOUND.
+ * once: a line sharing only one value with every Trip is NOT_FOUND.
  */
 
 /** What one line was decided to be, before it is told where it came from. */
@@ -33,6 +31,7 @@ export interface RowDecision {
   readonly candidates: readonly Trip[];
   readonly containerCorrection: ContainerCorrection | null;
   readonly bookingCorrection: BookingCorrection | null;
+  readonly dateCorrection: DateCorrection | null;
 }
 
 /**
@@ -61,70 +60,62 @@ export function decideByContainer(
 }
 
 /**
- * STEP 2 — the line's date and booking alone: the container was misprinted.
- *
- * Every Trip sharing the booking and either date is counted, of any status:
- * with the container gone, nothing says WHICH of them the line is, so only
- * exactly one Trip may answer. Null when NO Trip shares the booking on that
- * day — then step 3 is asked.
+ * The Trips that share exactly TWO of a line's three values — the evidence for
+ * a line with one value misprinted. A Trip sharing all three is an exact match
+ * and is decided by `decideByContainer`; one sharing a single value is never a
+ * candidate at all.
  */
-export function decideByBookingAndDate(
-  row: InvoiceSheetRow,
-  onDate: readonly Trip[],
-): RowDecision | null {
-  if (onDate.length === 0) {
-    return null;
-  }
-
-  if (onDate.length > 1) {
-    return decided(InvoiceRowStatus.AMBIGUOUS, null, onDate);
-  }
-
-  const only = onDate[0];
-
-  // A sole Trip without a container has nothing to correct the line to.
-  if (!only.containerNumber?.trim()) {
-    return notFound();
-  }
-
-  if (only.status !== TripStatus.CLOSED) {
-    return decided(InvoiceRowStatus.NOT_FINISHED, null, [only]);
-  }
-
-  return {
-    ...decided(InvoiceRowStatus.MATCHED, only, [only]),
-    containerCorrection: {
-      invoiceContainerNumber: row.containerNumber,
-      tripContainerNumber: only.containerNumber,
-    },
-  };
+export interface PartialCandidates {
+  /** The line's date and booking, another container: the container is wrong. */
+  readonly dateAndBooking: readonly Trip[];
+  /** The line's date and container, another booking: the booking is wrong. */
+  readonly dateAndContainer: readonly Trip[];
+  /** The line's booking and container, on another day: the date is wrong. */
+  readonly bookingAndContainer: readonly Trip[];
 }
 
 /**
- * STEP 3 — the line's date and container alone: the booking was misprinted.
+ * STEP 2 — a line no Trip matches on all three values, judged on the Trips that
+ * share two of them, all three ways at once.
  *
- * Reached only when no Trip of any status holds the line's booking on its day.
- * Containers are reused — a Combination's two legs share one, often on one day
- * (week 41: PVDU 1112788 on R75 and R76) — so only exactly ONE Trip on that day
- * holding the container may answer, and it must state a booking of its own.
+ * ── A TRIP ANOTHER LINE ALREADY IS, IS NOT A CANDIDATE ──────────────────────
+ * `claimedExactly` holds the Trips other lines of the document match on all
+ * three values. Such a Trip is accounted for, so it cannot explain THIS line —
+ * which is how a line with a misprinted date finds its own Trip instead of the
+ * one its booking shares a day with. When ONLY such Trips share two values, the
+ * line is a CONFLICT: it may be that same transport invoiced twice, and a
+ * person decides.
+ *
+ * ── ONE TRIP OR NONE ────────────────────────────────────────────────────────
+ * Exactly one remaining Trip answers MATCHED (CLOSED) or NOT_FINISHED, with the
+ * one value that differs corrected to the Trip's own. Two or more are
+ * AMBIGUOUS and nothing is chosen, whichever pairs of values they share.
  */
-export function decideByContainerAndDate(
+export function decideByTwoValues(
   row: InvoiceSheetRow,
-  tripsOnDate: readonly Trip[],
+  partial: PartialCandidates,
+  claimedExactly: ReadonlySet<string>,
 ): RowDecision {
-  const holding = tripsOnDate.filter(
-    (trip) =>
-      row.normalizedContainerNumber !== "" &&
-      normalizeContainerNumber(trip.containerNumber) === row.normalizedContainerNumber,
-  );
+  const all = uniqueTrips([
+    ...partial.dateAndBooking,
+    ...partial.dateAndContainer,
+    ...partial.bookingAndContainer,
+  ]);
+  const free = all.filter((trip) => !claimedExactly.has(trip.id));
 
-  if (holding.length > 1) {
-    return decided(InvoiceRowStatus.AMBIGUOUS, null, holding);
+  if (free.length > 1) {
+    return decided(InvoiceRowStatus.AMBIGUOUS, null, free);
   }
 
-  const only = holding[0];
+  if (free.length === 0) {
+    return all.length > 0 ? decided(InvoiceRowStatus.CONFLICT, null, all) : notFound();
+  }
 
-  if (only === undefined || !only.bookingNumber?.trim()) {
+  const only = free[0];
+  const correction = toCorrection(row, only, partial);
+
+  // A sole Trip lacking the value the line would be corrected to answers nothing.
+  if (correction === null) {
     return notFound();
   }
 
@@ -132,13 +123,51 @@ export function decideByContainerAndDate(
     return decided(InvoiceRowStatus.NOT_FINISHED, null, [only]);
   }
 
-  return {
-    ...decided(InvoiceRowStatus.MATCHED, only, [only]),
-    bookingCorrection: {
-      invoiceBookingNumber: row.bookingNumber,
-      tripBookingNumber: only.bookingNumber,
-    },
-  };
+  return { ...decided(InvoiceRowStatus.MATCHED, only, [only]), ...correction };
+}
+
+/** The one value of the line that the Trip shows to be wrong, corrected to the Trip's. */
+function toCorrection(
+  row: InvoiceSheetRow,
+  trip: Trip,
+  partial: PartialCandidates,
+): Pick<RowDecision, "containerCorrection" | "bookingCorrection" | "dateCorrection"> | null {
+  const none = { containerCorrection: null, bookingCorrection: null, dateCorrection: null };
+
+  if (partial.dateAndBooking.includes(trip)) {
+    return trip.containerNumber?.trim()
+      ? {
+          ...none,
+          containerCorrection: {
+            invoiceContainerNumber: row.containerNumber,
+            tripContainerNumber: trip.containerNumber,
+          },
+        }
+      : null;
+  }
+
+  if (partial.dateAndContainer.includes(trip)) {
+    return trip.bookingNumber?.trim()
+      ? {
+          ...none,
+          bookingCorrection: { invoiceBookingNumber: row.bookingNumber, tripBookingNumber: trip.bookingNumber },
+        }
+      : null;
+  }
+
+  return trip.planningDate
+    ? {
+        ...none,
+        dateCorrection: { invoicePlanningDate: row.planningDate, tripPlanningDate: toIsoDate(trip.planningDate) },
+      }
+    : null;
+}
+
+/** Each Trip once, in the order first given. */
+function uniqueTrips(trips: readonly Trip[]): Trip[] {
+  const seen = new Set<string>();
+
+  return trips.filter((trip) => !seen.has(trip.id) && Boolean(seen.add(trip.id)));
 }
 
 /**
@@ -168,7 +197,7 @@ function decided(
   trip: Trip | null,
   candidates: readonly Trip[],
 ): RowDecision {
-  return { status, trip, candidates, containerCorrection: null, bookingCorrection: null };
+  return { status, trip, candidates, containerCorrection: null, bookingCorrection: null, dateCorrection: null };
 }
 
 function notFound(): RowDecision {

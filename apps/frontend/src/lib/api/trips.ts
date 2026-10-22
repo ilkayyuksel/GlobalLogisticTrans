@@ -46,6 +46,11 @@ export interface ListTripsParams {
    */
   isPaid?: boolean;
   /**
+   * Only Trips whose route or route price needs attention. OMIT it for no such
+   * filter; the backend decides which Trips qualify.
+   */
+  routeAttention?: boolean;
+  /**
    * Which time to order a day's Trips by. The backend keeps the planning date
    * as the first ordering key and groups a Vehicle's Trips together, so this
    * chooses the order INSIDE that grouping.
@@ -95,6 +100,7 @@ export function listTrips(
       terminal: params.terminal,
       customPropertyId: params.customPropertyId,
       isPaid: params.isPaid,
+      routeAttention: params.routeAttention,
       sortBy: params.sortBy,
       sortDirection: params.sortDirection,
       tripGroupId: params.tripGroupId,

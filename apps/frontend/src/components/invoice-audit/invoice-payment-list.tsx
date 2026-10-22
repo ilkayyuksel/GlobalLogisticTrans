@@ -4,6 +4,7 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 
 import type {
+  InvoiceNotPayableReason,
   InvoicePaymentCategory,
   InvoiceTripPayment,
 } from "@/lib/api/invoice-audit";
@@ -73,11 +74,7 @@ export function InvoicePaymentList({
           {notPayable.map((payment) => (
             <li key={payment.tripId} className="px-3 py-1.5">
               <TripLabel payment={payment} />
-              <span className="ml-2 text-xs text-warning">
-                {payment.reasons
-                  .map((reason) => t(`invoiceAudit.payment.reason.${reason}` as TranslationKey))
-                  .join(" · ")}
-              </span>
+              <NotPayableExplanation payment={payment} />
             </li>
           ))}
         </PaymentGroup>
@@ -85,6 +82,41 @@ export function InvoicePaymentList({
     </div>
   );
 }
+
+/**
+ * Why a transport is not offered, the rows to fix and what to do — one reason
+ * per line, each with its own action, as the backend decided them.
+ */
+function NotPayableExplanation({ payment }: { payment: InvoiceTripPayment }) {
+  const t = useTranslation();
+  // Older answers carry no rows.
+  const rows = payment.blockingRowNumbers ?? [];
+
+  return (
+    <ul className="mt-0.5 space-y-0.5 text-xs">
+      {payment.reasons.map((reason) => (
+        <li key={reason}>
+          <span className="text-warning">{t(`invoiceAudit.payment.reason.${reason}` as TranslationKey)}</span>
+          {rows.length > 0 && ROW_REASONS.includes(reason) ? (
+            <span className="text-warning">
+              {" "}
+              ({t("invoiceAudit.column.row")} {rows.join(", ")})
+            </span>
+          ) : null}
+          <span className="text-secondary"> — {t(`invoiceAudit.payment.fix.${reason}` as TranslationKey)}</span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/** The reasons whose rows are the ones to fix. */
+const ROW_REASONS: readonly InvoiceNotPayableReason[] = [
+  "AMBIGUOUS_MATCH",
+  "MATCH_CONFLICT",
+  "BLOCKED_BY_UNRESOLVED_LINE",
+  "NOT_CLOSED",
+];
 
 function PaymentGroup({
   title,

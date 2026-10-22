@@ -1,4 +1,4 @@
-import type { BookingCorrection, ContainerCorrection } from "../matching/invoice-row-match";
+import type { BookingCorrection, ContainerCorrection, DateCorrection } from "../matching/invoice-row-match";
 import type { AddedRow } from "../missing/added-rows";
 import {
   DifferenceKind,
@@ -47,6 +47,8 @@ export interface ChangePlan {
 /** What a planned cell must hold once written. */
 export type PlannedContent =
   | { readonly kind: "TEXT"; readonly text: string }
+  /** A calendar day, `YYYY-MM-DD`, in whichever form the cell already held one. */
+  | { readonly kind: "DATE"; readonly date: string }
   | { readonly kind: "WRITE"; readonly write: CellWrite };
 
 export interface PlannedCell {
@@ -70,6 +72,7 @@ export interface ChangePlanInput {
   readonly yellowRowNumbers: readonly number[];
   readonly containerCorrections: ReadonlyMap<number, ContainerCorrection>;
   readonly bookingCorrections: ReadonlyMap<number, BookingCorrection>;
+  readonly dateCorrections: ReadonlyMap<number, DateCorrection>;
   readonly remarks: ReadonlyMap<number, string>;
   readonly fuelHeader: FuelHeaderChange | null;
   readonly added: readonly AddedRow[];
@@ -159,7 +162,7 @@ function planAmounts(input: ChangePlanInput, plan: PlanCell): void {
   }
 }
 
-/** Corrected numbers and completed Remarks — always in red. */
+/** Corrected numbers and dates and completed Remarks — always in red. */
 function planTexts(input: ChangePlanInput, plan: PlanCell): void {
   const { columns } = input.sheet;
   const texts: [number | undefined, string, ReadonlyMap<number, string>][] = [
@@ -172,6 +175,14 @@ function planTexts(input: ChangePlanInput, plan: PlanCell): void {
     for (const [rowNumber, text] of byRow) {
       plan(column, rowNumber, { reason, content: { kind: "TEXT", text }, red: true });
     }
+  }
+
+  for (const [rowNumber, correction] of input.dateCorrections) {
+    plan(columns.planningDate, rowNumber, {
+      reason: "datum gecorrigeerd",
+      content: { kind: "DATE", date: correction.tripPlanningDate },
+      red: true,
+    });
   }
 }
 

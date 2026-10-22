@@ -10,6 +10,7 @@ import {
 } from "./cell-comparison";
 import type { ChangePlan, PlannedCell } from "./change-plan";
 import { MONEY_DECIMAL_PLACES } from "./invoice-amounts";
+import { toPlanningDate } from "./invoice-sheet";
 import { shiftReferences } from "./invoice-row-inserter";
 import { checkAddedRows, checkSheetsAndMarkers } from "./workbook-shape-check";
 import { withBlankZero } from "./totals-refresher";
@@ -150,7 +151,9 @@ function comparePlanned(planned: PlannedCell, was: CellState, is: CellState, add
   const contentHolds =
     content.kind === "TEXT"
       ? is.formula === null && is.value === content.text
-      : content.write.kind === "FORMULA"
+      : content.kind === "DATE"
+        ? is.formula === null && toPlanningDate(is.value) === content.date
+        : content.write.kind === "FORMULA"
         ? is.formula === content.write.formula && sameValue(is.value, content.write.result.toNumber() || 0)
         : is.formula === null &&
           sameValue(

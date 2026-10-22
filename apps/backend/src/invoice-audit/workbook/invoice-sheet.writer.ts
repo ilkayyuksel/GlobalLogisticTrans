@@ -8,11 +8,12 @@ import { AppLoggerService } from "../../logger/app-logger.service";
 import type {
   BookingCorrection,
   ContainerCorrection,
+  DateCorrection,
 } from "../matching/invoice-row-matching.service";
 import type { AddedRow } from "../missing/added-rows";
 import type { InvoiceRowPricing } from "../pricing/invoice-reconciliation";
 import { isWritable, releaseBorrowedFormulas, writeRowAmounts } from "./amount-cell-writer";
-import { markRowsYellow, writeTextInRed } from "./cell-marking";
+import { markRowsYellow, writeDatesInRed, writeTextInRed } from "./cell-marking";
 import { writeFuelHeader, type FuelHeaderChange } from "./fuel-header";
 import { writeAuditMarkers } from "./invoice-audit-marker";
 import {
@@ -38,6 +39,7 @@ export interface WorkbookCorrections {
   readonly problemRowNumbers?: readonly number[];
   readonly containerCorrections?: ReadonlyMap<number, ContainerCorrection>;
   readonly bookingCorrections?: ReadonlyMap<number, BookingCorrection>;
+  readonly dateCorrections?: ReadonlyMap<number, DateCorrection>;
   /** Remarks completed by this check, as the cell will hold them. */
   readonly remarks?: ReadonlyMap<number, string>;
 }
@@ -50,6 +52,7 @@ export interface WorkbookCorrectionOutcome {
   readonly rowsMarked: number;
   readonly containersCorrected: number;
   readonly bookingsCorrected: number;
+  readonly datesCorrected: number;
   readonly remarksCompleted: number;
   readonly fuelHeaderChanged: boolean;
 }
@@ -106,6 +109,11 @@ export class InvoiceSheetWriter {
       worksheet,
       sheet.columns.bookingNumber,
       mapValues(corrections.bookingCorrections, (correction) => correction.tripBookingNumber),
+    );
+    const datesCorrected = writeDatesInRed(
+      worksheet,
+      sheet.columns.planningDate,
+      mapValues(corrections.dateCorrections, (correction) => correction.tripPlanningDate),
     );
     const remarksCompleted = writeTextInRed(
       worksheet,
@@ -166,6 +174,7 @@ export class InvoiceSheetWriter {
       rowsMarked,
       containersCorrected,
       bookingsCorrected,
+      datesCorrected,
       remarksCompleted,
       fuelHeaderChanged: Boolean(corrections.fuelHeader),
     };

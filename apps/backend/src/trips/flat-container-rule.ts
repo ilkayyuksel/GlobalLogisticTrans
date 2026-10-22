@@ -2,10 +2,16 @@
  * Which container types carry the Flat property, and what it is called.
  *
  * ── THE RULE ────────────────────────────────────────────────────────────────
- * A 20FL is a flat rack and a 20ST is a platform: neither is a box, both need
- * the same extra handling, and the business charges for it every time. So the
- * charge is not something an operator remembers to tick — the container type
- * already says it, and the system assigns the "Flat" property itself.
+ * A flat rack or open-side container is not a box and needs extra handling,
+ * and the business charges for it every time. So the charge is not something
+ * an operator remembers to tick — the container type already says it, and the
+ * system assigns the "Flat" property itself.
+ *
+ * Exactly three types qualify: 20FL, 40FL and 45OS (owner, 22 October 2026).
+ * Every other type — 20ST, 40OS and 45FL included — is never given Flat
+ * automatically. A Flat assigned earlier under a wider list is left as it is;
+ * the rule takes an automatic Flat away only when it runs again for that Trip
+ * (a document revising it), and a manual Flat never.
  * ────────────────────────────────────────────────────────────────────────────
  *
  * Kept as a pure module with no dependencies, because three layers need the
@@ -38,20 +44,7 @@ export const FLAT_CUSTOM_PROPERTY_NAME = "Flat";
  * a closed list — so anything not named here is simply a container type this
  * rule says nothing about.
  */
-const CONTAINER_TYPES_REQUIRING_FLAT: readonly string[] = [
-  "20FL",
-  "20ST",
-  // The forty-foot flats, added once the business confirmed they carry Flat
-  // exactly as the twenty-foot ones do. `40OSX` and `40F` are deliberately not
-  // here — the match is exact, so neither is affected by this.
-  "40FL",
-  "40OS",
-  // The forty-five-foot flat rack and open side, which the business confirmed
-  // in September 2026 carry Flat exactly as the others do. Real orders print
-  // them in exactly this form.
-  "45FL",
-  "45OS",
-];
+const CONTAINER_TYPES_REQUIRING_FLAT: readonly string[] = ["20FL", "40FL", "45OS"];
 
 /**
  * Whether a Trip with this container type must carry the Flat property.

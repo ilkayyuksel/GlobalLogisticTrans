@@ -1,0 +1,419 @@
+import ExcelJS from "exceljs";
+import { Prisma, Trip, TripStatus } from "@prisma/client";
+
+import { toIsoDate } from "../common/dates";
+import { AppLoggerService } from "../logger/app-logger.service";
+import type { CurrentTripPricing } from "../trip-pricing/effective-pricing.service";
+import { buildInvoiceAuditService } from "./__fixtures__/invoice-audit-service";
+import { reliablyPriced } from "./__fixtures__/invoice-pricing";
+import { invoiceReads } from "./__fixtures__/invoice-reads";
+import { tripRecord } from "./__fixtures__/invoice-rows";
+import { buildInvoiceWorkbook, type InvoiceFixtureLine } from "./__fixtures__/invoice-workbook";
+import { CORRECTED_TEXT_ARGB } from "./workbook/cell-marking";
+
+/**
+ * Finding the Trip of an invoice line whose date, booking OR container is
+ * misprinted — and correcting that one value in the Excel — through the whole
+ * check: the matching, the corrected workbook read back from its bytes, the
+ * missing transports, the payments and the advice a person reads.
+ *
+ * The database is a list of Trips every read FILTERS, so a line can only find
+ * what a real query would return. Week 41: Monday 5 to Friday 9 October 2026.
+ */
+
+const MONDAY = "2026-10-05";
+const TUESDAY = "2026-10-06";
+const WEDNESDAY = "2026-10-07";
+const COLUMN = { date: 1, booking: 5, container: 6, tarief: 12, fuel: 13 } as const;
+
+const day = (iso: string) => new Date(`${iso}T00:00:00.000Z`);
+
+function aTrip(id: string, booking: string, container: string, date: string, overrides: Partial<Trip> = {}): Trip {
+  return tripRecord({
+    id,
+    bookingNumber: booking,
+    containerNumber: container,
+    planningDate: day(date),
+    originalPlanningDate: day(date),
+    startTime: null,
+    ...overrides,
+  });
+}
+
+/** A transport line as the customer writes it: the date as a real date cell. */
+function line(date: string, booking: string, container: string, tarief = 200): InvoiceFixtureLine {
+  return {
+    planningDate: day(date),
+    bookingNumber: booking,
+    containerNumber: `${container.slice(0, 4)} ${container.slice(4)}`,
+    tarief,
+    fuel: tarief * 0.15,
+  };
+}
+
+describe("an invoice line with one misprinted value", () => {
+  const logger = { setContext: jest.fn(), log: jest.fn(), warn: jest.fn(), error: jest.fn() } as unknown as AppLoggerService;
+  let database: Trip[];
+
+  beforeEach(() => {
+    database = [];
+  });
+
+  const onDay = (trip: Trip, days: readonly Date[]) =>
+    days.some((each) => [trip.planningDate, trip.originalPlanningDate].some((date) => date?.getTime() === each.getTime()));
+  const alive = (trip: Trip) => trip.status !== TripStatus.DELETED;
+
+  function service() {
+    const reads = invoiceReads();
+    const pricing = new Map<string, CurrentTripPricing>(
+      database.map((trip) => [trip.id, priced("200", "30")]),
+    );
+
+    reads.findTripsOnDates.mockImplementation(async (days) => database.filter((trip) => alive(trip) && onDay(trip, days)));
+    reads.findTripsByBookings.mockImplementation(async (bookings) =>
+      database.filter((trip) => alive(trip) && bookings.includes(trip.bookingNumber!)),
+    );
+
+    return buildInvoiceAuditService({
+      logger,
+      reads,
+      trips: {
+        findManyForInvoice: jest.fn(async (query: { invoiceDates: Date[]; bookingNumbers: string[]; statuses: TripStatus[] }) =>
+          database.filter(
+            (trip) =>
+              query.statuses.includes(trip.status) &&
+              query.bookingNumbers.includes(trip.bookingNumber!) &&
+              onDay(trip, query.invoiceDates),
+          ),
+        ),
+        findClosedUnpaidBetween: jest.fn(async ({ from, to }: { from: Date; to: Date }) =>
+          database.filter(
+            (trip) =>
+              trip.status === TripStatus.CLOSED &&
+              !trip.isPaid &&
+              trip.planningDate! >= from &&
+              trip.planningDate! <= to,
+          ),
+        ),
+      },
+      effectivePricing: {
+        findForTrips: jest.fn(async (ids: readonly string[]) =>
+          new Map(ids.filter((id) => pricing.has(id)).map((id) => [id, pricing.get(id)!])),
+        ),
+      },
+    });
+  }
+
+  async function check(lines: readonly InvoiceFixtureLine[]) {
+    const received = await buildInvoiceWorkbook({ lines, fuelPercentage: 15 });
+    const copy = Buffer.from(received);
+    const applied = await service().apply({ buffer: received, originalname: "week 41 - 2026 GLT.xlsx", size: received.length });
+    const book = new ExcelJS.Workbook();
+
+    await book.xlsx.load(applied.workbook as unknown as ArrayBuffer);
+
+    const sheet = book.worksheets[0];
+
+    return {
+      result: applied.result,
+      rows: applied.result.rows,
+      cell: (row: number, column: number) => sheet.getRow(row).getCell(column),
+      receivedUnchanged: received.equals(copy),
+    };
+  }
+
+  const isRed = (cell: ExcelJS.Cell) => cell.font?.color?.argb === CORRECTED_TEXT_ARGB;
+
+  it("matches the three values exactly and corrects nothing", async () => {
+    database.push(aTrip("t1", "ANRDUB2813025", "EUCU4590355", TUESDAY));
+
+    const { rows, cell } = await check([line(TUESDAY, "ANRDUB2813025", "EUCU4590355")]);
+
+    expect(rows[0]).toMatchObject({
+      status: "MATCHED",
+      trip: { id: "t1" },
+      dateCorrection: null,
+      bookingCorrection: null,
+      containerCorrection: null,
+      advice: [],
+    });
+    expect(isRed(cell(2, COLUMN.date))).toBe(false);
+  });
+
+  describe("exactly one Trip shares the two other values", () => {
+    it("a wrong booking: matched on date and container, the booking corrected in red", async () => {
+      database.push(aTrip("t1", "ANRDUB2813025", "EUCU4590355", TUESDAY));
+
+      const { rows, cell } = await check([line(TUESDAY, "ANRDUB2813999", "EUCU4590355")]);
+
+      expect(rows[0]).toMatchObject({
+        status: "MATCHED",
+        trip: { id: "t1" },
+        bookingCorrection: { invoiceBookingNumber: "ANRDUB2813999", tripBookingNumber: "ANRDUB2813025" },
+      });
+      expect(cell(2, COLUMN.booking).value).toBe("ANRDUB2813025");
+      expect(isRed(cell(2, COLUMN.booking))).toBe(true);
+      expect(rows[0].advice).toEqual([
+        expect.objectContaining({
+          severity: "WARNING",
+          problem: "Boekingsnummer komt niet overeen",
+          explanation: expect.stringContaining("Datum en containernummer komen overeen met één unieke rit in Trano."),
+          action: expect.stringContaining("van ANRDUB2813999 naar ANRDUB2813025"),
+        }),
+      ]);
+    });
+
+    it("a wrong date: matched on booking and container, the date corrected in red, as a date", async () => {
+      database.push(aTrip("t1", "ANRDUB2811064", "EUCU4590355", WEDNESDAY));
+
+      const { rows, cell } = await check([line(TUESDAY, "ANRDUB2811064", "EUCU4590355")]);
+
+      expect(rows[0]).toMatchObject({
+        status: "MATCHED",
+        trip: { id: "t1" },
+        dateCorrection: { invoicePlanningDate: TUESDAY, tripPlanningDate: WEDNESDAY },
+      });
+      expect(cell(2, COLUMN.date).value).toBeInstanceOf(Date);
+      expect(toIsoDate(cell(2, COLUMN.date).value as Date)).toBe(WEDNESDAY);
+      expect(isRed(cell(2, COLUMN.date))).toBe(true);
+      expect(rows[0].advice).toEqual([
+        expect.objectContaining({
+          problem: "Datum komt niet overeen",
+          explanation: expect.stringContaining("Boekingsnummer en containernummer komen overeen"),
+          action: expect.stringContaining("van 06/10/2026 naar 07/10/2026"),
+        }),
+      ]);
+    });
+
+    it("a wrong container: matched on date and booking, the container corrected in red", async () => {
+      database.push(aTrip("t1", "ANRDUB2813025", "EUCU4590355", TUESDAY));
+
+      const { rows, cell } = await check([line(TUESDAY, "ANRDUB2813025", "EUCU9999999")]);
+
+      expect(rows[0]).toMatchObject({ status: "MATCHED", containerCorrection: { tripContainerNumber: "EUCU4590355" } });
+      expect(cell(2, COLUMN.container).value).toBe("EUCU4590355");
+      expect(isRed(cell(2, COLUMN.container))).toBe(true);
+      expect(rows[0].advice[0].problem).toBe("Containernummer komt niet overeen");
+    });
+
+    it("keeps the price check: a matched line is compared and raised as any other", async () => {
+      database.push(aTrip("t1", "ANRDUB2811064", "EUCU4590355", WEDNESDAY));
+
+      const { rows, cell } = await check([line(TUESDAY, "ANRDUB2811064", "EUCU4590355", 150)]);
+
+      expect(rows[0].pricingStatus).toBe("PRICING_CORRECTED");
+      expect(cell(2, COLUMN.tarief).value).toBe(200);
+      expect(isRed(cell(2, COLUMN.tarief))).toBe(true);
+    });
+  });
+
+  /**
+   * Example A (ANRDUB2813025 against row 57): two lines of one booking on one
+   * day. Row 2 is exactly Trip t1. Row 3 states the same day but another
+   * container, which is t2's — and t2 ran the day after. Before, row 3 was
+   * "corrected" onto t1, collided with row 2 and became a conflict; t2 was then
+   * offered as "not added, perhaps already on the invoice".
+   */
+  describe("example A: a second line of one booking whose date is wrong", () => {
+    beforeEach(() => {
+      database.push(aTrip("t1", "ANRDUB2813025", "EUCU4590355", TUESDAY));
+      database.push(aTrip("t2", "ANRDUB2813025", "EUCU4590366", WEDNESDAY));
+    });
+
+    it("finds each line its own Trip and corrects the second line's date", async () => {
+      const { rows, result } = await check([
+        line(TUESDAY, "ANRDUB2813025", "EUCU4590355"),
+        line(TUESDAY, "ANRDUB2813025", "EUCU4590366"),
+      ]);
+
+      expect(rows.map((row) => [row.status, row.trip?.id])).toEqual([
+        ["MATCHED", "t1"],
+        ["MATCHED", "t2"],
+      ]);
+      expect(rows[1].dateCorrection).toEqual({ invoicePlanningDate: TUESDAY, tripPlanningDate: WEDNESDAY });
+      expect(result.missingTrips).toEqual([]);
+      expect(result.blockedMissingTrips).toEqual([]);
+      expect(result.payments.filter((payment) => payment.payable).map((payment) => payment.tripId).sort()).toEqual([
+        "t1",
+        "t2",
+      ]);
+    });
+
+    it("comes to the same answer whichever line comes first", async () => {
+      const { rows } = await check([
+        line(TUESDAY, "ANRDUB2813025", "EUCU4590366"),
+        line(TUESDAY, "ANRDUB2813025", "EUCU4590355"),
+      ]);
+
+      expect(rows.map((row) => [row.status, row.trip?.id])).toEqual([
+        ["MATCHED", "t2"],
+        ["MATCHED", "t1"],
+      ]);
+    });
+  });
+
+  describe("never a guess", () => {
+    it("several Trips of one booking on other days and containers: AMBIGUOUS, all of them named, nothing chosen", async () => {
+      database.push(aTrip("t1", "ANRDUB2813025", "EUCU4590355", TUESDAY));
+      database.push(aTrip("t2", "ANRDUB2813025", "EUCU4590366", TUESDAY));
+
+      const { rows, cell, result } = await check([line(TUESDAY, "ANRDUB2813025", "EUCU9999999")]);
+
+      expect(rows[0].status).toBe("AMBIGUOUS");
+      expect(rows[0].candidates.map((trip) => trip.id).sort()).toEqual(["t1", "t2"]);
+      expect(cell(2, COLUMN.container).value).toBe("EUCU 9999999");
+      expect(result.markedRowNumbers).toEqual([2]);
+      expect(result.missingTrips).toEqual([]);
+      expect(rows[0].advice).toEqual([
+        expect.objectContaining({
+          severity: "ERROR",
+          problem: "Meerdere mogelijke ritten",
+          explanation: expect.stringContaining("EUCU4590366"),
+        }),
+      ]);
+    });
+
+    it("the same booking and container on two other days: AMBIGUOUS, the date left alone", async () => {
+      database.push(aTrip("t1", "ANRDUB2811064", "EUCU4590355", MONDAY));
+      database.push(aTrip("t2", "ANRDUB2811064", "EUCU4590355", WEDNESDAY));
+
+      const { rows, cell } = await check([line(TUESDAY, "ANRDUB2811064", "EUCU4590355")]);
+
+      expect(rows[0].status).toBe("AMBIGUOUS");
+      expect(toIsoDate(cell(2, COLUMN.date).value as Date)).toBe(TUESDAY);
+    });
+
+    it("pairs of values pointing at different Trips: AMBIGUOUS", async () => {
+      // Date + booking say t1; booking + container say t2.
+      database.push(aTrip("t1", "ANRDUB2813025", "EUCU4590355", TUESDAY));
+      database.push(aTrip("t2", "ANRDUB2813025", "EUCU4590366", WEDNESDAY));
+
+      const { rows } = await check([line(TUESDAY, "ANRDUB2813025", "EUCU4590366"), line(MONDAY, "OTHER", "EUCU1111111")]);
+
+      expect(rows[0].status).toBe("AMBIGUOUS");
+    });
+
+    it("two lines correcting to one Trip: both CONFLICT, each naming the other row", async () => {
+      database.push(aTrip("t1", "ANRDUB2813025", "EUCU4590355", WEDNESDAY));
+
+      const { rows, result } = await check([
+        line(TUESDAY, "ANRDUB2813025", "EUCU4590355"),
+        line(WEDNESDAY, "ANRDUB2899999", "EUCU4590355"),
+      ]);
+
+      expect(rows.map((row) => row.status)).toEqual(["CONFLICT", "CONFLICT"]);
+      expect(rows.map((row) => row.dateCorrection ?? row.bookingCorrection)).toEqual([null, null]);
+      expect(rows[0].advice[0]).toMatchObject({
+        severity: "ERROR",
+        problem: "Twee Excel-regels verwijzen mogelijk naar dezelfde rit",
+        explanation: expect.stringContaining("Excel-rij 3"),
+      });
+      expect(rows[1].advice[0].explanation).toContain("Excel-rij 2");
+      expect(result.payments.filter((payment) => payment.payable)).toEqual([]);
+    });
+
+    it("a line whose only candidate another line already IS: a CONFLICT naming that row, never a second match", async () => {
+      database.push(aTrip("t1", "ANRDUB2813025", "EUCU4590355", TUESDAY));
+
+      const { rows } = await check([
+        line(TUESDAY, "ANRDUB2813025", "EUCU4590355"),
+        line(TUESDAY, "ANRDUB2813025", "EUCU9999999"),
+      ]);
+
+      expect(rows[0]).toMatchObject({ status: "MATCHED", trip: { id: "t1" } });
+      expect(rows[1]).toMatchObject({ status: "CONFLICT", trip: null, containerCorrection: null });
+      expect(rows[1].advice[0].explanation).toContain("Excel-rij 2");
+    });
+
+    it("one shared value is not enough: NOT_FOUND, with what to check", async () => {
+      database.push(aTrip("t1", "ANRDUB2813025", "EUCU4590355", WEDNESDAY));
+
+      const { rows } = await check([line(TUESDAY, "ANRDUB2813025", "EUCU9999999")]);
+
+      expect(rows[0].status).toBe("NOT_FOUND");
+      expect(rows[0].advice).toEqual([
+        expect.objectContaining({
+          severity: "ERROR",
+          problem: "Geen unieke rit gevonden",
+          action: expect.stringContaining("Controleer het boekingsnummer, het containernummer en de datum"),
+        }),
+      ]);
+    });
+  });
+
+  describe("missing transports are decided after the whole matching", () => {
+    it("a line with a wrong date is its Trip, so that Trip is neither added nor blocked", async () => {
+      database.push(aTrip("t1", "ANRDUB2811064", "EUCU4590355", WEDNESDAY));
+
+      const { result } = await check([line(TUESDAY, "ANRDUB2811064", "EUCU4590355")]);
+
+      expect(result.missingTrips).toEqual([]);
+      expect(result.blockedMissingTrips).toEqual([]);
+    });
+
+    it("a Trip no line is about is still added as missing", async () => {
+      database.push(aTrip("t1", "ANRDUB2811064", "EUCU4590355", WEDNESDAY));
+      database.push(aTrip("t9", "ANRDUB2819999", "EUCU4599999", WEDNESDAY));
+
+      const { result } = await check([line(TUESDAY, "ANRDUB2811064", "EUCU4590355")]);
+
+      expect(result.missingTrips.map((missing) => missing.tripId)).toEqual(["t9"]);
+    });
+  });
+
+  /**
+   * Example C: the transport is matched; only its `EC 4214683` line names a
+   * confirmation this system does not hold. The transport is still checked and
+   * payable — the EC line alone stays open.
+   */
+  it("an EC line without its confirmation leaves its matched transport checked and payable", async () => {
+    database.push(aTrip("t1", "ANRDUB2812203", "EUCU4590355", TUESDAY));
+
+    const { rows, result } = await check([
+      line(TUESDAY, "ANRDUB2812203", "EUCU4590355"),
+      {
+        planningDate: day(TUESDAY),
+        bookingNumber: "ANRDUB2812203",
+        containerNumber: "",
+        tarief: null,
+        ek: 25,
+        remarks: "EC 4214683",
+        containerType: null,
+        startPoint: null,
+        endPoint: null,
+      },
+    ]);
+
+    expect(rows.map((row) => row.status)).toEqual(["MATCHED", "COST_LINE_UNRESOLVED"]);
+    expect(rows[0].pricingStatus).toBe("MATCHED_NO_CHANGES");
+    expect(result.payments).toEqual([expect.objectContaining({ tripId: "t1", payable: true })]);
+    expect(rows[1].advice[0]).toMatchObject({
+      problem: "EC-kostenbevestiging niet gekoppeld",
+      explanation: expect.stringContaining("De ritmatch is wel succesvol: de rit zelf staat op Excel-rij 2"),
+    });
+  });
+
+  it("leaves the received file byte for byte as it was", async () => {
+    database.push(aTrip("t1", "ANRDUB2811064", "EUCU4590355", WEDNESDAY));
+
+    const { receivedUnchanged } = await check([line(TUESDAY, "ANRDUB2811064", "EUCU4590355")]);
+
+    expect(receivedUnchanged).toBe(true);
+  });
+});
+
+function priced(tarief: string, brandstof: string): CurrentTripPricing {
+  const zero = new Prisma.Decimal(0);
+
+  return reliablyPriced({
+    components: [],
+    tarief: new Prisma.Decimal(tarief),
+    brandstof: new Prisma.Decimal(brandstof),
+    backload: zero,
+    tol: zero,
+    tunnel: zero,
+    others: zero,
+    ek: zero,
+    totaal: new Prisma.Decimal(tarief).add(brandstof),
+  });
+}

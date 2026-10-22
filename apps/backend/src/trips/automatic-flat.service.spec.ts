@@ -112,13 +112,13 @@ describe("AutomaticFlatPropertyService", () => {
   }
 
   describe("a Trip that has just been created", () => {
-    it.each(["20FL", "20ST", "20fl", "45FL", "45OS", " 45os "])("assigns Flat for %s", async (type) => {
+    it.each(["20FL", "40FL", "45OS", "20fl", " 45os "])("assigns Flat for %s", async (type) => {
       await service.applyToNewTrip(repository, TRIP_ID, type);
 
       expect(flatRow()).toMatchObject({ tripId: TRIP_ID, isAutomatic: true });
     });
 
-    it.each(["45PH", "45RH", "20STUFF", null])(
+    it.each(["45PH", "45RH", "20ST", "40OS", "45FL", "40OSUFF", null])(
       "assigns nothing for %p",
       async (type) => {
         await service.applyToNewTrip(repository, TRIP_ID, type);
@@ -139,14 +139,14 @@ describe("AutomaticFlatPropertyService", () => {
     });
 
     it("finds the property by name, never by a hardcoded id", async () => {
-      await service.applyToNewTrip(repository, TRIP_ID, "20FL");
+      await service.applyToNewTrip(repository, TRIP_ID, "40FL");
 
       expect(customProperties.findActiveByName).toHaveBeenCalledWith("Flat");
       expect(flatRow()?.customPropertyId).toBe(FLAT_ID);
     });
 
     /**
-     * A 20FL stored without its Flat would be under-charged for the rest of its
+     * A 40FL stored without its Flat would be under-charged for the rest of its
      * life, with nothing on the Trip to show why. Refusing rolls the Trip back
      * with it, because this runs inside the Trip's own transaction.
      */
@@ -154,7 +154,7 @@ describe("AutomaticFlatPropertyService", () => {
       customProperties.findActiveByName.mockResolvedValue(null);
 
       await expect(
-        service.applyToNewTrip(repository, TRIP_ID, "20FL"),
+        service.applyToNewTrip(repository, TRIP_ID, "40FL"),
       ).rejects.toBeInstanceOf(MissingRequiredCustomPropertyException);
       expect(rows).toHaveLength(0);
     });
@@ -163,7 +163,7 @@ describe("AutomaticFlatPropertyService", () => {
       customProperties.findActiveByName.mockResolvedValue(null);
 
       await expect(
-        service.applyToNewTrip(repository, TRIP_ID, "20FL"),
+        service.applyToNewTrip(repository, TRIP_ID, "40FL"),
       ).rejects.toBeDefined();
       expect(logger.error).toHaveBeenCalled();
     });
@@ -171,7 +171,7 @@ describe("AutomaticFlatPropertyService", () => {
 
   describe("a Trip whose container type has changed", () => {
     it("assigns Flat when the type starts requiring it", async () => {
-      await service.synchronise(repository, TRIP_ID, "20FL");
+      await service.synchronise(repository, TRIP_ID, "40FL");
 
       expect(flatRow()).toMatchObject({ isAutomatic: true });
     });
@@ -195,6 +195,21 @@ describe("AutomaticFlatPropertyService", () => {
       },
     );
 
+    /** Only 20FL, 40FL and 45OS carry Flat (owner, 22 October 2026). */
+    it.each(["20ST", "40OS", "45FL"])("withdraws the automatic Flat a %s Trip still carries", async (type) => {
+      given(FLAT_ID, true);
+
+      await service.synchronise(repository, TRIP_ID, type);
+
+      expect(flatRow()).toBeUndefined();
+    });
+
+    it.each(["20ST", "40OS", "45FL"])("assigns no Flat to a new %s Trip", async (type) => {
+      await service.applyToNewTrip(repository, TRIP_ID, type);
+
+      expect(repository.create).not.toHaveBeenCalled();
+    });
+
     /** The reason `isAutomatic` exists. */
     it("leaves a manually assigned Flat exactly where it is", async () => {
       const manual = given(FLAT_ID, false);
@@ -208,7 +223,7 @@ describe("AutomaticFlatPropertyService", () => {
     it("changes nothing when the type still requires it", async () => {
       const existing = given(FLAT_ID, true);
 
-      await service.synchronise(repository, TRIP_ID, "20ST");
+      await service.synchronise(repository, TRIP_ID, "45OS");
 
       expect(rows).toEqual([existing]);
       expect(repository.create).not.toHaveBeenCalled();
@@ -219,27 +234,27 @@ describe("AutomaticFlatPropertyService", () => {
      * beside it — the unique pair index would refuse a second row anyway — and
      * it does NOT take the row over. Who assigned it stays true.
      */
-    it("neither duplicates nor adopts a manual Flat on a 20FL Trip", async () => {
+    it("neither duplicates nor adopts a manual Flat on a 40FL Trip", async () => {
       given(FLAT_ID, false);
 
-      await service.synchronise(repository, TRIP_ID, "20FL");
+      await service.synchronise(repository, TRIP_ID, "40FL");
 
       expect(rows).toHaveLength(1);
       expect(flatRow()?.isAutomatic).toBe(false);
     });
 
     it("is idempotent when run again with the same type", async () => {
-      await service.synchronise(repository, TRIP_ID, "20FL");
-      await service.synchronise(repository, TRIP_ID, "20FL");
-      await service.synchronise(repository, TRIP_ID, "20FL");
+      await service.synchronise(repository, TRIP_ID, "40FL");
+      await service.synchronise(repository, TRIP_ID, "40FL");
+      await service.synchronise(repository, TRIP_ID, "40FL");
 
       expect(rows).toHaveLength(1);
     });
 
     it("adds it back when the type returns to a flat rack", async () => {
-      await service.synchronise(repository, TRIP_ID, "20FL");
+      await service.synchronise(repository, TRIP_ID, "40FL");
       await service.synchronise(repository, TRIP_ID, "45PH");
-      await service.synchronise(repository, TRIP_ID, "20ST");
+      await service.synchronise(repository, TRIP_ID, "45OS");
 
       expect(flatRow()).toMatchObject({ isAutomatic: true });
       expect(rows).toHaveLength(1);
@@ -249,7 +264,7 @@ describe("AutomaticFlatPropertyService", () => {
     it("never touches another property", async () => {
       const tar = given(TAR_ID, false);
 
-      await service.synchronise(repository, TRIP_ID, "20FL");
+      await service.synchronise(repository, TRIP_ID, "40FL");
       await service.synchronise(repository, TRIP_ID, "45PH");
 
       expect(rows).toEqual([tar]);
@@ -268,7 +283,7 @@ describe("AutomaticFlatPropertyService", () => {
       customProperties.findActiveByName.mockResolvedValue(null);
 
       await expect(
-        service.synchronise(repository, TRIP_ID, "20FL"),
+        service.synchronise(repository, TRIP_ID, "40FL"),
       ).rejects.toBeInstanceOf(MissingRequiredCustomPropertyException);
     });
   });

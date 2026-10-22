@@ -67,6 +67,43 @@ export function markTextRed(cell: ExcelJS.Cell): void {
   };
 }
 
+/** Excel counts days from 1899-12-30. */
+const EXCEL_EPOCH_MS = Date.UTC(1899, 11, 30);
+const MILLISECONDS_PER_DAY = 24 * 60 * 60 * 1000;
+
+/**
+ * Writes a corrected day (`YYYY-MM-DD`) into one column of each given row, in
+ * red, in the FORM the cell already holds a day: a date stays a date, an Excel
+ * serial a serial, text text. So the cell keeps the customer's own number
+ * format and reads back as the same day — never a different kind of value.
+ */
+export function writeDatesInRed(
+  worksheet: ExcelJS.Worksheet,
+  columnNumber: number | undefined,
+  daysByRow: ReadonlyMap<number, string>,
+): number {
+  if (columnNumber === undefined) {
+    return 0;
+  }
+
+  for (const [rowNumber, day] of daysByRow) {
+    const cell = worksheet.getRow(rowNumber).getCell(columnNumber);
+    const midnight = new Date(`${day}T00:00:00.000Z`);
+
+    if (cell.value instanceof Date) {
+      cell.value = midnight;
+    } else if (typeof cell.value === "number") {
+      cell.value = (midnight.getTime() - EXCEL_EPOCH_MS) / MILLISECONDS_PER_DAY;
+    } else {
+      cell.value = day;
+    }
+
+    markTextRed(cell);
+  }
+
+  return daysByRow.size;
+}
+
 /**
  * Writes a text value into one column of each given row, in red: a corrected
  * container or booking number, completed Remarks.

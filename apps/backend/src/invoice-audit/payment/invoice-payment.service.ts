@@ -18,7 +18,9 @@ const REFUSAL_WORDS: Record<NotPayableReason | "NOT_ON_INVOICE", string> = {
   [NotPayableReason.NOT_ADDED]: "niet aan de factuur toegevoegd, de totalen wijken af",
   [NotPayableReason.LINE_MARKED]: "regel geel gemarkeerd",
   [NotPayableReason.PRICE_NOT_SETTLED]: "prijs niet betrouwbaar gecontroleerd",
-  [NotPayableReason.OPEN_CONFLICT]: "open conflict met een andere regel",
+  [NotPayableReason.AMBIGUOUS_MATCH]: "een regel kan meerdere ritten zijn",
+  [NotPayableReason.MATCH_CONFLICT]: "twee regels verwijzen naar deze rit",
+  [NotPayableReason.BLOCKED_BY_UNRESOLVED_LINE]: "niet toegevoegd, een onopgeloste regel kan deze rit zijn",
 };
 
 /**

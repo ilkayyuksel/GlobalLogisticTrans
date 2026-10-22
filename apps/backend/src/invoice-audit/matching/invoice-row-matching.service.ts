@@ -15,18 +15,21 @@ import type { InvoiceSheetRow } from "../workbook/invoice-sheet";
 import { decideCostLine } from "./cost-line-matching";
 import { withIdentityConflicts } from "./identity-conflicts";
 import { InvoiceRowStatus, type InvoiceRowMatch } from "./invoice-row-match";
+import { decideByContainer, decideByTwoValues, isOnInvoiceDate } from "./row-decisions";
 import {
-  decideByBookingAndDate,
-  decideByContainer,
-  decideByContainerAndDate,
-  isOnInvoiceDate,
-} from "./row-decisions";
+  claimedByOthers,
+  toClaimedProblem,
+  toExactClaims,
+  toPartialCandidates,
+  type PartialSources,
+} from "./two-value-candidates";
 
 export {
   CombinationVerdict,
   InvoiceRowStatus,
   type BookingCorrection,
   type ContainerCorrection,
+  type DateCorrection,
   type InvoiceCombination,
   type InvoiceRowMatch,
 } from "./invoice-row-match";
@@ -54,8 +57,8 @@ const CANDIDATE_STATUSES: readonly TripStatus[] = [
  *
  * ── THREE KINDS OF ROW ──────────────────────────────────────────────────────
  *   a transport line   by its date, booking and container — see
- *                      `row-decisions.ts` for the hierarchy, including the two
- *                      single-number corrections;
+ *                      `row-decisions.ts` for the hierarchy, including the
+ *                      corrections of one misprinted value;
  *   a Cost Confirmation line   by its `EC <nr>` — `cost-line-matching.ts`;
  *   a line this system added   resolved like a transport line, never settled.
  *
@@ -66,8 +69,9 @@ const CANDIDATE_STATUSES: readonly TripStatus[] = [
  *
  * ── A FIXED NUMBER OF QUERIES FOR THE WHOLE DOCUMENT ────────────────────────
  * The days and bookings go to the database together; every other read —
- * the day's Trips for a misprinted booking, the confirmations, the group sizes
- * — is one query too, and only made when a line needs it.
+ * the day's Trips for a misprinted booking, a booking's Trips on any day for a
+ * misprinted date, the confirmations, the group sizes — is one query too, and
+ * only made when a line needs it.
  */
 @Injectable()
 export class InvoiceRowMatchingService {
@@ -105,50 +109,63 @@ export class InvoiceRowMatchingService {
     return matches;
   }
 
+  /**
+   * Every transport line, in two passes over the WHOLE document, so the answer
+   * never depends on the order of the lines: first the exact matches, then —
+   * knowing which Trips those lines already are — the lines with one value
+   * misprinted (`decideByTwoValues`).
+   */
   private async matchTransports(
     rows: readonly InvoiceSheetRow[],
     addedByAudit: ReadonlyMap<number, AuditMarkedRow>,
   ): Promise<InvoiceRowMatch[]> {
     const byBooking = groupByBooking(await this.loadCandidates(rows));
-    let tripsOnDates: Trip[] | null = null;
-    const matches: InvoiceRowMatch[] = [];
+    const onDateOf = (row: InvoiceSheetRow) =>
+      (byBooking.get(row.bookingNumber) ?? []).filter((trip) => isOnInvoiceDate(trip, row.planningDate));
+    const exact = new Map(rows.map((row) => [row.rowNumber, decideByContainer(row, onDateOf(row))]));
+    const claims = toExactClaims(rows, exact);
+    const unmatched = rows.filter((row) => exact.get(row.rowNumber) === null);
+    const partial = unmatched.length > 0 ? await this.loadPartialSources(unmatched) : null;
 
-    for (const row of rows) {
-      const onDate = (byBooking.get(row.bookingNumber) ?? []).filter((trip) =>
-        isOnInvoiceDate(trip, row.planningDate),
-      );
-      let decided = decideByContainer(row, onDate) ?? decideByBookingAndDate(row, onDate);
-
-      if (decided === null) {
-        // No Trip holds this booking on this day: the booking may be misprinted.
-        tripsOnDates ??= await this.reads.findTripsOnDates(toDays(rows));
-        decided = decideByContainerAndDate(
-          row,
-          tripsOnDates.filter((trip) => isOnInvoiceDate(trip, row.planningDate)),
-        );
-      }
-
+    return rows.map((row) => {
+      const decided =
+        exact.get(row.rowNumber) ??
+        decideByTwoValues(row, toPartialCandidates(row, onDateOf(row), partial!), claimedByOthers(claims, row));
       /*
-       * A line this system added keeps its own answer, and its numbers are
+       * A line this system added keeps its own answer, and its values are
        * never rewritten: the document's record of it holds the identity it was
-       * written with, and a changed number would stop it being recognised.
+       * written with, and a changed value would stop it being recognised.
        */
       const added = wasAddedByAudit(row, addedByAudit);
 
-      matches.push({
+      return {
         row,
         ...decided,
         status: added ? InvoiceRowStatus.ADDED_MISSING : decided.status,
         containerCorrection: added ? null : decided.containerCorrection,
         bookingCorrection: added ? null : decided.bookingCorrection,
+        dateCorrection: added ? null : decided.dateCorrection,
         sharedKeyRowNumbers: [],
         costConfirmation: null,
         combination: null,
-        problem: null,
-      });
-    }
+        problem:
+          decided.status === InvoiceRowStatus.CONFLICT ? toClaimedProblem(decided.candidates, claims) : null,
+      };
+    });
+  }
 
-    return matches;
+  /**
+   * What a line with one misprinted value is compared with: every Trip on the
+   * document's days (a misprinted booking) and every Trip holding one of its
+   * bookings on any day (a misprinted date). One query each, for all lines.
+   */
+  private async loadPartialSources(rows: readonly InvoiceSheetRow[]): Promise<PartialSources> {
+    const [tripsOnDates, tripsByBooking] = await Promise.all([
+      this.reads.findTripsOnDates(toDays(rows)),
+      this.reads.findTripsByBookings([...new Set(rows.map((row) => row.bookingNumber))]),
+    ]);
+
+    return { tripsOnDates, tripsByBooking };
   }
 
   /** Every Cost Confirmation line, resolved through the confirmation it names. */
@@ -179,6 +196,7 @@ export class InvoiceRowMatchingService {
       sharedKeyRowNumbers: [],
       containerCorrection: null,
       bookingCorrection: null,
+      dateCorrection: null,
       combination: null,
     }));
   }
@@ -222,6 +240,7 @@ export class InvoiceRowMatchingService {
       matched: count(InvoiceRowStatus.MATCHED),
       containerCorrected: matches.filter((match) => match.containerCorrection).length,
       bookingCorrected: matches.filter((match) => match.bookingCorrection).length,
+      dateCorrected: matches.filter((match) => match.dateCorrection).length,
       notFound: count(InvoiceRowStatus.NOT_FOUND),
       notFinished: count(InvoiceRowStatus.NOT_FINISHED),
       ambiguous: count(InvoiceRowStatus.AMBIGUOUS),

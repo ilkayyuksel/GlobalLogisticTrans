@@ -66,7 +66,7 @@ export function toCustomerRemarkParts(facts: RemarkFacts): CustomerRemarkParts {
   if (waiting !== null) {
     parts.push({ kind: RemarkKind.WAITING, text: waiting });
   } else if (hasWaitingTime(facts.waiting)) {
-    unexpressed.push("De wachttijd heeft geen venster binnen één dag en wordt daarom niet geschreven.");
+    unexpressed.push(WAITING_NOT_WRITTEN_NOTE);
   }
 
   if (facts.geenCombi) {
@@ -75,6 +75,10 @@ export function toCustomerRemarkParts(facts: RemarkFacts): CustomerRemarkParts {
 
   return { parts, unexpressed };
 }
+
+/** The note for a waiting time no Remarks part can state — read by `row-advice.ts` too. */
+export const WAITING_NOT_WRITTEN_NOTE =
+  "De wachttijd heeft geen venster binnen één dag en wordt daarom niet geschreven.";
 
 /** `wachtuur 7:30 tot 11:30`, or null when there is no window within one day. */
 function toWaitingPart(waiting: WaitingFacts | null): string | null {

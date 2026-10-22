@@ -3,6 +3,7 @@ import {
   InvoiceRowStatus,
   type BookingCorrection,
   type ContainerCorrection,
+  type DateCorrection,
   type InvoiceRowMatch,
 } from "./matching/invoice-row-matching.service";
 import { InvoicePricingStatus, type InvoiceRowPricing } from "./pricing/invoice-reconciliation";
@@ -58,6 +59,7 @@ export function toWorkbookCorrections(examined: ExaminedInvoice): WorkbookCorrec
     problemRowNumbers: toMarkedRowNumbers(examined.matches, examined.pricing),
     containerCorrections: byRow(examined.matches, (match) => match.containerCorrection),
     bookingCorrections: byRow(examined.matches, (match) => match.bookingCorrection),
+    dateCorrections: byRow(examined.matches, (match) => match.dateCorrection),
     remarks: toCompletedRemarks(examined.remarks),
   };
 }
@@ -70,6 +72,7 @@ export function toChangePlan(examined: ExaminedInvoice, corrections: WorkbookCor
     yellowRowNumbers: corrections.problemRowNumbers ?? [],
     containerCorrections: corrections.containerCorrections ?? new Map(),
     bookingCorrections: corrections.bookingCorrections ?? new Map(),
+    dateCorrections: corrections.dateCorrections ?? new Map(),
     remarks: corrections.remarks ?? new Map(),
     fuelHeader: examined.fuelHeader,
     added: examined.added,
@@ -88,7 +91,7 @@ function toCompletedRemarks(changes: ReadonlyMap<number, RemarkChange>): Map<num
 }
 
 /** A misprinted number of a line, by the row whose cell the document replaces. */
-function byRow<T extends ContainerCorrection | BookingCorrection>(
+function byRow<T extends ContainerCorrection | BookingCorrection | DateCorrection>(
   matches: readonly InvoiceRowMatch[],
   correctionOf: (match: InvoiceRowMatch) => T | null,
 ): Map<number, T> {

@@ -44,6 +44,12 @@ export class InvoiceTripPaymentDto {
   @ApiProperty({ enum: NotPayableReason, isArray: true })
   reasons!: NotPayableReason[];
 
+  @ApiProperty({
+    type: [Number],
+    description: "The rows to fix for it to become payable: unresolved lines naming it, or blocking adding it.",
+  })
+  blockingRowNumbers!: number[];
+
   @ApiProperty({ description: "Already paid: re-invoiced, and never paid a second time." })
   alreadyPaid!: boolean;
 }
@@ -87,6 +93,7 @@ export function toTripPaymentDto(payment: TripPayment): InvoiceTripPaymentDto {
     payable: payment.payable,
     category: payment.category,
     reasons: [...payment.reasons],
+    blockingRowNumbers: [...payment.blockingRowNumbers],
     alreadyPaid: payment.alreadyPaid,
   };
 }

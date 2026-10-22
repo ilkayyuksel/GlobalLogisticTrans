@@ -132,7 +132,7 @@ describe("Manual Trip creation", () => {
         TripService,
         /*
          * The REAL rule, over the one configured property these tests need.
-         * A manually created 20FL owes Flat exactly as an imported one does,
+         * A manually created 40FL owes Flat exactly as an imported one does,
          * and that is asserted below rather than assumed.
          */
         AutomaticFlatPropertyService,
@@ -444,7 +444,7 @@ describe("Manual Trip creation", () => {
   /**
    * The container type obliges the Trip, whoever entered it.
    *
-   * A Trip typed in by hand is not a lesser Trip: a 20FL announced by phone
+   * A Trip typed in by hand is not a lesser Trip: a 40FL announced by phone
    * carries the same flat-rack handling as one that arrived on a document, and
    * an operator who has to remember to tick it will eventually not. So the rule
    * runs on this path too, inside the same transaction as the insert.
@@ -523,7 +523,7 @@ describe("Manual Trip creation", () => {
         .expect(201);
     }
 
-    it.each(["20FL", "20ST", "45FL", "45OS"])("assigns Flat to a %s", async (containerType) => {
+    it.each(["20FL", "40FL", "45OS"])("assigns Flat to a %s", async (containerType) => {
       await createWith(containerType);
 
       expect(assignments).toEqual([
@@ -536,12 +536,12 @@ describe("Manual Trip creation", () => {
 
     it("assigns it for a lower-case container type too", async () => {
       // Only trimmed on the way in, so the rule is what handles the capitals.
-      await createWith("20fl");
+      await createWith("40fl");
 
       expect(assignments).toHaveLength(1);
     });
 
-    it.each(["45PH", "45RH", "20STUFF", null])(
+    it.each(["45PH", "45RH", "20ST", "40OS", "45FL", "40OSUFF", null])(
       "assigns nothing for %p",
       async (containerType) => {
         await createWith(containerType);
@@ -551,14 +551,14 @@ describe("Manual Trip creation", () => {
     );
 
     it("assigns it inside the transaction that inserts the Trip", async () => {
-      await createWith("20FL");
+      await createWith("40FL");
 
       expect(repository.runTripWriteTransaction).toHaveBeenCalledTimes(1);
     });
 
     /**
      * Atomicity, from the failing side. With no Flat property configured the
-     * Trip must not be stored at all — a 20FL without it is under-charged from
+     * Trip must not be stored at all — a 40FL without it is under-charged from
      * then on, and silently.
      */
     it("refuses the whole creation when no Flat property is configured", async () => {
@@ -566,7 +566,7 @@ describe("Manual Trip creation", () => {
 
       await request(app.getHttpServer())
         .post(BASE)
-        .send({ containerType: "20FL" })
+        .send({ containerType: "40FL" })
         .expect(422);
 
       expect(assignments).toEqual([]);

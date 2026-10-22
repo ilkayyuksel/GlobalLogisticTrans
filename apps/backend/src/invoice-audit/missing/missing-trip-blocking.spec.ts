@@ -11,6 +11,7 @@ function line(rowNumber: number, status: InvoiceRowStatus, booking: string, cont
     sharedKeyRowNumbers: [],
     containerCorrection: null,
     bookingCorrection: null,
+    dateCorrection: null,
     costConfirmation: null,
     combination: null,
     problem: null,
@@ -38,7 +39,7 @@ describe("missing transports and the lines that could be them", () => {
     expect(blockingRowsFor(missing, identities)).toEqual([5]);
   });
 
-  it.each([InvoiceRowStatus.AMBIGUOUS, InvoiceRowStatus.CONFLICT, InvoiceRowStatus.COST_LINE_UNRESOLVED])(
+  it.each([InvoiceRowStatus.AMBIGUOUS, InvoiceRowStatus.CONFLICT])(
     "is blocked by a %s line too",
     (status) => {
       const identities = toBlockingIdentities([line(9, status, "ANRDUB2810849", "")], []);
@@ -46,6 +47,16 @@ describe("missing transports and the lines that could be them", () => {
       expect(blockingRowsFor(missing, identities)).toEqual([9]);
     },
   );
+
+  /** An EC line is never a transport's own line: one not linked leaves only its EK unchecked. */
+  it("is not blocked by an EC line whose confirmation could not be linked", () => {
+    const identities = toBlockingIdentities(
+      [line(9, InvoiceRowStatus.COST_LINE_UNRESOLVED, "ANRDUB2810849", "")],
+      [],
+    );
+
+    expect(blockingRowsFor(missing, identities)).toEqual([]);
+  });
 
   it("is blocked by an incomplete row naming its booking", () => {
     const identities = toBlockingIdentities(

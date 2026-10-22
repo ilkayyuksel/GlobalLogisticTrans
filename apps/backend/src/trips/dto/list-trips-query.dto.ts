@@ -95,6 +95,16 @@ export class ListTripsQueryDto extends PaginationQueryDto {
 
   @ApiPropertyOptional({
     description:
+      "true: only Trips whose route or route price needs attention — their current price matched no usable route (NOT_FOUND, AMBIGUOUS, a pair that is no configured Combination), or was priced on a route whose prices are not marked as checked on the Routeprijzen page (a Combination by its own mark). One condition, so a Trip appears once. Omit it, or false, for no such filter. Combines with every other filter here; nothing is matched or priced.",
+    example: true,
+  })
+  @Transform(toOptionalBoolean)
+  @IsOptional()
+  @IsBoolean()
+  routeAttention?: boolean;
+
+  @ApiPropertyOptional({
+    description:
       "Trips planned on exactly this day. Overrides the range filters.",
     format: "date",
     example: "2026-08-17",

@@ -11,9 +11,10 @@ import type { InvoiceSheetRow } from "../workbook/invoice-sheet";
  * ambiguous: nothing is chosen. NOT_FINISHED is a Trip that is there but not
  * closed yet. NOT_FOUND is everything else.
  *
- * CONFLICT is a line whose number would have to be CORRECTED to reach a Trip
- * another line of the same document already names: one transport cannot be
- * two lines, so neither correction is made and a person decides.
+ * CONFLICT is a line that reaches its Trip only by a CORRECTION — of its date,
+ * booking or container — while another line of the same document already names
+ * that Trip: one transport cannot be two lines, so no correction is made and a
+ * person decides.
  *
  * COST_LINE is a Cost Confirmation line resolved, through its `EC <nr>`, to the
  * confirmation and its Trip. COST_LINE_UNRESOLVED is one that could not be.
@@ -61,6 +62,20 @@ export interface BookingCorrection {
   readonly tripBookingNumber: string;
 }
 
+/**
+ * The invoice named the right transport on the wrong day.
+ *
+ * Present only on a line whose booking AND container are exactly one Trip's,
+ * on neither of that Trip's dates — and only when no other line of the
+ * document already names that Trip.
+ */
+export interface DateCorrection {
+  /** The day the line states, `YYYY-MM-DD`. */
+  readonly invoicePlanningDate: string;
+  /** The Trip's own `planningDate`, `YYYY-MM-DD`. */
+  readonly tripPlanningDate: string;
+}
+
 /** What the Excel says about a line being half of a Combination. */
 export const CombinationVerdict = {
   /** The Excel's pair is the system's own group of exactly these two Trips. */
@@ -102,6 +117,8 @@ export interface InvoiceRowMatch {
   readonly containerCorrection: ContainerCorrection | null;
   /** Null unless the invoice's booking was wrong and is to be corrected. */
   readonly bookingCorrection: BookingCorrection | null;
+  /** Null unless the invoice's date was wrong and is to be corrected. */
+  readonly dateCorrection: DateCorrection | null;
   /** The confirmation a COST_LINE charges. */
   readonly costConfirmation: InvoiceCostConfirmation | null;
   /** Set on a line the Excel marks as half of a Combination. */

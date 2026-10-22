@@ -4,6 +4,8 @@ import { Prisma, Trip, TripGroup, TripStatus } from "@prisma/client";
 import { bookingNumberDigits } from "../common/booking-digits";
 import { PdfDocumentRepository } from "../pdf-documents/pdf-document.repository";
 import { TripCustomPropertyRepository } from "../trip-custom-properties/trip-custom-property.repository";
+import { routeAttentionWhere } from "../trip-pricing/route-attention";
+import { RouteReviewRepository } from "../trip-pricing/route-review.repository";
 import { TripHistoryEvent } from "./trip-history";
 import { PrismaService } from "../prisma/prisma.service";
 import { TripRouteSelectionRepository } from "../trip-route-selection/trip-route-selection.repository";
@@ -50,6 +52,12 @@ export interface FindTripsFilter {
    * unpaid ones") and `undefined` is the absence of one.
    */
   isPaid?: boolean;
+  /**
+   * Only Trips whose route or route price needs attention — no usable route,
+   * or a route whose prices are not checked (`route-attention.ts`). Absent or
+   * false: no such filter.
+   */
+  needsRouteAttention?: boolean;
   terminal?: string;
   destinationCity?: string;
   destinationCountry?: string;
@@ -369,7 +377,7 @@ export class TripRepository {
    * when a concurrent write lands between the two queries.
    */
   async findPage(filter: FindTripsFilter): Promise<TripPage> {
-    const where = this.buildWhere(filter);
+    const where = await this.withRouteAttention(filter, this.buildWhere(filter));
 
     const [items, totalItems] = await this.prisma.$transaction([
       this.prisma.trip.findMany({
@@ -908,6 +916,24 @@ export class TripRepository {
     }
 
     return this.prisma.trip.update({ where: { id }, data: { status } });
+  }
+
+  /**
+   * The route-attention condition beside every other filter (`AND`, so it
+   * never displaces the search's own `OR`). The unchecked configurations are
+   * read live, by the rule the Routeprijzen page's mark follows.
+   */
+  private async withRouteAttention(
+    filter: FindTripsFilter,
+    where: Prisma.TripWhereInput,
+  ): Promise<Prisma.TripWhereInput> {
+    if (!filter.needsRouteAttention) {
+      return where;
+    }
+
+    const unreviewed = await new RouteReviewRepository(this.prisma).findUnreviewed();
+
+    return { AND: [where, routeAttentionWhere(unreviewed)] };
   }
 
   private buildWhere(filter: FindTripsFilter): Prisma.TripWhereInput {

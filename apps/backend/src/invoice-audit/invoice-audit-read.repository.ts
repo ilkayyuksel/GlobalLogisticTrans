@@ -54,6 +54,21 @@ export class InvoiceAuditReadRepository {
     });
   }
 
+  /**
+   * Every Trip holding one of these bookings, on ANY day — the candidates for a
+   * line whose date is misprinted. Never a partial booking: exact numbers only.
+   */
+  findTripsByBookings(bookingNumbers: readonly string[]): Promise<Trip[]> {
+    if (bookingNumbers.length === 0) {
+      return Promise.resolve([]);
+    }
+
+    return this.prisma.trip.findMany({
+      where: { bookingNumber: { in: [...bookingNumbers] }, status: { not: TripStatus.DELETED } },
+      orderBy: [{ planningDate: "asc" }, { createdAt: "asc" }, { id: "asc" }],
+    });
+  }
+
   /** The given Trips, DELETED ones left out. */
   findTripsByIds(tripIds: readonly string[]): Promise<Trip[]> {
     if (tripIds.length === 0) {

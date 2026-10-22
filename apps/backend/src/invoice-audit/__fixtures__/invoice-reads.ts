@@ -13,6 +13,8 @@ import type {
 export interface InvoiceReadsDouble {
   findTripsOnDates: jest.Mock<Promise<Trip[]>, [readonly Date[]]>;
   findTripsByIds: jest.Mock<Promise<Trip[]>, [readonly string[]]>;
+  /** By default no Trip holds any booking on another day. */
+  findTripsByBookings: jest.Mock<Promise<Trip[]>, [readonly string[]]>;
   findCostConfirmationsByNumbers: jest.Mock<
     Promise<InvoiceCostConfirmation[]>,
     [readonly string[]]
@@ -31,6 +33,7 @@ export function invoiceReads(): InvoiceReadsDouble {
   return {
     findTripsOnDates: jest.fn(async (_days: readonly Date[]) => [] as Trip[]),
     findTripsByIds: jest.fn(async (_ids: readonly string[]) => [] as Trip[]),
+    findTripsByBookings: jest.fn(async (_bookings: readonly string[]) => [] as Trip[]),
     findCostConfirmationsByNumbers: jest.fn(
       async (_numbers: readonly string[]) => [] as InvoiceCostConfirmation[],
     ),

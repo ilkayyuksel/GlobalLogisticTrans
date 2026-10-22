@@ -50,7 +50,8 @@ import { RittenDialog } from "./ritten-dialog";
  * the money belongs in the Ritten pricing columns.
  *
  * ── A PROPERTY THE CONTAINER TYPE REQUIRES ──────────────────────────────────
- * Some assignments cannot be removed: a 20FL and a 20ST always carry Flat, and
+ * Some assignments cannot be removed: a 20FL, 40FL or 45OS always carries
+ * Flat, and
  * the backend refuses to unassign it. The remove action is disabled for those,
  * with the reason beside it — a button that is always refused is worse than no
  * button.

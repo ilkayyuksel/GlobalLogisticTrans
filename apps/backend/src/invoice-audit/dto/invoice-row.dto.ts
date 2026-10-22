@@ -2,6 +2,7 @@ import { ApiProperty } from "@nestjs/swagger";
 import { Trip, TripStatus } from "@prisma/client";
 
 import { toIsoDate } from "../../common/dates";
+import type { RowAdvice } from "../advice/row-advice";
 import { InvoiceRowStatus, type InvoiceRowMatch } from "../matching/invoice-row-matching.service";
 import { InvoicePricingStatus, type InvoiceRowPricing } from "../pricing/invoice-reconciliation";
 import type { RemarkChange } from "../remarks/remark-plan";
@@ -17,6 +18,7 @@ import {
   toDifferenceDto,
   toPriceReliabilityDto,
 } from "./invoice-row-details.dto";
+import { InvoiceDateCorrectionDto, InvoiceRowAdviceDto } from "./invoice-row-advice.dto";
 
 /** What this system holds for the Trip an invoice line was matched to. */
 export class InvoiceAuditTripDto {
@@ -124,6 +126,14 @@ export class InvoiceAuditRowDto {
   })
   bookingCorrection!: InvoiceBookingCorrectionDto | null;
 
+  @ApiProperty({
+    type: InvoiceDateCorrectionDto,
+    nullable: true,
+    description:
+      "Set only on a MATCHED line whose booking and container are exactly one Trip's, on another day than the line states.",
+  })
+  dateCorrection!: InvoiceDateCorrectionDto | null;
+
   @ApiProperty({ type: InvoiceCostConfirmationDto, nullable: true })
   costConfirmation!: InvoiceCostConfirmationDto | null;
 
@@ -143,12 +153,19 @@ export class InvoiceAuditRowDto {
     description: "What this check adds to the line's Remarks, and what it could not write.",
   })
   remarks!: InvoiceRemarksDto | null;
+
+  @ApiProperty({
+    type: [InvoiceRowAdviceDto],
+    description: "What is wrong with the line, what became of it and the recommended action. Empty when there is nothing to say.",
+  })
+  advice!: InvoiceRowAdviceDto[];
 }
 
 export function toInvoiceAuditRowDto(
   match: InvoiceRowMatch,
   pricing: InvoiceRowPricing | undefined,
   remarks?: RemarkChange,
+  advice: readonly RowAdvice[] = [],
 ): InvoiceAuditRowDto {
   return {
     rowNumber: match.row.rowNumber,
@@ -169,6 +186,7 @@ export function toInvoiceAuditRowDto(
       ? { ...match.containerCorrection }
       : null,
     bookingCorrection: match.bookingCorrection ? { ...match.bookingCorrection } : null,
+    dateCorrection: match.dateCorrection ? { ...match.dateCorrection } : null,
     costConfirmation: match.costConfirmation
       ? {
           ccNumber: match.costConfirmation.ccNumber,
@@ -185,6 +203,7 @@ export function toInvoiceAuditRowDto(
           notes: [...remarks.notes],
         }
       : null,
+    advice: advice.map((each) => ({ ...each })),
   };
 }
 

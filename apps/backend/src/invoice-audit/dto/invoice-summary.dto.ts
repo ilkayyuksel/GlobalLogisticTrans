@@ -82,6 +82,9 @@ export class InvoiceAuditSummaryDto {
   @ApiProperty({ example: 0, description: "Lines whose booking number is corrected." })
   bookingCorrected!: number;
 
+  @ApiProperty({ example: 0, description: "Lines whose date is corrected to their Trip's planning date." })
+  dateCorrected!: number;
+
   @ApiProperty({ example: 0, description: "Lines whose correction would reach a Trip another line is." })
   conflicts!: number;
 
@@ -161,6 +164,7 @@ export function toInvoiceAuditSummaryDto(
     missingTrips,
     blockedMissingTrips,
     bookingCorrected: matches.filter((match) => match.bookingCorrection !== null).length,
+    dateCorrected: matches.filter((match) => match.dateCorrection !== null).length,
     conflicts: count(InvoiceRowStatus.CONFLICT),
     costLines: count(InvoiceRowStatus.COST_LINE),
     costLinesUnresolved: count(InvoiceRowStatus.COST_LINE_UNRESOLVED),

@@ -39,7 +39,7 @@ import { TripService } from "./trip.service";
  * would make DriverModule depend on TripModule and close the loop.
  *
  * CustomPropertyModule is imported for one rule: a Trip whose container type
- * is 20FL or 20ST must carry the "Flat" property, and the rule resolves that
+ * is 20FL, 40FL or 45OS must carry the "Flat" property, and the rule resolves that
  * property by NAME through the Custom Property service rather than holding a
  * copy of its id. The dependency points the same way as the others — Custom
  * Property knows nothing about Trips — so no cycle forms. The assignment ROW is

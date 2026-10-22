@@ -335,7 +335,7 @@ describe("TripCustomPropertyService", () => {
    * A property the container type requires cannot be unassigned.
    *
    * The rule would put an automatic Flat straight back, so removing it would be
-   * theatre; a manual Flat on a 20FL is in the same position for a better
+   * theatre; a manual Flat on a 40FL is in the same position for a better
    * reason — the invariant is about what the Trip CARRIES, not about who put it
    * there. Either way the way out is the same: change the container type.
    *
@@ -355,9 +355,9 @@ describe("TripCustomPropertyService", () => {
 
     it.each([
       ["20FL", true],
-      ["20ST", true],
-      ["20FL", false],
-      ["20ST", false],
+      ["45OS", true],
+      ["40FL", false],
+      ["45OS", false],
     ])(
       "refuses to remove Flat from a %s Trip (automatic: %p)",
       async (containerType, isAutomatic) => {
@@ -371,13 +371,13 @@ describe("TripCustomPropertyService", () => {
     );
 
     it("names the container type, which is the reason and the way out", async () => {
-      flatOn("20FL", true);
+      flatOn("40FL", true);
 
-      await expect(service.remove(ASSIGNMENT_ID)).rejects.toThrow(/20FL/);
+      await expect(service.remove(ASSIGNMENT_ID)).rejects.toThrow(/40FL/);
     });
 
     it("logs the refusal without naming the property", async () => {
-      flatOn("20FL", true);
+      flatOn("40FL", true);
 
       await expect(service.remove(ASSIGNMENT_ID)).rejects.toBeDefined();
       expect(logger.warn).toHaveBeenCalledWith(
@@ -394,11 +394,25 @@ describe("TripCustomPropertyService", () => {
       expect(repository.delete).toHaveBeenCalledWith(ASSIGNMENT_ID);
     });
 
+    /**
+     * An automatic Flat from before the list became 20FL, 40FL and 45OS is left
+     * standing on its Trip, but nothing requires it any more: it may go.
+     */
+    it.each(["20ST", "40OS", "45FL"])(
+      "allows an earlier automatic Flat on a %s Trip to be removed",
+      async (containerType) => {
+        flatOn(containerType, true);
+
+        await expect(service.remove(ASSIGNMENT_ID)).resolves.toBeDefined();
+        expect(repository.delete).toHaveBeenCalledWith(ASSIGNMENT_ID);
+      },
+    );
+
     /** Only Flat is protected. Every other property stays freely removable. */
-    it("allows another property to be removed from a 20FL Trip", async () => {
+    it("allows another property to be removed from a 40FL Trip", async () => {
       tripService.findById.mockResolvedValue({
         id: TRIP_ID,
-        containerType: "20FL",
+        containerType: "40FL",
       });
       repository.findById.mockResolvedValue(
         buildAssignment({ customProperty: buildProperty({ name: "TAR" }) }),
@@ -423,10 +437,10 @@ describe("TripCustomPropertyService", () => {
       expect(items[0].isAutomatic).toBe(true);
     });
 
-    it("reports Flat on a 20FL Trip as required", async () => {
+    it("reports Flat on a 40FL Trip as required", async () => {
       tripService.findById.mockResolvedValue({
         id: TRIP_ID,
-        containerType: "20FL",
+        containerType: "40FL",
       });
       repository.findByTripId.mockResolvedValue([
         buildAssignment({ customProperty: buildProperty({ name: "Flat" }) }),
@@ -451,10 +465,10 @@ describe("TripCustomPropertyService", () => {
       expect(items[0].isRequired).toBe(false);
     });
 
-    it("reports another property on a 20FL Trip as not required", async () => {
+    it("reports another property on a 40FL Trip as not required", async () => {
       tripService.findById.mockResolvedValue({
         id: TRIP_ID,
-        containerType: "20FL",
+        containerType: "40FL",
       });
       repository.findByTripId.mockResolvedValue([buildAssignment()]);
 

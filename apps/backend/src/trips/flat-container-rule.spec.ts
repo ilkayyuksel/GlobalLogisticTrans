@@ -8,12 +8,18 @@ import {
  *
  * The whole rule is one predicate, and the tests that matter are the near
  * misses: a `startsWith` or an `includes` would pass every case below that says
- * "yes" and quietly charge for `20STUFF` as well. Each "no" here is a way of
+ * "yes" and quietly charge for `40OSUFF` as well. Each "no" here is a way of
  * writing the rule that would have been wrong.
  */
 describe("requiresFlatProperty", () => {
-  it.each(["20FL", "20ST", "40FL", "40OS", "45FL", "45OS"])("requires it for %s", (containerType) => {
+  /** Exactly these three (owner, 22 October 2026). */
+  it.each(["20FL", "40FL", "45OS"])("requires it for %s", (containerType) => {
     expect(requiresFlatProperty(containerType)).toBe(true);
+  });
+
+  /** Their neighbours — the other flat racks and open sides — never. */
+  it.each(["20ST", "40OS", "45FL", "20OS", "45ST", "20st", " 40OS "])("does not require it for %p", (containerType) => {
+    expect(requiresFlatProperty(containerType)).toBe(false);
   });
 
   it.each(["45PH", "45RH", "20TK", "20RF", "45OSX", "45F"])(
@@ -24,18 +30,18 @@ describe("requiresFlatProperty", () => {
   );
 
   /*
-   * The codes that begin with one of the two. A flat rack is a 20FL and
+   * The codes that begin with one of the two. A flat rack is a 40FL and
    * nothing else; anything longer is a different container type whose charge
    * this rule knows nothing about.
    */
-  it.each(["20FLX", "20STUFF", "20FL1", "20STX"])(
+  it.each(["40FLX", "40OSUFF", "40FL1", "40OSX1"])(
     "does not match %s, which merely begins with one",
     (containerType) => {
       expect(requiresFlatProperty(containerType)).toBe(false);
     },
   );
 
-  it.each(["X20FL", "A20ST"])(
+  it.each(["X40FL", "A40OS"])(
     "does not match %s, which merely contains one",
     (containerType) => {
       expect(requiresFlatProperty(containerType)).toBe(false);
@@ -44,14 +50,14 @@ describe("requiresFlatProperty", () => {
 
   /** The normalisation the Trip domain already applies, and no more. */
   describe("normalisation", () => {
-    it.each(["20fl", "20Fl", "20sT", "20st"])(
+    it.each(["40fl", "40Fl", "45oS", "45os", "20fl"])(
       "ignores the capitals in %p",
       (containerType) => {
         expect(requiresFlatProperty(containerType)).toBe(true);
       },
     );
 
-    it.each([" 20FL", "20FL ", "  20ST  ", "\t20FL\n"])(
+    it.each([" 40FL", "40FL ", "  45OS  ", "\t20FL\n"])(
       "ignores the surrounding whitespace in %p",
       (containerType) => {
         expect(requiresFlatProperty(containerType)).toBe(true);
@@ -59,7 +65,7 @@ describe("requiresFlatProperty", () => {
     );
 
     it("does not ignore whitespace inside the code", () => {
-      expect(requiresFlatProperty("20 FL")).toBe(false);
+      expect(requiresFlatProperty("40 FL")).toBe(false);
     });
   });
 

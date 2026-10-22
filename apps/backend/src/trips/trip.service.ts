@@ -174,6 +174,7 @@ export class TripService {
        * after it was fetched would page over the wrong set.
        */
       isPaid: query.isPaid,
+      needsRouteAttention: query.routeAttention,
       planningDate: query.planningDate
         ? toUtcDate(query.planningDate)
         : undefined,

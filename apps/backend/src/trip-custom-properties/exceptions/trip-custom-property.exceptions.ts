@@ -68,7 +68,7 @@ export class SystemManagedCustomPropertyException extends ConflictException {
 /**
  * The container type requires this property, so it may not be unassigned.
  *
- * A 20FL and a 20ST always carry Flat. The rule assigns it, and while the type
+ * A 20FL, a 40FL and a 45OS always carry Flat. The rule assigns it, and while the type
  * still requires it the assignment cannot be taken away — not by the automatic
  * path, which would put it straight back, and not by hand either. Removing it
  * would leave the Trip under-charged with nothing on it to show why.

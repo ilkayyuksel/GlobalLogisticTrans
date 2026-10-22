@@ -75,6 +75,7 @@ function match(
     sharedKeyRowNumbers: [],
     containerCorrection: null,
     bookingCorrection: null,
+    dateCorrection: null,
     costConfirmation: null,
     combination,
     problem: null,

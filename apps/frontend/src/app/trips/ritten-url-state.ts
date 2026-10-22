@@ -39,6 +39,7 @@ export const RITTEN_FILTER_PARAMS = objectParams<RittenFilterValues>({
   terminal: textParam("terminal"),
   customPropertyId: textParam("property"),
   isPaid: choiceParam("paid", PAYMENT_CHOICES, ""),
+  routeAttention: flagParam("route", false),
 });
 
 export const RITTEN_PAGE_PARAM = pageParam();

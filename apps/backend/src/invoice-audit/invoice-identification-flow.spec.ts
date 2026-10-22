@@ -226,9 +226,17 @@ describe("identifying the lines of a weekly invoice", () => {
   });
 
   describe("a transport a line could be", () => {
-    it("is not added but reported beside the line that blocks it", async () => {
-      // The line misprints its DATE: it matches nothing, but names the booking.
-      trips.findClosedUnpaidBetween.mockResolvedValue([onTuesday({ id: "amandsberg" })]);
+    /*
+     * A line misprinting only its DATE is now matched on its booking and
+     * container (the date corrected), so its transport is on the invoice:
+     * neither blocked nor added, and payable like any other.
+     */
+    it("is the line's own Trip when only the date is misprinted: matched, corrected and payable", async () => {
+      const amandsberg = onTuesday({ id: "amandsberg" });
+
+      trips.findClosedUnpaidBetween.mockResolvedValue([amandsberg]);
+      reads.findTripsByBookings.mockResolvedValue([amandsberg]);
+      pricingByTrip.set("amandsberg", pricing({ tarief: "229", totaal: "229" }));
 
       const { applied } = await apply([
         line({
@@ -239,15 +247,35 @@ describe("identifying the lines of a weekly invoice", () => {
         }),
       ]);
 
+      expect(applied.result.rows[0]).toMatchObject({ status: "MATCHED", dateCorrection: { tripPlanningDate: "2026-10-06" } });
+      expect(applied.rowsAdded).toBe(0);
+      expect(applied.result.blockedMissingTrips).toEqual([]);
+      expect(paid()).toEqual(["amandsberg"]);
+    });
+
+    it("is not added but reported beside the line that blocks it, when that line shares one value only", async () => {
+      // The line states the booking alone: another day AND another container.
+      trips.findClosedUnpaidBetween.mockResolvedValue([onTuesday({ id: "amandsberg" })]);
+
+      const { applied } = await apply([
+        line({
+          planningDate: new Date(Date.UTC(2026, 9, 7)),
+          bookingNumber: "ANRDUB2810849",
+          containerNumber: "EUCU 9999999",
+          tarief: 229,
+        }),
+      ]);
+
       expect(applied.rowsAdded).toBe(0);
       expect(applied.result.blockedMissingTrips).toEqual([
         expect.objectContaining({ tripId: "amandsberg", blockingRowNumbers: [2] }),
       ]);
       expect(applied.result.summary.blockedMissingTrips).toBe(1);
-      // An open conflict, not a price problem — and still never offered for payment.
+      // A match problem, not a price problem — named with the row to fix.
       expect(applied.result.payments.find((payment) => payment.tripId === "amandsberg")).toMatchObject({
         payable: false,
-        reasons: ["OPEN_CONFLICT"],
+        reasons: ["BLOCKED_BY_UNRESOLVED_LINE"],
+        blockingRowNumbers: [2],
       });
     });
   });
