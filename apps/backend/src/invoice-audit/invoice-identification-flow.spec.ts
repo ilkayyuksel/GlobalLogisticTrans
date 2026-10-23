@@ -112,6 +112,7 @@ describe("identifying the lines of a weekly invoice", () => {
       id: "bousbecque",
       bookingNumber: "ANRDUB2812770",
       containerNumber: "TLLU1609235",
+      startTime: null,
     });
 
     beforeEach(() => {
@@ -144,17 +145,27 @@ describe("identifying the lines of a weekly invoice", () => {
       expect(sheet.getRow(3).getCell(COLUMN.tarief).value).toBeNull();
     });
 
-    it("does not add the transport they belong to a second time", async () => {
-      const { applied } = await week();
+    /*
+     * The EC lines are never the transport's own line (owner, October 2026):
+     * the transport has none on this invoice, so it is added — once — and its
+     * line carries only the EK the EC lines do not already charge: 180 − 110 −
+     * 70 = nothing.
+     */
+    it("adds the transport once, without charging its EK a second time", async () => {
+      const { applied, sheet } = await week();
 
-      expect(applied.result.missingTrips).toEqual([]);
-      expect(applied.rowsAdded).toBe(0);
+      expect(applied.result.missingTrips.map((missing) => missing.tripId)).toEqual(["bousbecque"]);
+      expect(applied.rowsAdded).toBe(1);
+      expect(sheet.getRow(5).getCell(COLUMN.booking).value).toBe("ANRDUB2812770");
+      expect(sheet.getRow(5).getCell(COLUMN.tarief).value).toBe(299);
+      expect(sheet.getRow(5).getCell(COLUMN.ek).value).toBeNull();
     });
 
-    it("never settles the transport on its Cost Confirmation lines alone", async () => {
+    it("settles the transport through its added line, its EC lines and that line as one", async () => {
       await week();
 
-      expect(paid()).not.toContain("bousbecque");
+      expect(paid()).toContain("bousbecque");
+      expect(lastPayments.filter((payment) => payment.tripId === "bousbecque")).toHaveLength(1);
     });
   });
 

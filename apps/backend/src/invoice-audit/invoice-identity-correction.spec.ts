@@ -55,10 +55,13 @@ describe("an invoice line with one misprinted value", () => {
   const logger = { setContext: jest.fn(), log: jest.fn(), warn: jest.fn(), error: jest.fn() } as unknown as AppLoggerService;
   let database: Trip[];
   let confirmations: { tripId: string; ccNumber: string; amount: Prisma.Decimal }[];
+  /** A Trip's stored EK, when it has one. */
+  let ekOf: Map<string, string>;
 
   beforeEach(() => {
     database = [];
     confirmations = [];
+    ekOf = new Map();
   });
 
   const onDay = (trip: Trip, days: readonly Date[]) =>
@@ -68,7 +71,7 @@ describe("an invoice line with one misprinted value", () => {
   function service() {
     const reads = invoiceReads();
     const pricing = new Map<string, CurrentTripPricing>(
-      database.map((trip) => [trip.id, priced("200", "30")]),
+      database.map((trip) => [trip.id, priced("200", "30", ekOf.get(trip.id))]),
     );
 
     reads.findCostConfirmationsByNumbers.mockImplementation(async (numbers) =>
@@ -439,7 +442,7 @@ describe("an invoice line with one misprinted value", () => {
       const { rows } = await check([line(TUESDAY, "ANRDUB2819999", "EUCU9999999"), ecLine("AMRDIB2812203", "EUCU4590355", "4214683")]);
 
       expect(rows[1].matchProblem).toBe(
-        "Geen kostenbevestiging gevonden voor EC 4214683. De rit zelf is wel gevonden (ANRDUB2812203 · EUCU4590355 · 06/10/2026 · afgewerkt), maar staat niet als transportregel op deze factuur.",
+        "Geen kostenbevestiging gevonden voor EC 4214683. De rit zelf is wel gevonden (ANRDUB2812203 · EUCU4590355 · 06/10/2026 · afgewerkt), maar staat niet als transportregel op deze factuur; hij wordt beoordeeld als ontbrekende rit.",
       );
     });
   });
@@ -560,6 +563,120 @@ describe("an invoice line with one misprinted value", () => {
     });
   });
 
+  /**
+   * Example E — week 41 R107: `2026-10-08 · DUBANR2810438 · EUCU 4580552 · EK
+   * 386,16 · EC 4224479`, an EC line with no transport line of its own. The EC
+   * line charges a cost beside the transport; it is never the transport's line.
+   */
+  describe("example E: an EC line whose transport has no line of its own", () => {
+    const THURSDAY = "2026-10-08";
+    const EK = 20;
+    const R107 = () => ({ ...ecLine("DUBANR2810438", "EUCU4580552", "4224479"), planningDate: day(THURSDAY), ek: 386.16 });
+    const anotherTransport = () => line(TUESDAY, "ANRDUB2810001", "EUCU1000001");
+
+    beforeEach(() => {
+      database.push(aTrip("other", "ANRDUB2810001", "EUCU1000001", TUESDAY));
+      database.push(aTrip("gent", "DUBANR2810438", "EUCU4580552", THURSDAY));
+    });
+
+    it("B, confirmation unknown: the transport is added as missing, the EC line stays apart", async () => {
+      const { rows, result, cell } = await check([anotherTransport(), R107()]);
+
+      expect(rows[1]).toMatchObject({ status: "COST_LINE_UNRESOLVED", trip: null });
+      expect(result.missingTrips.map((missing) => missing.tripId)).toEqual(["gent"]);
+      expect(result.payments.filter((payment) => payment.tripId === "gent")).toEqual([
+        expect.objectContaining({ payable: true, category: "ADDED", rowNumbers: [4] }),
+      ]);
+      // The EC line is untouched; the added line charges the transport.
+      expect(cell(3, EK).value).toBe(386.16);
+      expect(cell(4, COLUMN.booking).value).toBe("DUBANR2810438");
+      expect(cell(4, COLUMN.tarief).value).toBe(200);
+    });
+
+    it("B, confirmation known: the transport is added once, its EK not charged a second time", async () => {
+      confirmations.push({ tripId: "gent", ccNumber: "4224479", amount: new Prisma.Decimal("386.16") });
+      ekOf.set("gent", "386.16");
+
+      const { rows, result, cell } = await check([anotherTransport(), R107()]);
+
+      expect(rows[1]).toMatchObject({ status: "COST_LINE", trip: { id: "gent" }, pricingStatus: "MATCHED_NO_CHANGES" });
+      expect(result.missingTrips.map((missing) => missing.tripId)).toEqual(["gent"]);
+      // The EK is on the EC line already: the added line carries none.
+      expect(cell(4, EK).value).toBeNull();
+      expect(cell(4, COLUMN.tarief).value).toBe(200);
+      expect(result.payments.filter((payment) => payment.tripId === "gent")).toEqual([
+        expect.objectContaining({ payable: true, category: "ADDED", rowNumbers: [3, 4] }),
+      ]);
+    });
+
+    /*
+     * Beside a transport line with the same date, booking and container, an EK
+     * line is that transport's split EK (`supplementary-cost-line.ts`): the two
+     * rows are one transport, compared once, the EK counted once.
+     */
+    it("A, the transport line is there with the same three values: one transport over two rows, the EK once", async () => {
+      confirmations.push({ tripId: "gent", ccNumber: "4224479", amount: new Prisma.Decimal("386.16") });
+      ekOf.set("gent", "386.16");
+
+      const { rows, result, cell } = await check([
+        anotherTransport(),
+        { ...line(THURSDAY, "DUBANR2810438", "EUCU4580552"), ek: null },
+        R107(),
+      ]);
+
+      expect(rows.slice(1).map((row) => [row.status, row.trip?.id, row.pricingStatus, row.sharedKeyRowNumbers])).toEqual([
+        ["MATCHED", "gent", "MATCHED_NO_CHANGES", [4]],
+        ["MATCHED", "gent", "MATCHED_NO_CHANGES", [3]],
+      ]);
+      // No transport price lands on the EK row, and nothing is added.
+      expect(cell(4, COLUMN.tarief).value).toBeNull();
+      expect(result.missingTrips).toEqual([]);
+      expect(result.payments.filter((payment) => payment.tripId === "gent")).toEqual([
+        expect.objectContaining({ payable: true, rowNumbers: [3, 4] }),
+      ]);
+    });
+
+    const ecWithoutContainer = () => ({ ...R107(), containerNumber: "" });
+
+    it("A, the transport line is there and a separate EC line: each checked on its own, the EK once", async () => {
+      confirmations.push({ tripId: "gent", ccNumber: "4224479", amount: new Prisma.Decimal("386.16") });
+      ekOf.set("gent", "386.16");
+
+      const { rows, result, cell } = await check([
+        anotherTransport(),
+        { ...line(THURSDAY, "DUBANR2810438", "EUCU4580552"), ek: null },
+        ecWithoutContainer(),
+      ]);
+
+      expect(rows.slice(1).map((row) => [row.status, row.trip?.id, row.pricingStatus])).toEqual([
+        ["MATCHED", "gent", "MATCHED_NO_CHANGES"],
+        ["COST_LINE", "gent", "MATCHED_NO_CHANGES"],
+      ]);
+      // The EC line carries the EK: the transport line is not raised to it as well.
+      expect(cell(3, EK).value).toBeNull();
+      expect(result.missingTrips).toEqual([]);
+      expect(result.payments.filter((payment) => payment.tripId === "gent")).toEqual([
+        expect.objectContaining({ payable: true, rowNumbers: [3, 4] }),
+      ]);
+    });
+
+    it("A, the transport line is there and the confirmation unknown: the transport checked and payable, nothing added", async () => {
+      const { rows, result } = await check([
+        anotherTransport(),
+        line(THURSDAY, "DUBANR2810438", "EUCU4580552"),
+        ecWithoutContainer(),
+      ]);
+
+      expect(rows[1]).toMatchObject({ status: "MATCHED", trip: { id: "gent" } });
+      expect(rows[2]).toMatchObject({ status: "COST_LINE_UNRESOLVED" });
+      expect(rows[2].matchProblem).toContain("De rit zelf is wel gematcht (Excel-rij 3)");
+      expect(result.missingTrips).toEqual([]);
+      expect(result.payments.filter((payment) => payment.tripId === "gent")).toEqual([
+        expect.objectContaining({ payable: true, rowNumbers: [3] }),
+      ]);
+    });
+  });
+
   it("leaves the received file byte for byte as it was", async () => {
     database.push(aTrip("t1", "ANRDUB2811064", "EUCU4590355", WEDNESDAY));
 
@@ -569,7 +686,7 @@ describe("an invoice line with one misprinted value", () => {
   });
 });
 
-function priced(tarief: string, brandstof: string): CurrentTripPricing {
+function priced(tarief: string, brandstof: string, ek = "0"): CurrentTripPricing {
   const zero = new Prisma.Decimal(0);
 
   return reliablyPriced({
@@ -580,7 +697,7 @@ function priced(tarief: string, brandstof: string): CurrentTripPricing {
     tol: zero,
     tunnel: zero,
     others: zero,
-    ek: zero,
-    totaal: new Prisma.Decimal(tarief).add(brandstof),
+    ek: new Prisma.Decimal(ek),
+    totaal: new Prisma.Decimal(tarief).add(brandstof).add(ek),
   });
 }

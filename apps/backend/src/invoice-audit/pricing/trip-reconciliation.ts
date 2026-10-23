@@ -53,11 +53,7 @@ export function reconcileTripRows(input: TripRowsInput): InvoiceRowPricing[] {
 
   const costRows = rows.filter((match) => match.row.costLine !== null);
   const transportRows = rows.filter((match) => match.row.costLine === null);
-  const waitingCharged = chargesWaitingTime(pricing);
-  const owedFor = (match: InvoiceRowMatch) =>
-    waitingCharged || match.costConfirmation === null
-      ? new Prisma.Decimal(0)
-      : match.costConfirmation.amount;
+  const owedFor = (match: InvoiceRowMatch) => owedOnCostLine(pricing, match);
   const covered = costRows.reduce((total, match) => total.plus(owedFor(match)), new Prisma.Decimal(0));
 
   const outcomes: InvoiceRowPricing[] = costRows.map((match) =>
@@ -111,6 +107,16 @@ function isCombinationConfirmed(
 
     return own !== null && own === partner;
   });
+}
+
+/**
+ * What a Cost Confirmation line is owed: its own confirmation — or nothing when
+ * the Trip's EK is its charged waiting time (one EK source, see `resolveEk`).
+ */
+export function owedOnCostLine(pricing: CurrentTripPricing, match: InvoiceRowMatch): Prisma.Decimal {
+  return chargesWaitingTime(pricing) || match.costConfirmation === null
+    ? new Prisma.Decimal(0)
+    : match.costConfirmation.amount;
 }
 
 /** The Trip's EK is its charged waiting time rather than its confirmations. */

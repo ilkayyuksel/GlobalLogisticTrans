@@ -105,8 +105,16 @@ not found at all: a missing confirmation is never a failed transport match. Othe
 with its own confirmation's amount — or with nothing when the Trip's EK is its
 charged waiting time. What the Trip's Cost Confirmation lines charge is taken
 off the EK its own line is compared with, so no confirmation is charged twice.
-A Cost Confirmation line never settles its Trip, and its Trip is never added as
-missing.
+A Cost Confirmation line is never its transport's own line (owner, October
+2026). It never settles its Trip on its own and never makes its Trip "stated"
+on the invoice: a Trip only EC lines name is missing its line and is added like
+any other missing transport (`toNamedTripIds`, and missing transports are
+compared with transport lines only). The added line carries only the EK those
+EC lines do not already charge (`missing/ek-on-cost-lines.ts`, the rule of
+`reconcileTripRows`), and the Trip is then one payable transport over its EC
+lines and the added line (`payment/invoice-payments.ts`). Beside a transport
+line stating the same date, booking and container, an EK line is that
+transport's split EK, as before.
 
 ### Combinations and `GEEN COMBI`
 

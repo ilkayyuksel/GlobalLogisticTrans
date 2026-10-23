@@ -5,6 +5,7 @@ import { InvalidInvoiceFileException } from "./exceptions/invoice-audit.exceptio
 import { InvoiceRowMatchingService, type InvoiceRowMatch } from "./matching/invoice-row-matching.service";
 import type { AddedRow } from "./missing/added-rows";
 import { AddedRowsService } from "./missing/added-rows.service";
+import { withEkNotOnCostLines } from "./missing/ek-on-cost-lines";
 import { toBlockingIdentities } from "./missing/missing-trip-blocking";
 import { MissingTripsService, type BlockedMissingTrip } from "./missing/missing-trips.service";
 import type { InvoiceRowPricing } from "./pricing/invoice-reconciliation";
@@ -102,11 +103,12 @@ export class InvoiceExaminationService {
      */
     const found = await this.missingTrips.find(
       period,
-      opened.sheet.rows,
+      // An EC line charges a cost beside a transport; it never states the transport.
+      opened.sheet.rows.filter((row) => row.costLine === null),
       toNamedTripIds(matches),
       toBlockingIdentities(matches, opened.sheet.incompleteRows),
     );
-    const missing = await this.addedRows.plan(found.missing);
+    const missing = await this.addedRows.plan(withEkNotOnCostLines(found.missing, matches));
     /*
      * Checked BEFORE anything is planned into the document: a total that would
      * leave an added line out is a wrong total, so a deviating document gets
@@ -195,13 +197,17 @@ export class InvoiceExaminationService {
 }
 
 /**
- * Every Trip some line of the document is about: the one it was matched to, and
- * every candidate a line could not choose between. None of them is missing from
- * the invoice, whatever values the line happens to print.
+ * Every Trip some TRANSPORT line of the document is about: the one it was
+ * matched to, and every candidate a line could not choose between. None of
+ * them is missing from the invoice, whatever values the line happens to print.
+ *
+ * An EC line is not among them. It charges a cost beside the transport and is
+ * never the transport's own line, so a Trip only EC lines name is still missing
+ * its line — and is added like any other (owner, October 2026).
  */
 function toNamedTripIds(matches: readonly InvoiceRowMatch[]): Set<string> {
   return new Set(
-    matches.flatMap((match) => [
+    matches.filter((match) => match.row.costLine === null).flatMap((match) => [
       ...(match.trip ? [match.trip.id] : []),
       ...match.candidates.map((candidate) => candidate.id),
     ]),

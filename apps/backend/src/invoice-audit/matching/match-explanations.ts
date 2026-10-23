@@ -56,5 +56,5 @@ function explainCostLineTransport(match: InvoiceRowMatch, matches: readonly Invo
 
   return ownRows.length > 0
     ? `De rit zelf is wel gematcht (Excel-rij ${ownRows.join(", ")}); alleen het EK-bedrag van deze regel is niet gecontroleerd.`
-    : `De rit zelf is wel gevonden (${describeTrip(trip)}), maar staat niet als transportregel op deze factuur.`;
+    : `De rit zelf is wel gevonden (${describeTrip(trip)}), maar staat niet als transportregel op deze factuur; hij wordt beoordeeld als ontbrekende rit.`;
 }
