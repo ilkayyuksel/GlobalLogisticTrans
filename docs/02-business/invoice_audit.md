@@ -57,6 +57,13 @@ the Trip's two dates, exactly; DELETED Trips are never candidates. A line is
    enough. A line matched on two values yields to another line's claim on the
    same Trip exactly as a corrected line does (`CONFLICT`).
 
+   A Trip EC charge lines (stating no container) name by their own date and
+   booking is CLAIMED by them too (`toCostLineClaims`): containers are shared
+   — week 41 R42 (Laakdal) and R53–R54 (ANRDUB2812770) both state PVDU 1106430
+   — so another line's date and container reaching it is no misprint of its
+   booking. It is no free candidate for a correction; a line only it could be
+   is a `CONFLICT` naming those EC lines, never corrected onto it.
+
 The lines are matched in two passes over the whole document, so the order of
 the lines never changes the answer. First every exact match; then step 2, where
 a Trip another line already matches EXACTLY is no candidate — it is accounted

@@ -3,6 +3,7 @@ import { normalizeContainerNumber } from "@tms/parser";
 
 import type { InvoiceSheetRow } from "../workbook/invoice-sheet";
 import { isOnInvoiceDate, type PartialCandidates, type RowDecision } from "./row-decisions";
+import { describeTrip } from "./trip-words";
 
 /**
  * Where the Trips sharing two of a line's values come from — read once for the
@@ -76,10 +77,36 @@ export function claimedByOthers(claims: ReadonlyMap<string, readonly number[]>, 
 export function toClaimedProblem(
   candidates: readonly Trip[],
   claims: ReadonlyMap<string, readonly number[]>,
+  /** The Trips EC charge lines name by their date and booking (`toCostLineClaims`). */
+  costLineClaims: ReadonlyMap<string, readonly number[]> = new Map(),
 ): string {
-  const rowNumbers = [...new Set(candidates.flatMap((trip) => claims.get(trip.id) ?? []))].sort(
-    (left, right) => left - right,
-  );
+  const rowsOf = (byTrip: ReadonlyMap<string, readonly number[]>) =>
+    [...new Set(candidates.flatMap((trip) => byTrip.get(trip.id) ?? []))].sort((left, right) => left - right);
+  const exact = rowsOf(claims);
+  const charged = rowsOf(costLineClaims);
 
-  return `Twee van de drie waarden van deze regel wijzen naar een rit die rij ${rowNumbers.join(", ")} al exact vermeldt.`;
+  return [
+    ...(exact.length > 0
+      ? [`Twee van de drie waarden van deze regel wijzen naar een rit die rij ${exact.join(", ")} al exact vermeldt.`]
+      : []),
+    ...(charged.length > 0
+      ? [
+          `Datum en container van deze regel wijzen naar rit ${candidates.map(describeTrip).join("; ")}, waarvoor rij ${charged.join(", ")} EC-kosten aanrekent onder zijn eigen boekingsnummer; de container wordt door twee transporten gedeeld of een waarde is fout.`,
+        ]
+      : []),
+  ].join(" ");
+}
+
+/** Both kinds of claim on a Trip, by Trip. */
+export function withCostLineClaims(
+  claims: ReadonlyMap<string, readonly number[]>,
+  costLineClaims: ReadonlyMap<string, readonly number[]>,
+): Map<string, number[]> {
+  const merged = new Map([...claims].map(([tripId, rowNumbers]) => [tripId, [...rowNumbers]]));
+
+  for (const [tripId, rowNumbers] of costLineClaims) {
+    merged.set(tripId, [...(merged.get(tripId) ?? []), ...rowNumbers]);
+  }
+
+  return merged;
 }

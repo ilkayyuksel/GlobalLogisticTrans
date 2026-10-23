@@ -6,6 +6,37 @@ import type { BookingCorrection } from "./invoice-row-match";
 import { decideByTwoValues, isOnInvoiceDate } from "./row-decisions";
 import { toPartialCandidates, type PartialSources } from "./two-value-candidates";
 
+/**
+ * The Trips EC charge lines name by their own date and booking — lines stating
+ * no container, which are never a transport's own line (`ec-transport-lines.ts`).
+ *
+ * ── A TRANSPORT ITS EC LINES NAME IS NOT ANOTHER LINE'S MISPRINT ───────────
+ * Containers are shared: two transports on one day, one container. Week 41
+ * R42 (ANRDUB2813293, to Laakdal) states PVDU 1106430, the container of the
+ * transport R53-R54 charge EC costs for under their own booking ANRDUB2812770.
+ * When R42 cannot find its own Trip, its date and container still reach that
+ * other transport, and correcting R42's booking to it would make the one line
+ * both transports. Such a Trip is therefore CLAIMED by its EC lines, as a Trip
+ * another line matches exactly is: no free candidate for a correction, and a
+ * line only it could be is a conflict naming those EC lines.
+ */
+export function toCostLineClaims(
+  rows: readonly InvoiceSheetRow[],
+  sources: PartialSources,
+): Map<string, number[]> {
+  const claims = new Map<string, number[]>();
+
+  for (const row of rows.filter((each) => each.costLine !== null && each.normalizedContainerNumber === "")) {
+    const transport = identifyCostLineTransport(row, sources);
+
+    if (transport !== null) {
+      claims.set(transport.trip.id, [...(claims.get(transport.trip.id) ?? []), row.rowNumber]);
+    }
+  }
+
+  return claims;
+}
+
 /** The transport an EC line is about, found apart from its confirmation. */
 export interface IdentifiedTransport {
   readonly trip: Trip;

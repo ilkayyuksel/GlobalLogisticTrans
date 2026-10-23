@@ -14,7 +14,7 @@ import { toStatedCcNumbers } from "../remarks/remark-parts";
 import type { AuditMarkedRow } from "../workbook/invoice-audit-marker";
 import type { InvoiceSheetRow } from "../workbook/invoice-sheet";
 import { decideCostLine } from "./cost-line-matching";
-import { identifyCostLineTransport } from "./cost-line-transport";
+import { identifyCostLineTransport, toCostLineClaims } from "./cost-line-transport";
 import { withIdentityConflicts } from "./identity-conflicts";
 import { toOwnTransportLines, toTransportCandidates } from "./ec-transport-lines";
 import { withExplanations, withMissingConfirmations } from "./match-explanations";
@@ -25,6 +25,7 @@ import {
   toClaimedProblem,
   toExactClaims,
   toPartialCandidates,
+  withCostLineClaims,
   type PartialSources,
 } from "./two-value-candidates";
 
@@ -92,8 +93,15 @@ export class InvoiceRowMatchingService {
     addedByAudit: ReadonlyMap<number, AuditMarkedRow> = new Map(),
   ): Promise<readonly InvoiceRowMatch[]> {
     const transportRows = rows.filter((row) => row.costLine === null);
-    const transportLines = await this.matchTransports(transportRows, addedByAudit);
-    const ownLines = await this.matchEkLinesAsTransports(transportRows, transportLines, rows, addedByAudit);
+    const costLineClaims = await this.loadCostLineClaims(rows);
+    const transportLines = await this.matchTransports(transportRows, addedByAudit, costLineClaims);
+    const ownLines = await this.matchEkLinesAsTransports(
+      transportRows,
+      transportLines,
+      rows,
+      addedByAudit,
+      costLineClaims,
+    );
     const ownLineRows = new Set(ownLines.map((match) => match.row.rowNumber));
     const costLines = await this.matchCostLines(
       rows.filter((row) => row.costLine !== null && !ownLineRows.has(row.rowNumber)),
@@ -125,19 +133,21 @@ export class InvoiceRowMatchingService {
   private async matchTransports(
     rows: readonly InvoiceSheetRow[],
     addedByAudit: ReadonlyMap<number, AuditMarkedRow>,
+    costLineClaims: ReadonlyMap<string, readonly number[]>,
   ): Promise<InvoiceRowMatch[]> {
     const byBooking = groupByBooking(await this.loadCandidates(rows));
     const onDateOf = (row: InvoiceSheetRow) =>
       (byBooking.get(row.bookingNumber) ?? []).filter((trip) => isOnInvoiceDate(trip, row.planningDate));
     const exact = new Map(rows.map((row) => [row.rowNumber, decideByContainer(row, onDateOf(row))]));
     const claims = toExactClaims(rows, exact);
+    const allClaims = withCostLineClaims(claims, costLineClaims);
     const unmatched = rows.filter((row) => exact.get(row.rowNumber) === null);
     const partial = unmatched.length > 0 ? await this.loadPartialSources(unmatched) : null;
 
     return rows.map((row) => {
       const decided =
         exact.get(row.rowNumber) ??
-        decideByTwoValues(row, toPartialCandidates(row, onDateOf(row), partial!), claimedByOthers(claims, row));
+        decideByTwoValues(row, toPartialCandidates(row, onDateOf(row), partial!), claimedByOthers(allClaims, row));
       /*
        * A line this system added keeps its own answer, and its values are
        * never rewritten: the document's record of it holds the identity it was
@@ -156,7 +166,9 @@ export class InvoiceRowMatchingService {
         costConfirmation: null,
         combination: null,
         problem:
-          decided.status === InvoiceRowStatus.CONFLICT ? toClaimedProblem(decided.candidates, claims) : null,
+          decided.status === InvoiceRowStatus.CONFLICT
+            ? toClaimedProblem(decided.candidates, claims, costLineClaims)
+            : null,
       };
     });
   }
@@ -186,6 +198,7 @@ export class InvoiceRowMatchingService {
     transportLines: readonly InvoiceRowMatch[],
     rows: readonly InvoiceSheetRow[],
     addedByAudit: ReadonlyMap<number, AuditMarkedRow>,
+    costLineClaims: ReadonlyMap<string, readonly number[]>,
   ): Promise<InvoiceRowMatch[]> {
     const candidates = toTransportCandidates(rows);
 
@@ -194,12 +207,19 @@ export class InvoiceRowMatchingService {
     }
 
     const candidateRows = new Set(candidates.map((row) => row.rowNumber));
-    const together = await this.matchTransports([...transportRows, ...candidates], addedByAudit);
+    const together = await this.matchTransports([...transportRows, ...candidates], addedByAudit, costLineClaims);
 
     return toOwnTransportLines(
       together.filter((match) => candidateRows.has(match.row.rowNumber)),
       transportLines,
     );
+  }
+
+  /** The Trips the document's EC charge lines name by date and booking (`toCostLineClaims`). */
+  private async loadCostLineClaims(rows: readonly InvoiceSheetRow[]): Promise<Map<string, number[]>> {
+    const charges = rows.filter((row) => row.costLine !== null && row.normalizedContainerNumber === "");
+
+    return charges.length === 0 ? new Map() : toCostLineClaims(charges, await this.loadPartialSources(charges));
   }
 
   /**
