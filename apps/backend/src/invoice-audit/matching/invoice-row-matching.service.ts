@@ -13,7 +13,9 @@ import {
 import type { AuditMarkedRow } from "../workbook/invoice-audit-marker";
 import type { InvoiceSheetRow } from "../workbook/invoice-sheet";
 import { decideCostLine } from "./cost-line-matching";
+import { identifyCostLineTransport } from "./cost-line-transport";
 import { withIdentityConflicts } from "./identity-conflicts";
+import { withExplanations } from "./match-explanations";
 import { InvoiceRowStatus, type InvoiceRowMatch } from "./invoice-row-match";
 import { decideByContainer, decideByTwoValues, isOnInvoiceDate } from "./row-decisions";
 import {
@@ -102,7 +104,7 @@ export class InvoiceRowMatchingService {
         (rowNumber) => rowNumber !== row.rowNumber,
       ),
     }));
-    const matches = await this.withCombinations(rows, inOrder);
+    const matches = withExplanations(await this.withCombinations(rows, inOrder));
 
     this.logMatched(matches);
 
@@ -189,13 +191,17 @@ export class InvoiceRowMatchingService {
     }
 
     const tripsById = new Map(trips.map((trip) => [trip.id, trip]));
+    // Only lines naming an unknown confirmation need their transport found apart.
+    const unknown = rows.filter((row) => row.costLine!.ccNumbers.some((number) => !confirmationsByNumber.has(number)));
+    const sources = unknown.length > 0 ? await this.loadPartialSources(unknown) : null;
 
     return rows.map((row) => ({
       row,
-      ...decideCostLine(row, confirmationsByNumber, tripsById),
+      ...decideCostLine(row, confirmationsByNumber, tripsById, (line) =>
+        sources === null ? null : identifyCostLineTransport(line, sources),
+      ),
       sharedKeyRowNumbers: [],
       containerCorrection: null,
-      bookingCorrection: null,
       dateCorrection: null,
       combination: null,
     }));

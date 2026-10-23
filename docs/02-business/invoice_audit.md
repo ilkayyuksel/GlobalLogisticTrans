@@ -70,16 +70,13 @@ Excel serial or `YYYY-MM-DD` text — so the customer's number format stays. A
 correction never makes a price reliable: the matched line is compared under the
 same price rules as every other line.
 
-### Advice per line
+### Why a line found no Trip
 
-Every line carries its advice (`advice/row-advice.ts`, `advice` in the API):
-the problem, the explanation (what was found and what became of the line) and
-the recommended action, as three separate sentences, with a severity — INFO
-(nothing to do), WARNING (a value was corrected, or a waiting time could not be
-written) or ERROR (unresolved, marked yellow). It restates what the matching and
-the Remarks plan decided; nothing is matched or priced again. An unresolved EC
-line says whether its transport WAS matched on another row — the transport is
-then checked and payable as usual, and only the EC line's EK is not compared.
+A line that matched nothing, or several Trips, says why in its existing warning
+(`matchProblem`, `matching/match-explanations.ts`): that all three pairs were
+tried, or which Trips it could be. A matched line gets no extra explanation —
+its status and its correction note say it. (The separate "Aanbevolen actie"
+column of October 2026 was withdrawn by the owner.)
 
 ### Cost Confirmation (EC) lines
 
@@ -92,7 +89,15 @@ split EK instead.
 
 It is resolved through the confirmation it names (`EC` = the confirmation's
 `ccNumber`): exactly one confirmation, of one CLOSED Trip, with the line's
-booking and — if the line states one — container. Otherwise it is
+booking and — if the line states one — container. A misprinted booking is
+corrected (red) when the line's container is that Trip's.
+
+When the confirmation is not known, the line stays `COST_LINE_UNRESOLVED`, but
+its transport is looked for apart (`matching/cost-line-transport.ts`, the same
+pairs of values as a transport line; only a booking is ever corrected on an EC
+line — its date may lawfully differ). Its warning then says whether the
+transport was matched, and on which row, or found but not on the invoice, or
+not found at all: a missing confirmation is never a failed transport match. Otherwise it is
 `COST_LINE_UNRESOLVED` (yellow). A resolved line is compared ONLY on its EK,
 with its own confirmation's amount — or with nothing when the Trip's EK is its
 charged waiting time. What the Trip's Cost Confirmation lines charge is taken
@@ -203,6 +208,13 @@ rounded to the cent (half up):
 | equal | nothing |
 | system lower | nothing is written; reported as `INVOICE_HIGHER` |
 
+The preview shows each line's comparison per component (`comparisons`,
+`dto/invoice-price-comparison.dto.ts`): the Excel figure, Trano's, and what the
+corrected file writes — the differences and the components that agree
+(`agreements`, read with the same expected amounts the comparison used), in
+the invoice's column order. A line that was not compared, or whose price is
+not relied on, shows no Trano figure.
+
 - An empty cell compares as zero. A cell holding a word, a dash, an Excel error
   or an uncalculated formula makes the whole line `AMOUNT_UNREADABLE`.
 - The toll is compared as Maut + Tol B + Tol FR and raised in Tol B only.
@@ -261,15 +273,18 @@ second split row) is completed with what it does not say yet
 | an assigned Custom Property, also at €0 | its name in lower case: `flat`, `stop`, `chassis` | equals the name, any case |
 | TAR charged by the Engine, or assigned | `tar` | begins with the word `tar` (`tar 869`, `Tar 1742 OP`) |
 | every Cost Confirmation of the Trip | `EC <nr>` | names that number on ANY row of the Trip |
-| a waiting window within one day | `wachtuur H:MM tot H:MM` | contains `wachtuur` |
+| a waiting window — also one ending the next day | `wachtuur H:MM tot H:MM` | contains `wachtuur` |
 | a `GEEN_COMBI` pair | `GEEN COMBI` | is exactly those words |
 
 - New parts go at the END, separated by `,` without a space; the existing text
   stays exactly as it was (only trailing spaces give way to the comma).
 - No translation is invented: a property name is written as its name in lower
   case — also when this invoice has never used the word, which is no reason
-  for a note (owner, October 2026). A waiting time over midnight or with only a
-  duration is not written, and reported. Over ST is never written.
+  for a note (owner, October 2026). A waiting window ending the next day
+  (`waiting_time_ends_next_day`) is written like any other, as the stored
+  window pricing used (`wachtuur 22:00 tot 1:30`); only a waiting time without
+  a complete window — a duration alone, a missing begin or end — is not
+  written, and reported. Over ST is never written.
 - The Trip's own facts are only written on a line whose price is relied on;
   `GEEN COMBI` also on a line marked for its price, because the pair itself was
   established from two reliably matched Trips.

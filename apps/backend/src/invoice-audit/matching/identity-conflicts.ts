@@ -27,7 +27,8 @@ export function withIdentityConflicts(
   }
 
   return matches.map((match) => {
-    if (match.trip === null || !isCorrected(match)) {
+    // An EC line charges its Trip beside the transport line; it never claims to be it.
+    if (match.trip === null || match.row.costLine !== null || !isCorrected(match)) {
       return match;
     }
 

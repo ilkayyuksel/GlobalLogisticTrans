@@ -170,7 +170,7 @@ describe("identifying invoice lines", () => {
     });
 
     it.each([
-      ["an unknown confirmation", [] as string[], [] as Trip[], /^Geen kostenbevestiging gevonden voor EC 4220981\.$/],
+      ["an unknown confirmation", [] as string[], [] as Trip[], /^Geen kostenbevestiging gevonden voor EC 4220981\. Ook de rit zelf is niet gevonden\.$/],
       ["a confirmation of several Trips", ["a", "b"], [], /meerdere ritten/],
     ])("is unresolved for %s", async (_label, tripIds, found, problem) => {
       confirm(...tripIds);

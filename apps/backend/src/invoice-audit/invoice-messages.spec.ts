@@ -77,7 +77,8 @@ describe("the messages of the invoice check", () => {
   it("are all Dutch", async () => {
     const logger = { setContext: jest.fn(), log: jest.fn(), warn: jest.fn(), error: jest.fn() } as unknown as AppLoggerService;
     const reads = invoiceReads();
-    const midnight = { waitingTimeStart: new Date("1970-01-01T22:00:00Z"), waitingTimeEnd: new Date("1970-01-01T02:00:00Z"), waitingTimeEndsNextDay: true };
+    // A waiting time with no window at all: only a duration, which no Remarks part can state.
+    const durationOnly = { waitingTimeStart: null, waitingTimeEnd: null, waitingTimeEndsNextDay: false, waitingTimeMinutes: 90 };
 
     reads.countGroupMembers.mockResolvedValue(new Map([["g", 2]]));
 
@@ -91,7 +92,7 @@ describe("the messages of the invoice check", () => {
           trip("leg-a", "ANRDUB2810003", "EUCU4540003", { tripGroupId: "g" }),
           trip("leg-b", "ANRDUB2810004", "EUCU4540004"),
         ]),
-        findClosedUnpaidBetween: jest.fn().mockResolvedValue([trip("missing", "ANRDUB2810009", "EUCU4540009", midnight)]),
+        findClosedUnpaidBetween: jest.fn().mockResolvedValue([trip("missing", "ANRDUB2810009", "EUCU4540009", durationOnly)]),
       },
       effectivePricing: {
         findForTrips: jest.fn(async (ids: readonly string[]) =>
@@ -138,7 +139,7 @@ describe("the messages of the invoice check", () => {
     // The week provoked every kind it was built for.
     expect(texts).toEqual(
       expect.arrayContaining([
-        "Geen kostenbevestiging gevonden voor EC 4224479.",
+        "Geen kostenbevestiging gevonden voor EC 4224479. Ook de rit zelf is niet gevonden.",
         "Tarief op rij 2 is geen leesbaar bedrag.",
         "Voor de rit is geen route gevonden.",
         "Het eerste deel van deze combinatie is niet gevonden.",

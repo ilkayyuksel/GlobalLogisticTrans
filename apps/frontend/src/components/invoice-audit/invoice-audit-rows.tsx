@@ -3,7 +3,6 @@
 import Link from "next/link";
 
 import { InvoicePricingCell } from "@/components/invoice-audit/invoice-pricing-cell";
-import { InvoiceRowAdviceList } from "@/components/invoice-audit/invoice-row-advice";
 import {
   ContainerCorrectionNote,
   InvoiceRowNotes,
@@ -108,9 +107,6 @@ export function InvoiceAuditRows({
             <th scope="col" className="px-3 py-2">
               {t("invoiceAudit.column.pricing")}
             </th>
-            <th scope="col" className="px-3 py-2">
-              {t("invoiceAudit.column.advice")}
-            </th>
           </tr>
         </thead>
         <tbody>
@@ -178,10 +174,6 @@ function InvoiceAuditRowLine({ row, marked }: { row: InvoiceAuditRow; marked: bo
       </td>
       <td className="px-3 py-2 align-top">
         <InvoicePricingCell row={row} />
-      </td>
-      <td className="px-3 py-2 align-top">
-        {/* Older answers carry no advice; they show what they always showed. */}
-        <InvoiceRowAdviceList advice={row.advice ?? []} />
       </td>
     </tr>
   );

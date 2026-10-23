@@ -182,11 +182,12 @@ describe("the Remarks of a transport added to the invoice", () => {
     expect(line.dto.remarks).toBe("");
   });
 
-  it("does not write a waiting time over midnight, and reports it", async () => {
+  /** A window ending the next day is a stored, valid window: written like any other. */
+  it("writes a waiting time over midnight like any other, without a note", async () => {
     const line = await addedLine({ waiting: { start: "22:00", end: "02:00", endsNextDay: true } });
 
-    expect(line.remarks).toBeNull();
-    expect(line.dto.remarkNotes).toHaveLength(1);
+    expect(line.remarks).toBe("wachtuur 22:00 tot 2:00");
+    expect(line.dto.remarkNotes).toEqual([]);
   });
 
   /*

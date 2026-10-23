@@ -15,7 +15,7 @@ import { CORRECTED_TEXT_ARGB } from "./workbook/cell-marking";
  * Finding the Trip of an invoice line whose date, booking OR container is
  * misprinted — and correcting that one value in the Excel — through the whole
  * check: the matching, the corrected workbook read back from its bytes, the
- * missing transports, the payments and the advice a person reads.
+ * missing transports, the payments and the warnings a person reads.
  *
  * The database is a list of Trips every read FILTERS, so a line can only find
  * what a real query would return. Week 41: Monday 5 to Friday 9 October 2026.
@@ -54,9 +54,11 @@ function line(date: string, booking: string, container: string, tarief = 200): I
 describe("an invoice line with one misprinted value", () => {
   const logger = { setContext: jest.fn(), log: jest.fn(), warn: jest.fn(), error: jest.fn() } as unknown as AppLoggerService;
   let database: Trip[];
+  let confirmations: { tripId: string; ccNumber: string; amount: Prisma.Decimal }[];
 
   beforeEach(() => {
     database = [];
+    confirmations = [];
   });
 
   const onDay = (trip: Trip, days: readonly Date[]) =>
@@ -69,6 +71,10 @@ describe("an invoice line with one misprinted value", () => {
       database.map((trip) => [trip.id, priced("200", "30")]),
     );
 
+    reads.findCostConfirmationsByNumbers.mockImplementation(async (numbers) =>
+      confirmations.filter((confirmation) => numbers.includes(confirmation.ccNumber)),
+    );
+    reads.findTripsByIds.mockImplementation(async (ids) => database.filter((trip) => ids.includes(trip.id)));
     reads.findTripsOnDates.mockImplementation(async (days) => database.filter((trip) => alive(trip) && onDay(trip, days)));
     reads.findTripsByBookings.mockImplementation(async (bookings) =>
       database.filter((trip) => alive(trip) && bookings.includes(trip.bookingNumber!)),
@@ -135,7 +141,7 @@ describe("an invoice line with one misprinted value", () => {
       dateCorrection: null,
       bookingCorrection: null,
       containerCorrection: null,
-      advice: [],
+      matchProblem: null,
     });
     expect(isRed(cell(2, COLUMN.date))).toBe(false);
   });
@@ -153,14 +159,8 @@ describe("an invoice line with one misprinted value", () => {
       });
       expect(cell(2, COLUMN.booking).value).toBe("ANRDUB2813025");
       expect(isRed(cell(2, COLUMN.booking))).toBe(true);
-      expect(rows[0].advice).toEqual([
-        expect.objectContaining({
-          severity: "WARNING",
-          problem: "Boekingsnummer komt niet overeen",
-          explanation: expect.stringContaining("Datum en containernummer komen overeen met één unieke rit in Trano."),
-          action: expect.stringContaining("van ANRDUB2813999 naar ANRDUB2813025"),
-        }),
-      ]);
+      // A match: no extra explanation beside its correction.
+      expect(rows[0].matchProblem).toBeNull();
     });
 
     it("a wrong date: matched on booking and container, the date corrected in red, as a date", async () => {
@@ -176,13 +176,7 @@ describe("an invoice line with one misprinted value", () => {
       expect(cell(2, COLUMN.date).value).toBeInstanceOf(Date);
       expect(toIsoDate(cell(2, COLUMN.date).value as Date)).toBe(WEDNESDAY);
       expect(isRed(cell(2, COLUMN.date))).toBe(true);
-      expect(rows[0].advice).toEqual([
-        expect.objectContaining({
-          problem: "Datum komt niet overeen",
-          explanation: expect.stringContaining("Boekingsnummer en containernummer komen overeen"),
-          action: expect.stringContaining("van 06/10/2026 naar 07/10/2026"),
-        }),
-      ]);
+      expect(rows[0].matchProblem).toBeNull();
     });
 
     it("a wrong container: matched on date and booking, the container corrected in red", async () => {
@@ -193,7 +187,7 @@ describe("an invoice line with one misprinted value", () => {
       expect(rows[0]).toMatchObject({ status: "MATCHED", containerCorrection: { tripContainerNumber: "EUCU4590355" } });
       expect(cell(2, COLUMN.container).value).toBe("EUCU4590355");
       expect(isRed(cell(2, COLUMN.container))).toBe(true);
-      expect(rows[0].advice[0].problem).toBe("Containernummer komt niet overeen");
+      expect(rows[0].matchProblem).toBeNull();
     });
 
     it("keeps the price check: a matched line is compared and raised as any other", async () => {
@@ -264,13 +258,7 @@ describe("an invoice line with one misprinted value", () => {
       expect(cell(2, COLUMN.container).value).toBe("EUCU 9999999");
       expect(result.markedRowNumbers).toEqual([2]);
       expect(result.missingTrips).toEqual([]);
-      expect(rows[0].advice).toEqual([
-        expect.objectContaining({
-          severity: "ERROR",
-          problem: "Meerdere mogelijke ritten",
-          explanation: expect.stringContaining("EUCU4590366"),
-        }),
-      ]);
+      expect(rows[0].matchProblem).toMatch(/^2 ritten passen bij deze regel en er is niet gekozen: .*EUCU4590355.*EUCU4590366/);
     });
 
     it("the same booking and container on two other days: AMBIGUOUS, the date left alone", async () => {
@@ -303,12 +291,8 @@ describe("an invoice line with one misprinted value", () => {
 
       expect(rows.map((row) => row.status)).toEqual(["CONFLICT", "CONFLICT"]);
       expect(rows.map((row) => row.dateCorrection ?? row.bookingCorrection)).toEqual([null, null]);
-      expect(rows[0].advice[0]).toMatchObject({
-        severity: "ERROR",
-        problem: "Twee Excel-regels verwijzen mogelijk naar dezelfde rit",
-        explanation: expect.stringContaining("Excel-rij 3"),
-      });
-      expect(rows[1].advice[0].explanation).toContain("Excel-rij 2");
+      expect(rows[0].matchProblem).toContain("rij 3");
+      expect(rows[1].matchProblem).toContain("rij 2");
       expect(result.payments.filter((payment) => payment.payable)).toEqual([]);
     });
 
@@ -322,7 +306,7 @@ describe("an invoice line with one misprinted value", () => {
 
       expect(rows[0]).toMatchObject({ status: "MATCHED", trip: { id: "t1" } });
       expect(rows[1]).toMatchObject({ status: "CONFLICT", trip: null, containerCorrection: null });
-      expect(rows[1].advice[0].explanation).toContain("Excel-rij 2");
+      expect(rows[1].matchProblem).toContain("rij 2 al exact vermeldt");
     });
 
     it("one shared value is not enough: NOT_FOUND, with what to check", async () => {
@@ -331,13 +315,10 @@ describe("an invoice line with one misprinted value", () => {
       const { rows } = await check([line(TUESDAY, "ANRDUB2813025", "EUCU9999999")]);
 
       expect(rows[0].status).toBe("NOT_FOUND");
-      expect(rows[0].advice).toEqual([
-        expect.objectContaining({
-          severity: "ERROR",
-          problem: "Geen unieke rit gevonden",
-          action: expect.stringContaining("Controleer het boekingsnummer, het containernummer en de datum"),
-        }),
-      ]);
+      // All three pairs were tried before calling it not found.
+      expect(rows[0].matchProblem).toBe(
+        "Gecontroleerd: boekingsnummer + datum, containernummer + datum en boekingsnummer + containernummer. Geen enkele rit in Trano deelt minstens twee van deze drie waarden met de regel.",
+      );
     });
   });
 
@@ -387,10 +368,107 @@ describe("an invoice line with one misprinted value", () => {
     expect(rows.map((row) => row.status)).toEqual(["MATCHED", "COST_LINE_UNRESOLVED"]);
     expect(rows[0].pricingStatus).toBe("MATCHED_NO_CHANGES");
     expect(result.payments).toEqual([expect.objectContaining({ tripId: "t1", payable: true })]);
-    expect(rows[1].advice[0]).toMatchObject({
-      problem: "EC-kostenbevestiging niet gekoppeld",
-      explanation: expect.stringContaining("De ritmatch is wel succesvol: de rit zelf staat op Excel-rij 2"),
+    expect(rows[1].matchProblem).toBe(
+      "Geen kostenbevestiging gevonden voor EC 4214683. De rit zelf is wel gematcht (Excel-rij 2); alleen het EK-bedrag van deze regel is niet gecontroleerd.",
+    );
+  });
+
+  /** An EC line as the customer writes one, stating the container this time. */
+  function ecLine(booking: string, container: string, ccNumber: string): InvoiceFixtureLine {
+    return {
+      planningDate: day(TUESDAY),
+      bookingNumber: booking,
+      containerNumber: `${container.slice(0, 4)} ${container.slice(4)}`,
+      tarief: null,
+      ek: 25,
+      remarks: `EC ${ccNumber}`,
+      containerType: null,
+      startPoint: null,
+      endPoint: null,
+    };
+  }
+
+  describe("an EC line whose booking is misprinted, its container and date right", () => {
+    beforeEach(() => {
+      database.push(aTrip("t1", "ANRDUB2812203", "EUCU4590355", TUESDAY));
     });
+
+    it("is linked to its confirmation, the booking corrected in red", async () => {
+      confirmations.push({ tripId: "t1", ccNumber: "4214683", amount: new Prisma.Decimal(25) });
+
+      const { rows, cell } = await check([
+        line(TUESDAY, "ANRDUB2812203", "EUCU4590355"),
+        ecLine("AMRDIB2812203", "EUCU4590355", "4214683"),
+      ]);
+
+      expect(rows[1]).toMatchObject({
+        status: "COST_LINE",
+        trip: { id: "t1" },
+        costConfirmation: { ccNumber: "4214683" },
+        bookingCorrection: { invoiceBookingNumber: "AMRDIB2812203", tripBookingNumber: "ANRDUB2812203" },
+      });
+      expect(cell(3, COLUMN.booking).value).toBe("ANRDUB2812203");
+      expect(isRed(cell(3, COLUMN.booking))).toBe(true);
+    });
+
+    /**
+     * Example C: the confirmation is unknown. The transport is found apart — its
+     * container and date — and its booking corrected; the EC line stays
+     * unresolved, and says that it is the confirmation, not the transport, that
+     * is missing.
+     */
+    it("without its confirmation: the transport found and the booking corrected, the EC line still unresolved", async () => {
+      const { rows, cell, result } = await check([
+        line(TUESDAY, "ANRDUB2812203", "EUCU4590355"),
+        ecLine("AMRDIB2812203", "EUCU4590355", "4214683"),
+      ]);
+
+      expect(rows[1]).toMatchObject({
+        status: "COST_LINE_UNRESOLVED",
+        trip: null,
+        bookingCorrection: { tripBookingNumber: "ANRDUB2812203" },
+        matchProblem:
+          "Geen kostenbevestiging gevonden voor EC 4214683. De rit zelf is wel gematcht (Excel-rij 2); alleen het EK-bedrag van deze regel is niet gecontroleerd.",
+      });
+      expect(cell(3, COLUMN.booking).value).toBe("ANRDUB2812203");
+      expect(isRed(cell(3, COLUMN.booking))).toBe(true);
+      expect(result.payments).toEqual([expect.objectContaining({ tripId: "t1", payable: true })]);
+    });
+
+    it("says the transport was found but is not on the invoice when no line of its own charges it", async () => {
+      const { rows } = await check([line(TUESDAY, "ANRDUB2819999", "EUCU9999999"), ecLine("AMRDIB2812203", "EUCU4590355", "4214683")]);
+
+      expect(rows[1].matchProblem).toBe(
+        "Geen kostenbevestiging gevonden voor EC 4214683. De rit zelf is wel gevonden (ANRDUB2812203 · EUCU4590355 · 06/10/2026 · afgewerkt), maar staat niet als transportregel op deze factuur.",
+      );
+    });
+  });
+
+  it("matches the whole document the same way in any order", async () => {
+    database.push(
+      aTrip("exact", "ANRDUB2810001", "EUCU1000001", TUESDAY),
+      aTrip("booking", "ANRDUB2810002", "EUCU1000002", TUESDAY),
+      aTrip("date", "ANRDUB2810003", "EUCU1000003", WEDNESDAY),
+      aTrip("container", "ANRDUB2810004", "EUCU1000004", TUESDAY),
+      aTrip("first", "ANRDUB2810005", "EUCU1000051", TUESDAY),
+      aTrip("second", "ANRDUB2810005", "EUCU1000052", WEDNESDAY),
+    );
+    const lines = [
+      line(TUESDAY, "ANRDUB2810001", "EUCU1000001"),
+      line(TUESDAY, "ANRDUB2819992", "EUCU1000002"),
+      line(TUESDAY, "ANRDUB2810003", "EUCU1000003"),
+      line(TUESDAY, "ANRDUB2810004", "EUCU9000004"),
+      line(TUESDAY, "ANRDUB2810005", "EUCU1000052"),
+      line(TUESDAY, "ANRDUB2810005", "EUCU1000051"),
+    ];
+    const byLine = async (ordered: readonly InvoiceFixtureLine[]) =>
+      new Map((await check(ordered)).rows.map((row) => [`${row.bookingNumber}|${row.containerNumber}`, row.trip?.id]));
+
+    const forwards = await byLine(lines);
+    const backwards = await byLine([...lines].reverse());
+
+    expect(backwards).toEqual(forwards);
+    expect([...forwards.values()].sort()).toEqual(["booking", "container", "date", "exact", "first", "second"]);
   });
 
   it("leaves the received file byte for byte as it was", async () => {

@@ -263,6 +263,24 @@ describe("waiting time and Cost Confirmations: one EK, the same in the Engine an
     expect(cell(2, COLUMN.remarks)).toBe("tar 869,EC 4132482,wachtuur 10:00 tot 13:00");
   });
 
+  /**
+   * A window ending the next day is a window like any other: written to Remarks
+   * in the customer's form, with no note, and priced exactly as before —
+   * 18:00 → 20:00 and 06:00 → 08:00 count, 240 minutes → 120 billable → 8 blocks.
+   */
+  it("9. writes a window ending the next day to Remarks, without a note, its price unchanged", async () => {
+    await world.tripService.update(TRIP, { waitingTimeStart: "18:00", waitingTimeEnd: "08:00", waitingTimeEndsNextDay: true });
+
+    expect(world.trips.get(TRIP)).toMatchObject({ waitingTimeMinutes: 240, waitingTimeEndsNextDay: true });
+    expect(await apiPricing()).toMatchObject({ ek: "110.00", totaal: "340.00" });
+
+    const { rows, cell } = await check([transportLine({ ek: 110, remarks: "tar 869" })]);
+
+    expect(rows[0].pricingStatus).toBe("MATCHED_NO_CHANGES");
+    expect(cell(2, COLUMN.remarks)).toBe("tar 869,wachtuur 18:00 tot 8:00");
+    expect(rows[0].remarks?.notes).toEqual([]);
+  });
+
   describe("8. zero, missing and not applicable stay three things", () => {
     it("no confirmation and no waiting: no EK line at all, and nothing to raise", async () => {
       expect(storedComponents()).not.toHaveProperty("COST_CONFIRMATION");

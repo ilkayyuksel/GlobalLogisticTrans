@@ -24,9 +24,6 @@ const NOTE = "inline-flex items-center gap-1 whitespace-nowrap rounded border px
 export function InvoiceRowNotes({ row }: { row: InvoiceAuditRow }) {
   const t = useTranslation();
   const notes = [];
-  // The advice column states the problem, the notes and what to do; these
-  // short notes are only for an answer that carries no advice.
-  const advised = (row.advice ?? []).length > 0;
 
   if (row.bookingCorrection) {
     notes.push(
@@ -72,7 +69,7 @@ export function InvoiceRowNotes({ row }: { row: InvoiceAuditRow }) {
     );
   }
 
-  for (const [index, note] of (advised ? [] : (row.remarks?.notes ?? [])).entries()) {
+  for (const [index, note] of (row.remarks?.notes ?? []).entries()) {
     notes.push(
       <span key={`remarks-note-${index}`} className="text-xs text-warning">
         {note}
@@ -80,7 +77,7 @@ export function InvoiceRowNotes({ row }: { row: InvoiceAuditRow }) {
     );
   }
 
-  if (row.matchProblem && !advised) {
+  if (row.matchProblem) {
     notes.push(
       <span key="problem" className="text-xs text-warning">
         {row.matchProblem}

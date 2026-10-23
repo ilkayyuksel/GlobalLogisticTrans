@@ -1,4 +1,4 @@
-import { toCustomerRemarkParts, type RemarkFacts } from "./customer-remark-vocabulary";
+import { WAITING_NOT_WRITTEN_NOTE, toCustomerRemarkParts, type RemarkFacts } from "./customer-remark-vocabulary";
 
 const time = (clock: string) => new Date(`1970-01-01T${clock}:00.000Z`);
 
@@ -43,18 +43,26 @@ describe("the customer's words", () => {
     ).toEqual(["wachtuur 7:30 tot 11:30"]);
   });
 
-  it("does not write a waiting time the customer has no spelling for, and says so", () => {
-    const overnight = toCustomerRemarkParts(
-      facts({ waiting: { start: time("22:00"), end: time("01:30"), endsNextDay: true, minutes: 210 } }),
-    );
-    const durationOnly = toCustomerRemarkParts(
-      facts({ waiting: { start: null, end: null, endsNextDay: false, minutes: 90 } }),
-    );
+  /** The stored window, as pricing reads it: the flag says the end is the next day. */
+  it.each([
+    ["ending the next day", time("22:00"), time("01:30"), 210, "wachtuur 22:00 tot 1:30"],
+    ["explicitly the next day, at a later time than it began", time("10:00"), time("12:00"), 840, "wachtuur 10:00 tot 12:00"],
+  ])("writes a window %s like any other, without a note", (_case, start, end, minutes, text) => {
+    const written = toCustomerRemarkParts(facts({ waiting: { start, end, endsNextDay: true, minutes } }));
 
-    expect(overnight.parts).toEqual([]);
-    expect(overnight.unexpressed).toHaveLength(1);
-    expect(durationOnly.parts).toEqual([]);
-    expect(durationOnly.unexpressed).toHaveLength(1);
+    expect(written.parts.map((part) => part.text)).toEqual([text]);
+    expect(written.unexpressed).toEqual([]);
+  });
+
+  it.each([
+    ["only a duration", null, null, 90],
+    ["a begin without an end", time("10:00"), null, null],
+    ["an end without a begin", null, time("12:00"), null],
+  ])("does not write %s, and says so", (_case, start, end, minutes) => {
+    const notWritten = toCustomerRemarkParts(facts({ waiting: { start, end, endsNextDay: false, minutes } }));
+
+    expect(notWritten.parts).toEqual([]);
+    expect(notWritten.unexpressed).toEqual([WAITING_NOT_WRITTEN_NOTE]);
   });
 
   it("says nothing about a Trip without a waiting time", () => {

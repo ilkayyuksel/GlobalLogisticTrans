@@ -2,7 +2,6 @@ import { ApiProperty } from "@nestjs/swagger";
 import { Trip, TripStatus } from "@prisma/client";
 
 import { toIsoDate } from "../../common/dates";
-import type { RowAdvice } from "../advice/row-advice";
 import { InvoiceRowStatus, type InvoiceRowMatch } from "../matching/invoice-row-matching.service";
 import { InvoicePricingStatus, type InvoiceRowPricing } from "../pricing/invoice-reconciliation";
 import type { RemarkChange } from "../remarks/remark-plan";
@@ -12,13 +11,14 @@ import {
   InvoiceCombinationDto,
   InvoiceContainerCorrectionDto,
   InvoiceCostConfirmationDto,
+  InvoiceDateCorrectionDto,
   InvoicePriceReliabilityDto,
   InvoicePricingDifferenceDto,
   InvoiceRemarksDto,
   toDifferenceDto,
   toPriceReliabilityDto,
 } from "./invoice-row-details.dto";
-import { InvoiceDateCorrectionDto, InvoiceRowAdviceDto } from "./invoice-row-advice.dto";
+import { InvoicePriceComparisonDto, toPriceComparisons } from "./invoice-price-comparison.dto";
 
 /** What this system holds for the Trip an invoice line was matched to. */
 export class InvoiceAuditTripDto {
@@ -103,6 +103,13 @@ export class InvoiceAuditRowDto {
   differences!: InvoicePricingDifferenceDto[];
 
   @ApiProperty({
+    type: [InvoicePriceComparisonDto],
+    description:
+      "Every compared component, Excel beside Trano, in the invoice's column order — the differences and the components that agree. Empty when the line was not compared.",
+  })
+  comparisons!: InvoicePriceComparisonDto[];
+
+  @ApiProperty({
     type: InvoicePriceReliabilityDto,
     nullable: true,
     description:
@@ -143,7 +150,8 @@ export class InvoiceAuditRowDto {
   @ApiProperty({
     type: String,
     nullable: true,
-    description: "Why the line could not be resolved: a conflict, an unknown confirmation.",
+    description:
+      "Why the line could not be resolved: a conflict, an unknown confirmation — and, for a line that found no Trip or several, which pairs of values were tried or which Trips it could be. Null for a resolved line.",
   })
   matchProblem!: string | null;
 
@@ -153,19 +161,12 @@ export class InvoiceAuditRowDto {
     description: "What this check adds to the line's Remarks, and what it could not write.",
   })
   remarks!: InvoiceRemarksDto | null;
-
-  @ApiProperty({
-    type: [InvoiceRowAdviceDto],
-    description: "What is wrong with the line, what became of it and the recommended action. Empty when there is nothing to say.",
-  })
-  advice!: InvoiceRowAdviceDto[];
 }
 
 export function toInvoiceAuditRowDto(
   match: InvoiceRowMatch,
   pricing: InvoiceRowPricing | undefined,
   remarks?: RemarkChange,
-  advice: readonly RowAdvice[] = [],
 ): InvoiceAuditRowDto {
   return {
     rowNumber: match.row.rowNumber,
@@ -179,6 +180,7 @@ export function toInvoiceAuditRowDto(
     sharedKeyRowNumbers: [...match.sharedKeyRowNumbers],
     pricingStatus: pricing?.status ?? InvoicePricingStatus.NOT_COMPARED,
     differences: (pricing?.differences ?? []).map(toDifferenceDto),
+    comparisons: toPriceComparisons(pricing),
     priceReliability: pricing?.reliability
       ? toPriceReliabilityDto(pricing.reliability)
       : null,
@@ -203,7 +205,6 @@ export function toInvoiceAuditRowDto(
           notes: [...remarks.notes],
         }
       : null,
-    advice: advice.map((each) => ({ ...each })),
   };
 }
 

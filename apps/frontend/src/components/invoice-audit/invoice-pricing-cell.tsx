@@ -1,5 +1,6 @@
 "use client";
 
+import { InvoicePriceComparisonTable } from "@/components/invoice-audit/invoice-price-comparison";
 import { InvoicePriceReliabilityNote } from "@/components/invoice-audit/invoice-price-reliability";
 import type {
   InvoiceAuditRow,
@@ -60,9 +61,9 @@ const PRICING_STYLE: Record<
 /**
  * What the pricing check made of one line.
  *
- * Every difference is shown as the invoice's own figure and what the corrected
- * document will say — `Tarief €364,00 → €370,00` — because a total or a count
- * would not tell an operator what changed in their document.
+ * Every compared component is shown Excel beside Trano with what the corrected
+ * document will say (`invoice-price-comparison.tsx`) — because a total or a
+ * count would not tell an operator what changed in their document.
  */
 export function InvoicePricingCell({ row }: { row: InvoiceAuditRow }) {
   const t = useTranslation();
@@ -90,7 +91,10 @@ export function InvoicePricingCell({ row }: { row: InvoiceAuditRow }) {
         <InvoicePriceReliabilityNote reliability={row.priceReliability} />
       ) : null}
 
-      {row.differences.length > 0 ? (
+      {/* Older answers carry no comparison: they show their differences as before. */}
+      {(row.comparisons ?? []).length > 0 ? (
+        <InvoicePriceComparisonTable comparisons={row.comparisons} />
+      ) : row.differences.length > 0 ? (
         <ul className="space-y-0.5">
           {row.differences.map((difference) => (
             <li

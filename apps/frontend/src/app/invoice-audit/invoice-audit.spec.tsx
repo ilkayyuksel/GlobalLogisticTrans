@@ -436,25 +436,17 @@ describe("Excel factuurcontrole", () => {
     const matchedRow = result().rows[0];
 
     /**
-     * The recommended action is the backend's, worded from the line's actual
-     * outcome; the screen lays out its three parts separately.
+     * No column of general advice: a corrected date shows as a note beside the
+     * date, and a line that found no Trip carries its explanation in the
+     * existing warning — the backend's words, shown as they are.
      */
-    it("shows a corrected date and the recommended action, problem, explanation and action apart", async () => {
+    it("shows a corrected date beside the date, and no advice column", async () => {
       requestMock.mockResolvedValue(
         result({
           rows: [
             {
               ...matchedRow,
-              planningDate: "2026-03-23",
               dateCorrection: { invoicePlanningDate: "2026-03-23", tripPlanningDate: "2026-03-24" },
-              advice: [
-                {
-                  severity: "WARNING",
-                  problem: "Datum komt niet overeen",
-                  explanation: "Boekingsnummer en containernummer komen overeen met één unieke rit in Trano.",
-                  action: "Corrigeer de datum in Excel van 23/03/2026 naar 24/03/2026.",
-                },
-              ],
             },
           ],
         }),
@@ -462,48 +454,25 @@ describe("Excel factuurcontrole", () => {
 
       await check();
 
-      const transport = rowFor("DUBANR2718284");
-      expect(screen.getByRole("columnheader", { name: "Aanbevolen actie" })).toBeInTheDocument();
-      expect(within(transport).getByText(/Datum gecorrigeerd → 2026-03-24/)).toBeInTheDocument();
-      expect(within(transport).getByText("Waarschuwing")).toBeInTheDocument();
-      expect(within(transport).getByText("Datum komt niet overeen")).toBeInTheDocument();
-      expect(
-        within(transport).getByText("Boekingsnummer en containernummer komen overeen met één unieke rit in Trano."),
-      ).toBeInTheDocument();
-      expect(within(transport).getByText("Corrigeer de datum in Excel van 23/03/2026 naar 24/03/2026.")).toBeInTheDocument();
+      expect(within(rowFor("DUBANR2718284")).getByText(/Datum gecorrigeerd → 2026-03-24/)).toBeInTheDocument();
+      expect(screen.queryByRole("columnheader", { name: "Aanbevolen actie" })).not.toBeInTheDocument();
     });
 
-    it("shows an unresolved line's advice instead of repeating its short problem", async () => {
+    it("shows why a line found no Trip in its existing warning", async () => {
+      const explanation =
+        "Gecontroleerd: boekingsnummer + datum, containernummer + datum en boekingsnummer + containernummer. Geen enkele rit in Trano deelt minstens twee van deze drie waarden met de regel.";
+
       requestMock.mockResolvedValue(
         result({
-          rows: [
-            {
-              ...matchedRow,
-              status: "COST_LINE_UNRESOLVED",
-              trip: null,
-              pricingStatus: "NOT_COMPARED",
-              differences: [],
-              matchProblem: "Geen kostenbevestiging gevonden voor EC 4214683.",
-              advice: [
-                {
-                  severity: "ERROR",
-                  problem: "EC-kostenbevestiging niet gekoppeld",
-                  explanation:
-                    "De ritmatch is wel succesvol: de rit zelf staat op Excel-rij 39 en is daar gewoon gecontroleerd. Geen kostenbevestiging gevonden voor EC 4214683.",
-                  action: "Controleer het EC-nummer (4214683).",
-                },
-              ],
-            },
-          ],
+          rows: [{ ...matchedRow, status: "NOT_FOUND", trip: null, pricingStatus: "NOT_COMPARED", differences: [], matchProblem: explanation }],
         }),
       );
 
       await check();
 
       const line = rowFor("DUBANR2718284");
-      expect(within(line).getByText("Fout")).toBeInTheDocument();
-      expect(within(line).getByText(/De ritmatch is wel succesvol/)).toBeInTheDocument();
-      expect(within(line).queryByText("Geen kostenbevestiging gevonden voor EC 4214683.")).not.toBeInTheDocument();
+      expect(within(line).getByText("Niet gevonden")).toBeInTheDocument();
+      expect(within(line).getByText(explanation)).toBeInTheDocument();
     });
 
     it("shows a corrected booking, an EC line and a Combination verdict", async () => {
@@ -784,6 +753,86 @@ describe("Excel factuurcontrole", () => {
       expect(
         within(rowFor("DUBANR2718284")).getByText("Gecontroleerd"),
       ).toBeInTheDocument();
+    });
+
+    /**
+     * Excel beside Trano, per component, and what the file will say — exactly
+     * the backend's comparison: the written value is printed as sent, never
+     * worked out here.
+     */
+    describe("Excel beside Trano", () => {
+      const baseRow = () => result().rows[0];
+      const comparison = (component: string, outcome: string, excelValue: string | null, tranoValue: string | null, writtenValue: string | null = null) => ({
+        component,
+        outcome,
+        excelValue,
+        tranoValue,
+        writtenValue,
+      });
+
+      async function show(rowOverrides: Record<string, unknown>) {
+        requestMock.mockResolvedValue(result({ rows: [{ ...baseRow(), ...rowOverrides }] }));
+        await check();
+
+        return within(rowFor("DUBANR2718284")).getByRole("table");
+      }
+
+      const cellsOf = (table: HTMLElement, component: string) =>
+        within(within(table).getByRole("rowheader", { name: component }).closest("tr") as HTMLElement)
+          .getAllByRole("cell")
+          .map((cell) => cell.textContent);
+
+      it("shows an unchanged component as no change, Excel and Trano side by side", async () => {
+        const table = await show({
+          pricingStatus: "MATCHED_NO_CHANGES",
+          differences: [],
+          comparisons: [comparison("Tol", "UNCHANGED", "50.00", "50.00")],
+        });
+
+        expect(within(table).getAllByRole("columnheader").map((header) => header.textContent)).toEqual([
+          "Component",
+          "Excel",
+          "Trano",
+          "Resultaat",
+        ]);
+        expect(cellsOf(table, "Tol")).toEqual(["€50.00", "€50.00", "geen wijziging"]);
+      });
+
+      it("shows several adjusted components, each with the value written to the file, in red", async () => {
+        const table = await show({
+          comparisons: [
+            comparison("Tarief", "RAISE", "450.00", "475.00", "475.00"),
+            // Written to its own row of a split line: printed as sent, not recomputed.
+            comparison("Fuel", "RAISE", "108.00", "114.00", "61.00"),
+            comparison("Tol", "UNCHANGED", "50.00", "50.00"),
+          ],
+        });
+
+        expect(cellsOf(table, "Tarief")).toEqual(["€450.00", "€475.00", "wordt €475.00"]);
+        expect(cellsOf(table, "Fuel")).toEqual(["€108.00", "€114.00", "wordt €61.00"]);
+        expect(within(table).getByText("wordt €475.00")).toHaveClass("text-danger");
+        expect(cellsOf(table, "Tol")).toEqual(["€50.00", "€50.00", "geen wijziging"]);
+      });
+
+      it("shows an unreadable cell without a Trano figure", async () => {
+        const table = await show({
+          pricingStatus: "AMOUNT_UNREADABLE",
+          comparisons: [comparison("Tarief", "UNREADABLE", null, null)],
+        });
+
+        expect(cellsOf(table, "Tarief")).toEqual(["—", "—", "geen leesbaar bedrag"]);
+      });
+
+      it("proposes no Trano price for a price that cannot be relied on", async () => {
+        requestMock.mockResolvedValue(
+          result({ rows: [{ ...baseRow(), pricingStatus: "PRICE_UNRELIABLE", differences: [], comparisons: [] }] }),
+        );
+        await check();
+
+        const line = rowFor("DUBANR2718284");
+        expect(within(line).getByText("Prijs onbetrouwbaar")).toBeInTheDocument();
+        expect(within(line).queryByRole("table")).not.toBeInTheDocument();
+      });
     });
 
     /** A difference the document gives no place to is shown, not written. */

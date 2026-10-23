@@ -16,9 +16,12 @@ import { RemarkKind, type RemarkPart } from "./remark-parts";
  *
  * No translation is invented: a property name is written as its name, in
  * lower case — also when this invoice has never used the word, which is no
- * reason for a note (owner, October 2026). A waiting time the customer has
- * no way of writing — over midnight, or only a duration — is not written at
- * all, and reported. Over ST is never written here (owner, October 2026).
+ * reason for a note (owner, October 2026). A waiting window is written the
+ * same way whether it ends on its own day or the next — the stored window is
+ * what pricing used, and `waiting_time_ends_next_day` only says which day its
+ * end is on. A waiting time with no complete window — a duration alone, or a
+ * missing begin or end — has no spelling: it is not written, and reported.
+ * Over ST is never written here (owner, October 2026).
  */
 export interface RemarkFacts {
   readonly propertyNames: readonly string[];
@@ -76,13 +79,17 @@ export function toCustomerRemarkParts(facts: RemarkFacts): CustomerRemarkParts {
   return { parts, unexpressed };
 }
 
-/** The note for a waiting time no Remarks part can state — read by `row-advice.ts` too. */
+/** The note for a waiting time no Remarks part can state. */
 export const WAITING_NOT_WRITTEN_NOTE =
   "De wachttijd heeft geen venster binnen één dag en wordt daarom niet geschreven.";
 
-/** `wachtuur 7:30 tot 11:30`, or null when there is no window within one day. */
+/**
+ * `wachtuur 7:30 tot 11:30` — and `wachtuur 22:00 tot 1:30` for a window ending
+ * the next day, read exactly as `waiting-window.ts` reads it for pricing. Null
+ * when the window is incomplete: no begin or no end.
+ */
 function toWaitingPart(waiting: WaitingFacts | null): string | null {
-  if (waiting === null || !waiting.start || !waiting.end || waiting.endsNextDay) {
+  if (waiting === null || !waiting.start || !waiting.end) {
     return null;
   }
 

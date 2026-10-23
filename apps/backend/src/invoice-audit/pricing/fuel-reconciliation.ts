@@ -21,6 +21,15 @@ import { ComponentDecision, decideComponent } from "./raise-only-policy";
 
 const TARIEF_COLUMNS: readonly InvoiceColumn[] = ["tarief"];
 
+/** The Fuel this line owes: the Trip's own percentage of the line's final Tarief. */
+export function expectedFuel(
+  rows: readonly InvoiceSheetRow[],
+  pricing: EffectivePricing,
+  context: LineContext,
+): Prisma.Decimal {
+  return round(fuelOnTarief(pricing, finalLineTarief(rows, pricing), context.fuelRate));
+}
+
 /**
  * The Fuel of a line — see `fuel-cell-plan.ts` for how its cell is written.
  *
@@ -40,9 +49,7 @@ export function reconcileFuel(
   context: LineContext,
   decided: readonly InvoicePricingDifference[],
 ): InvoicePricingDifference | null {
-  const expected = round(
-    fuelOnTarief(pricing, finalLineTarief(rows, pricing), context.fuelRate),
-  );
+  const expected = expectedFuel(rows, pricing, context);
   const stated = sumOf(rows, component.columns);
   const base = compared(component, stated, expected);
   const carriers = rows.filter((row) => statesAny(row, component.columns));

@@ -3,7 +3,7 @@ import { Prisma } from "@prisma/client";
 import type { EffectivePricing } from "../../trip-pricing/effective-pricing";
 import { round } from "../workbook/invoice-amounts";
 import type { InvoiceSheetRow } from "../workbook/invoice-sheet";
-import { reconcileFuel } from "./fuel-reconciliation";
+import { expectedFuel, reconcileFuel } from "./fuel-reconciliation";
 import { INVOICE_COMPONENTS, type InvoiceComponent } from "./invoice-column-map";
 import {
   DifferenceKind,
@@ -16,6 +16,7 @@ import {
   unreadableDifferences,
   withoutWrite,
   written,
+  type ComparedComponent,
   type InvoicePricingDifference,
   type InvoiceRowPricing,
 } from "./invoice-pricing-outcome";
@@ -90,11 +91,41 @@ export function reconcileLine(
     );
   }
 
-  return rows.map((row) => {
+  const agreements = toAgreements(rows, pricing, context, differences);
+
+  return rows.map((row, index) => {
     const own = differences.filter((difference) => difference.correctionRowNumber === row.rowNumber);
 
-    return { rowNumber: row.rowNumber, status: toStatus(own), differences: own, reliability: null };
+    return {
+      rowNumber: row.rowNumber,
+      status: toStatus(own),
+      differences: own,
+      agreements: index === 0 ? agreements : [],
+      reliability: null,
+    };
   });
+}
+
+/**
+ * Every component compared above without a difference: what the invoice states
+ * and what this system holds, read the same way the comparison read them —
+ * nothing priced again. A component neither side charges is left out.
+ */
+function toAgreements(
+  rows: readonly InvoiceSheetRow[],
+  pricing: EffectivePricing,
+  context: LineContext,
+  differences: readonly InvoicePricingDifference[],
+): ComparedComponent[] {
+  return INVOICE_COMPONENTS.filter((component) => !differences.some((difference) => difference.component === component.label))
+    .map((component) =>
+      compared(
+        component,
+        sumOf(rows, component.columns),
+        component.correctionColumn === "fuel" ? expectedFuel(rows, pricing, context) : round(component.expected(pricing)),
+      ),
+    )
+    .filter((agreement) => !agreement.expectedValue.isZero() || !(agreement.invoiceValue ?? new Prisma.Decimal(0)).isZero());
 }
 
 function reconcileComponent(

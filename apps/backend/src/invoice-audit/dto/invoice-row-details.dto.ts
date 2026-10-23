@@ -140,6 +140,15 @@ export class InvoiceBookingCorrectionDto {
   tripBookingNumber!: string;
 }
 
+/** The day a line stated, and the Trip's own planning date it is corrected to. */
+export class InvoiceDateCorrectionDto {
+  @ApiProperty({ format: "date", example: "2026-10-06", description: "As the sheet stated it." })
+  invoicePlanningDate!: string;
+
+  @ApiProperty({ format: "date", example: "2026-10-07", description: "The Trip's own planningDate." })
+  tripPlanningDate!: string;
+}
+
 /** The Cost Confirmation a Cost Confirmation line was resolved to. */
 export class InvoiceCostConfirmationDto {
   @ApiProperty({ example: "4220981", description: "Digits only; the sheet prints `EC 4220981`." })

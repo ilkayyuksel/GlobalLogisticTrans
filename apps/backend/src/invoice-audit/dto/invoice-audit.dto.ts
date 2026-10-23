@@ -18,7 +18,6 @@ import {
   toMissingTripDto,
 } from "./invoice-missing.dto";
 import { InvoiceTripPaymentDto, toTripPaymentDto } from "./invoice-payment.dto";
-import { adviseRow } from "../advice/row-advice";
 import { InvoiceAuditRowDto, toInvoiceAuditRowDto } from "./invoice-row.dto";
 import { InvoiceAuditSummaryDto, toInvoiceAuditSummaryDto } from "./invoice-summary.dto";
 
@@ -128,12 +127,7 @@ export function toInvoiceAuditResultDto(
     period: examined.period,
     summary: toInvoiceAuditSummaryDto(matches, pricing, missing.length, examined.blocked.length),
     rows: matches.map((match) =>
-      toInvoiceAuditRowDto(
-        match,
-        pricing.get(match.row.rowNumber),
-        remarks.get(match.row.rowNumber),
-        adviseRow(match, matches, remarks.get(match.row.rowNumber)),
-      ),
+      toInvoiceAuditRowDto(match, pricing.get(match.row.rowNumber), remarks.get(match.row.rowNumber)),
     ),
     incompleteRowNumbers: [...opened.sheet.incompleteRowNumbers],
     missingTrips: missing.map((trip, index) =>

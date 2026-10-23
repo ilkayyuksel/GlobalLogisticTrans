@@ -107,6 +107,12 @@ export interface InvoiceRowPricing {
   readonly rowNumber: number;
   readonly status: InvoicePricingStatus;
   readonly differences: readonly InvoicePricingDifference[];
+  /**
+   * The components compared and found to agree — nothing written — on the
+   * line's first row, so the preview can show them beside the differences.
+   * Absent when the line was not compared.
+   */
+  readonly agreements?: readonly ComparedComponent[];
   /** Whether the Trip's stored price could be relied on; null when uncompared. */
   readonly reliability: PriceReliability | null;
 }

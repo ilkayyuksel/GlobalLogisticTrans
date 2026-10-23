@@ -86,6 +86,20 @@ export interface InvoicePriceReliability {
  * Amounts are STRINGS at the money precision, as every pricing figure in this
  * application is — they are displayed and compared, never calculated with.
  */
+/** What became of one component: unchanged, or the kind of its difference. */
+export type InvoiceComparisonOutcome = "UNCHANGED" | InvoiceDifferenceKind;
+
+export interface InvoicePriceComparison {
+  readonly component: string;
+  readonly outcome: InvoiceComparisonOutcome;
+  /** What the Excel states; null when nothing or unreadable. */
+  readonly excelValue: string | null;
+  /** What Trano holds; null when there is nothing to set against the cell. */
+  readonly tranoValue: string | null;
+  /** What the corrected document writes; null when nothing is written. */
+  readonly writtenValue: string | null;
+}
+
 export interface InvoicePricingDifference {
   readonly component: string;
   readonly kind: InvoiceDifferenceKind;
@@ -138,6 +152,11 @@ export interface InvoiceAuditRow {
   readonly sharedKeyRowNumbers: readonly number[];
   readonly pricingStatus: InvoicePricingStatus;
   readonly differences: readonly InvoicePricingDifference[];
+  /**
+   * Every compared component, Excel beside Trano, in the invoice's column
+   * order — the check's own comparison. Empty when the line was not compared.
+   */
+  readonly comparisons: readonly InvoicePriceComparison[];
   /** Null for a line that was not compared. */
   readonly priceReliability: InvoicePriceReliability | null;
   /** Null unless the invoice's container was wrong and is corrected. */
@@ -150,15 +169,13 @@ export interface InvoiceAuditRow {
   readonly costConfirmation: InvoiceCostConfirmation | null;
   /** Set on a line the Excel marks as half of a Combination. */
   readonly combination: InvoiceCombination | null;
-  /** Why the line could not be resolved. */
+  /**
+   * Why the line could not be resolved — for a line that found no Trip or
+   * several, which pairs of values were tried or which Trips it could be.
+   */
   readonly matchProblem: string | null;
   /** What this check adds to the line's Remarks; null when nothing. */
   readonly remarks: InvoiceRemarks | null;
-  /**
-   * What is wrong, what became of the line and what to do — decided and
-   * worded by the backend from the line's actual outcome. Empty when nothing.
-   */
-  readonly advice: readonly InvoiceRowAdvice[];
 }
 
 export interface InvoiceDateCorrection {
@@ -167,15 +184,6 @@ export interface InvoiceDateCorrection {
   readonly tripPlanningDate: string;
 }
 
-/** INFO: nothing to do. WARNING: look. ERROR: act. */
-export type InvoiceAdviceSeverity = "INFO" | "WARNING" | "ERROR";
-
-export interface InvoiceRowAdvice {
-  readonly severity: InvoiceAdviceSeverity;
-  readonly problem: string;
-  readonly explanation: string;
-  readonly action: string;
-}
 
 export interface InvoiceRemarks {
   readonly before: string;
