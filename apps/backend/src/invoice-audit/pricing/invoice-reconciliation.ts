@@ -28,6 +28,9 @@ import { ComponentDecision, decideComponent } from "./raise-only-policy";
  * here so every caller keeps one place to import the reconciliation from.
  */
 export * from "./invoice-pricing-outcome";
+
+/** The EK's own label: a cost beside the transport, not one of its prices. */
+const COST_COMPONENT_LABEL = INVOICE_COMPONENTS.find((component) => component.correctionColumn === "ek")!.label;
 export { reconcileCostLine } from "./cost-line-reconciliation";
 
 /** What the sheet and the stored price decide about this line. */
@@ -53,7 +56,9 @@ export interface LineContext {
  * See `raise-only-policy.ts`. A raise goes to the row that already states the
  * component, or to the line's first row when none does. When SEVERAL rows
  * state it, nowhere — and then nothing on the whole line is written, because a
- * transport is corrected completely or not at all.
+ * transport is corrected completely or not at all. The one exception is the EK
+ * (owner, October 2026): an EK raise no row can carry holds back the EK alone,
+ * and the transport's own prices are still written; the line stays marked.
  *
  * ── A LINE THAT CANNOT BE READ IS NOT COMPARED ──────────────────────────────
  * One cell holding a word, a dash or an error makes the whole line unreliable:
@@ -83,12 +88,29 @@ export function reconcileLine(
     }
   }
 
-  if (differences.some((difference) => difference.kind === DifferenceKind.NOT_PLACEABLE)) {
-    return toRows(
-      rows,
-      differences.map(withoutWrite),
-      InvoicePricingStatus.NOT_DISTRIBUTABLE,
-    );
+  const unplaceable = differences.filter((difference) => difference.kind === DifferenceKind.NOT_PLACEABLE);
+
+  if (unplaceable.length > 0) {
+    /*
+     * An EK difference no single row can carry — a transport split over EC
+     * lines, each stating its own EK — holds back the EK and nothing else
+     * (owner, October 2026): the transport's own prices are decided apart from
+     * it and are still written. The line stays NOT_DISTRIBUTABLE, marked and
+     * not settled, because its EK is not. Any other component that cannot be
+     * placed still holds back the whole line: the Fuel follows the Tarief.
+     */
+    const onlyCost = unplaceable.every((difference) => difference.component === COST_COMPONENT_LABEL);
+
+    if (!onlyCost) {
+      return toRows(rows, differences.map(withoutWrite), InvoicePricingStatus.NOT_DISTRIBUTABLE);
+    }
+
+    const agreements = toAgreements(rows, pricing, context, differences);
+
+    return toRows(rows, differences, InvoicePricingStatus.NOT_DISTRIBUTABLE).map((outcome, index) => ({
+      ...outcome,
+      agreements: index === 0 ? agreements : [],
+    }));
   }
 
   const agreements = toAgreements(rows, pricing, context, differences);

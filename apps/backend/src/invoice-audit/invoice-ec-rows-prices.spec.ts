@@ -145,23 +145,19 @@ describe("EC lines never keep a transport's prices off the invoice", () => {
     expect(paymentsOf(result)).toHaveLength(1);
   });
 
-  it("4. two EC lines stating no container: kept as EC lines, the transport added once with its prices and the EK they do not charge", async () => {
+  /** Week 41 as sent: R53-R54 state no container. They are the transport's line all the same. */
+  it("4. two EC lines stating no container: one transport over both, priced once, the container filled in", async () => {
     const { result, cell } = await world.check([OTHER, ecLine("4220981", 110, ""), ecLine("4220982", 70, "")]);
 
-    expect(result.rows.slice(1).map((row) => [row.status, row.trip?.id, row.transportTrip?.id])).toEqual([
-      ["COST_LINE", "bousbecque", "bousbecque"],
-      ["COST_LINE", "bousbecque", "bousbecque"],
+    expect(result.rows.slice(1).map((row) => [row.status, row.trip?.id, row.sharedKeyRowNumbers])).toEqual([
+      ["MATCHED", "bousbecque", [4]],
+      ["MATCHED", "bousbecque", [3]],
     ]);
-    expect(result.missingTrips.map((missing) => missing.tripId)).toEqual(["bousbecque"]);
-    // The added line (row 5): the transport's prices; its EK is on the EC lines already.
-    expect([cell(5, 5).value, cell(5, COLUMN.tarief).value, cell(5, COLUMN.fuel).value, cell(5, COLUMN.ek).value]).toEqual([
-      BOOKING,
-      200,
-      30,
-      null,
-    ]);
-    expect([cell(3, COLUMN.ek).value, cell(4, COLUMN.ek).value, cell(3, COLUMN.tarief).value]).toEqual([110, 70, null]);
-    expect(paymentsOf(result)).toEqual([expect.objectContaining({ payable: true, rowNumbers: [3, 4, 5] })]);
+    expect([cell(3, COLUMN.tarief).value, cell(3, COLUMN.fuel).value, cell(4, COLUMN.tarief).value]).toEqual([200, 30, null]);
+    expect([cell(3, COLUMN.container).value, cell(4, COLUMN.container).value]).toEqual([CONTAINER, CONTAINER]);
+    expect([cell(3, COLUMN.ek).value, cell(4, COLUMN.ek).value]).toEqual([110, 70]);
+    expect(result.missingTrips).toEqual([]);
+    expect(paymentsOf(result)).toEqual([expect.objectContaining({ payable: true, rowNumbers: [3, 4] })]);
   });
 
   it("7. keeps a really ambiguous transport ambiguous: nothing priced, the EC number choosing nothing", async () => {

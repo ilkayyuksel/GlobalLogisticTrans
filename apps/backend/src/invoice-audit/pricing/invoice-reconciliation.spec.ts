@@ -509,16 +509,34 @@ describe("reconcileLine", () => {
       expect(outcomes[1].differences).toEqual([]);
     });
 
-    /** A transport is corrected completely or not at all. */
-    it("writes nothing else on a line that has a raise it cannot place", () => {
+    /*
+     * An EK raise no single row can carry holds back the EK alone (owner,
+     * October 2026): the transport's own prices are still written, and the
+     * line stays NOT_DISTRIBUTABLE — marked, and not settled.
+     */
+    it("still writes the transport's prices on a line whose EK raise cannot be placed", () => {
       const outcomes = reconcileLine(
         [row(10, { tarief: 100, ek: 120 }), row(11, { ek: 80 })],
         pricing({ tarief: "150", ek: "250" }),
         CONTEXT,
       );
 
+      expect(outcomes.map((outcome) => outcome.status)).toEqual(["NOT_DISTRIBUTABLE", "NOT_DISTRIBUTABLE"]);
+      expect(differenceFor(outcomes[0], "Tarief")?.correctedValue?.toFixed(2)).toBe("150.00");
+      expect(differenceFor(outcomes[0], "EK")).toMatchObject({ kind: "NOT_PLACEABLE", write: null });
+      expect(writes(outcomes).map((write) => write.component)).not.toContain("EK");
+    });
+
+    /** Any other component that cannot be placed still holds back the whole line. */
+    it("writes nothing on a line whose transport price cannot be placed", () => {
+      const outcomes = reconcileLine(
+        [row(10, { tarief: 100 }), row(11, { tarief: 20 })],
+        pricing({ tarief: "150" }),
+        CONTEXT,
+      );
+
       expect(writes(outcomes)).toEqual([]);
-      expect(differenceFor(outcomes[0], "Tarief")?.correctedValue).toBeNull();
+      expect(outcomes.map((outcome) => outcome.status)).toEqual(["NOT_DISTRIBUTABLE", "NOT_DISTRIBUTABLE"]);
     });
 
     it("writes an EK the invoice never stated onto the line's own row", () => {

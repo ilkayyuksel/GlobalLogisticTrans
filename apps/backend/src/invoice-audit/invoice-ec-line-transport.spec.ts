@@ -4,10 +4,11 @@ import { aTrip, day, invoiceWorld, type InvoiceWorld } from "./__fixtures__/invo
 import type { InvoiceFixtureLine } from "./__fixtures__/invoice-workbook";
 
 /**
- * An EC line stating no container: which transport it is about is answered by
- * its date and booking alone (`transportTrip`); which Trip its EK is checked
- * against by its confirmation (`trip`). The EC number never decides the
- * first, and the two are never confused.
+ * An EC line stating no container (week 41 R53's shape). Which transport it is
+ * about is answered by its date and booking alone — never by its EC number.
+ * When the transport has no line of its own on the invoice, the EC line IS its
+ * line (owner, October 2026): matched as a transport line, its prices filled.
+ * Whether its confirmation is known is checked apart and said apart.
  *
  * Booking ANRDUB2812770 has Trip "y" on Tuesday 6 October.
  */
@@ -15,7 +16,7 @@ import type { InvoiceFixtureLine } from "./__fixtures__/invoice-workbook";
 const MONDAY = "2026-10-05";
 const TUESDAY = "2026-10-06";
 const BOOKING = "ANRDUB2812770";
-const COLUMN = { tarief: 12, ek: 20 } as const;
+const COLUMN = { tarief: 12, fuel: 13, ek: 20 } as const;
 
 /** Week 41 R53's shape: a day, a booking, an EK and `EC <nr>`. */
 function ecLine(ccNumber = "4220981"): InvoiceFixtureLine {
@@ -41,7 +42,7 @@ const otherTransport: InvoiceFixtureLine = {
   fuel: 30,
 };
 
-describe("an EC line without container: its transport and its confirmation apart", () => {
+describe("an EC line without container: its transport by its own values, its confirmation apart", () => {
   let world: InvoiceWorld;
 
   beforeEach(() => {
@@ -53,55 +54,57 @@ describe("an EC line without container: its transport and its confirmation apart
   const confirm = (tripId: string) =>
     world.confirmations.push({ tripId, ccNumber: "4220981", amount: new Prisma.Decimal(110) });
 
-  it("1. date and booking identify one Trip: that is its transport, and its EK is checked on its confirmation of it", async () => {
+  it("1. date and booking identify one Trip with no line of its own: the EC line is its line, priced", async () => {
     confirm("y");
+    world.ekOf.set("y", "110");
 
     const { result, cell } = await world.check([otherTransport, ecLine()]);
     const row = result.rows[1];
 
-    expect(row).toMatchObject({ status: "COST_LINE", transportTrip: { id: "y" }, trip: { id: "y" } });
-    expect(row.pricingStatus).toBe("MATCHED_NO_CHANGES");
-    // Its transport has no line of its own: added once, through the missing transports.
-    expect(result.missingTrips.map((missing) => missing.tripId)).toEqual(["y"]);
-    expect(cell(3, COLUMN.tarief).value).toBeNull();
+    expect(row).toMatchObject({ status: "MATCHED", trip: { id: "y" }, matchProblem: null, transportPricesFilled: true });
+    expect([cell(3, COLUMN.tarief).value, cell(3, COLUMN.fuel).value, cell(3, COLUMN.ek).value]).toEqual([200, 30, 110]);
+    expect(result.missingTrips).toEqual([]);
   });
 
-  it("2. a confirmation of ANOTHER Trip than the line's values identify: nothing chosen, both said, the EK not checked", async () => {
+  it("2. a confirmation of ANOTHER Trip changes nothing about the transport: matched on its values, the confirmation said missing", async () => {
     world.trips.push(aTrip("x", BOOKING, "EUCU2000002", MONDAY));
     confirm("x");
 
     const { result } = await world.check([otherTransport, ecLine()]);
     const row = result.rows[1];
 
-    expect(row).toMatchObject({ status: "COST_LINE_UNRESOLVED", trip: null, transportTrip: { id: "y" } });
-    expect(row.pricingStatus).toBe("NOT_COMPARED");
-    expect(row.matchProblem).toBe(
-      "Kostenbevestiging EC 4220981 hoort bij rit ANRDUB2812770 · EUCU2000002 · 05/10/2026 · afgewerkt, maar de identificatievelden van deze regel (datum, boekingsnummer, container) wijzen rit ANRDUB2812770 · EUCU2000001 · 06/10/2026 · afgewerkt aan; het EK-bedrag is niet gecontroleerd.",
-    );
-    // The confirmation did not make "x" the line's transport.
-    expect(result.missingTrips.map((missing) => missing.tripId).sort()).toEqual(["x", "y"]);
+    expect(row).toMatchObject({
+      status: "MATCHED",
+      trip: { id: "y" },
+      matchProblem: "De transportmatch is geslaagd; voor EC 4220981 is bij deze rit geen kostenbevestiging gevonden.",
+    });
+    // "x", the confirmation's Trip, has no line of its own: it is missing, not "y".
+    expect(result.missingTrips.map((missing) => missing.tripId)).toEqual(["x"]);
   });
 
-  it("3. a known confirmation beside an ambiguous transport: no transport chosen, the EK still checked on its confirmation", async () => {
+  it("3. a known confirmation beside an ambiguous transport: the EC number chooses nothing", async () => {
     world.trips.push(aTrip("y2", BOOKING, "EUCU2000003", TUESDAY));
     confirm("y");
 
-    const { result } = await world.check([otherTransport, ecLine()]);
+    const { result, cell } = await world.check([otherTransport, ecLine()]);
     const row = result.rows[1];
 
-    expect(row).toMatchObject({ status: "COST_LINE", transportTrip: null, trip: { id: "y" } });
-    expect(row.pricingStatus).toBe("MATCHED_NO_CHANGES");
+    expect(row).toMatchObject({ status: "AMBIGUOUS", trip: null });
+    expect(row.candidates.map((trip) => trip.id).sort()).toEqual(["y", "y2"]);
+    expect(cell(3, COLUMN.tarief).value).toBeNull();
   });
 
-  it("4. an unknown confirmation beside a transport the values identify: the transport named, the confirmation said missing", async () => {
-    const { result } = await world.check([otherTransport, ecLine()]);
+  it("4. an unknown confirmation beside a transport the values identify: matched and priced, the confirmation said missing", async () => {
+    const { result, cell } = await world.check([otherTransport, ecLine()]);
     const row = result.rows[1];
 
-    expect(row).toMatchObject({ status: "COST_LINE_UNRESOLVED", trip: null, transportTrip: { id: "y" } });
-    expect(row.matchProblem).toBe(
-      "Geen kostenbevestiging gevonden voor EC 4220981. De rit zelf is wel gevonden (ANRDUB2812770 · EUCU2000001 · 06/10/2026 · afgewerkt), maar staat niet als transportregel op deze factuur; hij wordt beoordeeld als ontbrekende rit.",
-    );
-    expect(result.missingTrips.map((missing) => missing.tripId)).toEqual(["y"]);
+    expect(row).toMatchObject({
+      status: "MATCHED",
+      trip: { id: "y" },
+      matchProblem: "De transportmatch is geslaagd; voor EC 4220981 is bij deze rit geen kostenbevestiging gevonden.",
+    });
+    expect(cell(3, COLUMN.tarief).value).toBe(200);
+    expect(result.missingTrips).toEqual([]);
   });
 
   it("5. a stand-alone EC line beside its transport's own line: only its EK compared, no transport price on it, nothing added", async () => {

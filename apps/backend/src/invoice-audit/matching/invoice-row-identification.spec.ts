@@ -151,7 +151,12 @@ describe("identifying invoice lines", () => {
       );
     }
 
-    it("is resolved through the confirmation it names", async () => {
+    /*
+     * Its transport is looked for first, on its own values (owner, October
+     * 2026); here the database answers no Trip for them, so the line is the EC
+     * charge it is and its confirmation is checked.
+     */
+    it("is resolved through the confirmation it names when its own values find no transport", async () => {
       confirm("trip-bousbecque");
       reads.findTripsByIds.mockResolvedValue([bousbecque]);
 
@@ -163,8 +168,8 @@ describe("identifying invoice lines", () => {
         costConfirmation: { ccNumber: "4220981" },
       });
       expect(reads.findCostConfirmationsByNumbers).toHaveBeenCalledWith(["4220981"]);
-      // Never through the transport lines' own query.
-      expect(trips.findManyForInvoice).not.toHaveBeenCalledWith(
+      // The transport match was tried first, on the line's date and booking.
+      expect(trips.findManyForInvoice).toHaveBeenCalledWith(
         expect.objectContaining({ bookingNumbers: ["ANRDUB2812770"] }),
       );
     });

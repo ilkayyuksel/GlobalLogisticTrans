@@ -112,7 +112,6 @@ describe("InvoiceSheetWriter", () => {
    */
   it.each([
     InvoicePricingStatus.NOT_COMPARED,
-    InvoicePricingStatus.NOT_DISTRIBUTABLE,
     InvoicePricingStatus.PRICE_UNRELIABLE,
     InvoicePricingStatus.AMOUNT_UNREADABLE,
   ])("writes nothing for a row that is %s", (status) => {
@@ -125,6 +124,29 @@ describe("InvoiceSheetWriter", () => {
 
     expect(written.cellsWritten).toBe(0);
     expect(worksheet.getRow(2).getCell(COLUMNS.tarief).value).toBe(364);
+  });
+
+  /*
+   * NOT_DISTRIBUTABLE keeps a planned write only when the line's EK alone
+   * could not be placed: its transport prices (`reconcileLine`). Without one,
+   * it writes nothing.
+   */
+  it("writes a NOT_DISTRIBUTABLE row's transport price, and nothing when it carries no write", () => {
+    const planned = correction(2, InvoicePricingStatus.NOT_DISTRIBUTABLE);
+    const withoutWrite = {
+      ...correction(3, InvoicePricingStatus.NOT_DISTRIBUTABLE),
+      differences: correction(3, InvoicePricingStatus.NOT_DISTRIBUTABLE).differences.map((difference) => ({
+        ...difference,
+        correctedValue: null,
+        write: null,
+      })),
+    };
+
+    const written = writer.apply(workbook, worksheet, sheetOf([2, 3]), new Map([[2, planned], [3, withoutWrite]]));
+
+    expect(written.cellsWritten).toBe(1);
+    expect(worksheet.getRow(2).getCell(COLUMNS.tarief).value).toBe(370);
+    expect(worksheet.getRow(3).getCell(COLUMNS.tarief).value).toBe(364);
   });
 
   it("writes nothing for a row the check said nothing about", () => {

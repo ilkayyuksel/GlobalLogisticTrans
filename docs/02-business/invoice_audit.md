@@ -132,18 +132,25 @@ lines and the added line (`payment/invoice-payments.ts`). Beside a transport
 line stating the same date, booking and container, an EK line is that
 transport's split EK, as before.
 
-**An EK line that states a whole transport is that transport's line** (owner,
+**An EK line is its transport's line when the transport has none** (owner,
 October 2026, `matching/ec-transport-lines.ts`). A row shaped like an EC line
-that states a day, a booking AND a container is matched as a transport line —
-on those three values, never on its EC number — whenever no transport line of
-the document names that Trip; its empty prices are then filled. Its `EC <nr>`
+— with or without a container — is matched as a transport line on the values
+it states (any two of day, booking, container), never on its EC number,
+whenever no transport line of the document names that Trip; its empty prices
+are then filled, a missing container filled in red. EK lines stating the same
+values (week 41 R53–R54) are one transport over several rows: its prices on
+the first, the EK of all of them compared once. When that EK must be raised it
+is stated on several rows and cannot be placed: the EK is left as written and
+reported, and the transport's own prices (Tarief, Fuel, …) are still written
+(owner, October 2026). The line is `NOT_DISTRIBUTABLE`: marked yellow and not
+settled until the EK is. Any OTHER component that cannot be placed still holds
+back the whole line — the Fuel follows the Tarief. Its `EC <nr>`
 is a Remarks part: a number the Trip holds no confirmation for is reported on
 the line beside a match that stands. When the Trip has a transport line of its
 own, the row stays the EC line it is. Whatever the transport match finds for
 such a row — one Trip, several, one in conflict — stands; only a row the three
 values find NO Trip for goes on to its EC number, which never chooses between
-Trips the match found. An EC line stating no container names a charge, not a
-transport, and is handled as above.
+Trips the match found.
 
 ### Combinations and `GEEN COMBI`
 
@@ -269,7 +276,8 @@ transport only EC lines name is added as a missing line (see above).
 - The toll is compared as Maut + Tol B + Tol FR and raised in Tol B only.
 - A transport stated on several rows (Cost Confirmation lines) is added up per
   component. A raise that several rows could carry is `NOT_DISTRIBUTABLE`, and
-  then nothing on the whole line is written.
+  then nothing on the whole line is written — unless it is the EK alone: then
+  only the EK is held back and the transport's own prices are written.
 - The only amount that may go down is the Backload of an established
   `GEEN COMBI` (removal, phase 2).
 

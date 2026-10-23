@@ -459,15 +459,19 @@ describe("an invoice line with one misprinted value", () => {
       expect(cell(3, COLUMN.booking).value).toBe("ANRDUB2812203");
     });
 
-    it("says the transport was found but is not on the invoice when an EC line without container names it", async () => {
-      const { rows } = await check([
+    it("an EC line without container is its transport's line too, matched on date and booking", async () => {
+      const { rows, cell } = await check([
         line(TUESDAY, "ANRDUB2819999", "EUCU9999999"),
         { ...ecLine("ANRDUB2812203", "EUCU4590355", "4214683"), containerNumber: "" },
       ]);
 
-      expect(rows[1].matchProblem).toBe(
-        "Geen kostenbevestiging gevonden voor EC 4214683. De rit zelf is wel gevonden (ANRDUB2812203 · EUCU4590355 · 06/10/2026 · afgewerkt), maar staat niet als transportregel op deze factuur; hij wordt beoordeeld als ontbrekende rit.",
-      );
+      expect(rows[1]).toMatchObject({
+        status: "MATCHED",
+        trip: { id: "t1" },
+        containerCorrection: { tripContainerNumber: "EUCU4590355" },
+        matchProblem: "De transportmatch is geslaagd; voor EC 4214683 is bij deze rit geen kostenbevestiging gevonden.",
+      });
+      expect(cell(3, COLUMN.tarief).value).toBe(200);
     });
   });
 
@@ -658,33 +662,33 @@ describe("an invoice line with one misprinted value", () => {
       expect(result.payments.filter((payment) => payment.tripId === "gent")).toHaveLength(1);
     });
 
-    it("B, an EC line without container, confirmation unknown: the transport is added as missing, the EC line stays apart", async () => {
+    it("B, an EC line without container, confirmation unknown: it is the transport's line, priced, the confirmation said missing", async () => {
       const { rows, result, cell } = await check([anotherTransport(), ecWithoutContainer()]);
 
-      expect(rows[1]).toMatchObject({ status: "COST_LINE_UNRESOLVED", trip: null });
-      expect(result.missingTrips.map((missing) => missing.tripId)).toEqual(["gent"]);
+      expect(rows[1]).toMatchObject({
+        status: "MATCHED",
+        trip: { id: "gent" },
+        matchProblem: "De transportmatch is geslaagd; voor EC 4224479 is bij deze rit geen kostenbevestiging gevonden.",
+      });
+      expect(result.missingTrips).toEqual([]);
+      expect([cell(3, COLUMN.tarief).value, cell(3, EK).value]).toEqual([200, 386.16]);
       expect(result.payments.filter((payment) => payment.tripId === "gent")).toEqual([
-        expect.objectContaining({ payable: true, category: "ADDED", rowNumbers: [4] }),
+        expect.objectContaining({ rowNumbers: [3] }),
       ]);
-      // The EC line is untouched; the added line charges the transport.
-      expect(cell(3, EK).value).toBe(386.16);
-      expect(cell(4, COLUMN.booking).value).toBe("DUBANR2810438");
-      expect(cell(4, COLUMN.tarief).value).toBe(200);
     });
 
-    it("B, an EC line without container, confirmation known: the transport is added once, its EK not charged a second time", async () => {
+    it("B, an EC line without container, confirmation known: it is the transport's line, priced, its EK counted once", async () => {
       confirmations.push({ tripId: "gent", ccNumber: "4224479", amount: new Prisma.Decimal("386.16") });
       ekOf.set("gent", "386.16");
 
       const { rows, result, cell } = await check([anotherTransport(), ecWithoutContainer()]);
 
-      expect(rows[1]).toMatchObject({ status: "COST_LINE", trip: { id: "gent" }, pricingStatus: "MATCHED_NO_CHANGES" });
-      expect(result.missingTrips.map((missing) => missing.tripId)).toEqual(["gent"]);
-      // The EK is on the EC line already: the added line carries none.
-      expect(cell(4, EK).value).toBeNull();
-      expect(cell(4, COLUMN.tarief).value).toBe(200);
+      expect(rows[1]).toMatchObject({ status: "MATCHED", trip: { id: "gent" }, matchProblem: null });
+      expect([cell(3, COLUMN.tarief).value, cell(3, EK).value]).toEqual([200, 386.16]);
+      expect(rows[1].comparisons.find((comparison) => comparison.component === "EK")).toMatchObject({ outcome: "UNCHANGED" });
+      expect(result.missingTrips).toEqual([]);
       expect(result.payments.filter((payment) => payment.tripId === "gent")).toEqual([
-        expect.objectContaining({ payable: true, category: "ADDED", rowNumbers: [3, 4] }),
+        expect.objectContaining({ payable: true, rowNumbers: [3] }),
       ]);
     });
 

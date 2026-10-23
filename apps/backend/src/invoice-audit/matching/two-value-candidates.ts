@@ -69,8 +69,17 @@ export function toExactClaims(
  * The Trips other lines already are. A line asking this matched nothing
  * exactly itself, so every exact claim is another line's.
  */
-export function claimedByOthers(claims: ReadonlyMap<string, readonly number[]>, row: InvoiceSheetRow): Set<string> {
-  return new Set([...claims].filter(([, rowNumbers]) => !rowNumbers.includes(row.rowNumber)).map(([tripId]) => tripId));
+export function claimedByOthers(
+  claims: ReadonlyMap<string, readonly number[]>,
+  row: InvoiceSheetRow,
+  /** Each row's date, booking and container as one key: rows sharing it are one transport. */
+  keyByRow: ReadonlyMap<number, string> = new Map(),
+): Set<string> {
+  const ownKey = keyByRow.get(row.rowNumber);
+  const isOwn = (rowNumber: number) =>
+    rowNumber === row.rowNumber || (ownKey !== undefined && keyByRow.get(rowNumber) === ownKey);
+
+  return new Set([...claims].filter(([, rowNumbers]) => !rowNumbers.some(isOwn)).map(([tripId]) => tripId));
 }
 
 /** Why a line whose only candidates are other lines' Trips stays unresolved. */

@@ -2,22 +2,20 @@ import type { InvoiceSheetRow } from "../workbook/invoice-sheet";
 import type { InvoiceRowMatch } from "./invoice-row-match";
 
 /**
- * ── AN EK LINE THAT STATES A WHOLE TRANSPORT IS THAT TRANSPORT'S LINE ───────
+ * ── AN EK LINE IS ITS TRANSPORT'S LINE WHEN THE TRANSPORT HAS NONE ──────────
  * A row shaped like a Cost Confirmation line — an EK and `EC <nr>`, none of a
- * transport's other details — that nonetheless states a day, a booking AND a
- * container names a transport, the way any transport line does. When no other
+ * transport's other details — still states at least two of a day, a booking
+ * and a container, so it names a transport the way any line does. When no
  * transport line of the document is that transport, it IS its line (owner,
- * October 2026): matched on those three values — never on its EC number —
- * and its prices compared and filled like any transport line's. Its EC number
- * is then only a Remarks part, its confirmation checked apart.
+ * October 2026, week 41 R53-R54): matched on those values — never on its EC
+ * number — its prices filled from Trano like any transport line's, and EK
+ * lines stating the same values are that one transport over several rows.
+ * Its EC number is then only a Remarks part, its confirmation checked apart.
  *
- * One stating no container stays a Cost Confirmation line: it names a charge,
- * not a transport.
+ * Beside a transport line of its own, it stays the EC charge it is.
  */
 export function toTransportCandidates(rows: readonly InvoiceSheetRow[]): InvoiceSheetRow[] {
-  return rows
-    .filter((row) => row.costLine !== null && row.normalizedContainerNumber !== "")
-    .map((row) => ({ ...row, costLine: null }));
+  return rows.filter((row) => row.costLine !== null).map((row) => ({ ...row, costLine: null }));
 }
 
 /**

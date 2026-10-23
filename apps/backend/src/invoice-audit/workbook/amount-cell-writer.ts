@@ -48,7 +48,8 @@ interface SharedFormulaCell {
  *
  * Every compared row that is not a problem: a corrected one, and also one whose
  * amounts did not go up but whose Fuel cell must be rewritten to KEEP its
- * amount. A line that is a problem in any way writes nothing.
+ * amount. A line that is a problem writes nothing — except the transport
+ * prices of a line whose EK alone could not be placed (`isWritable`).
  */
 const WRITABLE_STATUSES: readonly InvoicePricingStatus[] = [
   InvoicePricingStatus.MATCHED_NO_CHANGES,
@@ -60,7 +61,13 @@ const WRITABLE_STATUSES: readonly InvoicePricingStatus[] = [
 const VISIBLE_CHANGES: readonly DifferenceKind[] = [DifferenceKind.RAISE, DifferenceKind.REMOVE];
 
 export function isWritable(outcome: InvoiceRowPricing): boolean {
-  return WRITABLE_STATUSES.includes(outcome.status);
+  return (
+    WRITABLE_STATUSES.includes(outcome.status) ||
+    // Only an EK that cannot be placed leaves writes on such a line: the
+    // transport's own prices (see `reconcileLine`).
+    (outcome.status === InvoicePricingStatus.NOT_DISTRIBUTABLE &&
+      outcome.differences.some((difference) => difference.write !== null))
+  );
 }
 
 /** Whether a written difference is shown in red. */

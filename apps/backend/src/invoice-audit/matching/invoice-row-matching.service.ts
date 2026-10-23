@@ -94,13 +94,15 @@ export class InvoiceRowMatchingService {
   ): Promise<readonly InvoiceRowMatch[]> {
     const transportRows = rows.filter((row) => row.costLine === null);
     const costLineClaims = await this.loadCostLineClaims(rows);
-    const transportLines = await this.matchTransports(transportRows, addedByAudit, costLineClaims);
+    const keyByRow = new Map(rows.map((row) => [row.rowNumber, identityKey(row)]));
+    const transportLines = await this.matchTransports(transportRows, addedByAudit, costLineClaims, keyByRow);
     const ownLines = await this.matchEkLinesAsTransports(
       transportRows,
       transportLines,
       rows,
       addedByAudit,
       costLineClaims,
+      keyByRow,
     );
     const ownLineRows = new Set(ownLines.map((match) => match.row.rowNumber));
     const costLines = await this.matchCostLines(
@@ -134,6 +136,7 @@ export class InvoiceRowMatchingService {
     rows: readonly InvoiceSheetRow[],
     addedByAudit: ReadonlyMap<number, AuditMarkedRow>,
     costLineClaims: ReadonlyMap<string, readonly number[]>,
+    keyByRow: ReadonlyMap<number, string>,
   ): Promise<InvoiceRowMatch[]> {
     const byBooking = groupByBooking(await this.loadCandidates(rows));
     const onDateOf = (row: InvoiceSheetRow) =>
@@ -147,7 +150,7 @@ export class InvoiceRowMatchingService {
     return rows.map((row) => {
       const decided =
         exact.get(row.rowNumber) ??
-        decideByTwoValues(row, toPartialCandidates(row, onDateOf(row), partial!), claimedByOthers(allClaims, row));
+        decideByTwoValues(row, toPartialCandidates(row, onDateOf(row), partial!), claimedByOthers(allClaims, row, keyByRow));
       /*
        * A line this system added keeps its own answer, and its values are
        * never rewritten: the document's record of it holds the identity it was
@@ -199,6 +202,7 @@ export class InvoiceRowMatchingService {
     rows: readonly InvoiceSheetRow[],
     addedByAudit: ReadonlyMap<number, AuditMarkedRow>,
     costLineClaims: ReadonlyMap<string, readonly number[]>,
+    keyByRow: ReadonlyMap<number, string>,
   ): Promise<InvoiceRowMatch[]> {
     const candidates = toTransportCandidates(rows);
 
@@ -207,7 +211,12 @@ export class InvoiceRowMatchingService {
     }
 
     const candidateRows = new Set(candidates.map((row) => row.rowNumber));
-    const together = await this.matchTransports([...transportRows, ...candidates], addedByAudit, costLineClaims);
+    const together = await this.matchTransports(
+      [...transportRows, ...candidates],
+      addedByAudit,
+      costLineClaims,
+      keyByRow,
+    );
 
     return toOwnTransportLines(
       together.filter((match) => candidateRows.has(match.row.rowNumber)),
