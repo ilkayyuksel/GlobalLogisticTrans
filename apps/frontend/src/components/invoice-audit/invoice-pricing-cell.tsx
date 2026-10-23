@@ -92,6 +92,10 @@ export function InvoicePricingCell({ row }: { row: InvoiceAuditRow }) {
       ) : null}
 
       {/* Older answers carry no comparison: they show their differences as before. */}
+      {row.transportPricesFilled ? (
+        <p className="text-xs text-secondary">{t("invoiceAudit.pricing.filledFromTrano")}</p>
+      ) : null}
+
       {(row.comparisons ?? []).length > 0 ? (
         <InvoicePriceComparisonTable comparisons={row.comparisons} />
       ) : row.differences.length > 0 ? (

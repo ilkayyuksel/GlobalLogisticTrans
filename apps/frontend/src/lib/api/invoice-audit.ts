@@ -87,7 +87,7 @@ export interface InvoicePriceReliability {
  * application is — they are displayed and compared, never calculated with.
  */
 /** What became of one component: unchanged, or the kind of its difference. */
-export type InvoiceComparisonOutcome = "UNCHANGED" | InvoiceDifferenceKind;
+export type InvoiceComparisonOutcome = "UNCHANGED" | "FILLED" | InvoiceDifferenceKind;
 
 export interface InvoicePriceComparison {
   readonly component: string;
@@ -157,6 +157,8 @@ export interface InvoiceAuditRow {
    * order — the check's own comparison. Empty when the line was not compared.
    */
   readonly comparisons: readonly InvoicePriceComparison[];
+  /** The line states no transport price: Trano's are filled in, not compared. */
+  readonly transportPricesFilled: boolean;
   /** Null for a line that was not compared. */
   readonly priceReliability: InvoicePriceReliability | null;
   /** Null unless the invoice's container was wrong and is corrected. */

@@ -105,6 +105,9 @@ const nl = {
   "invoiceAudit.pricing.compare.result": "Resultaat",
   "invoiceAudit.pricing.compare.unchanged": "geen wijziging",
   "invoiceAudit.pricing.compare.written": "wordt",
+  "invoiceAudit.pricing.compare.filled": "ingevuld",
+  "invoiceAudit.pricing.filledFromTrano":
+    "Excel bevat geen transportprijzen om te vergelijken; de prijzen worden vanuit Trano ingevuld.",
   "invoiceAudit.pricing.compare.writtenHint": "Deze waarde wordt in rood naar het Excel-bestand geschreven.",
   "invoiceAudit.pricing.tripRoute": "Rit",
   "invoiceAudit.pricing.pricedRoute": "Geprijsd op",
@@ -1405,6 +1408,9 @@ const tr: Translations = {
   "invoiceAudit.pricing.compare.result": "Sonuç",
   "invoiceAudit.pricing.compare.unchanged": "değişiklik yok",
   "invoiceAudit.pricing.compare.written": "olur",
+  "invoiceAudit.pricing.compare.filled": "dolduruldu",
+  "invoiceAudit.pricing.filledFromTrano":
+    "Excel'de karşılaştırılacak taşıma fiyatı yok; fiyatlar Trano'dan doldurulur.",
   "invoiceAudit.pricing.compare.writtenHint": "Bu değer Excel dosyasına kırmızı olarak yazılır.",
   "invoiceAudit.pricing.tripRoute": "Sefer",
   "invoiceAudit.pricing.pricedRoute": "Fiyatlandırılan rota",

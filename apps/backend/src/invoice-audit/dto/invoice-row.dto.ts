@@ -18,7 +18,11 @@ import {
   toDifferenceDto,
   toPriceReliabilityDto,
 } from "./invoice-row-details.dto";
-import { InvoicePriceComparisonDto, toPriceComparisons } from "./invoice-price-comparison.dto";
+import {
+  InvoicePriceComparisonDto,
+  fillsTransportPrices,
+  toPriceComparisons,
+} from "./invoice-price-comparison.dto";
 
 /** What this system holds for the Trip an invoice line was matched to. */
 export class InvoiceAuditTripDto {
@@ -110,6 +114,12 @@ export class InvoiceAuditRowDto {
   comparisons!: InvoicePriceComparisonDto[];
 
   @ApiProperty({
+    description:
+      "The line states no transport price, so Trano's — from its stored price, when relied on — are filled in rather than compared.",
+  })
+  transportPricesFilled!: boolean;
+
+  @ApiProperty({
     type: InvoicePriceReliabilityDto,
     nullable: true,
     description:
@@ -168,6 +178,8 @@ export function toInvoiceAuditRowDto(
   pricing: InvoiceRowPricing | undefined,
   remarks?: RemarkChange,
 ): InvoiceAuditRowDto {
+  const comparisons = toPriceComparisons(pricing);
+
   return {
     rowNumber: match.row.rowNumber,
     status: match.status,
@@ -180,7 +192,8 @@ export function toInvoiceAuditRowDto(
     sharedKeyRowNumbers: [...match.sharedKeyRowNumbers],
     pricingStatus: pricing?.status ?? InvoicePricingStatus.NOT_COMPARED,
     differences: (pricing?.differences ?? []).map(toDifferenceDto),
-    comparisons: toPriceComparisons(pricing),
+    comparisons,
+    transportPricesFilled: fillsTransportPrices(comparisons),
     priceReliability: pricing?.reliability
       ? toPriceReliabilityDto(pricing.reliability)
       : null,

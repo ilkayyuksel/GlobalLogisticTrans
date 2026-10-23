@@ -57,6 +57,12 @@ function Outcome({ comparison }: { comparison: InvoicePriceComparison }) {
   switch (comparison.outcome) {
     case "UNCHANGED":
       return <span className="text-success">{t("invoiceAudit.pricing.compare.unchanged")}</span>;
+    case "FILLED":
+      return (
+        <span className="font-medium text-danger" title={t("invoiceAudit.pricing.compare.writtenHint")}>
+          {t("invoiceAudit.pricing.compare.filled")} {toMoney(comparison.writtenValue)}
+        </span>
+      );
     case "RAISE":
       return (
         <span className="font-medium text-danger" title={t("invoiceAudit.pricing.compare.writtenHint")}>

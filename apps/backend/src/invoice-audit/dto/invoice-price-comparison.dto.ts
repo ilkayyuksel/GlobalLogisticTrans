@@ -4,8 +4,12 @@ import { INVOICE_COMPONENTS } from "../pricing/invoice-column-map";
 import { DifferenceKind, type InvoiceRowPricing } from "../pricing/invoice-reconciliation";
 import { MONEY_DECIMAL_PLACES } from "../workbook/invoice-amounts";
 
-/** What became of one component: unchanged, or the kind of its difference. */
-export const ComparisonOutcome = { UNCHANGED: "UNCHANGED", ...DifferenceKind } as const;
+/**
+ * What became of one component: unchanged, the kind of its difference — or
+ * FILLED: the Excel states nothing for it, so Trano's figure is written in. A
+ * raise from an empty cell is no comparison and is not shown as one.
+ */
+export const ComparisonOutcome = { UNCHANGED: "UNCHANGED", FILLED: "FILLED", ...DifferenceKind } as const;
 
 export type ComparisonOutcome = (typeof ComparisonOutcome)[keyof typeof ComparisonOutcome];
 
@@ -52,7 +56,10 @@ export function toPriceComparisons(pricing: InvoiceRowPricing | undefined): Invo
   const comparisons: InvoicePriceComparisonDto[] = [
     ...pricing.differences.map((difference) => ({
       component: difference.component,
-      outcome: difference.kind,
+      outcome:
+        difference.kind === DifferenceKind.RAISE && difference.invoiceValue === null
+          ? ComparisonOutcome.FILLED
+          : difference.kind,
       excelValue: money(difference.invoiceValue),
       // An unreadable cell was never compared: there is no figure to set against it.
       tranoValue: difference.kind === DifferenceKind.UNREADABLE ? null : money(difference.expectedValue),
@@ -69,4 +76,20 @@ export function toPriceComparisons(pricing: InvoiceRowPricing | undefined): Invo
   const order = (component: string) => INVOICE_COMPONENTS.findIndex((each) => each.label === component);
 
   return comparisons.sort((left, right) => order(left.component) - order(right.component));
+}
+
+/** EK is a cost beside the transport: its own figure says nothing about the transport's prices. */
+const COST_COMPONENT = "EK";
+
+/**
+ * Whether the line stated no transport price at all, so the ones Trano holds
+ * are filled in rather than compared — said so in the preview.
+ */
+export function fillsTransportPrices(comparisons: readonly InvoicePriceComparisonDto[]): boolean {
+  const transport = comparisons.filter((comparison) => comparison.component !== COST_COMPONENT);
+
+  return (
+    transport.some((comparison) => comparison.outcome === ComparisonOutcome.FILLED) &&
+    transport.every((comparison) => comparison.excelValue === null)
+  );
 }

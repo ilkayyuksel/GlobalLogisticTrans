@@ -660,6 +660,30 @@ describe("an invoice line with one misprinted value", () => {
       ]);
     });
 
+    it("A, an empty transport line beside its EC line: the prices filled from Trano, the EK not a second time", async () => {
+      confirmations.push({ tripId: "gent", ccNumber: "4224479", amount: new Prisma.Decimal("386.16") });
+      ekOf.set("gent", "386.16");
+
+      const { rows, result, cell } = await check([
+        anotherTransport(),
+        { ...line(THURSDAY, "DUBANR2810438", "EUCU4580552"), tarief: null, fuel: null },
+        ecWithoutContainer(),
+      ]);
+
+      expect(rows[1]).toMatchObject({ status: "MATCHED", trip: { id: "gent" }, transportPricesFilled: true });
+      expect(rows[1].comparisons.map((comparison) => [comparison.component, comparison.outcome])).toEqual([
+        ["Tarief", "FILLED"],
+        ["Fuel", "FILLED"],
+      ]);
+      expect([cell(3, COLUMN.tarief).value, cell(3, COLUMN.fuel).value, cell(3, EK).value]).toEqual([200, 30, null]);
+      // The EC line keeps its own figure, and is not given a transport price.
+      expect([cell(4, EK).value, cell(4, COLUMN.tarief).value]).toEqual([386.16, null]);
+      expect(result.missingTrips).toEqual([]);
+      expect(result.payments.filter((payment) => payment.tripId === "gent")).toEqual([
+        expect.objectContaining({ payable: true, rowNumbers: [3, 4] }),
+      ]);
+    });
+
     it("A, the transport line is there and the confirmation unknown: the transport checked and payable, nothing added", async () => {
       const { rows, result } = await check([
         anotherTransport(),

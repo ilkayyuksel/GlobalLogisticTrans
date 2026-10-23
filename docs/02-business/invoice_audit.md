@@ -226,6 +226,14 @@ corrected file writes — the differences and the components that agree
 the invoice's column order. A line that was not compared, or whose price is
 not relied on, shows no Trano figure.
 
+A component the Excel leaves empty is not compared but FILLED: Trano's stored
+figure is written in, through the same raise as any other (red, the Fuel as
+the customer's formula, a zero left empty). A line stating no transport price
+at all says so (`transportPricesFilled`): its prices come from Trano. With a
+price that is not relied on — or no stored price — nothing is filled and the
+reliability warning says why. An EC line is never given a transport price; a
+transport only EC lines name is added as a missing line (see above).
+
 - An empty cell compares as zero. A cell holding a word, a dash, an Excel error
   or an uncalculated formula makes the whole line `AMOUNT_UNREADABLE`.
 - The toll is compared as Maut + Tol B + Tol FR and raised in Tol B only.

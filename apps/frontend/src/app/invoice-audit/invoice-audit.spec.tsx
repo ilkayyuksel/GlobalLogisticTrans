@@ -814,6 +814,24 @@ describe("Excel factuurcontrole", () => {
         expect(cellsOf(table, "Tol")).toEqual(["€50.00", "€50.00", "geen wijziging"]);
       });
 
+      it("says the prices are filled from Trano when the Excel states none, without a comparison", async () => {
+        const table = await show({
+          transportPricesFilled: true,
+          comparisons: [
+            comparison("Tarief", "FILLED", null, "475.00", "475.00"),
+            comparison("Fuel", "FILLED", null, "114.00", "114.00"),
+          ],
+        });
+
+        expect(
+          within(rowFor("DUBANR2718284")).getByText(
+            "Excel bevat geen transportprijzen om te vergelijken; de prijzen worden vanuit Trano ingevuld.",
+          ),
+        ).toBeInTheDocument();
+        expect(cellsOf(table, "Tarief")).toEqual(["—", "€475.00", "ingevuld €475.00"]);
+        expect(within(table).getByText("ingevuld €475.00")).toHaveClass("text-danger");
+      });
+
       it("shows an unreadable cell without a Trano figure", async () => {
         const table = await show({
           pricingStatus: "AMOUNT_UNREADABLE",
