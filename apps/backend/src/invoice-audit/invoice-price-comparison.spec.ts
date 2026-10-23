@@ -76,9 +76,9 @@ describe("the price comparison of a line", () => {
 
       expect(row).toMatchObject({ status: "MATCHED", pricingStatus: "PRICING_CORRECTED", transportPricesFilled: true });
       expect(row.comparisons).toEqual([
-        { component: "Tarief", outcome: "FILLED", excelValue: null, tranoValue: "475.00", writtenValue: "475.00" },
-        { component: "Fuel", outcome: "FILLED", excelValue: null, tranoValue: "114.00", writtenValue: "114.00" },
-        { component: "Tol", outcome: "FILLED", excelValue: null, tranoValue: "50.00", writtenValue: "50.00" },
+        { component: "Tarief", outcome: "RAISE", excelValue: "0.00", excelCellEmpty: true, tranoValue: "475.00", writtenValue: "475.00" },
+        { component: "Fuel", outcome: "RAISE", excelValue: "0.00", excelCellEmpty: true, tranoValue: "114.00", writtenValue: "114.00" },
+        { component: "Tol", outcome: "RAISE", excelValue: "0.00", excelCellEmpty: true, tranoValue: "50.00", writtenValue: "50.00" },
       ]);
       expect(cell(COLUMN.tarief).value).toBe(475);
       expect(cell(COLUMN.fuel).value).toEqual({ formula: "24%*L2", result: 114 });
@@ -148,9 +148,9 @@ describe("the price comparison of a line", () => {
     const { row } = await check({ tarief: 475, fuel: 114, tolB: 50 });
 
     expect(row.comparisons).toEqual([
-      { component: "Tarief", outcome: "UNCHANGED", excelValue: "475.00", tranoValue: "475.00", writtenValue: null },
-      { component: "Fuel", outcome: "UNCHANGED", excelValue: "114.00", tranoValue: "114.00", writtenValue: null },
-      { component: "Tol", outcome: "UNCHANGED", excelValue: "50.00", tranoValue: "50.00", writtenValue: null },
+      { component: "Tarief", outcome: "UNCHANGED", excelValue: "475.00", excelCellEmpty: false, tranoValue: "475.00", writtenValue: null },
+      { component: "Fuel", outcome: "UNCHANGED", excelValue: "114.00", excelCellEmpty: false, tranoValue: "114.00", writtenValue: null },
+      { component: "Tol", outcome: "UNCHANGED", excelValue: "50.00", excelCellEmpty: false, tranoValue: "50.00", writtenValue: null },
     ]);
   });
 
@@ -161,6 +161,7 @@ describe("the price comparison of a line", () => {
       component: "Tarief",
       outcome: "RAISE",
       excelValue: "450.00",
+      excelCellEmpty: false,
       tranoValue: "475.00",
       writtenValue: "475.00",
     });
@@ -176,8 +177,8 @@ describe("the price comparison of a line", () => {
     expect(row.comparisons.map((comparison) => [comparison.component, comparison.outcome, comparison.writtenValue])).toEqual([
       ["Tarief", "RAISE", "475.00"],
       ["Fuel", "RAISE", "114.00"],
-      // The Excel states no Tol: Trano's is filled in, not compared.
-      ["Tol", "FILLED", "50.00"],
+      // The Excel states no Tol: compared as €0,00, raised to Trano's.
+      ["Tol", "RAISE", "50.00"],
     ]);
     expect(row.transportPricesFilled).toBe(false);
     expect([cell(COLUMN.tarief).value, cell(COLUMN.tolB).value]).toEqual([475, 50]);
@@ -190,6 +191,7 @@ describe("the price comparison of a line", () => {
       component: "Tarief",
       outcome: "INVOICE_HIGHER",
       excelValue: "500.00",
+      excelCellEmpty: false,
       tranoValue: "475.00",
       writtenValue: null,
     });
@@ -213,7 +215,7 @@ describe("the price comparison of a line", () => {
 
     expect(row.pricingStatus).toBe("AMOUNT_UNREADABLE");
     expect(row.comparisons).toEqual([
-      { component: "Tarief", outcome: "UNREADABLE", excelValue: null, tranoValue: null, writtenValue: null },
+      { component: "Tarief", outcome: "UNREADABLE", excelValue: null, excelCellEmpty: false, tranoValue: null, writtenValue: null },
     ]);
   });
 });

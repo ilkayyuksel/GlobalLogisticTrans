@@ -96,6 +96,8 @@ function planRow(
     ccNumbers: reliable ? (facts?.ccNumbers ?? []) : [],
     waiting: reliable ? (facts?.waiting ?? null) : null,
     geenCombi,
+    // A note is not about the price: it belongs on the Trip's line whatever its price.
+    extraNotes: facts?.extraNotes ?? null,
   });
   const stated = toRemarkParts(own.row.remarks);
   const ccNumbersOnTrip = new Set(tripRows.flatMap((match) => toStatedCcNumbers(match.row.remarks)));

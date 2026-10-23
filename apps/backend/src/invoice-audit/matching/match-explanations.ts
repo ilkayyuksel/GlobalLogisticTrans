@@ -1,5 +1,6 @@
 import { NO_CONFIRMATION_FOUND } from "./cost-line-matching";
 import { InvoiceRowStatus, type InvoiceRowMatch } from "./invoice-row-match";
+import { toStatedCcNumbers } from "../remarks/remark-parts";
 import { describeTrip } from "./trip-words";
 
 /**
@@ -57,4 +58,33 @@ function explainCostLineTransport(match: InvoiceRowMatch, matches: readonly Invo
   return ownRows.length > 0
     ? `De rit zelf is wel gematcht (Excel-rij ${ownRows.join(", ")}); alleen het EK-bedrag van deze regel is niet gecontroleerd.`
     : `De rit zelf is wel gevonden (${describeTrip(trip)}), maar staat niet als transportregel op deze factuur; hij wordt beoordeeld als ontbrekende rit.`;
+}
+
+/**
+ * A matched transport line whose Remarks name an `EC <nr>` its Trip holds no
+ * confirmation for: the match stands, and the missing confirmation is said
+ * apart from it. `held` is every confirmation number per Trip.
+ */
+export function withMissingConfirmations(
+  matches: readonly InvoiceRowMatch[],
+  held: ReadonlyMap<string, readonly string[]>,
+): InvoiceRowMatch[] {
+  return matches.map((match) => {
+    if (match.status !== InvoiceRowStatus.MATCHED || match.trip === null || match.row.costLine !== null) {
+      return match;
+    }
+
+    const known = new Set(held.get(match.trip.id) ?? []);
+    const unknown = toStatedCcNumbers(match.row.remarks).filter((number) => !known.has(number));
+
+    if (unknown.length === 0) {
+      return match;
+    }
+
+    const explanation = `De transportmatch is geslaagd; voor ${unknown
+      .map((number) => `EC ${number}`)
+      .join(", ")} is bij deze rit geen kostenbevestiging gevonden.`;
+
+    return { ...match, problem: [match.problem, explanation].filter(Boolean).join(" ") };
+  });
 }

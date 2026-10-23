@@ -10,12 +10,14 @@ import {
   InvoiceAuditReadRepository,
   type InvoiceCostConfirmation,
 } from "../invoice-audit-read.repository";
+import { toStatedCcNumbers } from "../remarks/remark-parts";
 import type { AuditMarkedRow } from "../workbook/invoice-audit-marker";
 import type { InvoiceSheetRow } from "../workbook/invoice-sheet";
 import { decideCostLine } from "./cost-line-matching";
 import { identifyCostLineTransport } from "./cost-line-transport";
 import { withIdentityConflicts } from "./identity-conflicts";
-import { withExplanations } from "./match-explanations";
+import { toOwnTransportLines, toTransportCandidates } from "./ec-transport-lines";
+import { withExplanations, withMissingConfirmations } from "./match-explanations";
 import { InvoiceRowStatus, type InvoiceRowMatch } from "./invoice-row-match";
 import { decideByContainer, decideByTwoValues, isOnInvoiceDate } from "./row-decisions";
 import {
@@ -89,11 +91,14 @@ export class InvoiceRowMatchingService {
     rows: readonly InvoiceSheetRow[],
     addedByAudit: ReadonlyMap<number, AuditMarkedRow> = new Map(),
   ): Promise<readonly InvoiceRowMatch[]> {
-    const transports = await this.matchTransports(
-      rows.filter((row) => row.costLine === null),
-      addedByAudit,
+    const transportRows = rows.filter((row) => row.costLine === null);
+    const transportLines = await this.matchTransports(transportRows, addedByAudit);
+    const ownLines = await this.matchEkLinesAsTransports(transportRows, transportLines, rows, addedByAudit);
+    const ownLineRows = new Set(ownLines.map((match) => match.row.rowNumber));
+    const costLines = await this.matchCostLines(
+      rows.filter((row) => row.costLine !== null && !ownLineRows.has(row.rowNumber)),
     );
-    const costLines = await this.matchCostLines(rows.filter((row) => row.costLine !== null));
+    const transports = await this.withUnknownConfirmations([...transportLines, ...ownLines]);
     const resolved = new Map(
       withIdentityConflicts([...transports, ...costLines]).map((match) => [match.row.rowNumber, match]),
     );
@@ -164,10 +169,56 @@ export class InvoiceRowMatchingService {
   private async loadPartialSources(rows: readonly InvoiceSheetRow[]): Promise<PartialSources> {
     const [tripsOnDates, tripsByBooking] = await Promise.all([
       this.reads.findTripsOnDates(toDays(rows)),
-      this.reads.findTripsByBookings([...new Set(rows.map((row) => row.bookingNumber))]),
+      this.reads.findTripsByBookings(toBookings(rows)),
     ]);
 
     return { tripsOnDates, tripsByBooking };
+  }
+
+  /**
+   * The EK lines stating a whole transport that are that transport's own line
+   * (`ec-transport-lines.ts`). They are matched together with the transport
+   * lines, on the three values alone; only the ones whose Trip no transport
+   * line names are kept. The transport lines' own answers stand as they were.
+   */
+  private async matchEkLinesAsTransports(
+    transportRows: readonly InvoiceSheetRow[],
+    transportLines: readonly InvoiceRowMatch[],
+    rows: readonly InvoiceSheetRow[],
+    addedByAudit: ReadonlyMap<number, AuditMarkedRow>,
+  ): Promise<InvoiceRowMatch[]> {
+    const candidates = toTransportCandidates(rows);
+
+    if (candidates.length === 0) {
+      return [];
+    }
+
+    const candidateRows = new Set(candidates.map((row) => row.rowNumber));
+    const together = await this.matchTransports([...transportRows, ...candidates], addedByAudit);
+
+    return toOwnTransportLines(
+      together.filter((match) => candidateRows.has(match.row.rowNumber)),
+      transportLines,
+    );
+  }
+
+  /**
+   * A matched transport line naming an `EC <nr>` its Trip holds no confirmation
+   * for says so — beside a match that stands: the transport is checked all the
+   * same, and only that confirmation is missing.
+   */
+  private async withUnknownConfirmations(matches: readonly InvoiceRowMatch[]): Promise<InvoiceRowMatch[]> {
+    const naming = matches.filter(
+      (match) => match.status === InvoiceRowStatus.MATCHED && toStatedCcNumbers(match.row.remarks).length > 0,
+    );
+
+    if (naming.length === 0) {
+      return [...matches];
+    }
+
+    const held = await this.reads.findCostConfirmationNumbers([...new Set(naming.map((match) => match.trip!.id))]);
+
+    return withMissingConfirmations(matches, held);
   }
 
   /** Every Cost Confirmation line, resolved through the confirmation it names. */
@@ -191,15 +242,12 @@ export class InvoiceRowMatchingService {
     }
 
     const tripsById = new Map(trips.map((trip) => [trip.id, trip]));
-    // Only lines naming an unknown confirmation need their transport found apart.
-    const unknown = rows.filter((row) => row.costLine!.ccNumbers.some((number) => !confirmationsByNumber.has(number)));
-    const sources = unknown.length > 0 ? await this.loadPartialSources(unknown) : null;
+    // Every EC line's transport is identified on its own values, apart from its confirmation.
+    const sources = await this.loadPartialSources(rows);
 
     return rows.map((row) => ({
       row,
-      ...decideCostLine(row, confirmationsByNumber, tripsById, (line) =>
-        sources === null ? null : identifyCostLineTransport(line, sources),
-      ),
+      ...decideCostLine(row, confirmationsByNumber, tripsById, (line) => identifyCostLineTransport(line, sources)),
       sharedKeyRowNumbers: [],
       containerCorrection: null,
       dateCorrection: null,
@@ -231,7 +279,7 @@ export class InvoiceRowMatchingService {
   private loadCandidates(rows: readonly InvoiceSheetRow[]): Promise<Trip[]> {
     return this.trips.findManyForInvoice({
       invoiceDates: toDays(rows),
-      bookingNumbers: [...new Set(rows.map((row) => row.bookingNumber))],
+      bookingNumbers: toBookings(rows),
       statuses: CANDIDATE_STATUSES,
     });
   }
@@ -259,9 +307,14 @@ export class InvoiceRowMatchingService {
   }
 }
 
-/** The days the rows state, as the database stores a calendar date. */
+/** The days the rows state, as the database stores a calendar date; a row without one adds none. */
 function toDays(rows: readonly InvoiceSheetRow[]): Date[] {
-  return [...new Set(rows.map((row) => row.planningDate))].map(toUtcDate);
+  return [...new Set(rows.map((row) => row.planningDate).filter((day) => day !== ""))].map(toUtcDate);
+}
+
+/** The bookings the rows state; a row without one adds none. */
+function toBookings(rows: readonly InvoiceSheetRow[]): string[] {
+  return [...new Set(rows.map((row) => row.bookingNumber).filter((booking) => booking !== ""))];
 }
 
 /**

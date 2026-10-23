@@ -87,13 +87,15 @@ export interface InvoicePriceReliability {
  * application is — they are displayed and compared, never calculated with.
  */
 /** What became of one component: unchanged, or the kind of its difference. */
-export type InvoiceComparisonOutcome = "UNCHANGED" | "FILLED" | InvoiceDifferenceKind;
+export type InvoiceComparisonOutcome = "UNCHANGED" | InvoiceDifferenceKind;
 
 export interface InvoicePriceComparison {
   readonly component: string;
   readonly outcome: InvoiceComparisonOutcome;
-  /** What the Excel states; null when nothing or unreadable. */
+  /** What the Excel states; 0.00 for an empty cell; null only when unreadable. */
   readonly excelValue: string | null;
+  /** The cell is empty: its 0.00 is what it was compared as, not a written figure. */
+  readonly excelCellEmpty: boolean;
   /** What Trano holds; null when there is nothing to set against the cell. */
   readonly tranoValue: string | null;
   /** What the corrected document writes; null when nothing is written. */
@@ -157,7 +159,7 @@ export interface InvoiceAuditRow {
    * order — the check's own comparison. Empty when the line was not compared.
    */
   readonly comparisons: readonly InvoicePriceComparison[];
-  /** The line states no transport price: Trano's are filled in, not compared. */
+  /** The line states no transport price: compared as €0, Trano's are filled in. */
   readonly transportPricesFilled: boolean;
   /** Null for a line that was not compared. */
   readonly priceReliability: InvoicePriceReliability | null;

@@ -96,12 +96,17 @@ export interface InvoiceCostLine {
 export interface InvoiceSheetRow {
   /** The row's number in the workbook, 1-based, as Excel counts. */
   readonly rowNumber: number;
-  /** `YYYY-MM-DD`, normalised from whatever the cell held. */
+  /**
+   * `YYYY-MM-DD`, normalised from whatever the cell held; empty when the cell
+   * holds no readable date — the line then names its Trip by the other two.
+   */
   readonly planningDate: string;
+  /** Empty when the sheet states none — the line names its Trip by the other two. */
   readonly bookingNumber: string;
   /**
-   * The container EXACTLY as the sheet spells it, spaces and all. Empty only on
-   * a Cost Confirmation line that states none.
+   * The container EXACTLY as the sheet spells it, spaces and all. Empty when
+   * the sheet states none: a Cost Confirmation line, or a line naming its
+   * Trip by its date and booking.
    */
   readonly containerNumber: string;
   /** The same container, as matching compares it. See `normalizeContainerNumber`. */
@@ -263,7 +268,8 @@ export interface InvoicePeriod {
  * transport is called missing on a guess.
  */
 export function toInvoicePeriod(rows: readonly InvoiceSheetRow[]): InvoicePeriod | null {
-  const transports = rows.filter((row) => row.costLine === null);
+  // A line without a readable date says nothing about the week.
+  const transports = rows.filter((row) => row.costLine === null && row.planningDate !== "");
 
   if (transports.length === 0) {
     return null;

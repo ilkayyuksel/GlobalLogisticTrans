@@ -13,6 +13,7 @@ import { RemarkKind, type RemarkPart } from "./remark-parts";
  *   the waiting time    `wachtuur H:MM tot H:MM`, the customer's commonest
  *                       form (`wachtuur 9:00 tot 11:30`)
  *   no Combination      `GEEN COMBI`
+ *   Extra notities      the operator's note on the Trip, as written, last
  *
  * No translation is invented: a property name is written as its name, in
  * lower case — also when this invoice has never used the word, which is no
@@ -29,6 +30,8 @@ export interface RemarkFacts {
   readonly ccNumbers: readonly string[];
   readonly waiting: WaitingFacts | null;
   readonly geenCombi: boolean;
+  /** The Trip's Extra notities (`internal_notes`); absent or null when none. */
+  readonly extraNotes?: string | null;
 }
 
 export interface WaitingFacts {
@@ -74,6 +77,13 @@ export function toCustomerRemarkParts(facts: RemarkFacts): CustomerRemarkParts {
 
   if (facts.geenCombi) {
     parts.push({ kind: RemarkKind.GEEN_COMBI, text: GEEN_COMBI });
+  }
+
+  // One line of Remarks: a note typed over several lines is joined by spaces.
+  const note = facts.extraNotes?.replace(/\s+/g, " ").trim() ?? "";
+
+  if (note !== "") {
+    parts.push({ kind: RemarkKind.NOTE, text: note });
   }
 
   return { parts, unexpressed };

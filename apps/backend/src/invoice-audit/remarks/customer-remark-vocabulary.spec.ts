@@ -65,6 +65,13 @@ describe("the customer's words", () => {
     expect(notWritten.unexpressed).toEqual([WAITING_NOT_WRITTEN_NOTE]);
   });
 
+  it("writes the Trip's Extra notities last, on one line", () => {
+    expect(
+      texts(facts({ propertyNames: ["Flat"], extraNotes: ["LAAD REF", "KLOPT NIET "].join(String.fromCharCode(10)) })),
+    ).toEqual(["flat", "LAAD REF KLOPT NIET"]);
+    expect(texts(facts({ extraNotes: null }))).toEqual([]);
+  });
+
   it("says nothing about a Trip without a waiting time", () => {
     expect(
       toCustomerRemarkParts(facts({ waiting: { start: null, end: null, endsNextDay: false, minutes: null } }))

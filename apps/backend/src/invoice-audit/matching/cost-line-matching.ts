@@ -5,6 +5,7 @@ import type { InvoiceCostConfirmation } from "../invoice-audit-read.repository";
 import type { InvoiceSheetRow } from "../workbook/invoice-sheet";
 import type { IdentifiedTransport } from "./cost-line-transport";
 import { InvoiceRowStatus, type BookingCorrection } from "./invoice-row-match";
+import { describeTrip } from "./trip-words";
 
 /**
  * Which confirmation — and so which Trip — a Cost Confirmation line charges.
@@ -31,14 +32,26 @@ export interface CostLineDecision {
   readonly costConfirmation: InvoiceCostConfirmation | null;
   /** The line's misprinted booking, corrected to its Trip's. */
   readonly bookingCorrection: BookingCorrection | null;
+  /**
+   * The Trip the line's OWN values — date, booking, container — identify,
+   * found apart from its confirmation (`cost-line-transport.ts`); null when
+   * they identify none, or several.
+   */
+  readonly transportTrip: Trip | null;
   readonly problem: string | null;
 }
 
 /**
- * `transportOf` finds the transport a line is about when its confirmation is
- * unknown (`cost-line-transport.ts`): the line stays unresolved — its EK has no
- * confirmation to be compared with — but it names the transport it is about,
- * and its misprinted booking is corrected.
+ * ── TWO QUESTIONS, ANSWERED APART ───────────────────────────────────────────
+ * Which transport the line is about is answered by its date, booking and
+ * container alone (`transportOf`) — never by its EC number. Which Trip its EK
+ * is checked against is answered by its confirmation. Only when the two agree
+ * — or the values identify no Trip — is the EK checked; when they name
+ * different Trips, nothing is chosen: the line is unresolved and says both.
+ *
+ * With its confirmation unknown, the line names the transport its values
+ * identify and its misprinted booking is corrected; its EK has nothing to be
+ * compared with.
  */
 export function decideCostLine(
   row: InvoiceSheetRow,
@@ -46,6 +59,17 @@ export function decideCostLine(
   tripsById: ReadonlyMap<string, Trip>,
   transportOf: (row: InvoiceSheetRow) => IdentifiedTransport | null = () => null,
 ): CostLineDecision {
+  const transport = transportOf(row);
+
+  return { ...decideOnConfirmation(row, confirmationsByNumber, tripsById, transport), transportTrip: transport?.trip ?? null };
+}
+
+function decideOnConfirmation(
+  row: InvoiceSheetRow,
+  confirmationsByNumber: ReadonlyMap<string, readonly InvoiceCostConfirmation[]>,
+  tripsById: ReadonlyMap<string, Trip>,
+  transport: IdentifiedTransport | null,
+): Omit<CostLineDecision, "transportTrip"> {
   const ccNumbers = row.costLine?.ccNumbers ?? [];
 
   if (ccNumbers.length !== 1) {
@@ -56,8 +80,6 @@ export function decideCostLine(
   const confirmations = confirmationsByNumber.get(ccNumber) ?? [];
 
   if (confirmations.length === 0) {
-    const transport = transportOf(row);
-
     return {
       ...unresolved(`${NO_CONFIRMATION_FOUND} ${ccNumber}.`, transport ? [transport.trip] : []),
       bookingCorrection: transport?.bookingCorrection ?? null,
@@ -101,6 +123,13 @@ export function decideCostLine(
     return unresolved(`Kostenbevestiging EC ${ccNumber} hoort bij een rit met een ander containernummer.`, [trip]);
   }
 
+  if (transport !== null && transport.trip.id !== trip.id) {
+    return unresolved(
+      `Kostenbevestiging EC ${ccNumber} hoort bij rit ${describeTrip(trip)}, maar de identificatievelden van deze regel (datum, boekingsnummer, container) wijzen rit ${describeTrip(transport.trip)} aan; het EK-bedrag is niet gecontroleerd.`,
+      [trip],
+    );
+  }
+
   if (trip.status !== TripStatus.CLOSED) {
     return unresolved(`De rit van kostenbevestiging EC ${ccNumber} is niet afgewerkt.`, [trip]);
   }
@@ -122,7 +151,7 @@ function holdsLineContainer(row: InvoiceSheetRow, trip: Trip): boolean {
   );
 }
 
-function unresolved(problem: string, candidates: readonly Trip[] = []): CostLineDecision {
+function unresolved(problem: string, candidates: readonly Trip[] = []): Omit<CostLineDecision, "transportTrip"> {
   return {
     status: InvoiceRowStatus.COST_LINE_UNRESOLVED,
     trip: null,

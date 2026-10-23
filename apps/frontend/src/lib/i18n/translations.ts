@@ -105,9 +105,9 @@ const nl = {
   "invoiceAudit.pricing.compare.result": "Resultaat",
   "invoiceAudit.pricing.compare.unchanged": "geen wijziging",
   "invoiceAudit.pricing.compare.written": "wordt",
-  "invoiceAudit.pricing.compare.filled": "ingevuld",
+  "invoiceAudit.pricing.compare.empty": "leeg",
   "invoiceAudit.pricing.filledFromTrano":
-    "Excel bevat geen transportprijzen om te vergelijken; de prijzen worden vanuit Trano ingevuld.",
+    "Excel bevat geen transportprijzen; lege cellen tellen als € 0,00 en de Trano-prijzen worden ingevuld.",
   "invoiceAudit.pricing.compare.writtenHint": "Deze waarde wordt in rood naar het Excel-bestand geschreven.",
   "invoiceAudit.pricing.tripRoute": "Rit",
   "invoiceAudit.pricing.pricedRoute": "Geprijsd op",
@@ -1408,9 +1408,9 @@ const tr: Translations = {
   "invoiceAudit.pricing.compare.result": "Sonuç",
   "invoiceAudit.pricing.compare.unchanged": "değişiklik yok",
   "invoiceAudit.pricing.compare.written": "olur",
-  "invoiceAudit.pricing.compare.filled": "dolduruldu",
+  "invoiceAudit.pricing.compare.empty": "boş",
   "invoiceAudit.pricing.filledFromTrano":
-    "Excel'de karşılaştırılacak taşıma fiyatı yok; fiyatlar Trano'dan doldurulur.",
+    "Excel'de taşıma fiyatı yok; boş hücreler € 0,00 sayılır ve Trano fiyatları doldurulur.",
   "invoiceAudit.pricing.compare.writtenHint": "Bu değer Excel dosyasına kırmızı olarak yazılır.",
   "invoiceAudit.pricing.tripRoute": "Sefer",
   "invoiceAudit.pricing.pricedRoute": "Fiyatlandırılan rota",

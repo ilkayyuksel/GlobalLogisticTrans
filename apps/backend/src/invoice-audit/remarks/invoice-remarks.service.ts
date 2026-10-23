@@ -78,6 +78,7 @@ export class InvoiceRemarksService {
             endsNextDay: trip.waitingTimeEndsNextDay ?? false,
             minutes: trip.waitingTimeMinutes ?? null,
           },
+          extraNotes: trip.internalNotes ?? null,
         },
       ]),
     );

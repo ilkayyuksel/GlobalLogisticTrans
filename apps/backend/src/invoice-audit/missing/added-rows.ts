@@ -58,6 +58,7 @@ export function planAddedRows(
       ccNumbers: facts?.ccNumbers ?? [],
       waiting: facts?.waiting ?? null,
       geenCombi: false,
+      extraNotes: facts?.extraNotes ?? null,
     });
 
     return {

@@ -762,10 +762,18 @@ describe("Excel factuurcontrole", () => {
      */
     describe("Excel beside Trano", () => {
       const baseRow = () => result().rows[0];
-      const comparison = (component: string, outcome: string, excelValue: string | null, tranoValue: string | null, writtenValue: string | null = null) => ({
+      const comparison = (
+        component: string,
+        outcome: string,
+        excelValue: string | null,
+        tranoValue: string | null,
+        writtenValue: string | null = null,
+        excelCellEmpty = false,
+      ) => ({
         component,
         outcome,
         excelValue,
+        excelCellEmpty,
         tranoValue,
         writtenValue,
       });
@@ -814,22 +822,22 @@ describe("Excel factuurcontrole", () => {
         expect(cellsOf(table, "Tol")).toEqual(["€50.00", "€50.00", "geen wijziging"]);
       });
 
-      it("says the prices are filled from Trano when the Excel states none, without a comparison", async () => {
+      it("shows an empty Excel cell as €0.00 against Trano, and says the prices come from Trano", async () => {
         const table = await show({
           transportPricesFilled: true,
           comparisons: [
-            comparison("Tarief", "FILLED", null, "475.00", "475.00"),
-            comparison("Fuel", "FILLED", null, "114.00", "114.00"),
+            comparison("Tarief", "RAISE", "0.00", "475.00", "475.00", true),
+            comparison("Fuel", "RAISE", "0.00", "114.00", "114.00", true),
           ],
         });
 
         expect(
           within(rowFor("DUBANR2718284")).getByText(
-            "Excel bevat geen transportprijzen om te vergelijken; de prijzen worden vanuit Trano ingevuld.",
+            "Excel bevat geen transportprijzen; lege cellen tellen als € 0,00 en de Trano-prijzen worden ingevuld.",
           ),
         ).toBeInTheDocument();
-        expect(cellsOf(table, "Tarief")).toEqual(["—", "€475.00", "ingevuld €475.00"]);
-        expect(within(table).getByText("ingevuld €475.00")).toHaveClass("text-danger");
+        expect(cellsOf(table, "Tarief")).toEqual(["€0.00(leeg)", "€475.00", "wordt €475.00"]);
+        expect(within(table).getByText("wordt €475.00")).toHaveClass("text-danger");
       });
 
       it("shows an unreadable cell without a Trano figure", async () => {

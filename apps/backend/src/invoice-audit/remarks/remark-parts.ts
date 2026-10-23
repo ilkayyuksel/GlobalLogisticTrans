@@ -19,6 +19,8 @@ export const RemarkKind = {
   /** The waiting window: `wachtuur 7:30 tot 11:30`. */
   WAITING: "WAITING",
   GEEN_COMBI: "GEEN_COMBI",
+  /** The Trip's Extra notities, as an operator wrote them: `LAAD REF KLOPT NIET`. */
+  NOTE: "NOTE",
 } as const;
 
 export type RemarkKind = (typeof RemarkKind)[keyof typeof RemarkKind];
@@ -55,6 +57,8 @@ export function toRemarkParts(remarks: string): string[] {
  *   wachtuur     any part containing the word — `wachtuur kaai 10:00 tot 11:00`
  *                is the customer's own spelling of a waiting time
  *   GEEN COMBI   exactly those words, any case
+ *   a note       the whole note, anywhere in the Remarks, any case — it may
+ *                hold commas of its own, so it is not looked for as one part
  */
 export function isStated(
   part: RemarkPart,
@@ -72,7 +76,14 @@ export function isStated(
       return stated.some((text) => /wachtuur/i.test(text));
     case RemarkKind.GEEN_COMBI:
       return stated.some((text) => text.toUpperCase() === part.text);
+    case RemarkKind.NOTE:
+      return toComparableNote(stated.join(SEPARATOR)).includes(toComparableNote(part.text));
   }
+}
+
+/** Text compared as parts: the spaces around commas and the case do not count. */
+function toComparableNote(text: string): string {
+  return toRemarkParts(text).join(SEPARATOR).toLowerCase();
 }
 
 /** Every confirmation number a Remarks text names as `EC <nr>`. */

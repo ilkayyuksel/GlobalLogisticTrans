@@ -39,7 +39,12 @@ export function InvoicePriceComparisonTable({ comparisons }: { comparisons: read
             <th scope="row" className="pr-3 text-left font-normal text-muted">
               {comparison.component}
             </th>
-            <td className="pr-3 text-right text-secondary">{toMoney(comparison.excelValue)}</td>
+            <td className="pr-3 text-right text-secondary">
+              {toMoney(comparison.excelValue)}
+              {comparison.excelCellEmpty ? (
+                <span className="ml-1 text-muted">({t("invoiceAudit.pricing.compare.empty")})</span>
+              ) : null}
+            </td>
             <td className="pr-3 text-right text-secondary">{toMoney(comparison.tranoValue)}</td>
             <td className="whitespace-nowrap">
               <Outcome comparison={comparison} />
@@ -57,12 +62,6 @@ function Outcome({ comparison }: { comparison: InvoicePriceComparison }) {
   switch (comparison.outcome) {
     case "UNCHANGED":
       return <span className="text-success">{t("invoiceAudit.pricing.compare.unchanged")}</span>;
-    case "FILLED":
-      return (
-        <span className="font-medium text-danger" title={t("invoiceAudit.pricing.compare.writtenHint")}>
-          {t("invoiceAudit.pricing.compare.filled")} {toMoney(comparison.writtenValue)}
-        </span>
-      );
     case "RAISE":
       return (
         <span className="font-medium text-danger" title={t("invoiceAudit.pricing.compare.writtenHint")}>

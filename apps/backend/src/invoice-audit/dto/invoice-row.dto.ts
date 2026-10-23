@@ -83,6 +83,14 @@ export class InvoiceAuditRowDto {
   trip!: InvoiceAuditTripDto | null;
 
   @ApiProperty({
+    type: InvoiceAuditTripDto,
+    nullable: true,
+    description:
+      "On an EC line: the Trip its own date, booking and container identify — apart from `trip`, the Trip its confirmation belongs to and its EK is checked against. Null elsewhere, and when its values identify no single Trip.",
+  })
+  transportTrip!: InvoiceAuditTripDto | null;
+
+  @ApiProperty({
     type: [InvoiceAuditTripDto],
     description:
       "Every Trip sharing this line's three values, whatever its status. Empty for a line nothing matches; several for an ambiguous one; the unfinished Trip for a line that found one.",
@@ -188,6 +196,7 @@ export function toInvoiceAuditRowDto(
     containerNumber: match.row.containerNumber,
     normalizedContainerNumber: match.row.normalizedContainerNumber,
     trip: match.trip ? toInvoiceAuditTripDto(match.trip) : null,
+    transportTrip: match.transportTrip ? toInvoiceAuditTripDto(match.transportTrip) : null,
     candidates: match.candidates.map(toInvoiceAuditTripDto),
     sharedKeyRowNumbers: [...match.sharedKeyRowNumbers],
     pricingStatus: pricing?.status ?? InvoicePricingStatus.NOT_COMPARED,

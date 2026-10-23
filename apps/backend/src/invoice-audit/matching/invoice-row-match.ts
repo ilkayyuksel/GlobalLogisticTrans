@@ -123,6 +123,11 @@ export interface InvoiceRowMatch {
   readonly costConfirmation: InvoiceCostConfirmation | null;
   /** Set on a line the Excel marks as half of a Combination. */
   readonly combination: InvoiceCombination | null;
+  /**
+   * On an EC line only: the Trip its own date, booking and container identify,
+   * apart from the Trip its confirmation belongs to (`trip`). Absent elsewhere.
+   */
+  readonly transportTrip?: Trip | null;
   /** Why the line could not be resolved, in a sentence a report can carry. */
   readonly problem: string | null;
 }

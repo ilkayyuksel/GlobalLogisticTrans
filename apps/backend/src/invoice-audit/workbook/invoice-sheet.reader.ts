@@ -249,10 +249,16 @@ export class InvoiceSheetReader {
         (value) => value !== null && value !== "",
       ).length;
 
-      if (planningDate !== null && bookingNumber !== "") {
+      /*
+       * Any TWO of the three values can name one Trip (`decideByTwoValues`), so
+       * a row stating two is a line: matched on the pair it states, the third
+       * corrected to its Trip's. Only a row stating one is incomplete — and a
+       * Cost Confirmation line keeps its own shape: a day, a booking, an EC.
+       */
+      if (statedValues >= 2 || (planningDate !== null && bookingNumber !== "")) {
         const line = this.toLine(row, columns, {
           rowNumber,
-          planningDate,
+          planningDate: planningDate ?? "",
           bookingNumber,
           containerNumber,
           normalizedContainerNumber: container,
@@ -321,8 +327,8 @@ export class InvoiceSheetReader {
   /**
    * One row as an invoice line, or null when it is not one.
    *
-   * A line states all three identity values — or, as a Cost Confirmation line
-   * (week 41 R53–R54), a day, a booking and an EC charge but no container.
+   * A line states at least two of the three identity values — or, as a Cost
+   * Confirmation line (week 41 R53–R54), a day, a booking and an EC charge.
    */
   private toLine(
     row: ExcelJS.Row,
@@ -346,7 +352,11 @@ export class InvoiceSheetReader {
       remarks,
     });
 
-    if (identity.normalizedContainerNumber === null && costLine === null) {
+    const stated = [identity.planningDate, identity.bookingNumber, identity.normalizedContainerNumber ?? ""].filter(
+      (value) => value !== "",
+    ).length;
+
+    if (stated < 2 && costLine === null) {
       return null;
     }
 

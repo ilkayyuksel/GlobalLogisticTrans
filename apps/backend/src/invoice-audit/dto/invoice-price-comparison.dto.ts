@@ -5,11 +5,11 @@ import { DifferenceKind, type InvoiceRowPricing } from "../pricing/invoice-recon
 import { MONEY_DECIMAL_PLACES } from "../workbook/invoice-amounts";
 
 /**
- * What became of one component: unchanged, the kind of its difference — or
- * FILLED: the Excel states nothing for it, so Trano's figure is written in. A
- * raise from an empty cell is no comparison and is not shown as one.
+ * What became of one component: unchanged, or the kind of its difference. An
+ * empty Excel cell is compared as €0,00 (owner, October 2026) — a raise from it
+ * is a raise like any other.
  */
-export const ComparisonOutcome = { UNCHANGED: "UNCHANGED", FILLED: "FILLED", ...DifferenceKind } as const;
+export const ComparisonOutcome = { UNCHANGED: "UNCHANGED", ...DifferenceKind } as const;
 
 export type ComparisonOutcome = (typeof ComparisonOutcome)[keyof typeof ComparisonOutcome];
 
@@ -25,8 +25,16 @@ export class InvoicePriceComparisonDto {
   @ApiProperty({ enum: Object.values(ComparisonOutcome) })
   outcome!: ComparisonOutcome;
 
-  @ApiProperty({ type: String, nullable: true, example: "450.00", description: "What the Excel states; null when nothing or unreadable." })
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    example: "450.00",
+    description: "What the Excel states; 0.00 for an empty cell, which is compared as zero; null only when unreadable.",
+  })
   excelValue!: string | null;
+
+  @ApiProperty({ description: "The Excel cell is empty: its 0.00 is the comparison's, not a figure the customer wrote." })
+  excelCellEmpty!: boolean;
 
   @ApiProperty({
     type: String,
@@ -56,11 +64,8 @@ export function toPriceComparisons(pricing: InvoiceRowPricing | undefined): Invo
   const comparisons: InvoicePriceComparisonDto[] = [
     ...pricing.differences.map((difference) => ({
       component: difference.component,
-      outcome:
-        difference.kind === DifferenceKind.RAISE && difference.invoiceValue === null
-          ? ComparisonOutcome.FILLED
-          : difference.kind,
-      excelValue: money(difference.invoiceValue),
+      outcome: difference.kind,
+      ...excelSide(difference.kind === DifferenceKind.UNREADABLE ? undefined : difference.invoiceValue),
       // An unreadable cell was never compared: there is no figure to set against it.
       tranoValue: difference.kind === DifferenceKind.UNREADABLE ? null : money(difference.expectedValue),
       writtenValue: difference.write === null ? null : money(difference.correctedValue),
@@ -68,7 +73,7 @@ export function toPriceComparisons(pricing: InvoiceRowPricing | undefined): Invo
     ...(pricing.agreements ?? []).map((agreement) => ({
       component: agreement.component,
       outcome: ComparisonOutcome.UNCHANGED,
-      excelValue: money(agreement.invoiceValue),
+      ...excelSide(agreement.invoiceValue),
       tranoValue: money(agreement.expectedValue),
       writtenValue: null,
     })),
@@ -76,6 +81,23 @@ export function toPriceComparisons(pricing: InvoiceRowPricing | undefined): Invo
   const order = (component: string) => INVOICE_COMPONENTS.findIndex((each) => each.label === component);
 
   return comparisons.sort((left, right) => order(left.component) - order(right.component));
+}
+
+/**
+ * The Excel's side of a comparison: an empty cell as the €0,00 it is compared
+ * as, said to be empty; an unreadable cell (`undefined`) as no figure at all.
+ */
+function excelSide(value: { toFixed(places: number): string } | null | undefined): {
+  excelValue: string | null;
+  excelCellEmpty: boolean;
+} {
+  if (value === undefined) {
+    return { excelValue: null, excelCellEmpty: false };
+  }
+
+  return value === null
+    ? { excelValue: (0).toFixed(MONEY_DECIMAL_PLACES), excelCellEmpty: true }
+    : { excelValue: value.toFixed(MONEY_DECIMAL_PLACES), excelCellEmpty: false };
 }
 
 /** EK is a cost beside the transport: its own figure says nothing about the transport's prices. */
@@ -89,7 +111,7 @@ export function fillsTransportPrices(comparisons: readonly InvoicePriceCompariso
   const transport = comparisons.filter((comparison) => comparison.component !== COST_COMPONENT);
 
   return (
-    transport.some((comparison) => comparison.outcome === ComparisonOutcome.FILLED) &&
-    transport.every((comparison) => comparison.excelValue === null)
+    transport.some((comparison) => comparison.outcome === ComparisonOutcome.RAISE) &&
+    transport.every((comparison) => comparison.excelCellEmpty)
   );
 }

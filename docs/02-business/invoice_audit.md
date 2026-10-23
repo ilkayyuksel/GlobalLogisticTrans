@@ -21,9 +21,10 @@ written workbook) are implemented.
   formulas, hidden columns, totals row and summary block are kept.
 - Columns are found by their header text (`invoice-columns.ts`), never by
   position. Fuel is any header of the form `Fuel 24%`.
-- A line states a planning date, a booking number and a container number. A row
-  with only some of them is reported as incomplete — except a Cost
-  Confirmation line (below), which may state no container.
+- A line states at least two of: a planning date, a booking number, a
+  container number (owner, October 2026) — matched on the pair it states, the
+  third corrected to its Trip's. A row stating only one is reported as
+  incomplete. A Cost Confirmation line (below) states a day and a booking.
 - A cell that BORROWS a shared formula (in week 41, `M3`–`M68` borrow `M2`'s
   `24%*L2`) is read as its own translated formula, because Excel recalculates
   it from the row's Tarief.
@@ -36,7 +37,8 @@ how that Trip's route was priced (`pricing/price-reliability.ts`).
 ### Transport lines
 
 Strongest evidence first (`matching/row-decisions.ts`). The date is either of
-the Trip's two dates, exactly; DELETED Trips are never candidates.
+the Trip's two dates, exactly; DELETED Trips are never candidates. A line is
+`NOT_FOUND` only after all three pairs were tried, whatever its Remarks say.
 
 1. date + booking + container: one CLOSED Trip is `MATCHED`, several are
    `AMBIGUOUS`, only unfinished ones `NOT_FINISHED`;
@@ -95,6 +97,13 @@ It is resolved through the confirmation it names (`EC` = the confirmation's
 booking and — if the line states one — container. A misprinted booking is
 corrected (red) when the line's container is that Trip's.
 
+Every EC line's transport is identified on its own values — date, booking,
+container — apart from its confirmation (`transportTrip`, owner, October
+2026); the EC number never decides it. Its EK is checked against its
+confirmation's Trip only when that is the Trip its values identify, or they
+identify none; when they name a different Trip, the line is
+`COST_LINE_UNRESOLVED`, says both, and its EK is not checked.
+
 When the confirmation is not known, the line stays `COST_LINE_UNRESOLVED`, but
 its transport is looked for apart (`matching/cost-line-transport.ts`, the same
 pairs of values as a transport line; only a booking is ever corrected on an EC
@@ -115,6 +124,19 @@ EC lines do not already charge (`missing/ek-on-cost-lines.ts`, the rule of
 lines and the added line (`payment/invoice-payments.ts`). Beside a transport
 line stating the same date, booking and container, an EK line is that
 transport's split EK, as before.
+
+**An EK line that states a whole transport is that transport's line** (owner,
+October 2026, `matching/ec-transport-lines.ts`). A row shaped like an EC line
+that states a day, a booking AND a container is matched as a transport line —
+on those three values, never on its EC number — whenever no transport line of
+the document names that Trip; its empty prices are then filled. Its `EC <nr>`
+is a Remarks part: a number the Trip holds no confirmation for is reported on
+the line beside a match that stands. When the Trip has a transport line of its
+own, the row stays the EC line it is. Whatever the transport match finds for
+such a row — one Trip, several, one in conflict — stands; only a row the three
+values find NO Trip for goes on to its EC number, which never chooses between
+Trips the match found. An EC line stating no container names a charge, not a
+transport, and is handled as above.
 
 ### Combinations and `GEEN COMBI`
 
@@ -226,9 +248,10 @@ corrected file writes — the differences and the components that agree
 the invoice's column order. A line that was not compared, or whose price is
 not relied on, shows no Trano figure.
 
-A component the Excel leaves empty is not compared but FILLED: Trano's stored
-figure is written in, through the same raise as any other (red, the Fuel as
-the customer's formula, a zero left empty). A line stating no transport price
+A component the Excel leaves empty is compared as €0,00 (owner, October 2026)
+and raised to Trano's stored figure like any other (red, the Fuel as the
+customer's formula, a zero left empty); the preview shows that cell as
+`€0.00 (leeg)` (`excelCellEmpty`). A line stating no transport price
 at all says so (`transportPricesFilled`): its prices come from Trano. With a
 price that is not relied on — or no stored price — nothing is filled and the
 reliability warning says why. An EC line is never given a transport price; a
@@ -294,6 +317,7 @@ second split row) is completed with what it does not say yet
 | every Cost Confirmation of the Trip | `EC <nr>` | names that number on ANY row of the Trip |
 | a waiting window — also one ending the next day | `wachtuur H:MM tot H:MM` | contains `wachtuur` |
 | a `GEEN_COMBI` pair | `GEEN COMBI` | is exactly those words |
+| the Trip's Extra notities (`internal_notes`), whatever its price | the note as written, on one line, last | contains the whole note, any case |
 
 - New parts go at the END, separated by `,` without a space; the existing text
   stays exactly as it was (only trailing spaces give way to the comma).

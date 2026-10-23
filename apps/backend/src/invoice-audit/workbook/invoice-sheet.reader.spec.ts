@@ -238,15 +238,30 @@ describe("InvoiceSheetReader", () => {
       ]);
     });
 
-    /** A day nobody can read is not guessed at: the row is not a line. */
-    it("does not read an unreadable date as a transport", async () => {
+    /*
+     * A day nobody can read is not guessed at: the line has no date, and is
+     * matched on its booking and container alone — the date then corrected to
+     * its Trip's (`decideByTwoValues`).
+     */
+    it("reads a line with an unreadable date as one without a date, never guessing it", async () => {
       const file = await buildInvoiceWorkbook({
         lines: [{ ...LINE, planningDate: "vorige week" }],
       });
 
       const sheet = await reader.read(file, "week 13.xlsx");
 
-      expect(sheet.rows).toHaveLength(0);
+      expect(sheet.rows).toEqual([expect.objectContaining({ rowNumber: 2, planningDate: "" })]);
+      expect(sheet.incompleteRowNumbers).toEqual([]);
+    });
+
+    it("still reports a row stating only one of the three values as incomplete", async () => {
+      const file = await buildInvoiceWorkbook({
+        lines: [{ ...LINE, planningDate: "vorige week", containerNumber: "" }],
+      });
+
+      const sheet = await reader.read(file, "week 13.xlsx");
+
+      expect(sheet.rows).toEqual([]);
       expect(sheet.incompleteRowNumbers).toEqual([2]);
     });
   });
