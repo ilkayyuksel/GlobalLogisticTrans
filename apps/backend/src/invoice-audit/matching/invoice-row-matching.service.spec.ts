@@ -586,12 +586,16 @@ describe("InvoiceRowMatchingService — both dates and a misprinted container", 
     });
 
     /** No container to correct TO: the customer's own value is never blanked. */
-    it("leaves a sole CLOSED Trip without a container NOT_FOUND", async () => {
+    /*
+     * Two values name it, and only it: it is the line's Trip. With no container
+     * of its own there is nothing to correct the line to, so the line's stays.
+     */
+    it("matches a sole CLOSED Trip without a container, correcting nothing", async () => {
       const match = await matchOne(WRONG, [replanned({ containerNumber: null })]);
 
       expect(match).toMatchObject({
-        status: "NOT_FOUND",
-        trip: null,
+        status: "MATCHED",
+        trip: { id: "trip-a" },
         containerCorrection: null,
       });
     });

@@ -88,7 +88,7 @@ export interface PartialCandidates {
  *
  * ── ONE TRIP OR NONE ────────────────────────────────────────────────────────
  * Exactly one remaining Trip answers MATCHED (CLOSED) or NOT_FINISHED, with the
- * one value that differs corrected to the Trip's own. Two or more are
+ * one value that differs corrected to the Trip's own — when the Trip has one. Two or more are
  * AMBIGUOUS and nothing is chosen, whichever pairs of values they share.
  */
 export function decideByTwoValues(
@@ -112,26 +112,29 @@ export function decideByTwoValues(
   }
 
   const only = free[0];
-  const correction = toCorrection(row, only, partial);
-
-  // A sole Trip lacking the value the line would be corrected to answers nothing.
-  if (correction === null) {
-    return notFound();
-  }
 
   if (only.status !== TripStatus.CLOSED) {
     return decided(InvoiceRowStatus.NOT_FINISHED, null, [only]);
   }
 
-  return { ...decided(InvoiceRowStatus.MATCHED, only, [only]), ...correction };
+  return { ...decided(InvoiceRowStatus.MATCHED, only, [only]), ...toCorrection(row, only, partial) };
 }
 
-/** The one value of the line that the Trip shows to be wrong, corrected to the Trip's. */
+/**
+ * The one value of the line that the Trip shows to be wrong, corrected to the
+ * Trip's.
+ *
+ * A Trip that holds NO such value — a Trip stored without a container is
+ * ordinary — is still the line's Trip: two values name it, and only it. There
+ * is then nothing to correct the line to, so it is matched and left as written.
+ * (Until October 2026 such a line was reported as finding no Trip at all,
+ * which contradicted the Trip plainly sharing its booking and date.)
+ */
 function toCorrection(
   row: InvoiceSheetRow,
   trip: Trip,
   partial: PartialCandidates,
-): Pick<RowDecision, "containerCorrection" | "bookingCorrection" | "dateCorrection"> | null {
+): Pick<RowDecision, "containerCorrection" | "bookingCorrection" | "dateCorrection"> {
   const none = { containerCorrection: null, bookingCorrection: null, dateCorrection: null };
 
   if (partial.dateAndBooking.includes(trip)) {
@@ -143,7 +146,7 @@ function toCorrection(
             tripContainerNumber: trip.containerNumber,
           },
         }
-      : null;
+      : none;
   }
 
   if (partial.dateAndContainer.includes(trip)) {
@@ -152,7 +155,7 @@ function toCorrection(
           ...none,
           bookingCorrection: { invoiceBookingNumber: row.bookingNumber, tripBookingNumber: trip.bookingNumber },
         }
-      : null;
+      : none;
   }
 
   return trip.planningDate
@@ -160,7 +163,7 @@ function toCorrection(
         ...none,
         dateCorrection: { invoicePlanningDate: row.planningDate, tripPlanningDate: toIsoDate(trip.planningDate) },
       }
-    : null;
+    : none;
 }
 
 /** Each Trip once, in the order first given. */

@@ -1,4 +1,8 @@
+import type { Trip } from "@prisma/client";
+import { normalizeContainerNumber } from "@tms/parser";
+
 import { InvoiceRowStatus, type InvoiceRowMatch } from "./invoice-row-match";
+import { isOnInvoiceDate } from "./row-decisions";
 
 /**
  * ── ONE TRANSPORT IS NOT TWO LINES ──────────────────────────────────────────
@@ -28,7 +32,8 @@ export function withIdentityConflicts(
 
   return matches.map((match) => {
     // An EC line charges its Trip beside the transport line; it never claims to be it.
-    if (match.trip === null || match.row.costLine !== null || !isCorrected(match)) {
+    // A line this system added keeps its own answer, as it always has.
+    if (match.trip === null || match.row.costLine !== null || match.status !== InvoiceRowStatus.MATCHED || !isCorrected(match)) {
       return match;
     }
 
@@ -55,8 +60,26 @@ export function withIdentityConflicts(
   });
 }
 
+/**
+ * Whether the line reached its Trip on fewer than all three values: through a
+ * correction, or on two values of a Trip that holds no third to correct to.
+ * Either way it is the weaker evidence, and yields to another line's claim.
+ */
 function isCorrected(match: InvoiceRowMatch): boolean {
-  return match.containerCorrection !== null || match.bookingCorrection !== null || match.dateCorrection !== null;
+  return (
+    match.containerCorrection !== null ||
+    match.bookingCorrection !== null ||
+    match.dateCorrection !== null ||
+    !statesAllThree(match.row, match.trip!)
+  );
+}
+
+function statesAllThree(row: InvoiceRowMatch["row"], trip: Trip): boolean {
+  return (
+    trip.bookingNumber === row.bookingNumber &&
+    normalizeContainerNumber(trip.containerNumber) === row.normalizedContainerNumber &&
+    isOnInvoiceDate(trip, row.planningDate)
+  );
 }
 
 function identityKey(match: InvoiceRowMatch): string {

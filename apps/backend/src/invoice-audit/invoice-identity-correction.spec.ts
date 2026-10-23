@@ -471,6 +471,95 @@ describe("an invoice line with one misprinted value", () => {
     expect([...forwards.values()].sort()).toEqual(["booking", "container", "date", "exact", "first", "second"]);
   });
 
+  /**
+   * Week 41, R46: `2026-10-06 · ANRDUB2814165 · PVDU 1111246`, reported as "no
+   * Trip found" while Trano holds a Trip with that booking on that day.
+   *
+   * The Trip WAS a candidate — fetched with the line's booking and day — but it
+   * holds no container, so there was nothing to correct the line's container to,
+   * and that one case answered NOT_FOUND. Two values naming one Trip is a match.
+   */
+  describe("example D: ANRDUB2814165 on 6 October, its container not Trano's", () => {
+    const R46 = () => line(TUESDAY, "ANRDUB2814165", "PVDU1111246");
+
+    it("matches the Trip holding no container, writes nothing over the line's container, and does not add it again", async () => {
+      database.push(aTrip("t1", "ANRDUB2814165", null as unknown as string, TUESDAY));
+
+      const { rows, cell, result } = await check([R46()]);
+
+      expect(rows[0]).toMatchObject({ status: "MATCHED", trip: { id: "t1" }, containerCorrection: null, matchProblem: null });
+      expect(cell(2, COLUMN.container).value).toBe("PVDU 1111246");
+      expect(isRed(cell(2, COLUMN.container))).toBe(false);
+      expect(result.missingTrips).toEqual([]);
+      expect(result.blockedMissingTrips).toEqual([]);
+      expect(result.payments).toEqual([expect.objectContaining({ tripId: "t1", payable: true })]);
+    });
+
+    it("matches a Trip holding another container, and corrects the container in red in the written file", async () => {
+      database.push(aTrip("t1", "ANRDUB2814165", "PVDU1111999", TUESDAY));
+
+      const { rows, cell, result } = await check([R46()]);
+
+      expect(rows[0]).toMatchObject({
+        status: "MATCHED",
+        trip: { id: "t1" },
+        containerCorrection: { invoiceContainerNumber: "PVDU 1111246", tripContainerNumber: "PVDU1111999" },
+      });
+      expect(cell(2, COLUMN.container).value).toBe("PVDU1111999");
+      expect(isRed(cell(2, COLUMN.container))).toBe(true);
+      // Only that cell changed colour on the row's identity.
+      expect([isRed(cell(2, COLUMN.booking)), isRed(cell(2, COLUMN.date))]).toEqual([false, false]);
+      expect(result.missingTrips).toEqual([]);
+    });
+
+    it("reads the same day from a date cell, an Excel serial or ISO text", async () => {
+      database.push(aTrip("t1", "ANRDUB2814165", null as unknown as string, TUESDAY));
+
+      for (const planningDate of [day(TUESDAY), 46301, TUESDAY]) {
+        const { rows } = await check([{ ...R46(), planningDate }]);
+
+        expect(rows[0]).toMatchObject({ status: "MATCHED", trip: { id: "t1" } });
+      }
+    });
+
+    it("does not match on the booking alone, on another day", async () => {
+      database.push(aTrip("t1", "ANRDUB2814165", null as unknown as string, WEDNESDAY));
+
+      const { rows } = await check([R46()]);
+
+      expect(rows[0].status).toBe("NOT_FOUND");
+    });
+
+    it("keeps two Trips of that booking on that day ambiguous", async () => {
+      database.push(aTrip("t1", "ANRDUB2814165", null as unknown as string, TUESDAY));
+      database.push(aTrip("t2", "ANRDUB2814165", "PVDU1111999", TUESDAY));
+
+      const { rows } = await check([R46()]);
+
+      expect(rows[0]).toMatchObject({ status: "AMBIGUOUS", trip: null });
+      expect(rows[0].candidates.map((trip) => trip.id).sort()).toEqual(["t1", "t2"]);
+    });
+
+    it("is a conflict naming the row when another line already IS that Trip exactly", async () => {
+      database.push(aTrip("t1", "ANRDUB2814165", "PVDU1111999", TUESDAY));
+
+      const { rows } = await check([line(TUESDAY, "ANRDUB2814165", "PVDU1111999"), R46()]);
+
+      expect(rows[0]).toMatchObject({ status: "MATCHED", trip: { id: "t1" } });
+      expect(rows[1]).toMatchObject({ status: "CONFLICT", trip: null, containerCorrection: null });
+      expect(rows[1].matchProblem).toContain("rij 2");
+    });
+
+    it("is a conflict for both when two lines reach the container-less Trip on two values", async () => {
+      database.push(aTrip("t1", "ANRDUB2814165", null as unknown as string, TUESDAY));
+
+      const { rows } = await check([R46(), line(TUESDAY, "ANRDUB2814165", "PVDU1111777")]);
+
+      expect(rows.map((row) => row.status)).toEqual(["CONFLICT", "CONFLICT"]);
+      expect(rows[0].matchProblem).toContain("rij 3");
+    });
+  });
+
   it("leaves the received file byte for byte as it was", async () => {
     database.push(aTrip("t1", "ANRDUB2811064", "EUCU4590355", WEDNESDAY));
 

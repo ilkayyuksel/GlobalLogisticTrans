@@ -47,10 +47,13 @@ the Trip's two dates, exactly; DELETED Trips are never candidates.
    - booking + container on another day → the date is corrected to the Trip's
      `planningDate` (owner, October 2026).
 
-   The three pairs are judged together. Exactly one Trip, CLOSED and stating
-   the value the line is corrected to → `MATCHED` with that one value
-   corrected (red); not CLOSED → `NOT_FINISHED`; two or more → `AMBIGUOUS`,
-   nothing chosen; none → `NOT_FOUND`. One shared value is never enough.
+   The three pairs are judged together. Exactly one Trip, CLOSED → `MATCHED`
+   with the one value that differs corrected (red) to the Trip's; a Trip
+   holding no such value (a Trip stored without a container) is matched all
+   the same and nothing is corrected. Not CLOSED → `NOT_FINISHED`; two or more
+   → `AMBIGUOUS`, nothing chosen; none → `NOT_FOUND`. One shared value is never
+   enough. A line matched on two values yields to another line's claim on the
+   same Trip exactly as a corrected line does (`CONFLICT`).
 
 The lines are matched in two passes over the whole document, so the order of
 the lines never changes the answer. First every exact match; then step 2, where
