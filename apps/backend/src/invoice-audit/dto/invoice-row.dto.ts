@@ -2,6 +2,7 @@ import { ApiProperty } from "@nestjs/swagger";
 import { Trip, TripStatus } from "@prisma/client";
 
 import { toIsoDate } from "../../common/dates";
+import { toTripRoute } from "../../trips/trip-route";
 import { InvoiceRowStatus, type InvoiceRowMatch } from "../matching/invoice-row-matching.service";
 import { InvoicePricingStatus, type InvoiceRowPricing } from "../pricing/invoice-reconciliation";
 import type { RemarkChange } from "../remarks/remark-plan";
@@ -66,6 +67,15 @@ export class InvoiceAuditRowDto {
 
   @ApiProperty({ example: "ANRDUB2725107" })
   bookingNumber!: string;
+
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    example: "Quay 869 → ZEMST",
+    description:
+      "The route of the Trip the line is matched to as a TRANSPORT — on an EC line, the Trip its own values identify, never its confirmation's — as `toTripRoute` derives it. Null without a transport match.",
+  })
+  route!: string | null;
 
   @ApiProperty({
     example: "EUCU 4581604",
@@ -193,6 +203,7 @@ export function toInvoiceAuditRowDto(
     status: match.status,
     planningDate: match.row.planningDate,
     bookingNumber: match.row.bookingNumber,
+    route: toRouteLabel(transportTripOf(match)),
     containerNumber: match.row.containerNumber,
     normalizedContainerNumber: match.row.normalizedContainerNumber,
     trip: match.trip ? toInvoiceAuditTripDto(match.trip) : null,
@@ -228,6 +239,39 @@ export function toInvoiceAuditRowDto(
         }
       : null,
   };
+}
+
+/** The statuses that are a transport match of the line's own Trip. */
+const TRANSPORT_MATCHES: readonly InvoiceRowStatus[] = [InvoiceRowStatus.MATCHED, InvoiceRowStatus.ADDED_MISSING];
+
+/**
+ * The Trip the line is a transport of: its match, for a transport line; for an
+ * EC line, the Trip its own values identify — its `trip` is its confirmation's.
+ */
+function transportTripOf(match: InvoiceRowMatch): Trip | null {
+  if (match.row.costLine !== null) {
+    return match.transportTrip ?? null;
+  }
+
+  return TRANSPORT_MATCHES.includes(match.status) ? match.trip : null;
+}
+
+/**
+ * `Quay 869 → ZEMST`, or null when the Trip states no complete route. A shown
+ * label only: a Trip read without its route columns has none, and never fails
+ * the check.
+ */
+function toRouteLabel(trip: Trip | null): string | null {
+  const route =
+    trip === null
+      ? null
+      : toTripRoute({
+          direction: trip.direction ?? null,
+          terminal: trip.terminal ?? null,
+          destinationCity: trip.destinationCity ?? null,
+        });
+
+  return route === null || route.from === "" || route.to === "" ? null : `${route.from} → ${route.to}`;
 }
 
 export function toInvoiceAuditTripDto(trip: Trip): InvoiceAuditTripDto {

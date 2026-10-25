@@ -435,6 +435,25 @@ describe("Excel factuurcontrole", () => {
   describe("how lines were identified", () => {
     const matchedRow = result().rows[0];
 
+    /** The matched transport's route under the booking — as the backend sends it, or nothing. */
+    it("shows the route under the booking, and none when the line has no route", async () => {
+      requestMock.mockResolvedValue(
+        result({
+          rows: [
+            { ...matchedRow, route: "Quay 869 → ZEMST" },
+            { ...matchedRow, rowNumber: 3, bookingNumber: "ANRDUB2899999", status: "NOT_FOUND", trip: null, route: null },
+          ],
+        }),
+      );
+
+      await check();
+
+      // The fourth column is Boeking: the route stands under the booking itself.
+      const bookingCell = within(rowFor("DUBANR2718284")).getAllByRole("cell")[3];
+      expect(bookingCell).toHaveTextContent("DUBANR2718284Quay 869 → ZEMST");
+      expect(within(rowFor("ANRDUB2899999")).queryByText(/→/)).not.toBeInTheDocument();
+    });
+
     /**
      * No column of general advice: a corrected date shows as a note beside the
      * date, and a line that found no Trip carries its explanation in the

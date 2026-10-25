@@ -151,6 +151,8 @@ function InvoiceAuditRowLine({ row, marked }: { row: InvoiceAuditRow; marked: bo
       </td>
       <td className="px-3 py-2 font-medium text-foreground">
         {row.bookingNumber}
+        {/* The matched transport's route, as the backend states it; none without a match. */}
+        {row.route ? <div className="text-xs font-normal text-muted">{row.route}</div> : null}
       </td>
       <td className="px-3 py-2 text-secondary">
         {row.containerNumber}

@@ -144,6 +144,11 @@ export interface InvoiceAuditRow {
   readonly status: InvoiceRowStatus;
   readonly planningDate: string;
   readonly bookingNumber: string;
+  /**
+   * `Quay 869 → ZEMST`: the route of the Trip the line is matched to as a
+   * transport, from the backend. Null without a transport match.
+   */
+  readonly route: string | null;
   /** As the sheet spells it. */
   readonly containerNumber: string;
   /** The same container, as the match compared it. */
