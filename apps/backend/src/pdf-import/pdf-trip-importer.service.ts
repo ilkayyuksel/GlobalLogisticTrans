@@ -646,14 +646,7 @@ export class PdfTripImporter {
      * nothing — and the message is retried, which would store it again.
      */
     if (match.kind === "NO_MATCHING_TRIP") {
-      throw new CostConfirmationRefusedException(
-        confirmation.ccNumber,
-        `No Trip matches booking number ${confirmation.bookingNumber} on ${confirmation.transportDate ?? "an unstated date"}${
-          confirmation.containerReference === null
-            ? " that was ordered without a container"
-            : ` with container ${confirmation.containerReference}`
-        }.`,
-      );
+      throw new CostConfirmationRefusedException(confirmation.ccNumber, toNoMatchMessage(confirmation, match.bookingDates));
     }
 
     /*
@@ -1104,4 +1097,29 @@ function describeRevisionRefusal(
   }
 
   return "the Trip is CLOSED, and finished work is not rewritten automatically";
+}
+
+/**
+ * Why no Trip took a confirmation, in terms a person can check.
+ *
+ * The last matching phase compares the booking and the date ALONE — a
+ * container, named or not, is never required (`cost-confirmation-matching`) —
+ * so a refusal is about the booking or the date, and says which: the date the
+ * confirmation prints in its LOADING/DELIVERY section, and the days the Trips
+ * holding that booking are actually on.
+ */
+function toNoMatchMessage(
+  confirmation: { readonly bookingNumber: string; readonly transportDate: string | null },
+  bookingDates: readonly string[],
+): string {
+  if (confirmation.transportDate === null) {
+    return `Booking number ${confirmation.bookingNumber}: the confirmation states no LOADING/DELIVERY date, so no Trip can be chosen.`;
+  }
+
+  const where =
+    bookingDates.length === 0
+      ? "No Trip holds this booking number."
+      : `Trips with this booking number are on ${bookingDates.join(", ")}.`;
+
+  return `No Trip matches booking number ${confirmation.bookingNumber} on ${confirmation.transportDate}, the LOADING/DELIVERY date the confirmation prints (compared with each Trip's planning date and originally ordered date; a container is not required). ${where}`;
 }

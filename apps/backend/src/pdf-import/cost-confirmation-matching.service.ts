@@ -52,7 +52,15 @@ import { TripService } from "../trips/trip.service";
 
 export type CostConfirmationMatch =
   | { readonly kind: "MATCHED"; readonly trip: Trip }
-  | { readonly kind: "NO_MATCHING_TRIP" }
+  | {
+      readonly kind: "NO_MATCHING_TRIP";
+      /**
+       * The days the Trips holding this booking ARE on — their planning and
+       * originally ordered dates, the two a confirmation is compared with —
+       * so a refusal can say where the booking stands. Read, never matched on.
+       */
+      readonly bookingDates: readonly string[];
+    }
   | { readonly kind: "AMBIGUOUS"; readonly trips: readonly Trip[] };
 
 /** What a confirmation states about the transport it is paying for. */
@@ -72,6 +80,15 @@ export function identityOfConfirmation(
     transportDate: confirmation.transportDate,
     containerReference: toContainerIdentity(confirmation.containerReference),
   };
+}
+
+/** Every planning and originally ordered date of these Trips, each once, in order. */
+function datesOf(trips: readonly Trip[]): string[] {
+  const dates = trips.flatMap((trip) =>
+    [trip.planningDate, trip.originalPlanningDate].flatMap((date) => (date ? [toIsoDate(date)] : [])),
+  );
+
+  return [...new Set(dates)].sort();
 }
 
 @Injectable()
@@ -97,7 +114,7 @@ export class CostConfirmationMatchingService {
         bookingNumber: identity.bookingNumber,
       });
 
-      return { kind: "NO_MATCHING_TRIP" };
+      return { kind: "NO_MATCHING_TRIP", bookingDates: [] };
     }
 
     const exact = await this.trips.findByExactBookingNumber(
@@ -151,13 +168,15 @@ export class CostConfirmationMatchingService {
       return this.decide(lastByBooking);
     }
 
-    return this.decide(onDate(byDigits));
+    const last = this.decide(onDate(byDigits));
+
+    return last.kind === "NO_MATCHING_TRIP" ? { ...last, bookingDates: datesOf([...exact, ...byDigits]) } : last;
   }
 
   /** The count is the answer. Nothing is ever chosen from several. */
   private decide(candidates: readonly Trip[]): CostConfirmationMatch {
     if (candidates.length === 0) {
-      return { kind: "NO_MATCHING_TRIP" };
+      return { kind: "NO_MATCHING_TRIP", bookingDates: [] };
     }
 
     if (candidates.length > 1) {

@@ -185,7 +185,7 @@ describe("Phase 1 — the exact booking number", () => {
         await service.findTripForCostConfirmation(
           confirmation({ containerReference: CONTAINER }),
         ),
-      ).toEqual({ kind: "NO_MATCHING_TRIP" });
+      ).toMatchObject({ kind: "NO_MATCHING_TRIP" });
     });
 
     /**
@@ -305,8 +305,10 @@ describe("Phase 1 — the exact booking number", () => {
         }),
       ]);
 
+      // Refused on the date, and the days the booking IS on are stated.
       expect(await service.findTripForCostConfirmation(confirmation())).toEqual({
         kind: "NO_MATCHING_TRIP",
+        bookingDates: ["2026-08-21"],
       });
     });
 
@@ -383,6 +385,7 @@ describe("Phase 1 — the exact booking number", () => {
 
     expect(await service.findTripForCostConfirmation(confirmation())).toEqual({
       kind: "NO_MATCHING_TRIP",
+      bookingDates: [],
     });
   });
 });
@@ -426,6 +429,7 @@ describe("Phase 2 — the digit-normalized booking number", () => {
 
     expect(await service.findTripForCostConfirmation(confirmation())).toEqual({
       kind: "NO_MATCHING_TRIP",
+      bookingDates: ["2026-08-21"],
     });
   });
 
@@ -496,7 +500,7 @@ describe("Phase 2 — the digit-normalized booking number", () => {
       await service.findTripForCostConfirmation(
         confirmation({ bookingNumber: "ANRDUB" }),
       ),
-    ).toEqual({ kind: "NO_MATCHING_TRIP" });
+    ).toMatchObject({ kind: "NO_MATCHING_TRIP" });
     expect(trips.findByBookingDigits).not.toHaveBeenCalled();
   });
 });
@@ -576,7 +580,7 @@ describe("a confirmation that states no transport date", () => {
       await service.findTripForCostConfirmation(
         confirmation({ transportDate: null }),
       ),
-    ).toEqual({ kind: "NO_MATCHING_TRIP" });
+    ).toMatchObject({ kind: "NO_MATCHING_TRIP" });
   });
 
   it("asks the repository for nothing at all", async () => {
@@ -664,7 +668,7 @@ describe("Phase 3 — booking and date, container ignored", () => {
 
     expect(await service.findTripForCostConfirmation(
       confirmation({ containerReference: CONTAINER }),
-    )).toEqual({ kind: "NO_MATCHING_TRIP" });
+    )).toMatchObject({ kind: "NO_MATCHING_TRIP" });
   });
 
   /** The two-phase booking strategy survives: exact first, then digits. */
@@ -702,7 +706,7 @@ describe("Phase 3 — booking and date, container ignored", () => {
       await service.findTripForCostConfirmation(
         confirmation({ containerReference: CONTAINER }),
       ),
-    ).toEqual({ kind: "NO_MATCHING_TRIP" });
+    ).toMatchObject({ kind: "NO_MATCHING_TRIP" });
   });
 
   /** A DELETED Trip is out of reach in every phase, this one included. */
@@ -718,7 +722,7 @@ describe("Phase 3 — booking and date, container ignored", () => {
       await service.findTripForCostConfirmation(
         confirmation({ containerReference: CONTAINER }),
       ),
-    ).toEqual({ kind: "NO_MATCHING_TRIP" });
+    ).toMatchObject({ kind: "NO_MATCHING_TRIP" });
   });
 });
 

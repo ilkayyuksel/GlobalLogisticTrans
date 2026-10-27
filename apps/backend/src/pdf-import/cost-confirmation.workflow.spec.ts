@@ -562,6 +562,104 @@ describe("every real Cost Confirmation, through the real workflow", () => {
     });
   });
 
+  /**
+   * A confirmation naming no container (`CC-zonder-container.pdf`: ANRDUB2796313,
+   * LOADING date 28/08/2026) reaches its Trip on the booking and that date —
+   * whatever the Trip's container is now. An operator may type one in after the
+   * order; the import never touches it.
+   */
+  describe("a container-less confirmation and the Trip's own container", () => {
+    const CONTAINERLESS = EXPECTED[5];
+
+    async function tripWithContainer(containerNumber: string | null, isoDate = CONTAINERLESS.transportDate) {
+      const trip = await seedTrip(CONTAINERLESS);
+
+      Object.assign(trip, {
+        containerNumber,
+        planningDate: new Date(`${isoDate}T00:00:00.000Z`),
+        originalPlanningDate: new Date(`${isoDate}T00:00:00.000Z`),
+      });
+
+      return trip;
+    }
+
+    const importIt = () => harness.importer.confirmCost(readConfirmation(CONTAINERLESS.file), CONTAINERLESS.file);
+
+    it("reaches a Trip still without a container, and leaves it without", async () => {
+      const trip = await tripWithContainer(null);
+
+      await importIt();
+
+      expect(harness.costConfirmations).toEqual([expect.objectContaining({ tripId: trip.id, ccNumber: CONTAINERLESS.ccNumber })]);
+      expect(trip.containerNumber).toBeNull();
+    });
+
+    it("reaches a Trip whose container was typed in later, and never changes it", async () => {
+      const trip = await tripWithContainer("PVDU 1234567");
+
+      await importIt();
+
+      expect(harness.costConfirmations).toEqual([expect.objectContaining({ tripId: trip.id })]);
+      expect(trip.containerNumber).toBe("PVDU 1234567");
+    });
+
+    it("reaches it even when its source order cannot be read: booking and date alone", async () => {
+      const trip = await tripWithContainer("PVDU 1234567");
+
+      trip.pdfDocumentId = "pdf-gone";
+
+      await importIt();
+
+      expect(harness.costConfirmations).toEqual([expect.objectContaining({ tripId: trip.id })]);
+    });
+
+    it("picks the Trip on the confirmation's date among the booking's Trips on other dates", async () => {
+      await tripWithContainer("PVDU 1111111", "2026-08-27");
+      const onTheDate = await tripWithContainer("PVDU 2222222");
+
+      await importIt();
+
+      expect(harness.costConfirmations).toEqual([expect.objectContaining({ tripId: onTheDate.id })]);
+    });
+
+    it("refuses two Trips of the booking on that date, choosing neither", async () => {
+      await tripWithContainer(null);
+      await tripWithContainer("PVDU 2222222");
+
+      await expect(importIt()).rejects.toThrow(/matches 2 Trips on 2026-08-28/);
+      expect(harness.costConfirmations).toEqual([]);
+    });
+
+    /**
+     * The refusal of ANRDUB2821379 read "…that was ordered without a container",
+     * though no container is required: it is the DATE that did not match.
+     */
+    it("says, when nothing matches, the date it compared and the days the booking is on — never a container", async () => {
+      await tripWithContainer("PVDU 1234567", "2026-08-27");
+
+      const refusal = importIt();
+
+      await expect(refusal).rejects.toThrow(
+        "No Trip matches booking number ANRDUB2796313 on 2026-08-28, the LOADING/DELIVERY date the confirmation prints (compared with each Trip's planning date and originally ordered date; a container is not required). Trips with this booking number are on 2026-08-27.",
+      );
+      await expect(importIt()).rejects.not.toThrow(/ordered without a container/);
+      expect(harness.costConfirmations).toEqual([]);
+    });
+
+    it("says so when no Trip holds the booking at all", async () => {
+      await expect(importIt()).rejects.toThrow(/on 2026-08-28.*No Trip holds this booking number\./);
+    });
+
+    it("records it once when it arrives again", async () => {
+      await tripWithContainer("PVDU 1234567");
+
+      await importIt();
+      await importIt();
+
+      expect(harness.costConfirmations).toHaveLength(1);
+    });
+  });
+
   describe("the same confirmation twice", () => {
     const { file, ccNumber } = EXPECTED[0];
 
