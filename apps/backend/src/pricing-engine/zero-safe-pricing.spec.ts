@@ -348,9 +348,25 @@ describe("a CLOSED Trip on an unconfigured route", () => {
       expect(totalPrice.toFixed(2)).toBe("75.00");
     });
 
-    /** Below the threshold the waiting time is €0 and the confirmation counts. */
-    it("counts the confirmation in full when the waiting time is not charged", async () => {
+    /**
+     * Below the threshold the waiting time is €0 — and still the EK: a
+     * RECORDED waiting time supersedes the confirmation (owner, November 2026).
+     */
+    it("supersedes the confirmation with a recorded waiting time priced at €0", async () => {
       trips.findById.mockResolvedValue(buildTrip({ waitingTimeMinutes: 60 }));
+      costConfirmations.findForTrip.mockResolvedValue({
+        ccNumbers: ["4139505"],
+        amount: "165.00",
+      });
+
+      const pricing = await amounts();
+
+      expect(pricing.ek).toBe("0.00");
+      expect(pricing.totaal).toBe("20.00");
+    });
+
+    it("counts the confirmation in full when no waiting time is recorded", async () => {
+      trips.findById.mockResolvedValue(buildTrip({ waitingTimeMinutes: null }));
       costConfirmations.findForTrip.mockResolvedValue({
         ccNumbers: ["4139505"],
         amount: "165.00",
@@ -579,8 +595,8 @@ describe("a CLOSED Trip on an unconfigured route", () => {
 
 /**
  * ── A GENUINE COMBINATION, ON AN UNCONFIGURED ROUTE ───────────────────────
- * The pairing rules are unchanged by the zero-safe base: one TAR for the pair,
- * on the DELIVERY, and the Backload on BOTH legs.
+ * The pairing rules are unchanged by the zero-safe base: one automatic TAR for
+ * the pair, on the COLLECTION (the second Trip), and the Backload on BOTH legs.
  */
 describe("the two legs of a Combination", () => {
   const GROUP_ID = "97777777-7777-4777-8777-777777777777";
@@ -689,16 +705,17 @@ describe("the two legs of a Combination", () => {
     );
   }
 
-  it("gives the DELIVERY leg the single TAR and a Backload", async () => {
-    const pricing = await legAmounts(DELIVERY);
+  it("gives the COLLECTION leg the single TAR and a Backload", async () => {
+    const pricing = await legAmounts(COLLECTION);
 
     expect(pricing.others).toBe("20.00");
     expect(pricing.backload).toBe("50.00");
   });
 
-  it("gives the COLLECTION leg a Backload and no TAR", async () => {
-    const pricing = await legAmounts(COLLECTION);
+  it("gives the DELIVERY leg a Backload and no TAR, though it states a number", async () => {
+    const pricing = await legAmounts(DELIVERY);
 
+    expect(DELIVERY.tarNummer).not.toBeNull();
     expect(pricing.others).toBe("0.00");
     expect(pricing.backload).toBe("50.00");
   });
@@ -740,14 +757,14 @@ describe("the two legs of a Combination", () => {
     });
 
     it("stays €50 when the same-day rule withholds the TAR", async () => {
-      const pricing = await legAmounts(DELIVERY, { chargedToday: true });
+      const pricing = await legAmounts(COLLECTION, { chargedToday: true });
 
       expect(pricing.others).toBe("0.00");
       expect(pricing.backload).toBe("50.00");
     });
 
     it("stays €50 on a leg that was given a manual TAR", async () => {
-      const pricing = await legAmounts(COLLECTION, { assignments: [MANUAL_TAR] });
+      const pricing = await legAmounts(DELIVERY, { assignments: [MANUAL_TAR] });
 
       expect(pricing.others).toBe("20.00");
       expect(pricing.backload).toBe("50.00");
@@ -756,8 +773,8 @@ describe("the two legs of a Combination", () => {
     it("is part of each leg's Totaal", async () => {
       // An unconfigured route prices the base at zero, so Totaal is
       // Backload plus whatever TAR the leg owes.
-      expect((await legAmounts(DELIVERY)).totaal).toBe("70.00");
-      expect((await legAmounts(COLLECTION)).totaal).toBe("50.00");
+      expect((await legAmounts(COLLECTION)).totaal).toBe("70.00");
+      expect((await legAmounts(DELIVERY)).totaal).toBe("50.00");
     });
   });
 
@@ -800,9 +817,9 @@ describe("the two legs of a Combination", () => {
       expect(pricing.backload).toBe("0.00");
     });
 
-    it("gives a delivery leg its €50 once grouped, and keeps its TAR", async () => {
-      const grouped = await legAmounts(DELIVERY);
-      const ungrouped = await legAmounts(alone(DELIVERY), { members: [] });
+    it("gives a collection leg its €50 once grouped, and keeps its TAR", async () => {
+      const grouped = await legAmounts(COLLECTION);
+      const ungrouped = await legAmounts(alone(COLLECTION), { members: [] });
 
       expect(grouped.backload).toBe("50.00");
       expect(ungrouped.backload).toBe("0.00");
@@ -812,13 +829,13 @@ describe("the two legs of a Combination", () => {
     });
 
     /*
-     * The one TAR rule a Combination changes: its collection leg owes none.
-     * Ungrouped it is an ordinary Trip again, and an ordinary Trip that states
-     * a number is charged — the existing rule, not a new one.
+     * The one TAR rule a pair changes: its first Trip, the delivery, owes no
+     * automatic TAR. Ungrouped it is an ordinary Trip again, and an ordinary
+     * Trip that states a number is charged — the existing rule, not a new one.
      */
-    it("applies the ordinary TAR rule to a collection leg once it stands alone", async () => {
-      const grouped = await legAmounts(COLLECTION);
-      const ungrouped = await legAmounts(alone(COLLECTION), { members: [] });
+    it("applies the ordinary TAR rule to a delivery leg once it stands alone", async () => {
+      const grouped = await legAmounts(DELIVERY);
+      const ungrouped = await legAmounts(alone(DELIVERY), { members: [] });
 
       expect(grouped.others).toBe("0.00");
       expect(ungrouped.others).toBe("20.00");
@@ -844,8 +861,8 @@ describe("the two legs of a Combination", () => {
     });
 
     it("moves nothing but the Backload when a leg leaves", async () => {
-      const grouped = await legAmounts(DELIVERY);
-      const ungrouped = await legAmounts(alone(DELIVERY), { members: [] });
+      const grouped = await legAmounts(COLLECTION);
+      const ungrouped = await legAmounts(alone(COLLECTION), { members: [] });
 
       expect({ ...ungrouped, backload: grouped.backload, totaal: grouped.totaal, components: grouped.components }).toEqual(grouped);
       expect(Number(grouped.totaal) - Number(ungrouped.totaal)).toBe(50);

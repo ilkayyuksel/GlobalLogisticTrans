@@ -14,13 +14,16 @@ import { TripDirection, TripStatus } from "@prisma/client";
  * carried the surcharge and a manual group was priced as ordinary Trips. The
  * business changed that in September 2026.
  *
- * ── WHICH LEG OF A GENUINE COMBINATION IS IT, FOR TAR? ──────────────────────
+ * ── WHICH LEG OF A GENUINE COMBINATION IS IT? ───────────────────────────────
  * A genuine Combination is ONE transport order that printed two legs — an
- * outbound delivery and a return collection. It decides where the automatic
- * TAR belongs: once per pair, on one leg. The evidence is persisted and needs
- * no guessing: the legs of a Combination were created from the SAME
+ * outbound delivery and a return collection. The evidence is persisted and
+ * needs no guessing: the legs of a Combination were created from the SAME
  * PdfDocument. Trips an operator grouped by hand come from different documents,
- * or from none, and are legs of nothing.
+ * or from none, and are legs of nothing. It also decides the pricing partner.
+ *
+ * ── WHICH TRIP OF A PAIR MAY RECEIVE THE AUTOMATIC TAR? ─────────────────────
+ * Only the second — the COLLECTION of a DELIVERY/COLLECTION pair. See
+ * `isFirstTripOfTarPair`.
  *
  * Nothing here reads a planning date, a row order, a booking number or the
  * order the trips happen to arrive in.
@@ -279,6 +282,39 @@ export function pricingPartnerOf<T extends CombinationMember>(
   }
 
   return { kind: "UNPAIRED", reason: "NO_UNAMBIGUOUS_PARTNER" };
+}
+
+/**
+ * Whether `trip` is the FIRST Trip of its pair, and so never receives the
+ * automatic TAR from its TAR-nummer field.
+ *
+ * ── THE RULE, AS THE BUSINESS FIXED IT (OWNER, NOVEMBER 2026) ───────────────
+ * In a pair only the SECOND Trip may receive the automatic TAR; the first never
+ * does, even when both state a TAR-nummer. The pair is `pricingPartnerOf`'s:
+ * a genuine same-document pair, or a group of exactly two ACTIVE Trips. Which
+ * Trip is first is its direction — the DELIVERY (out) is first, the COLLECTION
+ * (return) second — never a date, a row order or when a Trip was created.
+ *
+ * Only a pair of one DELIVERY and one COLLECTION has a first Trip. Any other
+ * pair (two of one direction, a direction missing), a Trip without a pair and a
+ * larger group keep the ordinary rule: each Trip its own number, once a day.
+ *
+ * This reverses the earlier allocation, under which a genuine Combination's
+ * DELIVERY owed the TAR and its COLLECTION never did. It decides the AUTOMATIC
+ * charge only: an operator's manual TAR is untouched by it.
+ * ────────────────────────────────────────────────────────────────────────────
+ */
+export function isFirstTripOfTarPair<T extends CombinationMember>(
+  trip: T,
+  members: readonly T[],
+): boolean {
+  if (trip.direction !== TripDirection.DELIVERY) {
+    return false;
+  }
+
+  const pairing = pricingPartnerOf(trip, members);
+
+  return pairing.kind === "PAIRED" && pairing.partner.direction === TripDirection.COLLECTION;
 }
 
 function partnerIdOf(

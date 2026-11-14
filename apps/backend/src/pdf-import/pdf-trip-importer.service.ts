@@ -28,6 +28,7 @@ import {
 import { CostConfirmationService } from "../cost-confirmations/cost-confirmation.service";
 import {
   CostConfirmationMatchingService,
+  NEARBY_DAYS_FOR_A_COLLECTION,
   identityOfConfirmation,
 } from "./cost-confirmation-matching.service";
 import { DuplicateBookingNumberException } from "../trips/exceptions/trip.exceptions";
@@ -80,15 +81,17 @@ export interface CancelledBooking {
  *
  * `REOPENED` brought a CANCELLED Trip back, because a later NEW or UPDATE for
  * the same identity superseded the cancellation. `REAPPLIED` re-read the
- * transport data of a Trip that was already open. `REFUSED_CLOSED` is the one
- * refusal left: finished, priced work is never rewritten.
+ * transport data of a Trip that was already open. `REFUSED_CLOSED` and
+ * `REFUSED_DRIVER_ASSIGNED` left a protected Trip untouched: finished work and
+ * work planned with a driver are never rewritten by a document.
  */
 export type RevisionAction =
   | "UPDATED"
   | "CREATED_FROM_UPDATE"
   | "REOPENED"
   | "REAPPLIED"
-  | "REFUSED_CLOSED";
+  | "REFUSED_CLOSED"
+  | "REFUSED_DRIVER_ASSIGNED";
 
 export interface RevisedBooking {
   readonly bookingNumber: string;
@@ -526,6 +529,29 @@ export class PdfTripImporter {
           continue;
         }
 
+        /*
+         * ── IGNORED, NOT FAILED ──────────────────────────────────────────────
+         * The document was read and matched correctly; only the Trip's own
+         * state — CLOSED, or a driver assigned — stops it. The Trip is left
+         * exactly as it is and the refusal is recorded against it, so this is
+         * a handled document: its email is marked processed and is not
+         * retried. Retrying would change nothing.
+         */
+        if (
+          result.outcome === "REFUSED_CLOSED" ||
+          result.outcome === "REFUSED_DRIVER_ASSIGNED"
+        ) {
+          documentIsReferenced = true;
+          revisions.push({
+            bookingNumber: trip.bookingNumber,
+            tripId: result.trip?.id ?? null,
+            action: result.outcome,
+            changedFields: [],
+          });
+
+          continue;
+        }
+
         // REOPENED is an applied revision that also brought the Trip back.
         if (result.outcome !== "UPDATED" && result.outcome !== "REOPENED") {
           documentIsReferenced = true;
@@ -667,7 +693,7 @@ export class PdfTripImporter {
 
       throw new CostConfirmationRefusedException(
         confirmation.ccNumber,
-        `Booking number ${confirmation.bookingNumber} matches ${match.trips.length} Trips on ${confirmation.transportDate}, and the confirmation names nothing that can tell them apart.`,
+        `Booking number ${confirmation.bookingNumber} matches ${match.trips.length} Trips on ${match.date ?? confirmation.transportDate}, and the confirmation names nothing that can tell them apart.`,
       );
     }
 
@@ -1096,6 +1122,10 @@ function describeRevisionRefusal(
     return "this document names no container and its booking number is held by more than one Trip, so which transport it revises cannot be determined";
   }
 
+  if (outcome === "REFUSED_DRIVER_ASSIGNED") {
+    return "a driver is assigned to the Trip, and planned work is not rewritten automatically";
+  }
+
   return "the Trip is CLOSED, and finished work is not rewritten automatically";
 }
 
@@ -1109,7 +1139,11 @@ function describeRevisionRefusal(
  * holding that booking are actually on.
  */
 function toNoMatchMessage(
-  confirmation: { readonly bookingNumber: string; readonly transportDate: string | null },
+  confirmation: {
+    readonly bookingNumber: string;
+    readonly transportDate: string | null;
+    readonly remarksDate: string | null;
+  },
   bookingDates: readonly string[],
 ): string {
   if (confirmation.transportDate === null) {
@@ -1121,5 +1155,10 @@ function toNoMatchMessage(
       ? "No Trip holds this booking number."
       : `Trips with this booking number are on ${bookingDates.join(", ")}.`;
 
-  return `No Trip matches booking number ${confirmation.bookingNumber} on ${confirmation.transportDate}, the LOADING/DELIVERY date the confirmation prints (compared with each Trip's planning date and originally ordered date; a container is not required). ${where}`;
+  const remarksDay =
+    confirmation.remarksDate !== null && confirmation.remarksDate !== confirmation.transportDate
+      ? `, nor on ${confirmation.remarksDate}, the "dd" day its Remarks name,`
+      : "";
+
+  return `No Trip matches booking number ${confirmation.bookingNumber} on ${confirmation.transportDate}, the LOADING/DELIVERY date the confirmation prints${remarksDay} (compared with each Trip's planning date and originally ordered date; a container is not required), and no collection does within ${NEARBY_DAYS_FOR_A_COLLECTION} days of it. ${where}`;
 }

@@ -222,22 +222,35 @@ describeWithRealInvoice("the real week 13 invoice, corrected", () => {
   // ── THE YELLOW ──────────────────────────────────────────────────────────────
 
   describe("yellow", () => {
-    /** B — one problem line paints one line, not the workbook. */
-    it("paints only the problem line, not the whole workbook", async () => {
+    /*
+     * B — one problem line paints one line, not the workbook. Beside it, the
+     * lines the comparison marks (owner, November 2026): the 14 GEEN COMBI
+     * lines — the Excel marks a Combination the Trips are not — and R41, an EC
+     * line that is its transport's line and states no Tarief and no Fuel.
+     */
+    it("paints only the problem line and the marked lines, not the whole workbook", async () => {
       const problem = original.getRow(50).getCell(COLUMN.booking).value as string;
       const applied = await run(originalBytes, { problemBooking: problem, missing: [] });
       const sheet = (await load(applied.workbook)).worksheets[0];
+      const markedFor = (mark: string) =>
+        applied.result.rows.filter((row) => row.marks.includes(mark as never)).map((row) => row.rowNumber);
+      const geenCombi = [2, 3, 23, 24, 43, 44, 45, 46, 47, 48, 74, 75, 87, 88];
 
-      expect(applied.rowsMarked).toBe(1);
+      expect(markedFor("COMBINATION_ONLY_IN_EXCEL")).toEqual(geenCombi);
+      expect(markedFor("PRICES_MISSING")).toEqual([41]);
+      expect(applied.result.markedRowNumbers.sort((a, b) => a - b)).toEqual([...geenCombi, 41, 50].sort((a, b) => a - b));
+      expect(applied.rowsMarked).toBe(16);
 
       const before = yellowAddresses(original);
       const after = yellowAddresses(sheet);
       const added = [...after].filter((address) => !before.has(address));
+      const markedRows = new Set(applied.result.markedRowNumbers);
 
-      // Every NEW yellow cell is on row 50, and there are only a row's worth.
+      // Every NEW yellow cell is on a marked row, and there are only rows' worth.
       expect(added.length).toBeGreaterThan(0);
-      expect(added.every((address) => /^[A-Z]+50$/.test(address))).toBe(true);
-      expect(after.size).toBeLessThan(before.size + 30);
+      expect(added.every((address) => markedRows.has(Number(/\d+$/.exec(address)![0])))).toBe(true);
+      expect(added.some((address) => /^[A-Z]+50$/.test(address))).toBe(true);
+      expect(after.size).toBeLessThan(before.size + 30 * markedRows.size);
     });
 
     /** C — the customer's own yellow stays exactly where they put it. */

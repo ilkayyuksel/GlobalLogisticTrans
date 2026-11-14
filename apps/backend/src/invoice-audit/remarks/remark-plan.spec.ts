@@ -143,11 +143,23 @@ describe("planRemarks", () => {
     ).toEqual(new Map());
   });
 
-  it("writes GEEN COMBI also on a line marked for its price", () => {
+  /*
+   * A Trip without a usable price leaves its line exactly as received (owner,
+   * November 2026): not even GEEN COMBI, which used to be written there too.
+   */
+  it("writes not even GEEN COMBI on the line of a Trip without a usable price", () => {
     const rows = [match({ rowNumber: 23, remarks: "" }, InvoiceRowStatus.MATCHED, GEEN_COMBI)];
 
     expect(
-      planRemarks(rows, priced(rows, InvoicePricingStatus.PRICE_UNRELIABLE), facts({ tarCharged: true })).get(23)
+      planRemarks(rows, priced(rows, InvoicePricingStatus.PRICE_UNRELIABLE), facts({ tarCharged: true })),
+    ).toEqual(new Map());
+  });
+
+  it("still writes GEEN COMBI on a line marked for another reason", () => {
+    const rows = [match({ rowNumber: 23, remarks: "" }, InvoiceRowStatus.MATCHED, GEEN_COMBI)];
+
+    expect(
+      planRemarks(rows, priced(rows, InvoicePricingStatus.AMOUNT_UNREADABLE), facts({ tarCharged: true })).get(23)
         ?.added,
     ).toEqual(["GEEN COMBI"]);
   });

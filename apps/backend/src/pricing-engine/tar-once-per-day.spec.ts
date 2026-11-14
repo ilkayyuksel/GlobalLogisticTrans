@@ -32,7 +32,7 @@ const GROUP_ID = "5c2f4d8e-1a3b-4c6d-8e9f-0a1b2c3d4e5f";
  *
  * ── WHAT IS DELIBERATELY UNCHANGED ──────────────────────────────────────────
  * Eligibility and ALLOCATION. A Trip must still state a meaningful number, and
- * a genuine Combination still charges at most once, on the delivery leg. The
+ * a pair still charges at most once, on its collection leg. The
  * new rule only decides whether that one charge is due again today.
  * ────────────────────────────────────────────────────────────────────────────
  */
@@ -279,29 +279,29 @@ describe("TAR is charged once per day per number", () => {
 
   /**
    * ── COMBINATIONS ────────────────────────────────────────────────────────
-   * Allocation is untouched. The COLLECTION leg of a genuine Combination owes
-   * no TAR and never asks about the day; the DELIVERY leg owes it and is
-   * subject to the same-day rule like any other Trip.
+   * Only the second Trip of a pair — the COLLECTION — may owe the automatic
+   * TAR, subject to the same-day rule like any other Trip. The first Trip — the
+   * DELIVERY — owes none and never asks about the day.
    */
   describe("a genuine Combination", () => {
     function genuinePair(): void {
       groupMembers.mockResolvedValue([
-        { id: TRIP_ID, direction: "DELIVERY", pdfDocumentId: "pdf-1", tripGroupId: GROUP_ID },
-        { id: OTHER_TRIP, direction: "COLLECTION", pdfDocumentId: "pdf-1", tripGroupId: GROUP_ID },
+        { id: TRIP_ID, direction: "COLLECTION", pdfDocumentId: "pdf-1", tripGroupId: GROUP_ID, status: "CLOSED" },
+        { id: OTHER_TRIP, direction: "DELIVERY", pdfDocumentId: "pdf-1", tripGroupId: GROUP_ID, status: "CLOSED" },
       ]);
     }
 
-    it("charges the DELIVERY leg when the number is free that day", async () => {
+    it("charges the COLLECTION leg when the number is free that day", async () => {
       genuinePair();
 
       expect(
         await chargesTar(
-          buildTrip({ tripGroupId: GROUP_ID, direction: "DELIVERY" }),
+          buildTrip({ tripGroupId: GROUP_ID, direction: "COLLECTION" }),
         ),
       ).toBe(true);
     });
 
-    it("charges the COLLECTION leg nothing, as before", async () => {
+    it("charges the DELIVERY leg nothing", async () => {
       genuinePair();
 
       expect(
@@ -309,34 +309,34 @@ describe("TAR is charged once per day per number", () => {
           buildTrip({
             id: OTHER_TRIP,
             tripGroupId: GROUP_ID,
-            direction: "COLLECTION",
+            direction: "DELIVERY",
           }),
         ),
       ).toBe(false);
     });
 
-    /** The collection leg is excluded before the day is ever considered. */
-    it("does not ask about the day for the COLLECTION leg", async () => {
+    /** The delivery leg is excluded before the day is ever considered. */
+    it("does not ask about the day for the DELIVERY leg", async () => {
       genuinePair();
 
       await chargesTar(
         buildTrip({
           id: OTHER_TRIP,
           tripGroupId: GROUP_ID,
-          direction: "COLLECTION",
+          direction: "DELIVERY",
         }),
       );
 
       expect(tarCharges.hasBeenChargedToday).not.toHaveBeenCalled();
     });
 
-    it("withholds the DELIVERY leg's TAR when the number is already charged", async () => {
+    it("withholds the COLLECTION leg's TAR when the number is already charged", async () => {
       genuinePair();
       tarCharges.hasBeenChargedToday.mockResolvedValue(true);
 
       expect(
         await chargesTar(
-          buildTrip({ tripGroupId: GROUP_ID, direction: "DELIVERY" }),
+          buildTrip({ tripGroupId: GROUP_ID, direction: "COLLECTION" }),
         ),
       ).toBe(false);
     });

@@ -25,6 +25,7 @@ import { TripReadService, TripReadView } from "../trips/trip-read.service";
 import {
   CombinationLeg,
   combinationLegOf,
+  isFirstTripOfTarPair,
   pricingPartnerOf,
   type PricingPairBasis,
 } from "./combination-leg";
@@ -231,9 +232,10 @@ export class PricingComponentResolver {
    * ──────────────────────────────────────────────────────────────────────────
    *
    * ── WHICH TRIPS OWE IT ────────────────────────────────────────────────────
-   * Every Trip, except the COLLECTION leg of a genuine Combination: the pair is
-   * one movement and carries the charge once, on the delivery. A manual group
-   * is not a Combination, so its Trips each owe it — see `combination-leg.ts`.
+   * Every Trip, except the FIRST Trip of a pair: the DELIVERY of a pair of one
+   * DELIVERY and one COLLECTION, whether a genuine Combination or a group of
+   * two. Only the second Trip, the COLLECTION, may receive it — see
+   * `isFirstTripOfTarPair`.
    * ──────────────────────────────────────────────────────────────────────────
    */
   private async withAutomaticProperty(
@@ -255,7 +257,7 @@ export class PricingComponentResolver {
      */
     const manual = [...assigned];
 
-    const leg = await this.resolveCombinationLeg(trip);
+    const members = trip.tripGroupId === null ? [] : await this.groupMembers(trip);
 
     /*
      * ── A MALFORMED PAIR IS PRICED, NOT REFUSED ─────────────────────────────
@@ -270,14 +272,21 @@ export class PricingComponentResolver {
      * stated number, with the same-day rule still preventing one number from
      * being charged twice.
      */
-    if (leg === CombinationLeg.INVALID) {
+    if (combinationLegOf(trip, members) === CombinationLeg.INVALID) {
       this.logger.warn("A group from one document is not one delivery and one collection", {
         tripId: trip.id,
         tripGroupId: trip.tripGroupId,
       });
     }
 
-    if (leg === CombinationLeg.COLLECTION) {
+    // Withheld whatever the Trip states: its TAR-nummer is not a claim on the
+    // automatic charge, so it neither holds nor blocks the day's charge.
+    if (isFirstTripOfTarPair(trip, members)) {
+      this.logger.log("First Trip of its pair; no automatic TAR from its TAR-nummer", {
+        tripId: trip.id,
+        tripGroupId: trip.tripGroupId,
+      });
+
       return manual;
     }
 
@@ -298,12 +307,11 @@ export class PricingComponentResolver {
      * its own — so a number on the delivery leg says nothing about the
      * collection leg, and never did anything to it.
      *
-     * The ALLOCATION rule above is untouched: which leg owes it, and that a
-     * genuine Combination owes it at most once, are decided exactly as before.
-     * This only decides whether there is anything to allocate. So a Combination
-     * whose delivery leg states a number still produces exactly one charge, on
-     * the same leg as always — and one whose delivery leg states none produces
-     * no TAR charge at all, however the collection leg is filled in.
+     * The ALLOCATION rule above decides which Trip may owe it; this only
+     * decides whether there is anything to charge. So a pair whose COLLECTION
+     * states a number produces one automatic charge, on the collection — and
+     * one whose collection states none produces no automatic TAR at all,
+     * however the delivery is filled in.
      */
     const tarNummer = meaningfulTarNummer(trip.tarNummer);
 

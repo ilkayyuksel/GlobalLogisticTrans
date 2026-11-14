@@ -179,6 +179,11 @@ export interface InvoiceAuditRow {
   /** Set on a line the Excel marks as half of a Combination. */
   readonly combination: InvoiceCombination | null;
   /**
+   * Why a line compared as usual is still marked yellow — the backend's
+   * decision, shown here. Empty when none.
+   */
+  readonly marks: readonly InvoiceLineMark[];
+  /**
    * Why the line could not be resolved — for a line that found no Trip or
    * several, which pairs of values were tried or which Trips it could be.
    */
@@ -186,6 +191,17 @@ export interface InvoiceAuditRow {
   /** What this check adds to the line's Remarks; null when nothing. */
   readonly remarks: InvoiceRemarks | null;
 }
+
+/**
+ * PRICES_MISSING            the line states no Tarief and no Fuel; neither filled
+ * COMBINATION_ONLY_IN_EXCEL the Excel marks a Combination the Trip is not
+ * COMBINATION_ONLY_IN_TRANO the Trip is a Combination the Excel does not mark;
+ *                           its €50 Backload is not added
+ */
+export type InvoiceLineMark =
+  | "PRICES_MISSING"
+  | "COMBINATION_ONLY_IN_EXCEL"
+  | "COMBINATION_ONLY_IN_TRANO";
 
 export interface InvoiceDateCorrection {
   readonly invoicePlanningDate: string;

@@ -617,10 +617,10 @@ describe("every real UPDATE and CANCEL document, through the real workflow", () 
       trip.status = TripStatus.CLOSED;
       trip.containerType = "45PH";
 
-      await expect(
-        harness.importer.revise(readFixture(FILE), "late-update.pdf"),
-      ).rejects.toThrow();
+      // Ignored, not failed: handled, so its email is processed and not retried.
+      const result = await harness.importer.revise(readFixture(FILE), "late-update.pdf");
 
+      expect(result.revisions.map((entry) => entry.action)).toEqual(["REFUSED_CLOSED"]);
       expect(trip.status).toBe(TripStatus.CLOSED);
       expect(trip.containerType).toBe("45PH");
       expect(harness.pdfDocuments).toHaveLength(2);
@@ -753,10 +753,9 @@ describe("every real UPDATE and CANCEL document, through the real workflow", () 
         TripStatus.CLOSED;
       const before = { ...(tripFor(SHARED_BOOKING) as Record<string, unknown>) };
 
-      await expect(
-        harness.importer.revise(readFixture(PLANNED_1369485), "late.pdf"),
-      ).rejects.toThrow();
+      const result = await harness.importer.revise(readFixture(PLANNED_1369485), "late.pdf");
 
+      expect(result.revisions.map((entry) => entry.action)).toEqual(["REFUSED_CLOSED"]);
       expect(tripFor(SHARED_BOOKING)).toEqual(before);
       // One event for the refusal, and its document to explain it.
       expect(

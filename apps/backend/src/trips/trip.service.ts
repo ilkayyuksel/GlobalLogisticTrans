@@ -140,6 +140,8 @@ export class TripService {
           customProperties: [],
           latestUpdate: null,
           costConfirmation: null,
+          costConfirmations: [],
+          costConfirmationTotal: null,
           pricing: null,
         },
       ),

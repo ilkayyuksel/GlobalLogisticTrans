@@ -162,18 +162,36 @@ properties, its waiting time and its group membership are all preserved.
 
 ### Only an OPEN Trip is cancelled, judged at the moment of the write
 
-A CANCEL document cancels a Trip only if it is OPEN when the status is written,
-not merely when the document was matched. The write is a compare-and-set
-(`UPDATE … WHERE status = 'OPEN'`), so a Trip an operator closes while the
-document is being processed stays CLOSED and the cancellation is recorded as
-refused (`REFUSED_CLOSED`). A cancellation writes the status and nothing else:
-waiting time, Custom Values, vehicle and driver are untouched.
+A CANCEL document cancels a Trip only if it is OPEN **and has no driver
+assigned** when the status is written, not merely when the document was
+matched. The write is a compare-and-set
+(`UPDATE … WHERE status = 'OPEN' AND driver_id IS NULL`), so a Trip an operator
+closes or gives a driver while the document is being processed is left as it
+is and the cancellation is recorded as refused. A cancellation writes the status
+and nothing else: waiting time, Custom Values, vehicle and driver are untouched.
 
-| Status when the CANCEL is written | Outcome             | Trip changed |
-|-----------------------------------|---------------------|--------------|
-| Open                              | `CANCELLED`         | status only  |
-| Cancelled                         | `ALREADY_CANCELLED` | no           |
-| Closed                            | `REFUSED_CLOSED`    | no           |
+| Trip when the CANCEL is written | Outcome                   | Trip changed |
+|---------------------------------|---------------------------|--------------|
+| Open, no driver                 | `CANCELLED`               | status only  |
+| Open, driver assigned           | `REFUSED_DRIVER_ASSIGNED` | no           |
+| Cancelled                       | `ALREADY_CANCELLED`       | no           |
+| Closed (with or without driver) | `REFUSED_CLOSED`          | no           |
+
+### A protected Trip is not changed by an UPDATE or a CANCEL (owner, November 2026)
+
+The same protection applies to UPDATE and CANCEL documents: a Trip that is
+CLOSED, or has a driver assigned (`trip.driver_id`, the driver stored when the
+Trip was planned — never derived from its vehicle), is left exactly as it is.
+Not revised, not cancelled, not reopened, no driver touched and nothing
+repriced (`protectionOf` in `trip-revision.service.ts`, checked before any
+write). The refusal is recorded against the Trip (`UPDATE_REFUSED` /
+`CANCEL_REFUSED`, with the reason `REFUSED_CLOSED` or
+`REFUSED_DRIVER_ASSIGNED`).
+
+It is a HANDLED document, not a failure: the PDF was read and matched
+correctly, so the email is marked PROCESSED and read and is never retried. A
+PDF that cannot be parsed keeps the existing failure handling (FAILED, unread,
+retried by the next scan).
 
 ### Cancelled is not terminal: a later document reopens the Trip
 
@@ -182,7 +200,8 @@ business order, and the LATEST document about a transport is the sender's word
 on it:
 
 - an UPDATE: for a Cancelled Trip reopens it (`REOPENED`) and applies its
-  fields, exactly as it would to an Open Trip;
+  fields, exactly as it would to an Open Trip — unless it has a driver
+  assigned, see above;
 - a NEW: for an identity a Cancelled Trip holds does not create a second Trip —
   it reopens that Trip and its transport data is re-read from the document;
 - a second CANCEL: reports `ALREADY_CANCELLED` and writes nothing.
@@ -191,9 +210,10 @@ The reopening is recorded as its own event beside the document that caused it.
 Like every document, it never touches what the operator entered (see "Manually
 managed data disappears only by a manual action").
 
-Only CLOSED is final for documents: an UPDATE: or NEW: for a Closed Trip is
-stored and refused, because finished and priced work is never rewritten by a
-document that arrives afterwards. The operator's "Openen" action through the
+CLOSED is final for documents: an UPDATE: or NEW: for a Closed Trip is stored
+and refused, because finished and priced work is never rewritten by a document
+that arrives afterwards. (An UPDATE: or CANCEL: is also refused for a Trip
+with a driver assigned; a NEW: is not affected by that rule.) The operator's "Openen" action through the
 status endpoint remains the manual way back to Open, for a Cancelled and for a
 Closed Trip; it changes the lifecycle state and nothing else.
 
@@ -280,25 +300,38 @@ confirmed amount is never merged into the WAITING_TIME pricing line.
 
 A Trip's EK is ONE source, in this order:
 
-1. the operator's waiting time, when its price is above €0;
-2. otherwise the Cost Confirmations, summed;
+1. the operator's waiting time, whenever one is RECORDED (a complete window),
+   at whatever price — also €0;
+2. otherwise the Cost Confirmations, summed, each number once;
 3. otherwise €0.
 
 The two are never added: a confirmed €27.50 beside a waiting time of €137.50 is
-EK €137.50, not €165.00. A waiting time priced at €0 — below the threshold, or
-entirely outside 06:00–20:00 — does not displace a confirmation. Removing the
-waiting time makes the confirmations the EK again.
+EK €137.50, not €165.00. A recorded waiting time priced at €0 — below the
+threshold, or entirely outside 06:00–20:00 — also displaces the confirmations,
+and EK is then €0 (owner, November 2026; this reverses the earlier rule that
+only a waiting time above €0 did). A WAIT Cost Confirmation from a PDF is not a
+recorded waiting time. Removing the waiting time makes the confirmations the EK
+again. The order in which the two arrive never matters: recording, changing or
+removing the window and recording a confirmation all reprice the Trip from its
+current data, never on top of an earlier EK.
 
 Because the waiting time is an EK source, it is NOT part of Others; Others is the
 priced Custom Properties alone. The waiting time therefore counts once in Totaal.
 
 Where it is decided:
 
-- the Pricing Engine writes the Cost Confirmation line at €0 when a charged
-  waiting time precedes it, still naming the documents (so Remarks keeps the CC
-  references), and the stored total counts the waiting time once;
-- the effective read (`effective-pricing.ts`) chooses EK by the same rule, so
-  a snapshot written before the rule reads correctly too.
+- the Pricing Engine writes the Cost Confirmation line at €0 when a waiting
+  time is recorded on the Trip (`waitingTimeRecorded` in the calculation
+  context, `CostConfirmationCalculator`), still naming the documents (so
+  Remarks keeps the CC references), and the stored total counts the waiting
+  time alone;
+- the effective read (`effective-pricing.ts`) takes the waiting time when it is
+  charged, otherwise the stored confirmation line — €0 when superseded — so a
+  snapshot written before the first rule reads correctly too. A snapshot written
+  before November 2026 for a €0 window keeps its full confirmation line until
+  the Trip is priced again;
+- the invoice check owes nothing on an EC line when the stored snapshot says
+  the confirmations were superseded (`owedOnCostLine`).
 
 The confirmation records themselves are never changed or deleted by this: they
 stay stored and auditable. The Prijsoverzicht export keeps its informational

@@ -929,6 +929,78 @@ describe("IMAP import, end to end with a real transport order", () => {
         );
       });
 
+      /*
+       * ── A PROTECTED TRIP: IGNORED, AND THE EMAIL HANDLED ───────────────────
+       * A CLOSED Trip, or one with a driver, is not changed by an UPDATE or a
+       * CANCEL. The document was read correctly, so this is no failure: the
+       * email is PROCESSED and read, and never retried (only FAILED is).
+       */
+      describe("8–10. for a protected Trip", () => {
+        async function plannedThen(planning: Record<string, unknown>) {
+          messageCarrying(PLANNED, {
+            messageId: "<real-new@carrier.test>",
+            subject: "NEW: Trucking Order 1369485",
+          });
+          await scanService.scan();
+          Object.assign(createdTrips[0], planning);
+
+          return { ...createdTrips[0] };
+        }
+
+        it("8. an UPDATE for a CLOSED Trip is read and processed, and changes nothing", async () => {
+          const before = await plannedThen({ status: TripStatus.CLOSED });
+
+          messageCarrying(PLANNED, {
+            messageId: "<real-update@carrier.test>",
+            subject: "UPDATE: Trucking Order 1369485",
+          });
+          const result = await scanService.scan();
+
+          expect(result).toMatchObject({ imported: 1, failed: 0 });
+          expect(importedEmailStatus.status).toBe("PROCESSED");
+          expect(session.markSeen).toHaveBeenCalledTimes(2);
+          expect(createdTrips).toEqual([before]);
+          expect(recordedHistory).toContainEqual(
+            expect.objectContaining({ eventType: "UPDATE_REFUSED", newValue: { reason: "REFUSED_CLOSED" } }),
+          );
+        });
+
+        it("9. a CANCEL for a Trip with a driver is read and processed, and changes nothing", async () => {
+          const before = await plannedThen({ driverId: "driver-1" });
+
+          messageCarrying(CANCELLED, {
+            messageId: "<real-cancel@carrier.test>",
+            subject: "CANCEL: Trucking Order 1369485",
+          });
+          const result = await scanService.scan();
+
+          expect(result).toMatchObject({ imported: 1, failed: 0 });
+          expect(importedEmailStatus.status).toBe("PROCESSED");
+          expect(session.markSeen).toHaveBeenCalledTimes(2);
+          expect(createdTrips).toEqual([before]);
+          expect(recordedHistory).toContainEqual(
+            expect.objectContaining({
+              eventType: "CANCEL_REFUSED",
+              newValue: { reason: "REFUSED_DRIVER_ASSIGNED" },
+            }),
+          );
+        });
+
+        it("10. is no failure: nothing is FAILED, so nothing is retried", async () => {
+          const before = await plannedThen({ driverId: "driver-1" });
+
+          messageCarrying(PLANNED, {
+            messageId: "<real-update@carrier.test>",
+            subject: "UPDATE: Trucking Order 1369485",
+          });
+          const result = await scanService.scan();
+
+          expect(result.failed).toBe(0);
+          expect(importedEmailStatus.status).not.toBe("FAILED");
+          expect(createdTrips).toEqual([before]);
+        });
+      });
+
       /** A second NEW for the same identity reopens rather than duplicating. */
       it("reopens rather than creating a second Trip when the order is re-sent", async () => {
         messageCarrying(PLANNED, {

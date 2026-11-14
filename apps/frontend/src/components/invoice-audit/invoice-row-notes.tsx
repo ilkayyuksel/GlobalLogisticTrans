@@ -61,6 +61,20 @@ export function InvoiceRowNotes({ row }: { row: InvoiceAuditRow }) {
     );
   }
 
+  /*
+   * The Trip is a Combination the Excel does not mark as one: its €50 Backload
+   * was not added. Said on this line only — never for the opposite case, where
+   * the Excel's Combination is handled as it always was.
+   */
+  if ((row.marks ?? []).includes("COMBINATION_ONLY_IN_TRANO")) {
+    notes.push(
+      <span key="combination-in-trano" className={`${NOTE} border-warning/40 bg-warning/10 text-warning`}>
+        <span aria-hidden="true">⚠</span>
+        {t("invoiceAudit.combinationOnlyInTrano")}
+      </span>,
+    );
+  }
+
   if (row.remarks && row.remarks.added.length > 0) {
     notes.push(
       <span key="remarks" className="text-xs text-danger" title={row.remarks.after}>

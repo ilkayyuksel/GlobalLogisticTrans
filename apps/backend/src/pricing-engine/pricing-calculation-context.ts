@@ -189,6 +189,13 @@ export interface PricingCalculationContext {
   readonly isCombination: boolean;
   /** Absent waiting time is zero waiting time, not an unknown. */
   readonly waitingTimeMinutes: number;
+  /**
+   * Whether an operator recorded a waiting time on the Trip — a complete
+   * window, whatever it is priced at. It makes the waiting time the EK source
+   * and supersedes the Cost Confirmations, also at €0
+   * (`CostConfirmationCalculator`).
+   */
+  readonly waitingTimeRecorded: boolean;
 
   /**
    * The road the Trip drives, in its real direction, as the Trip spells it.

@@ -70,7 +70,7 @@ export class PdfImportFileResultDto {
   @ApiPropertyOptional({
     example: [{ bookingNumber: "ANRBEL2772352", outcome: "CANCELLED" }],
     description:
-      "Present when the document stamped itself CANCELLED. One entry per booking it names, with what happened to the Trip holding it: CANCELLED (an OPEN Trip was cancelled), ALREADY_CANCELLED, REFUSED_CLOSED (finished work is never rewritten) or NO_MATCHING_TRIP. A cancelled document creates no Trip, so trips is empty.",
+      "Present when the document stamped itself CANCELLED. One entry per booking it names, with what happened to the Trip holding it: CANCELLED (an OPEN Trip was cancelled), ALREADY_CANCELLED, REFUSED_CLOSED (finished work is never rewritten), REFUSED_DRIVER_ASSIGNED (a Trip planned with a driver is not cancelled by a document), AMBIGUOUS_BOOKING_MATCH or NO_MATCHING_TRIP. A cancelled document creates no Trip, so trips is empty.",
   })
   cancellations?: CancelledBooking[];
 

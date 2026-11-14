@@ -18,8 +18,8 @@ import { TarChargeReadRepository, type TarDay } from "./tar-charge-read.reposito
  * `PairedPricingService`. So one check there reaches them all:
  *
  *   it GAVE UP the charge   a stored Trip held the automatic TAR before and
- *                           holds none now — it became a Combination's
- *                           COLLECTION leg, or anything else that withdrew
+ *                           holds none now — it became the first Trip (the
+ *                           DELIVERY) of a pair, or anything else that withdrew
  *                           it. The other CLOSED Trips stating the number that
  *                           day were priced without it and are priced again;
  *                           the first of them takes it.

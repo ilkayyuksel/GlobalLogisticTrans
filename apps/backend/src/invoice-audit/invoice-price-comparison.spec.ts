@@ -8,6 +8,7 @@ import { EXACT_ROUTE_MATCH, fuelRatesOf, reliablyPriced } from "./__fixtures__/i
 import { tripRecord } from "./__fixtures__/invoice-rows";
 import { buildInvoiceWorkbook, type InvoiceFixtureLine } from "./__fixtures__/invoice-workbook";
 import { CORRECTED_TEXT_ARGB } from "./workbook/cell-marking";
+import { isYellowFill } from "./workbook/cell-comparison";
 
 /**
  * The preview's price comparison: per component, the Excel's figure beside
@@ -16,7 +17,7 @@ import { CORRECTED_TEXT_ARGB } from "./workbook/cell-marking";
  */
 
 const MONDAY = new Date(Date.UTC(2026, 9, 5));
-const COLUMN = { tarief: 12, fuel: 13, tolB: 16 } as const;
+const COLUMN = { tarief: 12, fuel: 13, tolB: 16, remarks: 21 } as const;
 
 function stored(
   overrides: Partial<Record<"tarief" | "brandstof" | "tol" | "tunnel" | "others" | "ek", string>> = {},
@@ -71,49 +72,84 @@ describe("the price comparison of a line", () => {
    * preview says so rather than comparing an empty cell.
    */
   describe("a line stating no transport price", () => {
-    it("fills every price Trano holds, red, and says the prices come from Trano", async () => {
+    /*
+     * ── NO TARIEF AND NO FUEL: NEITHER FILLED IN (owner, November 2026) ───────
+     * Both used to be filled from Trano. They now stay as the customer wrote
+     * them and the line is marked yellow; every OTHER component is compared and
+     * filled as before.
+     */
+    it("leaves an empty Tarief and Fuel empty, marks the line, and still fills the other components", async () => {
       const { row, cell } = await check({});
 
-      expect(row).toMatchObject({ status: "MATCHED", pricingStatus: "PRICING_CORRECTED", transportPricesFilled: true });
+      expect(row).toMatchObject({ status: "MATCHED", pricingStatus: "PRICING_CORRECTED", transportPricesFilled: false, marks: ["PRICES_MISSING"] });
       expect(row.comparisons).toEqual([
-        { component: "Tarief", outcome: "RAISE", excelValue: "0.00", excelCellEmpty: true, tranoValue: "475.00", writtenValue: "475.00" },
-        { component: "Fuel", outcome: "RAISE", excelValue: "0.00", excelCellEmpty: true, tranoValue: "114.00", writtenValue: "114.00" },
         { component: "Tol", outcome: "RAISE", excelValue: "0.00", excelCellEmpty: true, tranoValue: "50.00", writtenValue: "50.00" },
       ]);
-      expect(cell(COLUMN.tarief).value).toBe(475);
-      expect(cell(COLUMN.fuel).value).toEqual({ formula: "24%*L2", result: 114 });
+      expect(cell(COLUMN.tarief).value).toBeNull();
+      expect(cell(COLUMN.fuel).value).toBeNull();
       expect(cell(COLUMN.tolB).value).toBe(50);
-      for (const column of [COLUMN.tarief, COLUMN.fuel, COLUMN.tolB]) {
-        expect(cell(column).font?.color?.argb).toBe(CORRECTED_TEXT_ARGB);
-        // The customer's own number format stays.
-        expect(cell(column).numFmt).toContain("€");
-      }
+      expect(cell(COLUMN.tolB).font?.color?.argb).toBe(CORRECTED_TEXT_ARGB);
+      // The whole row is painted yellow.
+      expect(isYellowFill(cell(COLUMN.tarief).fill)).toBe(true);
+      expect(isYellowFill(cell(COLUMN.remarks).fill)).toBe(true);
     });
 
-    it("fills every component Trano holds — Tunnel, Others and EK too — and leaves a zero empty", async () => {
+    it("fills every other component Trano holds — Tunnel, Others and EK — and leaves a zero empty", async () => {
       const { row, cell } = await check({}, stored({ tunnel: "12", others: "35", ek: "25", tol: "0" }));
 
       expect(row.comparisons.map((comparison) => [comparison.component, comparison.writtenValue])).toEqual([
-        ["Tarief", "475.00"],
-        ["Fuel", "114.00"],
         ["Tunnel", "12.00"],
         ["Others", "35.00"],
         ["EK", "25.00"],
       ]);
       expect([cell(18).value, cell(19).value, cell(20).value]).toEqual([12, 35, 25]);
+      expect([cell(COLUMN.tarief).value, cell(COLUMN.fuel).value]).toEqual([null, null]);
       // Tol is zero in Trano: no figure, no "- €", an empty cell as before.
       expect(cell(COLUMN.tolB).value).toBeNull();
     });
 
-    it("matches with one misprinted value, corrects it and fills the prices", async () => {
+    it("leaves a Tarief and a Fuel of a dash exactly as written, and marks the line", async () => {
+      const { row, cell } = await check({ tarief: "-", fuel: "-" });
+
+      expect(row).toMatchObject({ status: "MATCHED", marks: ["PRICES_MISSING"] });
+      expect(row.pricingStatus).not.toBe("AMOUNT_UNREADABLE");
+      expect([cell(COLUMN.tarief).value, cell(COLUMN.fuel).value]).toEqual(["-", "-"]);
+      expect(cell(COLUMN.tolB).value).toBe(50);
+      expect(isYellowFill(cell(COLUMN.tarief).fill)).toBe(true);
+    });
+
+    it("compares a Tarief and a Fuel of 0,00 as prices: no mark, raised as ever", async () => {
+      const { row, cell } = await check({ tarief: 0, fuel: 0 });
+
+      expect(row.marks).toEqual([]);
+      expect(cell(COLUMN.tarief).value).toBe(475);
+      expect(isYellowFill(cell(COLUMN.tarief).fill)).toBe(false);
+    });
+
+    it("keeps the component checks when only the Tarief is missing", async () => {
+      const { row, cell } = await check({ fuel: 100 });
+
+      expect(row.marks).toEqual([]);
+      expect(cell(COLUMN.tarief).value).toBe(475);
+      expect(row.comparisons.find((comparison) => comparison.component === "Tarief")).toMatchObject({ outcome: "RAISE" });
+    });
+
+    it("keeps the component checks when only the Fuel is missing", async () => {
+      const { row } = await check({ tarief: 475 });
+
+      expect(row.marks).toEqual([]);
+      expect(row.comparisons.find((comparison) => comparison.component === "Fuel")).toMatchObject({ outcome: "RAISE", writtenValue: "114.00" });
+    });
+
+    it("matches with one misprinted value and corrects it, filling no Tarief or Fuel", async () => {
       const { row, cell } = await check({ containerNumber: "EUCU 9999999" });
 
       expect(row).toMatchObject({
         status: "MATCHED",
         containerCorrection: { tripContainerNumber: "EUCU4541197" },
-        transportPricesFilled: true,
+        marks: ["PRICES_MISSING"],
       });
-      expect(cell(COLUMN.tarief).value).toBe(475);
+      expect(cell(COLUMN.tarief).value).toBeNull();
     });
 
     it("invents nothing for a price that cannot be relied on, and says why", async () => {

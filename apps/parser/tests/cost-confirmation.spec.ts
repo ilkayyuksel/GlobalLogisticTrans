@@ -98,7 +98,34 @@ const EXPECTED: readonly ExpectedConfirmation[] = [
     costCode: "WAIT",
     containerReference: null,
   },
+  {
+    /*
+     * The first STOP: loading window 27/10/2026, Remarks `stop tournai , kaai -
+     * tournai - puurs - kaai dd 26/10 vanuit tournai naar puurs`.
+     */
+    file: "COST_CONFIRMATION_NR_4261545__ANRDUB2821379__XXXXXXXXXXXX.pdf",
+    ccNumber: "4261545",
+    bookingNumber: "ANRDUB2821379",
+    amount: "70.00",
+    costCode: "STOP",
+    containerReference: null,
+  },
+  {
+    /* Same booking and loading window; its Remarks name no day. */
+    file: "COST_CONFIRMATION_NR_4261544__ANRDUB2821379__XXXXXXXXXXXX.pdf",
+    ccNumber: "4261544",
+    bookingNumber: "ANRDUB2821379",
+    amount: "68.75",
+    costCode: "WAIT",
+    containerReference: null,
+  },
 ];
+
+/** The day each real document's Remarks name with `dd DD/MM`, beside its loading date. */
+const REMARKS_DATES: Readonly<Record<string, { transportDate: string; remarksDate: string | null }>> = {
+  "COST_CONFIRMATION_NR_4261545__ANRDUB2821379__XXXXXXXXXXXX.pdf": { transportDate: "2026-10-27", remarksDate: "2026-10-26" },
+  "COST_CONFIRMATION_NR_4261544__ANRDUB2821379__XXXXXXXXXXXX.pdf": { transportDate: "2026-10-27", remarksDate: null },
+};
 
 function readFixture(relativePath: string): Uint8Array {
   return new Uint8Array(readFileSync(join(FIXTURES, relativePath)));
@@ -109,6 +136,21 @@ async function parseConfirmation(file: string) {
     new Uint8Array(readFileSync(join(COST_CONFIRMATIONS, file))),
   );
 }
+
+describe("the day a real confirmation's Remarks name", () => {
+  it.each(EXPECTED.map((entry) => entry.file))("%s", async (file) => {
+    const result = await parseConfirmation(file);
+
+    if (!result.ok) throw new Error(`expected a parse: ${result.reason}`);
+
+    // Only CC 4261545 writes `dd 26/10`; every other real confirmation names no day.
+    expect(result.confirmation.remarksDate).toBe(REMARKS_DATES[file]?.remarksDate ?? null);
+
+    if (REMARKS_DATES[file]) {
+      expect(result.confirmation.transportDate).toBe(REMARKS_DATES[file].transportDate);
+    }
+  });
+});
 
 describe("the Cost Confirmation fixtures", () => {
   /** A document added to the folder must not go untested. */

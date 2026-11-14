@@ -7,6 +7,7 @@ import {
   InvoicePricingStatus,
   type InvoiceRowPricing,
 } from "../pricing/invoice-reconciliation";
+import { hasNoUsablePrice } from "../pricing/unpriced-trips";
 import {
   toCustomerRemarkParts,
   type RemarkFacts,
@@ -88,6 +89,11 @@ function planRow(
   outcome: InvoiceRowPricing | undefined,
   facts: TripRemarkFacts | undefined,
 ): RemarkChange | null {
+  // No usable price: the line's Remarks stay as received, GEEN COMBI and notes included.
+  if (hasNoUsablePrice(outcome)) {
+    return null;
+  }
+
   const reliable = outcome !== undefined && RELIABLE_PRICING.includes(outcome.status);
   const geenCombi = tripRows.some((match) => match.combination?.verdict === CombinationVerdict.GEEN_COMBI);
   const { parts, unexpressed } = toCustomerRemarkParts({

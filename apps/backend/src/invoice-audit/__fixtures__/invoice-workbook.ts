@@ -53,14 +53,15 @@ export interface InvoiceFixtureLine {
   readonly bookingNumber: string;
   /** As the sheet spells it — the real files print a space. */
   readonly containerNumber: string;
-  readonly tarief?: number | null;
+  /** `"-"` is the dash a customer types for "no price". */
+  readonly tarief?: number | null | "-";
   /**
    * The Fuel amount.
    *
    * `"formula"` writes it as the real files do — `10%*L<row>`, a percentage of
    * this row's Tarief — which is the case the correction has to leave alone.
    */
-  readonly fuel?: number | null | "formula";
+  readonly fuel?: number | null | "formula" | "-";
   readonly backload?: number | null;
   readonly maut?: number | null;
   readonly tolB?: number | null;
@@ -224,7 +225,7 @@ function toFuelCell(
   }
 
   // What Excel last calculated, as a saved workbook carries it.
-  const result = Number(((line.tarief ?? 0) * 0.1).toFixed(2));
+  const result = Number(((typeof line.tarief === "number" ? line.tarief : 0) * 0.1).toFixed(2));
 
   if (!options.sharedFuelFormula) {
     return { formula: `10%*L${rowNumber}`, result };

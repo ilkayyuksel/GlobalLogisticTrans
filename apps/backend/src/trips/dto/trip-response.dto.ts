@@ -8,6 +8,7 @@ import { Trip, TripDirection, TripStatus } from "@prisma/client";
 import { toIsoDate } from "../../common/dates";
 import { PaginationMetaDto } from "../../common/dto/pagination-meta.dto";
 import { toClockTime } from "../../common/time-of-day";
+import { hasRecordedWaitingTime } from "../waiting-window";
 import { DISTANCE_DECIMAL_PLACES } from "./create-trip.dto";
 
 /**
@@ -134,7 +135,12 @@ export interface TripPlanningData {
   /** In the properties' configured display order. Empty when none are assigned. */
   customProperties: TripCustomPropertySummaryDto[];
   latestUpdate: LatestTripUpdateDto | null;
+  /** The latest confirmation: `costConfirmations[0]`, or null. */
   costConfirmation: CostConfirmationDto | null;
+  /** Every confirmation of the Trip, newest first. Empty when there is none. */
+  costConfirmations: CostConfirmationDto[];
+  /** Their sum, fixed-2, or null when there is none. */
+  costConfirmationTotal: string | null;
   /**
    * What the Trip is worth, after any operator correction. Null when it has
    * never been priced.
@@ -387,9 +393,31 @@ export class TripResponseDto {
     type: CostConfirmationDto,
     nullable: true,
     description:
-      "The cost Eucon confirmed for this Trip, or null. A Trip has at most ONE. Read-only, and never merged with the waiting time an operator entered: the minutes and the confirmed amount are different facts.",
+      "The LATEST cost Eucon confirmed for this Trip, or null. Read-only, and never merged with the waiting time an operator entered: the minutes and the confirmed amount are different facts. Every confirmation is in costConfirmations.",
   })
   costConfirmation!: CostConfirmationDto | null;
+
+  @ApiProperty({
+    type: [CostConfirmationDto],
+    description:
+      "Every confirmation of this Trip, newest first; empty when there is none. Each number appears once.",
+  })
+  costConfirmations!: CostConfirmationDto[];
+
+  @ApiPropertyOptional({
+    type: String,
+    nullable: true,
+    example: "163.75",
+    description:
+      "The sum of costConfirmations as a fixed-2 string, or null when there is none. What the confirmations add up to — EK only when no waiting time is recorded (see waitingTimeSupersedesCostConfirmations).",
+  })
+  costConfirmationTotal!: string | null;
+
+  @ApiProperty({
+    description:
+      "True when an operator recorded a waiting time on this Trip. It is then the EK source, also at €0, and the confirmations are kept but not counted in EK.",
+  })
+  waitingTimeSupersedesCostConfirmations!: boolean;
 
   @ApiPropertyOptional({
     type: EffectivePricingDto,
@@ -479,6 +507,9 @@ export function toTripResponse(
     effectiveDriver: planning.effectiveDriver,
     latestUpdate: planning.latestUpdate,
     costConfirmation: planning.costConfirmation,
+    costConfirmations: planning.costConfirmations,
+    costConfirmationTotal: planning.costConfirmationTotal,
+    waitingTimeSupersedesCostConfirmations: hasRecordedWaitingTime(trip),
     pricing: planning.pricing,
     /*
      * A READ never attempted a recalculation, so there is nothing to explain.

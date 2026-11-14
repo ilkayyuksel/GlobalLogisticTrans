@@ -320,6 +320,43 @@ Every failure should be logged.
 
 No partial data should remain.
 
+## Which Trip a cost confirmation belongs to
+
+A cost confirmation (CC) never creates a Trip; it names one
+(`cost-confirmation-matching.service.ts`). It is matched on its booking number
+and a DATE, never on its CC number:
+
+1. the LOADING/DELIVERY `Date/time:` the CC prints (never its print date),
+   equal to the Trip's planning date or originally ordered date — in three
+   phases: exact booking with the container rule, booking digits with the
+   container rule, booking and date alone. A Trip's current container is never
+   a condition: an operator may type one in after the order;
+2. only when that finds NO Trip: the same three phases on the day the CC's
+   Remarks name with `dd DD/MM` (owner, October 2026 — CC 4261545 prints
+   27/10 and `dd 26/10`, the day the transport ran). The parser reads that day
+   beside the LOADING date: its year is the one within a week of it; none,
+   several, or two different `dd` days, and it is not read;
+3. only when neither finds a Trip, and only for a COLLECTION Trip: the same
+   three phases on the days ±1, then ±2, then ±3 around the LOADING date
+   (owner, November 2026 — CC 4261544 prints 27/10 and no other day, for a
+   collection Trano holds on 26/10; a CC prints the order's loading window as
+   it stands when the cost is confirmed). The closest distance that finds
+   anything decides; a Trip the day before AND one the day after, or two on
+   one day, is ambiguous. Further than 3 days is refused. Other directions keep
+   rules 1–2.
+
+One Trip is matched; several are refused as ambiguous, naming the day; none
+is refused naming the dates compared and the days the booking's Trips are on.
+Matching never changes the Trip: not its container, not its planning date, not
+its original date.
+
+A Trip may carry several CCs (unique per Trip and CC number). Their sum is the
+EK unless a waiting time is recorded (see `businessrules.md`). The Ritten CC
+cell marks a Trip with several and lists each with its amount, their total and
+the EK on hover; every figure comes from the Trip response
+(`costConfirmations`, `costConfirmationTotal`,
+`waitingTimeSupersedesCostConfirmations`).
+
 ## A document read is not a document imported
 
 After the write, the import checks in the database that the document left its

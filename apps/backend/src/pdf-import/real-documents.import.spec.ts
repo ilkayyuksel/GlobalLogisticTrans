@@ -79,6 +79,12 @@ const IMPORTABLE: readonly ExpectedImport[] = [
     bookings: ["ANRDUB2790528"],
     combination: false,
   },
+  {
+    // Four BI cargo remarks push `Cntr type: 45PH` onto page 2; still one Trip.
+    file: "BUG-CNTR/transportorder1404135.pdf",
+    bookings: ["ANRDUB2831071"],
+    combination: false,
+  },
 ];
 
 /**
@@ -488,13 +494,14 @@ describe("every real transport order, through the real import pipeline", () => {
       expect(harness.trips[0].waitingTimeMinutes).toBeNull();
     });
 
+    // Refused as a handled document, never as a failure that is retried.
     it("refuses to revise a CLOSED Trip", async () => {
       await harness.importer.import(readFixture(FILE), FILE);
       harness.trips[0].status = TripStatus.CLOSED;
 
-      await expect(
-        harness.importer.revise(readFixture(FILE), FILE),
-      ).rejects.toThrow(/CLOSED/);
+      const result = await harness.importer.revise(readFixture(FILE), FILE);
+
+      expect(result.revisions.map((entry) => entry.action)).toEqual(["REFUSED_CLOSED"]);
     });
 
     /** A cancellation is superseded by the document that arrives after it. */
@@ -514,9 +521,9 @@ describe("every real transport order, through the real import pipeline", () => {
       await harness.importer.import(readFixture(FILE), FILE);
       harness.trips[0].status = TripStatus.CLOSED;
 
-      await expect(
-        harness.importer.revise(readFixture(FILE), FILE),
-      ).rejects.toThrow(/CLOSED/);
+      const result = await harness.importer.revise(readFixture(FILE), FILE);
+
+      expect(result.revisions.map((entry) => entry.action)).toEqual(["REFUSED_CLOSED"]);
       expect(harness.trips[0].status).toBe(TripStatus.CLOSED);
     });
 

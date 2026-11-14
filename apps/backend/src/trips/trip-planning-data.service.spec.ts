@@ -400,4 +400,55 @@ describe("TripPlanningDataService", () => {
       ).not.toHaveBeenCalled();
     });
   });
+
+  /**
+   * Every confirmation of a Trip travels with it, newest first, with the total
+   * the backend summed — the Ritten row marks a Trip that has several and lists
+   * them, and never adds money up itself.
+   */
+  describe("the cost confirmations", () => {
+    const confirmation = (ccNumber: string, amount: string) => ({
+      id: `cc-${ccNumber}`,
+      ccNumber,
+      costCode: "WAIT",
+      amount,
+      currency: "EUR",
+      receivedAt: new Date("2026-10-27T09:00:00.000Z"),
+      pdfDocumentId: `pdf-${ccNumber}`,
+    });
+
+    function serviceWith(confirmations: Map<string, unknown>) {
+      return new TripPlanningDataService(
+        vehicleService as unknown as VehicleService,
+        driverService as unknown as DriverService,
+        assignmentService as unknown as VehicleAssignmentService,
+        tripRepository as unknown as TripRepository,
+        { findForTrips: () => Promise.resolve(confirmations) } as unknown as CostConfirmationService,
+        { findForTrips: () => Promise.resolve(new Map()) } as unknown as EffectivePricingService,
+      );
+    }
+
+    it("carries every confirmation, the latest first, and their total", async () => {
+      const trip = buildTrip();
+      const items = [
+        confirmation("4261546", "25.00"),
+        confirmation("4261545", "70.00"),
+        confirmation("4261544", "68.75"),
+      ];
+
+      const planning = await serviceWith(new Map([[trip.id, { items, total: "163.75" }]])).resolveOne(trip);
+
+      expect(planning.costConfirmation).toEqual(items[0]);
+      expect(planning.costConfirmations).toEqual(items);
+      expect(planning.costConfirmationTotal).toBe("163.75");
+    });
+
+    it("carries none for a Trip without a confirmation", async () => {
+      const planning = await serviceWith(new Map()).resolveOne(buildTrip());
+
+      expect(planning.costConfirmation).toBeNull();
+      expect(planning.costConfirmations).toEqual([]);
+      expect(planning.costConfirmationTotal).toBeNull();
+    });
+  });
 });

@@ -1,9 +1,9 @@
 import { Injectable } from "@nestjs/common";
-import { Trip } from "@prisma/client";
+import { Trip, TripDirection } from "@prisma/client";
 import { parse, type ParsedCostConfirmation } from "@tms/parser";
 
 import { bookingNumberDigits } from "../common/booking-digits";
-import { toIsoDate } from "../common/dates";
+import { addDays, toIsoDate, toUtcDate } from "../common/dates";
 import { AppLoggerService } from "../logger/app-logger.service";
 import { PdfDocumentService } from "../pdf-documents/pdf-document.service";
 import { toContainerIdentity } from "../trips/document-trip-matching";
@@ -61,7 +61,12 @@ export type CostConfirmationMatch =
        */
       readonly bookingDates: readonly string[];
     }
-  | { readonly kind: "AMBIGUOUS"; readonly trips: readonly Trip[] };
+  | {
+      readonly kind: "AMBIGUOUS";
+      readonly trips: readonly Trip[];
+      /** The day the Trips were found on: the transport date, or the Remarks' `dd` day. */
+      readonly date?: string;
+    };
 
 /** What a confirmation states about the transport it is paying for. */
 export interface ConfirmationIdentity {
@@ -70,6 +75,11 @@ export interface ConfirmationIdentity {
   readonly transportDate: string | null;
   /** Canonical container, or null when the document named none usable. */
   readonly containerReference: string | null;
+  /**
+   * The day the Remarks name with `dd DD/MM` (`dd 26/10`), read by the parser
+   * beside the transport date — the fallback when that date finds no Trip.
+   */
+  readonly remarksDate?: string | null;
 }
 
 export function identityOfConfirmation(
@@ -79,7 +89,19 @@ export function identityOfConfirmation(
     bookingNumber: confirmation.bookingNumber,
     transportDate: confirmation.transportDate,
     containerReference: toContainerIdentity(confirmation.containerReference),
+    remarksDate: confirmation.remarksDate,
   };
+}
+
+/**
+ * How far either side of its transport date a confirmation may find a
+ * COLLECTION Trip, when no Trip is on that date or on its Remarks' day (owner,
+ * November 2026: ±1, ±2, ±3 days, then refused).
+ */
+export const NEARBY_DAYS_FOR_A_COLLECTION = 3;
+
+function isCollection(trip: Trip): boolean {
+  return trip.direction === TripDirection.COLLECTION;
 }
 
 /** Every planning and originally ordered date of these Trips, each once, in order. */
@@ -101,8 +123,130 @@ export class CostConfirmationMatchingService {
     this.logger.setContext(CostConfirmationMatchingService.name);
   }
 
+  /**
+   * ── ON THE TRANSPORT DATE, THEN ON THE REMARKS' DAY ───────────────────────
+   * The three phases below run on the LOADING / DELIVERY date the confirmation
+   * prints. Only when they find NO Trip at all are they run once more, in full,
+   * on the day its Remarks name with `dd DD/MM` (owner, October 2026: CC
+   * 4261544/4261545 print a loading window of 27/10 and `dd 26/10`, the day the
+   * transport ran). An ambiguity on the first date is never relaxed into the
+   * second, and the second is as strict as the first: the booking, that day,
+   * the same container rule, one Trip or none.
+   *
+   * ── THEN, FOR A COLLECTION, THE NEARBY DAYS ───────────────────────────────
+   * When neither day finds a Trip, a COLLECTION Trip is looked for up to
+   * `NEARBY_DAYS_FOR_A_COLLECTION` days either side of the transport date, the
+   * closest distance first (owner, November 2026). A confirmation prints the
+   * order's loading window as it stands when the cost is confirmed, and for a
+   * collection that can lie a day or more from the day Trano holds the Trip on:
+   * CC 4261544 prints 27/10 and nothing else, for a Trip on 26/10. See
+   * `matchOnNearbyDays`.
+   */
   async findTripForCostConfirmation(
     identity: ConfirmationIdentity,
+  ): Promise<CostConfirmationMatch> {
+    const onTransportDate = await this.matchOnDate(identity);
+
+    if (onTransportDate.kind !== "NO_MATCHING_TRIP") {
+      return onTransportDate.kind === "AMBIGUOUS" && identity.transportDate !== null
+        ? { ...onTransportDate, date: identity.transportDate }
+        : onTransportDate;
+    }
+
+    const remarksDate = identity.remarksDate ?? null;
+
+    if (remarksDate !== null && remarksDate !== identity.transportDate) {
+      const onRemarksDate = await this.matchOnDate({ ...identity, transportDate: remarksDate });
+
+      this.logger.log("Cost confirmation matched on the day its Remarks name", {
+        bookingNumber: identity.bookingNumber,
+        transportDate: identity.transportDate,
+        remarksDate,
+        outcome: onRemarksDate.kind,
+      });
+
+      if (onRemarksDate.kind === "AMBIGUOUS") {
+        return { ...onRemarksDate, date: remarksDate };
+      }
+
+      if (onRemarksDate.kind === "MATCHED") {
+        return onRemarksDate;
+      }
+    }
+
+    return (await this.matchOnNearbyDays(identity)) ?? onTransportDate;
+  }
+
+  /**
+   * A COLLECTION Trip on a day near the transport date: ±1, then ±2, … up to
+   * `NEARBY_DAYS_FOR_A_COLLECTION`. Null when none is found.
+   *
+   * Each day is matched by the same three phases as the transport date, so the
+   * booking and the container rule are exactly as strict; only the day moves.
+   * The CLOSEST distance that finds anything answers. Both sides of it are
+   * looked at together, and anything other than exactly one Trip there — a Trip
+   * the day before AND one the day after, or an ambiguity on either day — is
+   * AMBIGUOUS: the nearer day is not a reason to pick one, and a farther day is
+   * never reached past an ambiguity.
+   *
+   * Only collections: their order is written before the transport is fixed and
+   * is the one the business saw drift. Every other Trip keeps the exact-date
+   * rule.
+   */
+  private async matchOnNearbyDays(
+    identity: ConfirmationIdentity,
+  ): Promise<CostConfirmationMatch | null> {
+    if (identity.transportDate === null) {
+      return null;
+    }
+
+    const transportDay = toUtcDate(identity.transportDate);
+
+    for (let distance = 1; distance <= NEARBY_DAYS_FOR_A_COLLECTION; distance += 1) {
+      const days = [-distance, distance].map((offset) => toIsoDate(addDays(transportDay, offset)));
+      const found = new Map<string, Trip>();
+      let ambiguous = false;
+
+      for (const day of days) {
+        const match = await this.matchOnDate({ ...identity, transportDate: day }, isCollection);
+
+        ambiguous ||= match.kind === "AMBIGUOUS";
+        for (const trip of match.kind === "MATCHED" ? [match.trip] : match.kind === "AMBIGUOUS" ? match.trips : []) {
+          found.set(trip.id, trip);
+        }
+      }
+
+      if (found.size === 0) {
+        continue;
+      }
+
+      const trips = [...found.values()];
+      const outcome: CostConfirmationMatch =
+        ambiguous || trips.length > 1
+          ? { kind: "AMBIGUOUS", trips, date: days.join(" / ") }
+          : { kind: "MATCHED", trip: trips[0] as Trip };
+
+      this.logger.log("Cost confirmation matched a collection on a nearby day", {
+        bookingNumber: identity.bookingNumber,
+        transportDate: identity.transportDate,
+        distanceInDays: distance,
+        outcome: outcome.kind,
+        tripIds: trips.map((trip) => trip.id),
+      });
+
+      return outcome;
+    }
+
+    return null;
+  }
+
+  /**
+   * The three phases on one date — `identity.transportDate` — among the Trips
+   * `admits`, by default every Trip.
+   */
+  private async matchOnDate(
+    identity: ConfirmationIdentity,
+    admits: (trip: Trip) => boolean = () => true,
   ): Promise<CostConfirmationMatch> {
     /*
      * Without a date nothing can be matched: the date is what separates two
@@ -117,9 +261,7 @@ export class CostConfirmationMatchingService {
       return { kind: "NO_MATCHING_TRIP", bookingDates: [] };
     }
 
-    const exact = await this.trips.findByExactBookingNumber(
-      identity.bookingNumber,
-    );
+    const exact = (await this.trips.findByExactBookingNumber(identity.bookingNumber)).filter(admits);
 
     /* PHASE 1 — the exact booking, the date, and the container rule. */
     const strict = await this.eligibleAmong(exact, identity);
@@ -135,7 +277,7 @@ export class CostConfirmationMatchingService {
     const digits = bookingNumberDigits(identity.bookingNumber);
 
     const byDigits =
-      digits === null ? [] : await this.trips.findByBookingDigits(digits);
+      digits === null ? [] : (await this.trips.findByBookingDigits(digits)).filter(admits);
 
     const relaxedBooking = await this.eligibleAmong(byDigits, identity);
 

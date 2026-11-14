@@ -80,7 +80,8 @@ export type CancellationOutcome =
   | "ALREADY_CANCELLED"
   /** The Trip is CLOSED. Finished work is never rewritten. */
   | "REFUSED_CLOSED"
-  | "AMBIGUOUS_BOOKING_MATCH"
+  /** A driver is assigned to the Trip. Planned work is not cancelled by a document. */
+  | "REFUSED_DRIVER_ASSIGNED"
   /**
    * The document printed no container, and the booking it names carries more
    * than one Trip. Nothing is chosen: a cancellation applied to the wrong half
@@ -101,6 +102,8 @@ export type RevisionOutcome =
    * document rather than protected from it.
    */
   | "REFUSED_CLOSED"
+  /** A driver is assigned to the Trip. Planned work is not rewritten by a document. */
+  | "REFUSED_DRIVER_ASSIGNED"
   /**
    * The document printed no container and its booking carries several Trips.
    * Distinct from NO_MATCHING_TRIP on purpose: that one CREATES the Trip the
@@ -189,6 +192,28 @@ function pairInputsOf(
     destinationCity: trip.destinationCity,
     direction: trip.direction,
   };
+}
+
+/**
+ * Why an UPDATE or CANCEL document may not change this Trip, or null when it
+ * may — one rule for both (owner, November 2026).
+ *
+ *   CLOSED           → finished, priced work is never rewritten;
+ *   driver assigned  → the work is planned with a person; a document does not
+ *                      change or call it off behind their back.
+ *
+ * CLOSED is named first, so a CLOSED Trip with a driver reads as CLOSED. The
+ * driver is the Trip's own stored relation (`driverId`), never derived from its
+ * vehicle — that relation is what planning stores (`TripDriverPinningService`).
+ */
+export function protectionOf(
+  trip: Pick<Trip, "status" | "driverId">,
+): "REFUSED_CLOSED" | "REFUSED_DRIVER_ASSIGNED" | null {
+  if (trip.status === TripStatus.CLOSED) {
+    return "REFUSED_CLOSED";
+  }
+
+  return (trip.driverId ?? null) !== null ? "REFUSED_DRIVER_ASSIGNED" : null;
 }
 
 export function identityOf(document: ImportedTripData): TripIdentity {
@@ -289,19 +314,21 @@ export class TripRevisionService {
         matchMethod = match.method;
 
         /*
-         * Only an OPEN Trip is cancelled, and "OPEN" means OPEN at the moment
+         * Only an OPEN Trip WITHOUT a driver is cancelled, judged at the moment
          * of the write — not when it was matched. The transition is a
-         * compare-and-set, so a Trip closed by an operator in between is left
-         * CLOSED rather than overwritten. Only the status is written: a
-         * cancellation never touches the waiting time, the Custom Values or
-         * anything else the operator entered.
+         * compare-and-set on both, so a Trip closed or given a driver in
+         * between is left as it is rather than overwritten. Only the status is
+         * written: a cancellation never touches the waiting time, the Custom
+         * Values or anything else the operator entered.
          */
         if (
           match.trip.status === TripStatus.OPEN &&
+          protectionOf(match.trip) === null &&
           (await repository.transitionStatus(
             match.trip.id,
             TripStatus.OPEN,
             TripStatus.CANCELLED,
+            { onlyWithoutDriver: true },
           ))
         ) {
           await this.record(repository, match.trip.id, document, {
@@ -315,9 +342,10 @@ export class TripRevisionService {
           return "CANCELLED";
         }
 
-        // Lost the race: decide on the status the Trip holds NOW.
+        // Lost the race — the write was tried and refused: decide on the Trip
+        // as it is NOW. A Trip refused before any write is judged as matched.
         const trip =
-          match.trip.status === TripStatus.OPEN
+          match.trip.status === TripStatus.OPEN && protectionOf(match.trip) === null
             ? ((await repository.findById(match.trip.id)) ?? match.trip)
             : match.trip;
 
@@ -337,16 +365,11 @@ export class TripRevisionService {
         }
 
         /*
-         * CLOSED, or — after a lost race — whatever the Trip became instead of
-         * OPEN. Nothing is written: a cancellation applies to OPEN work only.
+         * CLOSED, a driver assigned, or — after a lost race — whatever the
+         * Trip became instead. Nothing is written: a cancellation applies to
+         * OPEN work nobody has been given yet.
          */
-        await this.record(repository, trip.id, document, {
-          eventType: TripHistoryEvent.CancelRefused,
-          description:
-            "Cancellation received for a CLOSED Trip. Finished work is not undone.",
-        });
-
-        return "REFUSED_CLOSED";
+        return this.refuseProtected(repository, trip, document, "CANCEL");
       },
     );
 
@@ -427,6 +450,23 @@ export class TripRevisionService {
         const trip = match.trip;
 
         /*
+         * ── PROTECTED BEFORE ANYTHING IS WRITTEN ──────────────────────────────
+         * A CLOSED Trip, or one a driver has been assigned to, is not changed by
+         * a document — not reopened, not revised. The refusal is still recorded
+         * against the Trip it named, which is what makes "an update arrived
+         * after the Trip was finished or planned" a visible fact rather than a
+         * silent one, and it is why the document is kept: the record and the
+         * evidence stay together.
+         */
+        if (protectionOf(trip) !== null) {
+          return {
+            outcome: await this.refuseProtected(repository, trip, source, "UPDATE"),
+            trip,
+            changedFields: [],
+          };
+        }
+
+        /*
          * A cancellation is not the end of this Trip's life. A revision that
          * arrives after one is the LATER statement about the same transport, so
          * it brings the Trip back and its fields are applied — the alternative
@@ -446,22 +486,6 @@ export class TripRevisionService {
             description:
               "Reopened by an update that arrived after the cancellation.",
           });
-        }
-
-        /*
-         * A revision that cannot be applied is still recorded against the Trip
-         * it named. That is what makes "an update arrived after the Trip was
-         * finished" a visible fact rather than a silent refusal, and it is why
-         * the document is kept: the record and the evidence stay together.
-         */
-        if (!reopened && trip.status !== TripStatus.OPEN) {
-          await this.record(repository, trip.id, source, {
-            eventType: TripHistoryEvent.UpdateRefused,
-            description:
-              "Update received for a CLOSED Trip. Finished work is not rewritten.",
-          });
-
-          return { outcome: "REFUSED_CLOSED", trip, changedFields: [] };
         }
 
         /*
@@ -818,6 +842,43 @@ export class TripRevisionService {
         description: describeChange(change),
       })),
     );
+  }
+
+  /**
+   * Records why a document was deliberately not applied to a protected Trip,
+   * and says which protection it was. Writes nothing to the Trip.
+   *
+   * Not a failure: the document was read and matched correctly, and only the
+   * Trip's own state stops it. The importer reports it as handled, so its
+   * email is marked processed and never retried.
+   */
+  private async refuseProtected(
+    repository: TripRepository,
+    trip: Trip,
+    source: DocumentReference | undefined,
+    kind: "UPDATE" | "CANCEL",
+  ): Promise<"REFUSED_CLOSED" | "REFUSED_DRIVER_ASSIGNED"> {
+    // Anything else after a lost race reads as before: not OPEN work.
+    const reason = protectionOf(trip) ?? "REFUSED_CLOSED";
+    const what = kind === "UPDATE" ? "Update" : "Cancellation";
+
+    await this.record(repository, trip.id, source, {
+      eventType:
+        kind === "UPDATE" ? TripHistoryEvent.UpdateRefused : TripHistoryEvent.CancelRefused,
+      newValue: { reason },
+      description:
+        reason === "REFUSED_DRIVER_ASSIGNED"
+          ? `${what} received for a Trip with an assigned driver. Planned work is not changed by a document.`
+          : `${what} received for a CLOSED Trip. Finished work is not ${kind === "UPDATE" ? "rewritten" : "undone"}.`,
+    });
+
+    this.logger.log("Transport document ignored for a protected Trip", {
+      tripId: trip.id,
+      documentKind: kind,
+      reason,
+    });
+
+    return reason;
   }
 
   /** One event row, for the outcomes that describe themselves in a sentence. */

@@ -18,6 +18,16 @@ const TYPE_LABEL = "Cntr type:";
 const NUMBER_LABEL = "Container:";
 
 /**
+ * The `Cntr type:` label as a text layer may actually emit it.
+ *
+ * Extraction already collapses runs of whitespace, but a PDF generator may
+ * still drop or add a space around the words or the colon, or emit the label
+ * and its value as ONE run (`Cntr type: 45PH`). The capture is that glued-on
+ * value, empty when the value is a separate fragment to the right.
+ */
+const TYPE_LABEL_PATTERN = /^Cntr\s*type\s*:\s*(.*)$/;
+
+/**
  * No closed list of container types.
  *
  * The documents show `45PH`, `45RH`, `20TK`, `20RF` and say "etc.", so
@@ -27,13 +37,13 @@ const NUMBER_LABEL = "Container:";
 const CONTAINER_TYPE = /^[0-9]{2}[A-Z0-9]{2,}$/;
 
 export function extractContainerType(fragments: readonly Fragment[]): string {
-  const labels = fragments.filter((fragment) => fragment.text === TYPE_LABEL);
+  const labels = findContainerTypeLabels(fragments);
 
   for (const label of labels) {
-    const candidate = valuesRightOf(fragments, label)[0];
+    const candidate = containerTypeValue(fragments, label);
 
-    if (candidate && CONTAINER_TYPE.test(candidate.text)) {
-      return candidate.text;
+    if (candidate !== null && CONTAINER_TYPE.test(candidate)) {
+      return candidate;
     }
   }
 
@@ -43,6 +53,29 @@ export function extractContainerType(fragments: readonly Fragment[]): string {
       ? `No '${TYPE_LABEL}' label was found.`
       : `'${TYPE_LABEL}' was found but carried no value shaped like a container type.`,
   );
+}
+
+/** True when these fragments print a `Cntr type:` label at all. */
+export function hasContainerTypeLabel(fragments: readonly Fragment[]): boolean {
+  return findContainerTypeLabels(fragments).length > 0;
+}
+
+function findContainerTypeLabels(fragments: readonly Fragment[]): Fragment[] {
+  return fragments.filter((fragment) => TYPE_LABEL_PATTERN.test(fragment.text));
+}
+
+/** The value glued onto the label, otherwise the nearest one to its right. */
+function containerTypeValue(
+  fragments: readonly Fragment[],
+  label: Fragment,
+): string | null {
+  const inline = TYPE_LABEL_PATTERN.exec(label.text)?.[1] ?? "";
+
+  if (inline !== "") {
+    return inline;
+  }
+
+  return valuesRightOf(fragments, label)[0]?.text ?? null;
 }
 
 /**

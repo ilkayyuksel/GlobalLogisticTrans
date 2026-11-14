@@ -9,6 +9,7 @@ import {
   extractContainerNumber,
   extractRawContainerNumber,
   extractContainerType,
+  hasContainerTypeLabel,
 } from "../fields/container";
 import { ExtractedDateTime, extractDateTime } from "../fields/date-time";
 import { extractTerminal } from "../fields/terminal";
@@ -32,17 +33,28 @@ const ADDRESS_SECTIONS = /^(LOADING|DELIVERY)\s+\d+:$/;
 /** Section headers worth reporting for diagnostics. */
 const SECTION_HEADER = /^[A-Z][A-Z /]+:$/;
 
+/**
+ * `continuationPages` are pages the SAME trip may flow onto. A single order
+ * passes its later pages; a combination passes none, because its other page is
+ * a different trip whose container must never be borrowed.
+ */
 export function extractTripFromPage(
   fragments: readonly Fragment[],
   page: number,
   groupKey: string | null,
+  continuationPages: readonly number[] = [],
 ): ParsedTrip {
   const pageFragments = fragments.filter((fragment) => fragment.page === page);
+  const cargoFragments = cargoBlockFragments(
+    fragments,
+    pageFragments,
+    continuationPages,
+  );
 
   const booking = extractBookingAndDirection(pageFragments);
-  const containerType = extractContainerType(pageFragments);
-  const containerNumber = extractContainerNumber(pageFragments);
-  const rawContainerNumber = extractRawContainerNumber(pageFragments);
+  const containerType = extractContainerType(cargoFragments);
+  const containerNumber = extractContainerNumber(cargoFragments);
+  const rawContainerNumber = extractRawContainerNumber(cargoFragments);
 
   const { address, dateTime, sectionLabel } = readDestination(
     fragments,
@@ -89,6 +101,37 @@ export function extractTripFromPage(
       },
     },
   };
+}
+
+/**
+ * The page that carries this trip's CONTAINER/CARGO block.
+ *
+ * Normally the trip's own page. A long TRANSPORT REMARKS section — one real
+ * order lists four `BIxxxxx: n x 45PH` cargo lines — pushes the block's
+ * `Weight:` / `Cntr type:` row onto page 2, leaving only the heading on
+ * page 1. The block is then read from the first continuation page that prints
+ * the label, and container type and number come from that one page together.
+ *
+ * Own page first, always: a continuation is consulted only when the own page
+ * prints no `Cntr type:` label at all, so it can never override a value the
+ * trip's page states. The cargo remarks themselves are never read as a type.
+ */
+function cargoBlockFragments(
+  fragments: readonly Fragment[],
+  pageFragments: readonly Fragment[],
+  continuationPages: readonly number[],
+): readonly Fragment[] {
+  if (hasContainerTypeLabel(pageFragments)) {
+    return pageFragments;
+  }
+
+  const continuation = continuationPages
+    .map((page) => fragmentsOnPage(fragments, page))
+    .find(hasContainerTypeLabel);
+
+  // Absent everywhere: the own page is returned so the existing
+  // "No 'Cntr type:' label was found." refusal is raised unchanged.
+  return continuation ?? pageFragments;
 }
 
 /**

@@ -40,6 +40,8 @@ export interface CancelledBooking {
     | "CANCELLED"
     | "ALREADY_CANCELLED"
     | "REFUSED_CLOSED"
+    | "REFUSED_DRIVER_ASSIGNED"
+    | "AMBIGUOUS_BOOKING_MATCH"
     | "NO_MATCHING_TRIP";
 }
 

@@ -115,7 +115,28 @@ export interface InvoiceRowPricing {
   readonly agreements?: readonly ComparedComponent[];
   /** Whether the Trip's stored price could be relied on; null when uncompared. */
   readonly reliability: PriceReliability | null;
+  /**
+   * Why the line is marked yellow although it was compared as usual. A mark
+   * changes no status and no write: it only adds the line to the yellow ones
+   * (`toMarkedRowNumbers`). Absent or empty when there is none.
+   */
+  readonly marks?: readonly InvoiceLineMark[];
 }
+
+/** The reasons a compared line is still marked yellow (owner, November 2026). */
+export const InvoiceLineMark = {
+  /** The invoice states neither a Tarief nor a Fuel: both empty or `-`. Neither is filled in. */
+  PRICES_MISSING: "PRICES_MISSING",
+  /** The Excel marks the line as a Combination; the Trip is in no group. */
+  COMBINATION_ONLY_IN_EXCEL: "COMBINATION_ONLY_IN_EXCEL",
+  /**
+   * The Trip is in a group; the Excel marks no Combination. Its €50 Backload
+   * is not added and no Combination remark is written.
+   */
+  COMBINATION_ONLY_IN_TRANO: "COMBINATION_ONLY_IN_TRANO",
+} as const;
+
+export type InvoiceLineMark = (typeof InvoiceLineMark)[keyof typeof InvoiceLineMark];
 
 export type ComparedComponent = Pick<
   InvoicePricingDifference,

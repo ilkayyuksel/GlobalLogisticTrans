@@ -23,6 +23,7 @@ import {
 } from "@/lib/ritten/combination";
 import { toVehicleGroups } from "@/lib/ritten/vehicle-groups";
 import { toCostConfirmationLabel } from "@/lib/trips/cost-confirmation";
+import { SeveralCostConfirmationsMarker } from "./several-cost-confirmations-marker";
 import {
   UPDATED_FIELD_CLASS,
   changedByLatestUpdate,
@@ -874,6 +875,7 @@ function CostConfirmationCell({
         <span className="font-medium tabular-nums text-foreground">
           {confirmation.amount}
         </span>
+        <SeveralCostConfirmationsMarker trip={trip} />
       </span>
     </td>
   );

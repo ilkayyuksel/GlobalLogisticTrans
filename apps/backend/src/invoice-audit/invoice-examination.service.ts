@@ -10,6 +10,7 @@ import { toBlockingIdentities } from "./missing/missing-trip-blocking";
 import { MissingTripsService, type BlockedMissingTrip } from "./missing/missing-trips.service";
 import type { InvoiceRowPricing } from "./pricing/invoice-reconciliation";
 import { InvoicePricingService } from "./pricing/invoice-pricing.service";
+import { withoutCorrectionsOnUnpricedLines } from "./pricing/unpriced-trips";
 import { InvoiceRemarksService } from "./remarks/invoice-remarks.service";
 import type { RemarkChange } from "./remarks/remark-plan";
 import { planFuelHeader, type FuelHeaderChange } from "./workbook/fuel-header";
@@ -92,8 +93,10 @@ export class InvoiceExaminationService {
      * into the match, so those lines come back as ADDED_MISSING rather than as
      * ordinary invoice lines — priced like any other, never settled.
      */
-    const matches = await this.matching.match(opened.sheet.rows, opened.sheet.addedByAudit);
-    const pricing = await this.pricing.reconcile(matches, opened.sheet.columns);
+    const matched = await this.matching.match(opened.sheet.rows, opened.sheet.addedByAudit);
+    const pricing = await this.pricing.reconcile(matched, opened.sheet.columns);
+    // A Trip without a usable price keeps every line as received: no corrected number either.
+    const matches = withoutCorrectionsOnUnpricedLines(matched, pricing);
     const remarks = await this.remarks.plan(matches, pricing);
     const period = toInvoicePeriod(opened.sheet.rows);
     /*

@@ -8,8 +8,9 @@ import { CORRECTED_TEXT_ARGB } from "./workbook/cell-marking";
  * Week 41 R53-R54: one transport over two EC lines — EC 4220981 (EK 110) and
  * EC 4220982 (EK 70), 180 together. Its prices belong on R53. When Trano's EK
  * is higher, the raise cannot be given to either row: that holds back the EK
- * ALONE (owner, October 2026). Tarief and Fuel are still written; the EK is
- * left as the customer wrote it, said, and the transport is not settled.
+ * ALONE (owner, October 2026); the EK is left as the customer wrote it, said,
+ * and the transport is not settled. The lines state no Tarief and no Fuel, so
+ * neither is filled from Trano and the lines are marked (owner, November 2026).
  */
 
 const TUESDAY = "2026-10-06";
@@ -64,19 +65,16 @@ describe("an EK difference no EC line can carry holds back the EK alone", () => 
   describe("1. Trano's EK higher than the 180 on the EC lines", () => {
     beforeEach(() => world.ekOf.set("bousbecque", "220"));
 
-    it("writes Tarief and Fuel on R53, leaves the EK as written, and says why", async () => {
+    it("fills no Tarief or Fuel on R53, leaves the EK as written, and says why", async () => {
       const { result, cell } = await world.check(LINES);
       const r53 = result.rows[1];
 
-      expect(r53).toMatchObject({ status: "MATCHED", trip: { id: "bousbecque" }, pricingStatus: "NOT_DISTRIBUTABLE" });
+      expect(r53).toMatchObject({ status: "MATCHED", trip: { id: "bousbecque" }, pricingStatus: "NOT_DISTRIBUTABLE", marks: ["PRICES_MISSING"] });
       expect(r53.comparisons.map((comparison) => [comparison.component, comparison.outcome, comparison.writtenValue])).toEqual([
-        ["Tarief", "RAISE", "200.00"],
-        ["Fuel", "RAISE", "30.00"],
         ["EK", "NOT_PLACEABLE", null],
       ]);
       // The preview's figures are the file's.
-      expect([cell(3, COLUMN.tarief).value, cell(3, COLUMN.fuel).value]).toEqual([200, 30]);
-      expect([isRed(cell(3, COLUMN.tarief)), isRed(cell(3, COLUMN.fuel))]).toEqual([true, true]);
+      expect([cell(3, COLUMN.tarief).value, cell(3, COLUMN.fuel).value]).toEqual([null, null]);
       // 5. Both EC lines and their EK kept as the customer wrote them.
       expect([cell(3, COLUMN.ek).value, cell(4, COLUMN.ek).value]).toEqual([110, 70]);
       expect([isRed(cell(3, COLUMN.ek)), isRed(cell(4, COLUMN.ek))]).toEqual([false, false]);
@@ -85,10 +83,10 @@ describe("an EK difference no EC line can carry holds back the EK alone", () => 
       expect(result.markedRowNumbers).toEqual(expect.arrayContaining([3, 4]));
     });
 
-    it("4. adds the Tarief and the Fuel to the totals once, and no EK", async () => {
+    it("4. adds nothing to the totals: no Tarief, no Fuel, no EK", async () => {
       const { result } = await world.check(LINES);
 
-      expect([grew(result, "Tarief"), grew(result, "Fuel"), grew(result, "EK")]).toEqual(["200.00", "30.00", "0.00"]);
+      expect([grew(result, "Tarief"), grew(result, "Fuel"), grew(result, "EK")]).toEqual(["0.00", "0.00", "0.00"]);
       expect(result.missingTrips).toEqual([]);
     });
 
@@ -107,38 +105,37 @@ describe("an EK difference no EC line can carry holds back the EK alone", () => 
       const r53 = again.result.rows[1];
 
       expect(r53.comparisons.map((comparison) => [comparison.component, comparison.outcome])).toEqual([
-        ["Tarief", "UNCHANGED"],
-        ["Fuel", "UNCHANGED"],
         ["EK", "NOT_PLACEABLE"],
       ]);
       expect([again.cell(3, COLUMN.tarief).value, again.cell(3, COLUMN.ek).value, again.cell(4, COLUMN.ek).value]).toEqual([
-        200, 110, 70,
+        null, 110, 70,
       ]);
       expect([grew(again.result, "Tarief"), grew(again.result, "EK")]).toEqual(["0.00", "0.00"]);
     });
   });
 
-  it("2. Trano's EK equal to the 180: compared, unchanged, the transport priced and settled", async () => {
+  it("2. Trano's EK equal to the 180: compared, unchanged; no price filled, so marked and not settled", async () => {
     world.ekOf.set("bousbecque", "180");
 
     const { result, cell } = await world.check(LINES);
 
-    expect(result.rows[1]).toMatchObject({ pricingStatus: "PRICING_CORRECTED" });
+    expect(result.rows[1]).toMatchObject({ pricingStatus: "MATCHED_NO_CHANGES", marks: ["PRICES_MISSING"] });
     expect(result.rows[1].comparisons.find((comparison) => comparison.component === "EK")).toMatchObject({ outcome: "UNCHANGED" });
-    expect([cell(3, COLUMN.tarief).value, cell(3, COLUMN.ek).value, cell(4, COLUMN.ek).value]).toEqual([200, 110, 70]);
-    expect(paymentOf(result)).toEqual([expect.objectContaining({ payable: true, rowNumbers: [3, 4] })]);
+    expect([cell(3, COLUMN.tarief).value, cell(3, COLUMN.ek).value, cell(4, COLUMN.ek).value]).toEqual([null, 110, 70]);
+    expect(paymentOf(result)).toEqual([
+      expect.objectContaining({ payable: false, rowNumbers: [3, 4], reasons: expect.arrayContaining(["LINE_MARKED"]) }),
+    ]);
   });
 
-  it("3. Trano's EK lower than the 180: never lowered, the transport priced", async () => {
+  it("3. Trano's EK lower than the 180: never lowered, no price filled, the line marked", async () => {
     world.ekOf.set("bousbecque", "150");
 
     const { result, cell } = await world.check(LINES);
 
-    expect(result.rows[1]).toMatchObject({ pricingStatus: "PRICING_CORRECTED" });
+    expect(result.rows[1]).toMatchObject({ pricingStatus: "INVOICE_HIGHER", marks: ["PRICES_MISSING"] });
     expect(result.rows[1].comparisons.find((comparison) => comparison.component === "EK")).toMatchObject({ outcome: "INVOICE_HIGHER" });
-    expect([cell(3, COLUMN.tarief).value, cell(3, COLUMN.ek).value, cell(4, COLUMN.ek).value]).toEqual([200, 110, 70]);
-    // Payable: the Tarief and Fuel were raised; the higher EK is only pointed out.
-    expect(paymentOf(result)).toEqual([expect.objectContaining({ payable: true, category: "RAISED" })]);
+    expect([cell(3, COLUMN.tarief).value, cell(3, COLUMN.ek).value, cell(4, COLUMN.ek).value]).toEqual([null, 110, 70]);
+    expect(paymentOf(result)).toEqual([expect.objectContaining({ payable: false })]);
   });
 
   it("7. still invents nothing for a price that cannot be relied on", async () => {

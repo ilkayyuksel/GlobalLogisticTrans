@@ -1053,6 +1053,34 @@ const PARSED_DOCUMENTS: readonly ExpectedDocument[] = [
       },
     ],
   },
+  {
+    /*
+     * Four `BIxxxxx: n x 45PH` cargo remarks fill page 1, so the
+     * CONTAINER/CARGO block's `Cntr type: 45PH` row and LOADING 1 are on
+     * page 2. Still one collection, one trip.
+     */
+    file: "BUG-CNTR/transportorder1404135.pdf",
+    pageCount: 2,
+    layout: "SINGLE_TWO_PAGE",
+    documentStatus: "PLANNED",
+    trips: [
+      {
+        bookingNumber: "ANRDUB2831071",
+        direction: "COLLECTION",
+        containerType: "45PH",
+        containerNumber: null,
+        terminal: "PSA Quay 869",
+        destinationCity: "Aalter",
+        destinationCountry: null,
+        date: "2026-11-13",
+        startTime: "09:00",
+        endTime: "09:00",
+        groupKey: null,
+        page: 1,
+        addressSection: "LOADING 1",
+      },
+    ],
+  },
 ];
 
 describe.each(PARSED_DOCUMENTS)("$file", (expected) => {

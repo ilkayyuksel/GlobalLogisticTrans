@@ -4,7 +4,7 @@ import { Trip, TripStatus } from "@prisma/client";
 import { toIsoDate } from "../../common/dates";
 import { toTripRoute } from "../../trips/trip-route";
 import { InvoiceRowStatus, type InvoiceRowMatch } from "../matching/invoice-row-matching.service";
-import { InvoicePricingStatus, type InvoiceRowPricing } from "../pricing/invoice-reconciliation";
+import { InvoiceLineMark, InvoicePricingStatus, type InvoiceRowPricing } from "../pricing/invoice-reconciliation";
 import type { RemarkChange } from "../remarks/remark-plan";
 import { MONEY_DECIMAL_PLACES } from "../workbook/invoice-amounts";
 import {
@@ -176,6 +176,14 @@ export class InvoiceAuditRowDto {
   combination!: InvoiceCombinationDto | null;
 
   @ApiProperty({
+    enum: Object.values(InvoiceLineMark),
+    isArray: true,
+    description:
+      "Why a line compared as usual is still marked yellow: no Tarief and no Fuel stated (PRICES_MISSING), the Excel marks a Combination the Trip is not (COMBINATION_ONLY_IN_EXCEL), or the Trip is a Combination the Excel does not mark — its €50 Backload not added (COMBINATION_ONLY_IN_TRANO). Empty when none.",
+  })
+  marks!: InvoiceLineMark[];
+
+  @ApiProperty({
     type: String,
     nullable: true,
     description:
@@ -213,7 +221,9 @@ export function toInvoiceAuditRowDto(
     pricingStatus: pricing?.status ?? InvoicePricingStatus.NOT_COMPARED,
     differences: (pricing?.differences ?? []).map(toDifferenceDto),
     comparisons,
-    transportPricesFilled: fillsTransportPrices(comparisons),
+    // A line stating no Tarief and no Fuel is not filled from Trano any more.
+    transportPricesFilled:
+      fillsTransportPrices(comparisons) && !(pricing?.marks ?? []).includes(InvoiceLineMark.PRICES_MISSING),
     priceReliability: pricing?.reliability
       ? toPriceReliabilityDto(pricing.reliability)
       : null,
@@ -229,6 +239,7 @@ export function toInvoiceAuditRowDto(
         }
       : null,
     combination: match.combination ? { ...match.combination } : null,
+    marks: [...(pricing?.marks ?? [])],
     matchProblem: match.problem,
     remarks: remarks
       ? {

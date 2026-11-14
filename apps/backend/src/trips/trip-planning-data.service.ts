@@ -205,7 +205,9 @@ export class TripPlanningDataService {
         effectiveDriver: this.resolveDriver(trip, overrideDrivers, assignedDrivers),
         customProperties: customProperties.get(trip.id) ?? [],
         latestUpdate: latestUpdates.get(trip.id) ?? null,
-        costConfirmation: confirmations.get(trip.id) ?? null,
+        costConfirmation: confirmations.get(trip.id)?.items[0] ?? null,
+        costConfirmations: confirmations.get(trip.id)?.items ?? [],
+        costConfirmationTotal: confirmations.get(trip.id)?.total ?? null,
         /*
          * Absent from the map means the Trip has never been priced, which is an
          * ordinary state. It becomes null rather than a zeroed breakdown: zeros
@@ -299,6 +301,8 @@ const EMPTY_PLANNING_DATA: TripPlanningData = {
   customProperties: [],
   latestUpdate: null,
   costConfirmation: null,
+  costConfirmations: [],
+  costConfirmationTotal: null,
   pricing: null,
 };
 

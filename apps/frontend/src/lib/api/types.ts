@@ -191,13 +191,24 @@ export interface Trip {
   effectiveDriver: EffectiveDriver | null;
   latestUpdate: LatestTripUpdate | null;
   /**
-   * The cost Eucon confirmed, or null.
-   *
-   * A Trip has at most ONE: Eucon confirms its waiting time once, and the
-   * database enforces it. Null means nothing has been confirmed — which is not
-   * the same as an amount of zero.
+   * The LATEST cost Eucon confirmed, or null. Null means nothing has been
+   * confirmed — which is not the same as an amount of zero. A Trip may have
+   * several; they are all in `costConfirmations`.
    */
   costConfirmation: CostConfirmation | null;
+  /**
+   * EVERY confirmation of the Trip, newest first — `costConfirmation` is the
+   * first of them. Empty when there is none.
+   */
+  costConfirmations: CostConfirmation[];
+  /** Their sum, summed by the backend, as a fixed-2 string; null when none. */
+  costConfirmationTotal: string | null;
+  /**
+   * True when an operator recorded a waiting time: it is then the EK, and the
+   * confirmations are kept but not counted in it. The backend's rule, read
+   * here, never re-derived.
+   */
+  waitingTimeSupersedesCostConfirmations: boolean;
   /**
    * What this Trip is worth, or null when it has never been priced.
    *

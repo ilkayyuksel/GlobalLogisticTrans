@@ -1,5 +1,5 @@
 import { Injectable } from "@nestjs/common";
-import { CostConfirmation } from "@prisma/client";
+import { CostConfirmation, Prisma } from "@prisma/client";
 
 import { AppLoggerService } from "../logger/app-logger.service";
 import { PricingRecalculationService } from "../pricing-engine/pricing-recalculation.service";
@@ -262,30 +262,47 @@ export class CostConfirmationService {
   }
 
   /**
-   * The LATEST confirmation of each Trip on a page, keyed by Trip id.
+   * Every confirmation of each Trip on a page, newest first, with their total,
+   * keyed by Trip id. A Trip with none is absent.
    *
-   * ── WHY THE LATEST AND NOT ALL OF THEM ──────────────────────────────────
-   * This feeds the Ritten row, which shows one confirmation and opens its PDF.
-   * Returning every confirmation of every Trip would grow the list payload for
-   * a history nothing on that screen reads. The older ones are not lost — they
-   * are rows like any other, and pricing reads all of them.
+   * ── WHY ALL OF THEM NOW ─────────────────────────────────────────────────
+   * The Ritten row shows the latest and opens its PDF, and it now also marks a
+   * Trip that has several, listing each with its amount and their total (owner,
+   * November 2026). A Trip carries a handful at most, so the payload stays
+   * small; the latest is still `items[0]`.
    *
-   * Still ONE query for the page. The rows arrive newest first, so the first
-   * one seen for a Trip is its latest and the rest are stepped over.
+   * Still ONE query for the page, the rows newest first. The total is summed
+   * here, as Decimal, from the same rows pricing reads — a screen never adds
+   * money up itself.
    */
   async findForTrips(
     tripIds: readonly string[],
-  ): Promise<Map<string, CostConfirmationDto>> {
-    const byTrip = new Map<string, CostConfirmationDto>();
+  ): Promise<Map<string, TripCostConfirmations>> {
+    const rowsByTrip = new Map<string, CostConfirmation[]>();
 
     for (const row of await this.repository.findForTrips(tripIds)) {
-      if (!byTrip.has(row.tripId)) {
-        byTrip.set(row.tripId, toResponse(row));
-      }
+      rowsByTrip.set(row.tripId, [...(rowsByTrip.get(row.tripId) ?? []), row]);
     }
 
-    return byTrip;
+    return new Map(
+      [...rowsByTrip].map(([tripId, rows]) => [
+        tripId,
+        {
+          items: rows.map(toResponse),
+          total: rows
+            .reduce((sum, row) => sum.plus(row.amount), new Prisma.Decimal(0))
+            .toFixed(2),
+        },
+      ]),
+    );
   }
+}
+
+/** A Trip's confirmations, newest first, and what they add up to. */
+export interface TripCostConfirmations {
+  readonly items: CostConfirmationDto[];
+  /** Fixed-2 string, like every amount that leaves the backend. */
+  readonly total: string;
 }
 
 /**

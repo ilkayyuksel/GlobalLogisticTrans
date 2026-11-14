@@ -142,7 +142,8 @@ describe("the corrected weekly invoice", () => {
      */
     async function aWeekToCorrect() {
       trips.findManyForInvoice.mockResolvedValue([
-        // Charged a Backload, so grouped: the price is a Combination's.
+        // Grouped, so its price carries a Backload — which the line, marking no
+        // Combination, does not get (owner, November 2026).
         { ...trip("trip-1", "DUBANR2718284", "EUCU4581604"), tripGroupId: "group-1" },
         trip("trip-2", "ANRDUB2725107", "TLLU1595717"),
       ]);
@@ -193,7 +194,8 @@ describe("the corrected weekly invoice", () => {
       const { sheet } = await correct(await aWeekToCorrect());
 
       expect(amountAt(sheet, 2, COLUMN.tarief)).toBe(370);
-      expect(amountAt(sheet, 2, COLUMN.backload)).toBe(50);
+      // No Combination on the line: its €50 is not added.
+      expect(amountAt(sheet, 2, COLUMN.backload)).toBeNull();
       expect(amountAt(sheet, 2, COLUMN.tolB)).toBe(63.84);
       expect(amountAt(sheet, 2, COLUMN.tunnel)).toBe(36.36);
       expect(amountAt(sheet, 2, COLUMN.others)).toBe(84);
@@ -238,7 +240,6 @@ describe("the corrected weekly invoice", () => {
       ).toEqual([
         ["Tarief", "364.00", "370.00"],
         ["Fuel", "36.40", "37.00"],
-        ["Backload", null, "50.00"],
         ["Tol", "21.83", "63.84"],
         ["Tunnel", "18.18", "36.36"],
         ["Others", "14.00", "84.00"],
@@ -249,8 +250,10 @@ describe("the corrected weekly invoice", () => {
         priceUnchanged: 1,
         priceCorrected: 1,
         priceNotDistributable: 0,
-        correctedCells: 7,
+        correctedCells: 6,
       });
+      expect(row.marks).toEqual(["COMBINATION_ONLY_IN_TRANO"]);
+      expect(result.result.markedRowNumbers).toEqual([2]);
     });
   });
 

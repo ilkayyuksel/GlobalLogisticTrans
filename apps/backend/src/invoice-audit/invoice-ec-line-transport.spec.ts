@@ -54,15 +54,21 @@ describe("an EC line without container: its transport by its own values, its con
   const confirm = (tripId: string) =>
     world.confirmations.push({ tripId, ccNumber: "4220981", amount: new Prisma.Decimal(110) });
 
-  it("1. date and booking identify one Trip with no line of its own: the EC line is its line, priced", async () => {
+  /*
+   * Its EK is compared as ever; the EC line states no Tarief and no Fuel, and
+   * they are no longer filled from Trano — the line is marked instead (owner,
+   * November 2026).
+   */
+  it("1. date and booking identify one Trip with no line of its own: the EC line is its line, compared, its prices not filled", async () => {
     confirm("y");
     world.ekOf.set("y", "110");
 
     const { result, cell } = await world.check([otherTransport, ecLine()]);
     const row = result.rows[1];
 
-    expect(row).toMatchObject({ status: "MATCHED", trip: { id: "y" }, matchProblem: null, transportPricesFilled: true });
-    expect([cell(3, COLUMN.tarief).value, cell(3, COLUMN.fuel).value, cell(3, COLUMN.ek).value]).toEqual([200, 30, 110]);
+    expect(row).toMatchObject({ status: "MATCHED", trip: { id: "y" }, matchProblem: null, transportPricesFilled: false, marks: ["PRICES_MISSING"] });
+    expect([cell(3, COLUMN.tarief).value, cell(3, COLUMN.fuel).value, cell(3, COLUMN.ek).value]).toEqual([null, null, 110]);
+    expect(result.markedRowNumbers).toContain(3);
     expect(result.missingTrips).toEqual([]);
   });
 
@@ -94,7 +100,7 @@ describe("an EC line without container: its transport by its own values, its con
     expect(cell(3, COLUMN.tarief).value).toBeNull();
   });
 
-  it("4. an unknown confirmation beside a transport the values identify: matched and priced, the confirmation said missing", async () => {
+  it("4. an unknown confirmation beside a transport the values identify: matched, the confirmation said missing", async () => {
     const { result, cell } = await world.check([otherTransport, ecLine()]);
     const row = result.rows[1];
 
@@ -103,7 +109,9 @@ describe("an EC line without container: its transport by its own values, its con
       trip: { id: "y" },
       matchProblem: "De transportmatch is geslaagd; voor EC 4220981 is bij deze rit geen kostenbevestiging gevonden.",
     });
-    expect(cell(3, COLUMN.tarief).value).toBe(200);
+    // No Tarief and no Fuel stated: not filled in, the line marked.
+    expect(cell(3, COLUMN.tarief).value).toBeNull();
+    expect(row.marks).toEqual(["PRICES_MISSING"]);
     expect(result.missingTrips).toEqual([]);
   });
 

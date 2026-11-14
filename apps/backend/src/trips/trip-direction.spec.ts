@@ -57,6 +57,8 @@ const NO_PLANNING = {
   effectiveDriver: null,
   latestUpdate: null,
   costConfirmation: null,
+  costConfirmations: [],
+  costConfirmationTotal: null,
   customProperties: [],
   pricing: null,
 };
@@ -101,5 +103,24 @@ describe("Trip direction", () => {
     );
 
     expect(response).not.toHaveProperty("parserMetadata");
+  });
+});
+
+/**
+ * Whether the Trip's confirmations count in EK is the backend's answer, read
+ * from the same rule the Engine prices (`hasRecordedWaitingTime`): a recorded
+ * waiting time — €0 included — supersedes them.
+ */
+describe("whether a waiting time supersedes the confirmations", () => {
+  it("is false when no waiting time is recorded", () => {
+    expect(
+      toTripResponse(buildTrip(TripDirection.COLLECTION), NO_PLANNING).waitingTimeSupersedesCostConfirmations,
+    ).toBe(false);
+  });
+
+  it.each([0, 135, 180])("is true for a recorded waiting time of %i minutes", (minutes) => {
+    const trip = { ...buildTrip(TripDirection.COLLECTION), waitingTimeMinutes: minutes };
+
+    expect(toTripResponse(trip, NO_PLANNING).waitingTimeSupersedesCostConfirmations).toBe(true);
   });
 });

@@ -90,6 +90,24 @@ const EXPECTED: readonly ExpectedConfirmation[] = [
     transportDate: "2026-08-28",
     containerReference: null,
   },
+  {
+    /* STOP; loading window 27/10, Remarks `… dd 26/10 …`. */
+    file: "COST_CONFIRMATION_NR_4261545__ANRDUB2821379__XXXXXXXXXXXX.pdf",
+    ccNumber: "4261545",
+    bookingNumber: "ANRDUB2821379",
+    amount: "70.00",
+    transportDate: "2026-10-27",
+    containerReference: null,
+  },
+  {
+    /* WAIT; same booking and loading window, Remarks naming no day. */
+    file: "COST_CONFIRMATION_NR_4261544__ANRDUB2821379__XXXXXXXXXXXX.pdf",
+    ccNumber: "4261544",
+    bookingNumber: "ANRDUB2821379",
+    amount: "68.75",
+    transportDate: "2026-10-27",
+    containerReference: null,
+  },
 ];
 
 function readConfirmation(file: string): Uint8Array {
@@ -341,9 +359,14 @@ describe("every real Cost Confirmation, through the real workflow", () => {
   describe("the amounts", () => {
     it("are the amounts the documents state", async () => {
       const recorded: string[] = [];
+      // One Trip per transport: ANRDUB2821379's two confirmations are of ONE Trip.
+      const tripOf = new Map<string, Awaited<ReturnType<typeof seedTrip>>>();
 
       for (const expected of EXPECTED) {
-        const trip = await seedTrip(expected);
+        const key = `${expected.bookingNumber}|${expected.transportDate}`;
+        const trip = tripOf.get(key) ?? (await seedTrip(expected));
+
+        tripOf.set(key, trip);
         const result = await harness.importer.confirmCost(
           readConfirmation(expected.file),
           expected.file,
@@ -640,7 +663,7 @@ describe("every real Cost Confirmation, through the real workflow", () => {
       const refusal = importIt();
 
       await expect(refusal).rejects.toThrow(
-        "No Trip matches booking number ANRDUB2796313 on 2026-08-28, the LOADING/DELIVERY date the confirmation prints (compared with each Trip's planning date and originally ordered date; a container is not required). Trips with this booking number are on 2026-08-27.",
+        "No Trip matches booking number ANRDUB2796313 on 2026-08-28, the LOADING/DELIVERY date the confirmation prints (compared with each Trip's planning date and originally ordered date; a container is not required), and no collection does within 3 days of it. Trips with this booking number are on 2026-08-27.",
       );
       await expect(importIt()).rejects.not.toThrow(/ordered without a container/);
       expect(harness.costConfirmations).toEqual([]);
@@ -657,6 +680,82 @@ describe("every real Cost Confirmation, through the real workflow", () => {
       await importIt();
 
       expect(harness.costConfirmations).toHaveLength(1);
+    });
+  });
+
+  /**
+   * The real CC 4261545 (STOP, €70.00) and CC 4261544 (WAIT, €68.75) for
+   * ANRDUB2821379, against its Trip as Trano holds it: on 26/10. Both print a
+   * loading window of 27/10; only the STOP's Remarks name `dd 26/10`.
+   */
+  describe("ANRDUB2821379's two confirmations against its Trip on 26/10", () => {
+    const [STOP, WAIT] = [EXPECTED[6], EXPECTED[7]];
+
+    /** A COLLECTION, as the confirmations print it (`COLLECTION: 1113603/76944066`). */
+    async function tripOn26October(direction: string | null = "COLLECTION") {
+      const trip = await seedTrip(STOP);
+
+      Object.assign(trip, {
+        planningDate: new Date("2026-10-26T00:00:00.000Z"),
+        originalPlanningDate: new Date("2026-10-26T00:00:00.000Z"),
+        containerNumber: "PVDU 1234567",
+        direction,
+      });
+
+      return trip;
+    }
+
+    it("records the STOP on that Trip, through the day its Remarks name", async () => {
+      const trip = await tripOn26October();
+
+      await harness.importer.confirmCost(readConfirmation(STOP.file), STOP.file);
+
+      expect(harness.costConfirmations.map((row) => [row.tripId, row.ccNumber, row.costCode, String(row.amount)])).toEqual([
+        [trip.id, "4261545", "STOP", "70.00"],
+      ]);
+      expect(trip.containerNumber).toBe("PVDU 1234567");
+    });
+
+    /*
+     * 7. The WAIT prints 27/10 and no other day; the collection is held on
+     * 26/10 (original and planned). One day away: found on the nearby day.
+     */
+    it("records the WAIT, which names no day but 27/10, on the collection one day before", async () => {
+      const trip = await tripOn26October();
+
+      await harness.importer.confirmCost(readConfirmation(WAIT.file), WAIT.file);
+
+      expect(harness.costConfirmations.map((row) => [row.tripId, row.ccNumber, String(row.amount)])).toEqual([
+        [trip.id, "4261544", "68.75"],
+      ]);
+      // Matching changed nothing on the Trip: not its dates, not its container.
+      expect(trip).toMatchObject({
+        planningDate: new Date("2026-10-26T00:00:00.000Z"),
+        originalPlanningDate: new Date("2026-10-26T00:00:00.000Z"),
+        containerNumber: "PVDU 1234567",
+      });
+    });
+
+    it("records both on the one collection, and both count", async () => {
+      const trip = await tripOn26October();
+
+      await harness.importer.confirmCost(readConfirmation(STOP.file), STOP.file);
+      await harness.importer.confirmCost(readConfirmation(WAIT.file), WAIT.file);
+
+      expect(harness.costConfirmations.map((row) => [row.tripId, row.ccNumber])).toEqual([
+        [trip.id, "4261545"],
+        [trip.id, "4261544"],
+      ]);
+    });
+
+    /* 6. A Trip that is no collection keeps the exact-date rule. */
+    it("refuses the WAIT for a delivery on 26/10, saying where the booking is", async () => {
+      await tripOn26October("DELIVERY");
+
+      await expect(harness.importer.confirmCost(readConfirmation(WAIT.file), WAIT.file)).rejects.toThrow(
+        "No Trip matches booking number ANRDUB2821379 on 2026-10-27, the LOADING/DELIVERY date the confirmation prints (compared with each Trip's planning date and originally ordered date; a container is not required), and no collection does within 3 days of it. Trips with this booking number are on 2026-10-26.",
+      );
+      expect(harness.costConfirmations).toEqual([]);
     });
   });
 

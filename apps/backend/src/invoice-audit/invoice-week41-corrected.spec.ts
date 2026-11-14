@@ -12,6 +12,7 @@ import { reliablyPriced } from "./__fixtures__/invoice-pricing";
 import { invoiceReads } from "./__fixtures__/invoice-reads";
 import { tripRecord } from "./__fixtures__/invoice-rows";
 import { InvoiceSheetReader } from "./workbook/invoice-sheet.reader";
+import { isYellowFill } from "./workbook/cell-comparison";
 import { buildInvoiceAuditService } from "./__fixtures__/invoice-audit-service";
 
 /**
@@ -129,16 +130,24 @@ describeWithWeek41("the real week 41 invoice, corrected on a copy", () => {
     return book.worksheets[0];
   }
 
-  it("changes exactly the planned cells: the Backload and Remarks of the 26 GEEN COMBI lines", async () => {
+  /*
+   * The 26 GEEN COMBI lines: the Excel marks a Combination the Trips are not.
+   * They keep their GEEN COMBI and lose their Backload exactly as before, and
+   * are now also painted yellow (owner, November 2026) — every cell of their
+   * row, and nothing on any other row.
+   */
+  it("changes exactly the planned cells: the Backload and Remarks of the 26 GEEN COMBI lines, painted yellow", async () => {
     const { original, applied } = await correctACopy();
     const before = await firstSheet(original);
     const after = await firstSheet(applied.workbook);
     const geenCombiRows = applied.result.rows
       .filter((row) => row.combination?.verdict === "GEEN_COMBI")
       .map((row) => row.rowNumber);
-    const planned = new Set(
+    const valuesPlanned = new Set(
       geenCombiRows.flatMap((rowNumber) => [`${rowNumber}:${COLUMN.backload}`, `${rowNumber}:${COLUMN.remarks}`]),
     );
+    const yellowRows = new Set(geenCombiRows);
+    const valueChanged: string[] = [];
     const changed: string[] = [];
 
     // Every line and the header. The totals row and the summary are checked on
@@ -153,13 +162,22 @@ describeWithWeek41("the real week 41 invoice, corrected on a copy", () => {
         if (!isDeepStrictEqual(was.value, is.value) || !isDeepStrictEqual(was.style, is.style)) {
           changed.push(`${rowNumber}:${column}`);
         }
+
+        if (!isDeepStrictEqual(was.value, is.value)) {
+          valueChanged.push(`${rowNumber}:${column}`);
+        }
+
+        if (yellowRows.has(rowNumber)) {
+          expect(isYellowFill(is.style.fill)).toBe(true);
+        }
       }
     }
 
     expect(geenCombiRows).toHaveLength(26);
-    expect(applied.rowsMarked).toBe(0);
-    expect(changed.filter((address) => !planned.has(address))).toEqual([]);
-    expect(changed.sort()).toEqual([...planned].sort());
+    expect(applied.rowsMarked).toBe(26);
+    expect(applied.result.rows.filter((row) => row.marks.includes("COMBINATION_ONLY_IN_EXCEL")).map((row) => row.rowNumber)).toEqual(geenCombiRows);
+    expect(valueChanged.sort()).toEqual([...valuesPlanned].sort());
+    expect(changed.filter((address) => !yellowRows.has(Number(address.split(":")[0])))).toEqual([]);
     // R3 / R4: out to Lessines, back from Harnes.
     expect(after.getRow(3).getCell(COLUMN.remarks).value).toBe("GEEN COMBI");
     expect(after.getRow(4).getCell(COLUMN.remarks).value).toBe("tar,EC 4220979,GEEN COMBI");
@@ -221,7 +239,8 @@ describeWithWeek41("the real week 41 invoice, corrected on a copy", () => {
 
     expect(second.cellsWritten).toBe(0);
     expect(second.rowsAdded).toBe(0);
-    expect(second.rowsMarked).toBe(0);
+    // The Excel still marks those 26 as Combinations: still yellow, nothing more written.
+    expect(second.rowsMarked).toBe(26);
     expect(second.result.rows.filter((row) => (row.remarks?.added.length ?? 0) > 0)).toEqual([]);
     expect(second.result.fuelHeader).toBeNull();
   });

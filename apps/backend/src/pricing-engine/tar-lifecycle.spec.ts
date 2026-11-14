@@ -16,7 +16,7 @@ import { routeMatchActions } from "./route-match-lifecycle.fixtures";
  *
  * ── THE RULES, UNCHANGED ────────────────────────────────────────────────────
  * One TAR-nummer is charged automatically once per day, on the first Trip
- * priced with it; the COLLECTION leg of a genuine Combination never owes it; a
+ * priced with it; the first Trip of a pair (its DELIVERY) never owes it; a
  * manual TAR is an extra beside it and never holds or blocks it. What these
  * tests add is that every change reaches the Trips sharing the number at once,
  * so the charge is always on exactly one CLOSED Trip that owes it.
@@ -70,15 +70,15 @@ describe("the automatic TAR through the Trip lifecycle", () => {
     (await world.customValues.assign({ tripId, customPropertyId: PROPERTIES.tar.id })).id;
 
   describe("1/2. a change of group", () => {
-    it("1. moves the charge when its holder becomes the COLLECTION leg of a genuine Combination", async () => {
-      // A is a collection on its own: it owes the TAR and holds it.
-      await closed("A", { direction: TripDirection.COLLECTION, pdfDocumentId: "pdf-1" });
+    it("1. moves the charge when its holder becomes the DELIVERY leg (first Trip) of a pair", async () => {
+      // A is a delivery on its own: it owes the TAR and holds it.
+      await closed("A", { direction: TripDirection.DELIVERY, pdfDocumentId: "pdf-1" });
       await closed("B");
-      await closed("delivery", { tarNummer: null, direction: TripDirection.DELIVERY, pdfDocumentId: "pdf-1" });
+      await closed("collection", { tarNummer: null, direction: TripDirection.COLLECTION, pdfDocumentId: "pdf-1" });
       expect(automaticHolders()).toEqual(["A"]);
 
-      // Grouped with the delivery of its own document, A is that pair's collection.
-      await world.tripService.createGroup(["A", "delivery"]);
+      // Grouped with the collection of its own document, A is that pair's first Trip.
+      await world.tripService.createGroup(["A", "collection"]);
 
       expect(tarLines("A")).toEqual([]);
       expect(automaticHolders()).toEqual(["B"]);
@@ -87,9 +87,9 @@ describe("the automatic TAR through the Trip lifecycle", () => {
     });
 
     it("1. gives the charge back to the leg that owes it again when the pair is split", async () => {
-      await closed("A", { direction: TripDirection.COLLECTION, pdfDocumentId: "pdf-1" });
-      await closed("delivery", { tarNummer: null, direction: TripDirection.DELIVERY, pdfDocumentId: "pdf-1" });
-      await world.tripService.createGroup(["A", "delivery"]);
+      await closed("A", { direction: TripDirection.DELIVERY, pdfDocumentId: "pdf-1" });
+      await closed("collection", { tarNummer: null, direction: TripDirection.COLLECTION, pdfDocumentId: "pdf-1" });
+      await world.tripService.createGroup(["A", "collection"]);
       await closed("B");
       expect(automaticHolders()).toEqual(["B"]);
 

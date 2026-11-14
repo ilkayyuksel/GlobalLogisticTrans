@@ -119,7 +119,7 @@ transport was matched, and on which row, or found but not on the invoice, or
 not found at all: a missing confirmation is never a failed transport match. Otherwise it is
 `COST_LINE_UNRESOLVED` (yellow). A resolved line is compared ONLY on its EK,
 with its own confirmation's amount — or with nothing when the Trip's EK is its
-charged waiting time. What the Trip's Cost Confirmation lines charge is taken
+waiting time (a recorded waiting time supersedes the confirmations, also at €0). What the Trip's Cost Confirmation lines charge is taken
 off the EK its own line is compared with, so no confirmation is charged twice.
 A Cost Confirmation line is never its transport's own line (owner, October
 2026). It never settles its Trip on its own and never makes its Trip "stated"
@@ -136,12 +136,14 @@ transport's split EK, as before.
 October 2026, `matching/ec-transport-lines.ts`). A row shaped like an EC line
 — with or without a container — is matched as a transport line on the values
 it states (any two of day, booking, container), never on its EC number,
-whenever no transport line of the document names that Trip; its empty prices
-are then filled, a missing container filled in red. EK lines stating the same
-values (week 41 R53–R54) are one transport over several rows: its prices on
-the first, the EK of all of them compared once. When that EK must be raised it
-is stated on several rows and cannot be placed: the EK is left as written and
-reported, and the transport's own prices (Tarief, Fuel, …) are still written
+whenever no transport line of the document names that Trip; a missing
+container is filled in red. Such a row states no Tarief and no Fuel, so
+neither is filled from Trano and the row is marked (`PRICES_MISSING`, see
+"Lines marked although compared"; owner, November 2026 — this used to fill
+them). EK lines stating the same values (week 41 R53–R54) are one transport
+over several rows, the EK of all of them compared once. When that EK must be
+raised it is stated on several rows and cannot be placed: the EK is left as
+written and reported, and the transport's other prices are still written
 (owner, October 2026). The line is `NOT_DISTRIBUTABLE`: marked yellow and not
 settled until the EK is. Any OTHER component that cannot be placed still holds
 back the whole line — the Fuel follows the Tarief. Its `EC <nr>`
@@ -175,6 +177,23 @@ carry the same `combinationRouteGroupId`, is `COMBINATION_REVIEW`: yellow,
 nothing written. Both lines of a `GEEN_COMBI` pair get `GEEN COMBI` in Remarks
 (phase 3).
 
+### Lines marked although compared (owner, November 2026)
+
+A line compared as usual is still painted yellow — its status and its writes
+unchanged — for one of these reasons, recorded on the row as `marks`
+(`InvoiceLineMark`; `toMarkedRowNumbers` adds them to the yellow rows, so a
+marked line is not settled, like every yellow line):
+
+| Mark | When | What changes beside the yellow |
+|---|---|---|
+| `PRICES_MISSING` | every Tarief AND every Fuel cell of the line is empty or a dash (`-`, `–`, `—`); 0,00 is a price | neither is filled from Trano; every other component compared as ever; a dash in them no longer makes the line `AMOUNT_UNREADABLE` |
+| `COMBINATION_ONLY_IN_EXCEL` (A) | a line of the Trip carries the Excel's `COMBINATION` marking, and the Trip is in no group | nothing — `GEEN COMBI`, its Backload removal and its Remarks stay exactly as before |
+| `COMBINATION_ONLY_IN_TRANO` (B) | the Trip is in a group (it carries the Combination Backload) and no line of it carries the Excel's marking | its €50 Backload is not ADDED (a Backload the invoice states is compared as ever); no Combination remark; the preview warns `WEL COMBI, MAAR PRIJS NIET AANGEPAST` on that line |
+
+`PRICES_MISSING` marks the transport's own line; A and B mark every row the
+Trip is charged on, its EC lines included. A row with several reasons is
+painted once.
+
 ### Missing transports
 
 The period is Monday to Friday of the ISO week of the transport lines
@@ -206,6 +225,15 @@ was stored with it (`pricing/price-reliability.ts`). The line is
 | grouped Trip, Combination not `MATCHED` | `COMBINATION_NOT_PRICED` |
 | snapshot contradicts the Trip's group (Backload or Combination without a group, a group without a Combination record) | `SNAPSHOT_INCONSISTENT` |
 | (phase 2) a Combination the Excel marks that cannot be confirmed | `COMBINATION_REVIEW` |
+
+**A Trip without a usable price is left untouched** (owner, November 2026).
+Every line a `PRICE_UNRELIABLE` Trip is charged on stays exactly as received:
+no amount, no corrected booking, container or date, no Remarks — not even
+`GEEN COMBI` — and no Backload removed; the yellow is the only change
+(`pricing/unpriced-trips.ts`, applied once after pricing, before corrections and
+Remarks are planned; the preview shows those lines without corrections too).
+It takes precedence over every other rule, the marks above included. A price
+of 0,00 the system relies on is a price, not this.
 
 **The system's own match decides** (owner, October 2026). A route the matcher
 FOUND — `EXACT`, `NORMALIZED`, or `FUZZY` (which the matcher only records for
@@ -265,14 +293,17 @@ not relied on, shows no Trano figure.
 A component the Excel leaves empty is compared as €0,00 (owner, October 2026)
 and raised to Trano's stored figure like any other (red, the Fuel as the
 customer's formula, a zero left empty); the preview shows that cell as
-`€0.00 (leeg)` (`excelCellEmpty`). A line stating no transport price
-at all says so (`transportPricesFilled`): its prices come from Trano. With a
+`€0.00 (leeg)` (`excelCellEmpty`) — EXCEPT a Tarief and a Fuel that are BOTH
+missing, which are not filled at all (`PRICES_MISSING`). A line whose
+transport prices were filled with nothing stated says so
+(`transportPricesFilled`). With a
 price that is not relied on — or no stored price — nothing is filled and the
 reliability warning says why. An EC line is never given a transport price; a
 transport only EC lines name is added as a missing line (see above).
 
 - An empty cell compares as zero. A cell holding a word, a dash, an Excel error
-  or an uncalculated formula makes the whole line `AMOUNT_UNREADABLE`.
+  or an uncalculated formula makes the whole line `AMOUNT_UNREADABLE` — except
+  a dash in a Tarief and Fuel that are both missing (`PRICES_MISSING`).
 - The toll is compared as Maut + Tol B + Tol FR and raised in Tol B only.
 - A transport stated on several rows (Cost Confirmation lines) is added up per
   component. A raise that several rows could carry is `NOT_DISTRIBUTABLE`, and
@@ -343,9 +374,10 @@ second split row) is completed with what it does not say yet
   window pricing used (`wachtuur 22:00 tot 1:30`); only a waiting time without
   a complete window — a duration alone, a missing begin or end — is not
   written, and reported. Over ST is never written.
-- The Trip's own facts are only written on a line whose price is relied on;
-  `GEEN COMBI` also on a line marked for its price, because the pair itself was
-  established from two reliably matched Trips.
+- The Trip's own facts are only written on a line whose price is relied on.
+  `GEEN COMBI` is also written on a line marked for another reason, because the
+  pair itself was established from two reliably matched Trips — but never on
+  the line of a Trip without a usable price, which stays untouched.
 - A completed Remarks cell is red, as in the owner's own corrections of week 36.
 - Running the check again on the corrected file adds nothing.
 

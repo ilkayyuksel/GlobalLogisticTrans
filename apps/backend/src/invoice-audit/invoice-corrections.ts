@@ -18,7 +18,9 @@ import type { WorkbookCorrections } from "./workbook/invoice-sheet.writer";
  * be compared safely: a difference no cell may carry, a stored price nobody can
  * stand behind, an amount cell that holds no amount, a Combination under
  * review. A line that was matched and priced is not marked, however much its
- * amounts had to change — a correction is an answer, not a problem.
+ * amounts had to change — a correction is an answer, not a problem — unless the
+ * comparison marked it (`InvoiceLineMark`): no Tarief and no Fuel stated, or
+ * the Excel and the Trip disagree about it being a Combination.
  */
 const MARKED_LINE_STATUSES: readonly InvoiceRowStatus[] = [
   InvoiceRowStatus.NOT_FOUND,
@@ -41,11 +43,13 @@ export function toMarkedRowNumbers(
 ): number[] {
   return matches
     .filter((match) => {
-      const status = pricing.get(match.row.rowNumber)?.status;
+      const outcome = pricing.get(match.row.rowNumber);
 
       return (
         MARKED_LINE_STATUSES.includes(match.status) ||
-        (status !== undefined && MARKED_PRICING_STATUSES.includes(status))
+        (outcome !== undefined && MARKED_PRICING_STATUSES.includes(outcome.status)) ||
+        // A line compared as usual and still marked: see `InvoiceLineMark`.
+        (outcome?.marks ?? []).length > 0
       );
     })
     .map((match) => match.row.rowNumber);

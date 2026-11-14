@@ -173,6 +173,13 @@ export interface ParsedCostConfirmation {
    * Null when the document states no readable section date.
    */
   readonly transportDate: string | null;
+  /**
+   * The day the Remarks name with `dd DD/MM` (`dd 26/10`), read beside
+   * `transportDate` — see `fields/remarks-date.ts`. ISO `YYYY-MM-DD`. A
+   * fallback for matching when `transportDate` finds no Trip; null when the
+   * Remarks name no single, near day.
+   */
+  readonly remarksDate: string | null;
   readonly remarks: string | null;
   /** The confirmation block, kept as evidence for what was read. */
   readonly raw: string;

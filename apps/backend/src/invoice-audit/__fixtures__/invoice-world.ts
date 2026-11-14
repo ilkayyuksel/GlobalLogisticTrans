@@ -23,6 +23,12 @@ export interface InvoiceWorld {
   readonly ekOf: Map<string, string>;
   /** Trips whose stored price cannot be relied on: no route was found. */
   readonly unreliable: Set<string>;
+  /** A Trip's stored Backload, when not zero — a grouped Trip's €50. */
+  readonly backloadOf: Map<string, string>;
+  /** Trips that were never priced: no stored price at all. */
+  readonly unpriced: Set<string>;
+  /** Trips reliably priced at 0,00 in every component — a price, not a missing one. */
+  readonly zeroPriced: Set<string>;
   check(lines: readonly InvoiceFixtureLine[]): Promise<CheckedInvoice>;
   /** The check run over a workbook as it is — a corrected one, checked again. */
   checkFile(file: Buffer): Promise<CheckedInvoice>;
@@ -57,6 +63,9 @@ export function invoiceWorld(): InvoiceWorld {
   const confirmations: InvoiceWorld["confirmations"] = [];
   const ekOf = new Map<string, string>();
   const unreliable = new Set<string>();
+  const backloadOf = new Map<string, string>();
+  const unpriced = new Set<string>();
+  const zeroPriced = new Set<string>();
   const onDay = (trip: Trip, days: readonly Date[]) =>
     days.some((each) => [trip.planningDate, trip.originalPlanningDate].some((date) => date?.getTime() === each.getTime()));
 
@@ -64,17 +73,19 @@ export function invoiceWorld(): InvoiceWorld {
     const reads = invoiceReads();
     const zero = new Prisma.Decimal(0);
     const priced = (tripId: string): CurrentTripPricing => {
+      const base = zeroPriced.has(tripId) ? zero : null;
       const ek = new Prisma.Decimal(ekOf.get(tripId) ?? 0);
+      const backload = new Prisma.Decimal(backloadOf.get(tripId) ?? 0);
       const pricing = reliablyPriced({
         components: [],
-        tarief: new Prisma.Decimal(200),
-        brandstof: new Prisma.Decimal(30),
-        backload: zero,
+        tarief: base ?? new Prisma.Decimal(200),
+        brandstof: base ?? new Prisma.Decimal(30),
+        backload,
         tol: zero,
         tunnel: zero,
         others: zero,
         ek,
-        totaal: new Prisma.Decimal(230).add(ek),
+        totaal: (base ?? new Prisma.Decimal(230)).add(ek).add(backload),
       });
 
       return unreliable.has(tripId)
@@ -87,6 +98,9 @@ export function invoiceWorld(): InvoiceWorld {
       trips.filter((trip) => bookings.includes(trip.bookingNumber!)),
     );
     reads.findTripsByIds.mockImplementation(async (ids) => trips.filter((trip) => ids.includes(trip.id)));
+    reads.countGroupMembers.mockImplementation(
+      async (groupIds) => new Map(groupIds.map((groupId) => [groupId, trips.filter((trip) => trip.tripGroupId === groupId).length])),
+    );
     reads.findCostConfirmationsByNumbers.mockImplementation(async (numbers) =>
       confirmations.filter((confirmation) => numbers.includes(confirmation.ccNumber)),
     );
@@ -112,7 +126,8 @@ export function invoiceWorld(): InvoiceWorld {
           ),
       },
       effectivePricing: {
-        findForTrips: async (ids: readonly string[]) => new Map(ids.map((id) => [id, priced(id)])),
+        findForTrips: async (ids: readonly string[]) =>
+          new Map(ids.filter((id) => !unpriced.has(id)).map((id) => [id, priced(id)])),
       },
     });
   }
@@ -137,6 +152,9 @@ export function invoiceWorld(): InvoiceWorld {
     confirmations,
     ekOf,
     unreliable,
+    backloadOf,
+    unpriced,
+    zeroPriced,
     checkFile,
     async check(lines) {
       return checkFile(await buildInvoiceWorkbook({ lines, fuelPercentage: 15 }));

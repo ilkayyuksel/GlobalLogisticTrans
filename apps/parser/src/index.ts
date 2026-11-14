@@ -4,6 +4,7 @@ import {
   findCostConfirmationHeader,
 } from "./fields/cost-confirmation";
 import { extractDateTime } from "./fields/date-time";
+import { remarksDateOf } from "./fields/remarks-date";
 import { extractDocumentStatus } from "./fields/document-status";
 import { detectLayout } from "./layout/detect";
 import { detectedSections } from "./layout/page-trip";
@@ -20,6 +21,7 @@ import {
   ParseFailure,
   ParseMetadata,
   ParseResult,
+  ParsedCostConfirmation,
   ParsedTrip,
 } from "./types";
 
@@ -245,12 +247,17 @@ export async function parseCostConfirmation(
   return {
     ok: true,
     parserVersion: PARSER_VERSION,
-    confirmation: {
-      ...read.value,
-      transportDate: transportDateOf(document.fragments),
-    },
+    confirmation: withDates(read.value, transportDateOf(document.fragments)),
     metadata,
   };
+}
+
+/** The confirmation with its transport date, and the Remarks' day read beside it. */
+function withDates(
+  confirmation: Omit<ParsedCostConfirmation, "transportDate" | "remarksDate">,
+  transportDate: string | null,
+): ParsedCostConfirmation {
+  return { ...confirmation, transportDate, remarksDate: remarksDateOf(confirmation.remarks, transportDate) };
 }
 
 /** `LOADING 1:` / `DELIVERY 1:` — the section that states the ordered date. */

@@ -551,8 +551,9 @@ The outcome is stored on every grouped Trip's snapshot as
 
 `NULL` for a Trip in no group, and on snapshots written before it was recorded.
 
-The **TAR** allocation does not read this: a genuine same-document pair still
-owes TAR once, on the COLLECTION; every other group member pays as before.
+The **TAR** allocation does not read this outcome. It uses the same pricing
+partner: in a DELIVERY/COLLECTION pair only the COLLECTION may owe the automatic
+TAR — see "The automatic Custom Property (TAR)".
 
 ### What reprices when the pair changes
 
@@ -912,13 +913,25 @@ to. Then:
 | Trip | Automatic TAR |
 |---|---|
 | An ordinary Trip | charged |
-| A Trip in a manually created group | charged — a manual group is not a Combination |
-| The DELIVERY leg of a genuine Combination | charged |
-| The COLLECTION leg of a genuine Combination | **not** charged |
+| The **first** Trip of a pair — its DELIVERY | **never** charged, even when it states a number |
+| The **second** Trip of a pair — its COLLECTION | charged |
+| Any other grouped Trip | charged, as an ordinary Trip |
 
-A genuine Combination therefore carries at most **one** automatic TAR: the two
-legs are one truck movement (`withAutomaticProperty` in
-`pricing-component.resolver.ts`).
+**A pair** (owner, November 2026) is `pricingPartnerOf`'s: a genuine
+same-document Combination, or a group of exactly two ACTIVE (OPEN or CLOSED)
+Trips, manual or imported. Which Trip is first is its **direction**: the
+DELIVERY (out) is first, the COLLECTION (return) second. Never a date, a row
+order or when a Trip was created. Only a pair of one DELIVERY and one COLLECTION
+has a first Trip. A pair of two of one direction, or with a direction missing, a
+group of three or more without a genuine pair, a Trip left alone in its group and
+a Trip whose partner is CANCELLED or DELETED all keep the ordinary rule
+(`isFirstTripOfTarPair` in `combination-leg.ts`, applied in
+`withAutomaticProperty` in `pricing-component.resolver.ts`).
+
+The first Trip's TAR-nummer is no claim on the automatic charge: it neither
+holds nor blocks the day's charge. This **reverses** the earlier allocation, under
+which a genuine Combination's DELIVERY owed the TAR and its COLLECTION never
+did. A manual TAR is untouched by it (see "A manual TAR is an extra").
 
 ### What counts as a genuine Combination
 
@@ -932,13 +945,13 @@ Trips an operator grouped by hand come from different documents, or from none,
 and are therefore not a Combination. Nothing is inferred from planning dates,
 booking numbers or the order rows appear in.
 
-This decides the TAR allocation only. The Combination Surcharge follows plain
-group membership — see Combination Surcharge above.
+It decides the pricing partner inside a larger group. The Combination Surcharge
+follows plain group membership — see Combination Surcharge above.
 
 If the Trips of one document are grouped but do **not** form exactly one
-DELIVERY and one COLLECTION, they are not a genuine Combination. Each is then
-priced as a member of a manual group and owes TAR under the ordinary rule, on
-its own stated number. The shape is logged as the data fault it is.
+DELIVERY and one COLLECTION, they are not a genuine Combination and have no
+first Trip. Each owes TAR under the ordinary rule, on its own stated number.
+The shape is logged as the data fault it is.
 
 ### One number, once a day
 
@@ -968,7 +981,7 @@ calculation that produced the line:
 | Change | What is repriced |
 |---|---|
 | the holder's TAR-nummer changes or is cleared, it moves to another day, it is cancelled or deleted | every other CLOSED Trip stating the number that day (`trips/tar-charge-release.ts`) |
-| any pricing of a Trip that held the automatic charge and no longer does — it became a genuine Combination's COLLECTION leg by a group change, or anything else withdrew it | every other CLOSED Trip stating the number that day (`TarChargeSettlement`) |
+| any pricing of a Trip that held the automatic charge and no longer does — it became the first Trip (DELIVERY) of a pair by a group change, or anything else withdrew it | every other CLOSED Trip stating the number that day (`TarChargeSettlement`) |
 | two Trips priced at the same moment both took it | all but the first priced (earliest `calculated_at`, then Trip id) give it up (`TarChargeSettlement`) |
 | a cancelled or deleted Trip becomes active again (any path: status change, restore, a document) | nothing — the Trip that took the charge keeps it; the returning Trip finds it taken when it closes |
 

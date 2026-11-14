@@ -543,6 +543,29 @@ describe("Excel factuurcontrole", () => {
       expect(within(costLine).getByText("EC 4220981 · €110.00")).toBeInTheDocument();
     });
 
+    /*
+     * 14. A Trip that is a Combination the Excel does not mark: its €50 was not
+     * added, and the line says so in the owner's exact words. Only that line.
+     */
+    it("warns on the line of a Combination the Excel does not mark, and nowhere else", async () => {
+      requestMock.mockResolvedValue(
+        result({
+          rows: [
+            { ...matchedRow, marks: ["COMBINATION_ONLY_IN_TRANO"] },
+            { ...matchedRow, rowNumber: 3, bookingNumber: "ANRDUB2810002", marks: ["COMBINATION_ONLY_IN_EXCEL"] },
+            { ...matchedRow, rowNumber: 4, bookingNumber: "ANRDUB2810003", marks: ["PRICES_MISSING"] },
+          ],
+        }),
+      );
+
+      await check();
+
+      expect(within(rowFor("DUBANR2718284")).getByText("WEL COMBI, MAAR PRIJS NIET AANGEPAST")).toBeInTheDocument();
+      expect(screen.getAllByText("WEL COMBI, MAAR PRIJS NIET AANGEPAST")).toHaveLength(1);
+      expect(within(rowFor("ANRDUB2810002")).queryByText("WEL COMBI, MAAR PRIJS NIET AANGEPAST")).not.toBeInTheDocument();
+      expect(within(rowFor("ANRDUB2810003")).queryByText("WEL COMBI, MAAR PRIJS NIET AANGEPAST")).not.toBeInTheDocument();
+    });
+
     it("lists a transport it did not add, with the rows that block it", async () => {
       requestMock.mockResolvedValue(
         result({

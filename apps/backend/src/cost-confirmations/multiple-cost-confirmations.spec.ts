@@ -203,7 +203,7 @@ describe("several cost confirmations on one Trip", () => {
    */
   describe("which one the Ritten list shows", () => {
     async function latestFor(tripId: string): Promise<string | undefined> {
-      return (await service.findForTrips([tripId])).get(tripId)?.ccNumber;
+      return (await service.findForTrips([tripId])).get(tripId)?.items[0]?.ccNumber;
     }
 
     it("is the only one, at first", async () => {

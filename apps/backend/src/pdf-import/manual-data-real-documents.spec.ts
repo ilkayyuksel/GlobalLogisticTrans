@@ -38,10 +38,14 @@ function time(clock: string): Date {
   return new Date(`1970-01-01T${clock}:00.000Z`);
 }
 
-/** What an afternoon of planning leaves on the Trip. */
+/**
+ * What an afternoon of planning leaves on the Trip — before a driver is given:
+ * a Trip with a driver is not changed by a document at all (see
+ * `cancel-update-protection.spec.ts`).
+ */
 const OPERATOR_WINDOW = {
   vehicleId: "vehicle-1",
-  driverId: "driver-1",
+  driverId: null,
   containerNumber: "MSKU1234565",
   waitingTimeStart: time("10:00"),
   waitingTimeEnd: time("12:00"),
@@ -159,7 +163,6 @@ describe("operator data through the real UPDATE and CANCEL documents", () => {
       expect(trip).toMatchObject({
         containerNumber: "MSKU1234565",
         vehicleId: "vehicle-1",
-        driverId: "driver-1",
       });
     });
   });

@@ -165,7 +165,9 @@ describe("the Fuel of an invoice line", () => {
     const empty = await correct({ tarief: null, fuel: null }, pricing("0", "0"));
     const stated = await correct({ tarief: null, fuel: 10 }, pricing("0", "0"));
 
-    expect(empty.changed).toEqual([]);
+    // No Tarief and no Fuel stated: nothing filled in, the line marked (owner, November 2026).
+    expect(empty.applied.result.rows[0].marks).toEqual(["PRICES_MISSING"]);
+    expect(empty.applied.result.rows[0].differences).toEqual([]);
     expect(stated.changed).toEqual([]);
     expect(stated.applied.result.rows[0].differences).toEqual([
       expect.objectContaining({ component: "Fuel", kind: "INVOICE_HIGHER" }),

@@ -72,8 +72,15 @@ describe("a line is not found only after all three pairs of values were tried", 
     expect(row).toMatchObject({ status: "MATCHED", trip: { id: "t1" } });
     expect(cell(2, each.corrected.column).value).toEqual(each.corrected.value);
     expect(isRed(cell(2, each.corrected.column))).toBe(true);
-    // Then priced as any transport line: an empty Tarief is filled from Trano.
-    expect(cell(2, COLUMN.tarief).value).toBe(200);
+    // Then priced as any transport line. An EC line states no Tarief and no
+    // Fuel: neither is filled from Trano, the line is marked (owner, November 2026).
+    if (each.shape === "EC line stating the transport") {
+      expect(cell(2, COLUMN.tarief).value).toBeNull();
+      expect(row.marks).toEqual(["PRICES_MISSING"]);
+    } else {
+      expect(cell(2, COLUMN.tarief).value).toBe(200);
+      expect(row.marks).toEqual([]);
+    }
     expect(result.missingTrips).toEqual([]);
   });
 

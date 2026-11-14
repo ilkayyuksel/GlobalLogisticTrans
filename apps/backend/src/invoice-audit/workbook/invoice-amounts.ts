@@ -26,7 +26,17 @@ export interface InvoiceAmountCell {
    * unreliable and is left exactly as it is.
    */
   readonly unreadable: boolean;
+  /**
+   * The cell holds a dash and nothing else: the customer's way of saying "no
+   * price here". Still unreadable — it is no amount — but recognisable, so a
+   * line whose Tarief and Fuel are both missing can be told apart from one
+   * holding a stray word (`isMissingPrice`).
+   */
+  readonly dash?: boolean;
 }
+
+/** A dash a person types for "nothing": hyphen, en dash or em dash. */
+const DASH = /^[-–—]$/;
 
 export const EMPTY_AMOUNT: InvoiceAmountCell = {
   value: null,
@@ -91,10 +101,19 @@ function toAmount(value: unknown): Omit<InvoiceAmountCell, "formula"> {
   const normalised = text.replace(",", ".");
 
   if (!/^-?\d+(\.\d+)?$/.test(normalised)) {
-    return { value: null, unreadable: true };
+    return DASH.test(text) ? { value: null, unreadable: true, dash: true } : { value: null, unreadable: true };
   }
 
   return { value: toDecimal(normalised), unreadable: false };
+}
+
+/**
+ * Whether a cell states NO price: empty, or a dash. A figure — 0,00 included —
+ * is a price, and so is anything else unreadable (a word, an error), which
+ * keeps its own handling.
+ */
+export function isMissingPrice(cell: InvoiceAmountCell | undefined): boolean {
+  return cell === undefined || (cell.value === null && (!cell.unreadable || cell.dash === true));
 }
 
 function toDecimal(value: number | string): Prisma.Decimal {

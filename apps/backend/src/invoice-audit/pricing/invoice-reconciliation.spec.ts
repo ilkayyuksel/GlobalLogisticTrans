@@ -435,10 +435,11 @@ describe("reconcileLine", () => {
     });
 
     /** Each component lands in its own column, whatever else differs. */
+    // A Tarief of 0 is a price: the line is compared in full (an empty one is not).
     it("writes every component into its own column", () => {
       const outcome = first(
         reconcileLine(
-          [row(2, {})],
+          [row(2, { tarief: 0 })],
           pricing({
             tarief: "1",
             brandstof: "2",

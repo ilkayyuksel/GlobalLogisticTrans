@@ -1304,17 +1304,17 @@ describe("PricingComponentResolver", () => {
       );
     }
 
-    it("charges it on the delivery leg", async () => {
+    it("charges it on the collection leg, the second Trip of the pair", async () => {
       groupOf(DELIVERY_LEG, COLLECTION_LEG);
 
-      expect(hasAutomatic(await resolve(DELIVERY_LEG))).toBe(true);
+      expect(hasAutomatic(await resolve(COLLECTION_LEG))).toBe(true);
     });
 
     /**
      * ── THE PAIR MUST STATE A NUMBER TOO ────────────────────────────────────
-     * The allocation rule is untouched — the delivery leg is still the one that
-     * owes it, and still only once. What changed is that there has to be
-     * something to allocate.
+     * The allocation decides that the collection leg is the one that may owe
+     * it, and only once. The number decides whether there is anything to
+     * allocate.
      *
      * The group rule copies one TAR-nummer onto both legs, so in practice they
      * agree; these assert the outcome for each leg independently rather than
@@ -1366,21 +1366,43 @@ describe("PricingComponentResolver", () => {
         expect(hasAutomatic(await resolve(collection))).toBe(false);
       });
 
-      /* The collection leg is refused by allocation, not by the number. */
-      it("still refuses the collection leg even when it states one", async () => {
+      /* The delivery leg is refused by allocation, not by the number. */
+      it("still refuses the delivery leg even when it states one", async () => {
         const delivery = withNumber(DELIVERY_LEG, "TAR123");
         const collection = withNumber(COLLECTION_LEG, "TAR123");
 
         groupOf(delivery, collection);
 
+        expect(hasAutomatic(await resolve(delivery))).toBe(false);
+        expect(hasAutomatic(await resolve(collection))).toBe(true);
+      });
+
+      /* The first Trip's number alone gives the pair no automatic charge. */
+      it("charges neither leg when only the delivery leg states one", async () => {
+        const delivery = withNumber(DELIVERY_LEG, "TAR123");
+        const collection = withNumber(COLLECTION_LEG, null);
+
+        groupOf(delivery, collection);
+
+        expect(hasAutomatic(await resolve(delivery))).toBe(false);
         expect(hasAutomatic(await resolve(collection))).toBe(false);
+      });
+
+      it("charges the collection leg when only it states one", async () => {
+        const delivery = withNumber(DELIVERY_LEG, null);
+        const collection = withNumber(COLLECTION_LEG, "TAR123");
+
+        groupOf(delivery, collection);
+
+        expect(hasAutomatic(await resolve(delivery))).toBe(false);
+        expect(hasAutomatic(await resolve(collection))).toBe(true);
       });
     });
 
-    it("does not charge it on the collection leg", async () => {
+    it("does not charge it on the delivery leg", async () => {
       groupOf(DELIVERY_LEG, COLLECTION_LEG);
 
-      expect(hasAutomatic(await resolve(COLLECTION_LEG))).toBe(false);
+      expect(hasAutomatic(await resolve(DELIVERY_LEG))).toBe(false);
     });
 
     /* Exactly one charge for the pair, whichever leg is priced first. */
@@ -1398,40 +1420,37 @@ describe("PricingComponentResolver", () => {
     });
 
     /**
-     * The ALLOCATION is unchanged: the collection leg never owes the automatic
-     * charge. What it may now carry is an operator's own extra TAR, which is a
-     * decision about that leg and not a second automatic charge — so the
-     * property is present, but only once, and the delivery leg still owes its
-     * automatic one independently.
+     * The delivery leg never owes the automatic charge. What it may carry is an
+     * operator's own manual TAR, which is a decision about that leg and not an
+     * automatic charge — so the property is present once, and not automatic.
      */
-    it("gives the collection leg only what was assigned to it", async () => {
+    it("gives the delivery leg only what was assigned to it", async () => {
       groupOf(DELIVERY_LEG, COLLECTION_LEG);
       tripCustomProperties.findByTripId.mockResolvedValue([assignment(AUTOMATIC_PROPERTY_ID, "TAR", null, "20.00")]);
 
-      const collection = await resolve(COLLECTION_LEG);
+      const tar = (await resolve(DELIVERY_LEG)).filter(
+        (property) => property.customPropertyId === AUTOMATIC_PROPERTY_ID,
+      );
 
-      expect(
-        collection.filter(
-          (property) => property.customPropertyId === AUTOMATIC_PROPERTY_ID,
-        ),
-      ).toHaveLength(1);
+      expect(tar).toHaveLength(1);
+      expect(tar[0].isAutomatic).toBeFalsy();
     });
 
-    /** With nothing assigned, the collection leg owes nothing at all. */
-    it("charges the collection leg nothing when it was assigned nothing", async () => {
+    /** With nothing assigned, the delivery leg owes nothing at all. */
+    it("charges the delivery leg nothing when it was assigned nothing", async () => {
       groupOf(DELIVERY_LEG, COLLECTION_LEG);
       tripCustomProperties.findByTripId.mockResolvedValue([]);
 
-      expect(hasAutomatic(await resolve(COLLECTION_LEG))).toBe(false);
+      expect(hasAutomatic(await resolve(DELIVERY_LEG))).toBe(false);
     });
 
     /**
      * Both legs assigned it by hand: each keeps its own extra, and only the
-     * DELIVERY leg additionally owes the automatic one. So the pair carries
+     * COLLECTION leg additionally owes the automatic one. So the pair carries
      * three contributions, not two automatic ones — a manual assignment can
      * never create a second automatic charge.
      */
-    it("adds the automatic charge only to the delivery leg", async () => {
+    it("adds the automatic charge only to the collection leg", async () => {
       groupOf(DELIVERY_LEG, COLLECTION_LEG);
       tripCustomProperties.findByTripId.mockResolvedValue([assignment(AUTOMATIC_PROPERTY_ID, "TAR", null, "20.00")]);
 
@@ -1443,16 +1462,16 @@ describe("PricingComponentResolver", () => {
           (property) => property.customPropertyId === AUTOMATIC_PROPERTY_ID,
         ).length;
 
-      expect(countOn(delivery)).toBe(2);
-      expect(countOn(collection)).toBe(1);
+      expect(countOn(delivery)).toBe(1);
+      expect(countOn(collection)).toBe(2);
     });
 
     it("charges once when neither leg was assigned it", async () => {
       groupOf(DELIVERY_LEG, COLLECTION_LEG);
       tripCustomProperties.findByTripId.mockResolvedValue([]);
 
-      expect(hasAutomatic(await resolve(DELIVERY_LEG))).toBe(true);
-      expect(hasAutomatic(await resolve(COLLECTION_LEG))).toBe(false);
+      expect(hasAutomatic(await resolve(DELIVERY_LEG))).toBe(false);
+      expect(hasAutomatic(await resolve(COLLECTION_LEG))).toBe(true);
     });
 
     it("uses the configured price on the leg that pays", async () => {
@@ -1464,7 +1483,7 @@ describe("PricingComponentResolver", () => {
         defaultPrice: "24.50",
       });
 
-      const [property] = await resolve(DELIVERY_LEG);
+      const [property] = await resolve(COLLECTION_LEG);
 
       expect(property.defaultPrice).toBe("24.50");
     });
@@ -1491,6 +1510,44 @@ describe("PricingComponentResolver", () => {
 
       expect(hasAutomatic(await resolve(first))).toBe(true);
       expect(hasAutomatic(await resolve(second))).toBe(true);
+    });
+
+    /* A group of two from different documents is a pair too: same allocation. */
+    it("charges only the collection of a manual group of one delivery and one collection", async () => {
+      const delivery = buildTrip({
+        id: "trip-a",
+        tripGroupId: GROUP_ID,
+        pdfDocumentId: "pdf-a",
+        direction: TripDirection.DELIVERY,
+      });
+      const collection = buildTrip({
+        id: "trip-b",
+        tripGroupId: GROUP_ID,
+        pdfDocumentId: "pdf-b",
+        direction: TripDirection.COLLECTION,
+      });
+      groupOf(delivery, collection);
+
+      expect(hasAutomatic(await resolve(delivery))).toBe(false);
+      expect(hasAutomatic(await resolve(collection))).toBe(true);
+    });
+
+    /* Three active members have no unambiguous pair: the ordinary rule. */
+    it("treats a delivery in a manual group of three as an ordinary Trip", async () => {
+      const members = [TripDirection.DELIVERY, TripDirection.COLLECTION, TripDirection.COLLECTION].map(
+        (direction, index) =>
+          buildTrip({ id: `trip-${index}`, tripGroupId: GROUP_ID, pdfDocumentId: `pdf-${index}`, direction }),
+      );
+      groupOf(...members);
+
+      expect(hasAutomatic(await resolve(members[0]))).toBe(true);
+    });
+
+    /* A cancelled partner is no partner: the delivery stands alone again. */
+    it("treats a delivery whose collection was cancelled as an ordinary Trip", async () => {
+      groupOf(DELIVERY_LEG, { ...COLLECTION_LEG, status: TripStatus.CANCELLED });
+
+      expect(hasAutomatic(await resolve(DELIVERY_LEG))).toBe(true);
     });
 
     it("treats a grouped Trip with no document as an ordinary Trip", async () => {

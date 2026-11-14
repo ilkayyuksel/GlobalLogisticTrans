@@ -870,20 +870,25 @@ export class TripRepository {
    * and this write is not moved, where an unconditional `setStatus` would turn
    * CLOSED into CANCELLED. No lock has to be taken explicitly, and the status
    * is the only column written.
+   *
+   * `onlyWithoutDriver` adds `driver_id IS NULL` to the same compare-and-set:
+   * a Trip given a driver between our read and this write is not moved either.
    */
   async transitionStatus(
     id: string,
     from: TripStatus,
     to: TripStatus,
+    options: { readonly onlyWithoutDriver?: boolean } = {},
   ): Promise<boolean> {
-    if (CLEARS_ROUTE_SELECTION.includes(to)) {
-      await this.clearRouteSelections([id]);
-    }
-
     const { count } = await this.prisma.trip.updateMany({
-      where: { id, status: from },
+      where: { id, status: from, ...(options.onlyWithoutDriver ? { driverId: null } : {}) },
       data: { status: to },
     });
+
+    // Only once the Trip has really moved: a refused move changes nothing.
+    if (count === 1 && CLEARS_ROUTE_SELECTION.includes(to)) {
+      await this.clearRouteSelections([id]);
+    }
 
     return count === 1;
   }

@@ -6,10 +6,13 @@ import {
   CombinationVerdict,
   type InvoiceRowMatch,
 } from "../matching/invoice-row-match";
+import { carriesCombinationSurcharge } from "../../pricing-engine/combination-leg";
 import {
+  InvoiceLineMark,
   InvoicePricingStatus,
   reconcileCostLine,
   reconcileLine,
+  withMark,
   type InvoiceRowPricing,
 } from "./invoice-reconciliation";
 import type { PriceReliability } from "./price-reliability";
@@ -41,6 +44,47 @@ export interface TripRowsInput {
 }
 
 export function reconcileTripRows(input: TripRowsInput): InvoiceRowPricing[] {
+  const mismatch = combinationMismatchOf(input.rows);
+  const outcomes = reconcileTrip(input, mismatch);
+
+  // Every row the transport is charged on is marked, its EC lines included.
+  return mismatch === null ? outcomes : outcomes.map((outcome) => withMark(outcome, mismatch));
+}
+
+/**
+ * Whether the Excel and this system disagree about the transport being a
+ * Combination (owner, November 2026), or null when they agree.
+ *
+ *   Excel: one of its own lines carries the COMBINATION marking the Excel pairs
+ *          by (`excel-combination-pairs.ts`) — a pair, or a line under review;
+ *   Trano: the Trip belongs to a group, which is what carries the Combination
+ *          Backload (`carriesCombinationSurcharge`).
+ *
+ * Only Excel        → COMBINATION_ONLY_IN_EXCEL: marked, nothing else changes —
+ *                     a GEEN COMBI is still written and its Backload removed.
+ * Only this system  → COMBINATION_ONLY_IN_TRANO: marked, and its €50 Backload is
+ *                     not added (`backloadRaiseAllowed`). No Combination remark
+ *                     can arise: GEEN COMBI needs the Excel's own marking.
+ */
+function combinationMismatchOf(rows: readonly InvoiceRowMatch[]): InvoiceLineMark | null {
+  const transportRows = rows.filter((match) => match.row.costLine === null);
+  const trip = transportRows.find((match) => match.trip !== null)?.trip ?? null;
+
+  if (trip === null || transportRows.length === 0) {
+    return null;
+  }
+
+  const inExcel = transportRows.some((match) => match.combination !== null);
+  const inTrano = carriesCombinationSurcharge({ tripGroupId: trip.tripGroupId ?? null });
+
+  if (inExcel === inTrano) {
+    return null;
+  }
+
+  return inExcel ? InvoiceLineMark.COMBINATION_ONLY_IN_EXCEL : InvoiceLineMark.COMBINATION_ONLY_IN_TRANO;
+}
+
+function reconcileTrip(input: TripRowsInput, mismatch: InvoiceLineMark | null): InvoiceRowPricing[] {
   const { rows, pricing, reliability } = input;
 
   if (!reliability.reliable || pricing === null) {
@@ -73,6 +117,7 @@ export function reconcileTripRows(input: TripRowsInput): InvoiceRowPricing[] {
           backloadRemovalAllowed: transportRows.some(
             (match) => match.combination?.verdict === CombinationVerdict.GEEN_COMBI,
           ),
+          backloadRaiseAllowed: mismatch !== InvoiceLineMark.COMBINATION_ONLY_IN_TRANO,
         },
       ),
     );
@@ -111,21 +156,29 @@ function isCombinationConfirmed(
 
 /**
  * What a Cost Confirmation line is owed: its own confirmation — or nothing when
- * the Trip's EK is its charged waiting time (one EK source, see `resolveEk`).
+ * the Trip's EK is its waiting time (one EK source, see `resolveEk`).
  */
 export function owedOnCostLine(pricing: CurrentTripPricing, match: InvoiceRowMatch): Prisma.Decimal {
-  return chargesWaitingTime(pricing) || match.costConfirmation === null
+  return areConfirmationsSuperseded(pricing) || match.costConfirmation === null
     ? new Prisma.Decimal(0)
     : match.costConfirmation.amount;
 }
 
-/** The Trip's EK is its charged waiting time rather than its confirmations. */
-function chargesWaitingTime(pricing: CurrentTripPricing): boolean {
-  return pricing.components.some(
-    (component) =>
-      component.componentCode === EffectiveComponent.WAITING_TIME &&
-      component.effectiveAmount.greaterThan(0),
-  );
+/**
+ * The Trip's EK is its waiting time rather than its confirmations, as the
+ * stored snapshot says: a charged waiting time, or — since a RECORDED waiting
+ * time supersedes them even at €0 (owner, November 2026) — a confirmation line
+ * the Engine stored at €0. The confirmations are taken verbatim, so that line
+ * is €0 only when superseded or when they confirm nothing at all.
+ */
+function areConfirmationsSuperseded(pricing: CurrentTripPricing): boolean {
+  const amountOf = (componentCode: string) =>
+    pricing.components.find((component) => component.componentCode === componentCode)
+      ?.effectiveAmount ?? null;
+  const waitingTime = amountOf(EffectiveComponent.WAITING_TIME);
+  const confirmations = amountOf(EffectiveComponent.COST_CONFIRMATION);
+
+  return (waitingTime?.greaterThan(0) ?? false) || (confirmations?.isZero() ?? false);
 }
 
 function withStatus(

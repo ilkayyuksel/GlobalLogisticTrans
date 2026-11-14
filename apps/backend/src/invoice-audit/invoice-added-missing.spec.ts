@@ -339,8 +339,12 @@ describe("a line this system added to the invoice", () => {
       expect(paymentOf(third, "missing-1")).toMatchObject({ payable: true });
     });
 
-    /** A Combination leg keeps its own surcharge through all of it. */
-    it("keeps a Combination's Backload, and settles it like any other line", async () => {
+    /*
+     * A Combination leg the line does not mark as one (owner, November 2026):
+     * its €50 Backload is not added, and the line is marked — so, like every
+     * yellow line, it is not settled until someone has looked at it.
+     */
+    it("adds no Combination Backload to a line that marks no Combination, and marks it", async () => {
       const { second } = await processTwice(
         trip("missing-1", "BELANR2720016", "EUCU2451828", { tripGroupId: "group-1" }),
         pricing({ tarief: "210", brandstof: "21", backload: "50" }),
@@ -352,8 +356,11 @@ describe("a line this system added to the invoice", () => {
       const sheet = (await readBack(second.workbook)).worksheets[0];
 
       expect(added?.status).toBe("ADDED_MISSING");
-      expect(sheet.getRow(added!.rowNumber).getCell(COLUMN.backload).value).toBe(50);
-      expect(paymentOf(second, "missing-1")).toMatchObject({ payable: true });
+      // Added without amounts by the first run, so no Tarief and no Fuel either: both reasons, one mark.
+      expect(added?.marks).toEqual(["PRICES_MISSING", "COMBINATION_ONLY_IN_TRANO"]);
+      expect(sheet.getRow(added!.rowNumber).getCell(COLUMN.backload).value).toBeNull();
+      expect(second.result.markedRowNumbers).toContain(added!.rowNumber);
+      expect(paymentOf(second, "missing-1")).toMatchObject({ payable: false });
     });
   });
 

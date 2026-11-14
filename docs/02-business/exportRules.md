@@ -199,8 +199,8 @@ where an operator may correct it. Nothing is calculated in the export.
 
 | Column | Source and rule |
 |---|---|
-| COMBI EN KOST | The stored amounts joined with ` + `, in this order: the COMBINATION line (Backload, €50 per leg the Engine charged); the operator's Custom Properties, in the order INFO names them; the system-managed property charges (TAR, Flat); the EK — the effective EK (`trip.pricing.ek`: the charged waiting time, else the summed Cost Confirmations), printed when the snapshot has a waiting-time or Cost Confirmation line. A property without a price has no line and therefore no amount. |
-| INFO | LOSRIT; `COMBI` when the snapshot has a COMBINATION line; the operator's PRICED Custom Properties (not route-priced, not system-managed), in display order; `TAR` when the Engine charged it; the waiting window when minutes were recorded; every Cost Confirmation reference (`CC4139505`), also when a charged waiting time is the EK; the operator's UNPRICED Custom Properties; the internal note. |
+| COMBI EN KOST | The stored amounts joined with ` + `, in this order: the COMBINATION line (Backload, €50 per leg the Engine charged); the operator's Custom Properties, in the order INFO names them; the system-managed property charges (TAR, Flat); the EK — the effective EK (`trip.pricing.ek`: the recorded waiting time, else the summed Cost Confirmations), printed when the snapshot has a waiting-time or Cost Confirmation line. A property without a price has no line and therefore no amount. |
+| INFO | LOSRIT; `COMBI` when the snapshot has a COMBINATION line; the operator's PRICED Custom Properties (not route-priced, not system-managed), in display order; `TAR` when the Engine charged it; the waiting window when minutes were recorded; every Cost Confirmation reference (`CC4139505`), also when a recorded waiting time is the EK; the operator's UNPRICED Custom Properties; the internal note. |
 
 The two columns are read side by side, amount under word, so every word that
 has an amount comes first and in the same order as its amount. A Custom

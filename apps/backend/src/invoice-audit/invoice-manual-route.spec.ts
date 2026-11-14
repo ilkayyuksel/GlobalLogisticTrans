@@ -219,10 +219,20 @@ describe("a route chosen by hand, in the Excel invoice check", () => {
         choices: [member(TRIP_ID, "leg-1", true), member(PARTNER_ID, partnerChoice, true)],
       });
 
+    /*
+     * The Excel marks no Combination on this line while the Trip is grouped:
+     * the check still runs as ever — the Tarief raised — and the line is marked
+     * (owner, November 2026: `COMBINATION_ONLY_IN_TRANO`).
+     */
     it("6. accepts both legs on one Combination, and the check runs as ever", async () => {
       const outcome = await pair(chosenLeg("leg-2"));
 
-      expectCorrected(outcome);
+      expect(outcome.row.priceReliability).toMatchObject({ reliable: true, problem: null });
+      expect(outcome.row.pricingStatus).toBe("PRICING_CORRECTED");
+      expect(outcome.cell.value).toBe(150);
+      expect(outcome.cell.font?.color?.argb).toBe(CORRECTED_TEXT_ARGB);
+      expect(outcome.row.marks).toEqual(["COMBINATION_ONLY_IN_TRANO"]);
+      expect(outcome.applied.result.markedRowNumbers).toEqual([ROW]);
       // The partner leg is not on the invoice: its stored price is read for the check.
       expect(outcome.findForTrips).toHaveBeenCalledWith([PARTNER_ID]);
     });

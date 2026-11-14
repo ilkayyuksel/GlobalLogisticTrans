@@ -76,8 +76,15 @@ interface Position {
 export function HoverNote({
   label,
   note,
+  showMarker = true,
   children,
 }: {
+  /**
+   * Whether the quiet ● that says "a note exists" follows the anchor. Off when
+   * the anchor is itself that sign — an icon shown only because there is a
+   * note — so the row does not carry two.
+   */
+  showMarker?: boolean;
   /**
    * What the note is ABOUT — a heading above the text, so a reader knows which
    * field they are looking at rather than seeing an unlabelled paragraph.
@@ -231,9 +238,11 @@ export function HoverNote({
         reason to stop on the link. Hidden from assistive technology, because
         the note itself is already announced through `aria-describedby`.
       */}
-      <span aria-hidden="true" className="text-[10px] leading-none text-muted">
-        ●
-      </span>
+      {showMarker ? (
+        <span aria-hidden="true" className="text-[10px] leading-none text-muted">
+          ●
+        </span>
+      ) : null}
 
       {isOpen
         ? createPortal(

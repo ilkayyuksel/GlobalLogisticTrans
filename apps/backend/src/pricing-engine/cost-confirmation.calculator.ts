@@ -45,22 +45,28 @@ import { toStorableAmount } from "./pricing-money";
  * A Trip without any confirmation produces no line at all — not a zero, which
  * would claim a confirmed cost of nothing.
  *
- * ── A CHARGED WAITING TIME TAKES ITS PLACE ──────────────────────────────────
- * EK is ONE source, by business rule: the operator's waiting time when it is
- * charged (a WAITING_TIME line above €0), otherwise the confirmations. The two
- * are never added — a confirmed €27.50 beside a waiting time of €137.50 is EK
- * €137.50, not €165.00.
+ * ── A RECORDED WAITING TIME TAKES ITS PLACE ─────────────────────────────────
+ * EK is ONE source, by business rule: the operator's waiting time whenever one
+ * is RECORDED on the Trip, otherwise the confirmations. The two are never
+ * added — a confirmed €27.50 beside a waiting time of €137.50 is EK €137.50,
+ * not €165.00.
  *
- * So when a charged waiting time precedes this step, the line is still written
- * — its description keeps naming the documents, which is how Remarks shows the
- * CC references — but it contributes €0, and the stored total counts the
- * waiting time once. The confirmations themselves are untouched: this decides
- * only what they contribute to THIS calculation. A waiting time of €0 produces
- * no line, so the confirmations count in full, as before.
+ * Recorded, not charged (owner, November 2026): a valid waiting window priced
+ * at €0 — below the threshold, or at night — still supersedes the
+ * confirmations, and EK is then €0. This reverses the earlier rule, under which
+ * only a waiting time above €0 did. A WAIT confirmation from a PDF is not a
+ * recorded waiting time: it is one of the confirmations.
+ *
+ * So when one is recorded, the line is still written — its description keeps
+ * naming the documents, which is how Remarks shows the CC references — but it
+ * contributes €0, and the stored total counts the waiting time alone. The
+ * confirmations themselves are untouched: this decides only what they
+ * contribute to THIS calculation, which is always made from the current Trip
+ * and the current confirmations, never added to an earlier EK.
  * ────────────────────────────────────────────────────────────────────────────
  */
 
-/** Last in the sequence: it reads the waiting time, and nothing depends on it. */
+/** Last in the sequence: nothing depends on it. */
 const CALCULATION_ORDER = 80;
 
 const ZERO = new Prisma.Decimal(0);
@@ -71,10 +77,7 @@ export class CostConfirmationCalculator implements PricingCalculationStep {
     this.logger.setContext(CostConfirmationCalculator.name);
   }
 
-  calculate(
-    context: PricingCalculationContext,
-    precedingLines: readonly PricingLine[] = [],
-  ): PricingLine[] {
+  calculate(context: PricingCalculationContext): PricingLine[] {
     const confirmation = context.costConfirmation;
 
     if (!confirmation) {
@@ -85,7 +88,7 @@ export class CostConfirmationCalculator implements PricingCalculationStep {
       return [];
     }
 
-    const isSuperseded = isWaitingTimeCharged(precedingLines);
+    const isSuperseded = context.waitingTimeRecorded;
 
     this.logger.log("Cost confirmation priced", {
       tripId: context.tripId,
@@ -132,13 +135,4 @@ function describe(ccNumbers: readonly string[]): string {
   return ccNumbers.length === 1
     ? `Cost confirmation ${ccNumbers[0]}`
     : `Cost confirmations ${ccNumbers.join(", ")}`;
-}
-
-/** Whether an earlier step charged a waiting time — the EK source then. */
-function isWaitingTimeCharged(precedingLines: readonly PricingLine[]): boolean {
-  return precedingLines.some(
-    (line) =>
-      line.component === PricingComponentCode.WAITING_TIME &&
-      line.amount.greaterThan(ZERO),
-  );
 }

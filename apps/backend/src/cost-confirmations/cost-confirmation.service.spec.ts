@@ -1,4 +1,4 @@
-import { CostConfirmation } from "@prisma/client";
+import { CostConfirmation, Prisma } from "@prisma/client";
 
 import { AppLoggerService } from "../logger/app-logger.service";
 import { CostConfirmationRepository } from "./cost-confirmation.repository";
@@ -26,7 +26,7 @@ function buildRow(overrides: Partial<CostConfirmation> = {}): CostConfirmation {
     pdfDocumentId: "pdf-1",
     ccNumber: "4132482",
     costCode: "WAIT",
-    amount: { toFixed: () => "25.00" },
+    amount: new Prisma.Decimal("25.00"),
     currency: "EUR",
     receivedAt: new Date("2026-08-18T09:00:00.000Z"),
     createdAt: new Date("2026-08-18T09:00:00.000Z"),
@@ -206,7 +206,7 @@ describe("CostConfirmationService", () => {
   });
 
   describe("reading a page of Trips", () => {
-    it("returns at most one confirmation per Trip", async () => {
+    it("returns each Trip's own confirmations", async () => {
       repository.findForTrips.mockResolvedValue([
         buildRow({ tripId: "trip-1", ccNumber: "4132482" }),
         buildRow({ id: "cc-2", tripId: "trip-2", ccNumber: "4139511" }),
@@ -214,9 +214,27 @@ describe("CostConfirmationService", () => {
 
       const byTrip = await service.findForTrips(["trip-1", "trip-2"]);
 
-      expect(byTrip.get("trip-1")?.ccNumber).toBe("4132482");
-      expect(byTrip.get("trip-2")?.ccNumber).toBe("4139511");
+      expect(byTrip.get("trip-1")?.items.map((item) => item.ccNumber)).toEqual(["4132482"]);
+      expect(byTrip.get("trip-2")?.items.map((item) => item.ccNumber)).toEqual(["4139511"]);
       expect(byTrip.size).toBe(2);
+    });
+
+    /* 68.75 + 70.00 + 25.00, summed as Decimal: no float ever adds money up. */
+    it("returns every confirmation of a Trip, newest first, and their total", async () => {
+      repository.findForTrips.mockResolvedValue([
+        buildRow({ id: "cc-3", ccNumber: "4261546", amount: new Prisma.Decimal("25.00") }),
+        buildRow({ id: "cc-2", ccNumber: "4261545", amount: new Prisma.Decimal("70.00") }),
+        buildRow({ id: "cc-1", ccNumber: "4261544", amount: new Prisma.Decimal("68.75") }),
+      ]);
+
+      const byTrip = await service.findForTrips([TRIP_ID]);
+
+      expect(byTrip.get(TRIP_ID)?.items.map((item) => [item.ccNumber, item.amount])).toEqual([
+        ["4261546", "25.00"],
+        ["4261545", "70.00"],
+        ["4261544", "68.75"],
+      ]);
+      expect(byTrip.get(TRIP_ID)?.total).toBe("163.75");
     });
 
     it("has no entry for a Trip with none", async () => {
@@ -231,8 +249,9 @@ describe("CostConfirmationService", () => {
 
       const byTrip = await service.findForTrips([TRIP_ID]);
 
-      expect(byTrip.get(TRIP_ID)?.amount).toBe("25.00");
-      expect(typeof byTrip.get(TRIP_ID)?.amount).toBe("string");
+      expect(byTrip.get(TRIP_ID)?.items[0].amount).toBe("25.00");
+      expect(typeof byTrip.get(TRIP_ID)?.items[0].amount).toBe("string");
+      expect(byTrip.get(TRIP_ID)?.total).toBe("25.00");
     });
   });
 });

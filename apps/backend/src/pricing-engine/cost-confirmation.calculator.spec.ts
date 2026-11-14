@@ -1,9 +1,7 @@
-import { Prisma } from "@prisma/client";
-
 import { AppLoggerService } from "../logger/app-logger.service";
 import { CostConfirmationCalculator } from "./cost-confirmation.calculator";
 import { PricingCalculationContext } from "./pricing-calculation-context";
-import { PricingComponentCode, type PricingLine } from "./pricing-line";
+import { PricingComponentCode } from "./pricing-line";
 
 /**
  * The Cost Confirmation as a pricing component.
@@ -19,6 +17,7 @@ import { PricingComponentCode, type PricingLine } from "./pricing-line";
  */
 function buildContext(
   costConfirmation: PricingCalculationContext["costConfirmation"],
+  waitingTimeRecorded = false,
 ): PricingCalculationContext {
   return {
     tripId: "trip-1",
@@ -27,6 +26,7 @@ function buildContext(
     planningDate: "2026-08-24",
     isCombination: false,
     waitingTimeMinutes: 0,
+    waitingTimeRecorded,
     route: { departure: "PSA Quay 869", destination: "Gent" },
     baseSource: {
       strategy: "ROUTE_BASED",
@@ -116,28 +116,16 @@ describe("pricing a Cost Confirmation", () => {
   });
 
   /**
-   * ── A CHARGED WAITING TIME IS THE EK SOURCE ─────────────────────────────
+   * ── A RECORDED WAITING TIME IS THE EK SOURCE ────────────────────────────
    * The confirmation line is still written — its description names the
    * documents, which is how Remarks shows them — but contributes €0, so the
-   * stored total never adds the two.
+   * stored total never adds the two. Recorded, not charged: a waiting time
+   * priced at €0 supersedes the confirmations too (owner, November 2026).
    */
-  describe("beside a waiting time", () => {
-    function waiting(amount: string): PricingLine {
-      return {
-        component: PricingComponentCode.WAITING_TIME,
-        description: "billable minutes",
-        amount: new Prisma.Decimal(amount),
-        calculationOrder: 4,
-        quantity: null,
-        unitPrice: null,
-        customPropertyId: null,
-      };
-    }
-
-    it("contributes nothing when a waiting time is charged", () => {
+  describe("beside a recorded waiting time", () => {
+    it("contributes nothing when a waiting time is recorded", () => {
       const [line] = calculator.calculate(
-        buildContext({ ccNumbers: ["CC4139505"], amount: "27.50" }),
-        [waiting("137.50")],
+        buildContext({ ccNumbers: ["CC4139505"], amount: "27.50" }, true),
       );
 
       expect(line.amount.toFixed(2)).toBe("0.00");
@@ -147,8 +135,7 @@ describe("pricing a Cost Confirmation", () => {
     /** Several confirmations are one line, superseded as one: 25 + 40 + 12.50. */
     it("supersedes several confirmations alike, still naming each", () => {
       const [line] = calculator.calculate(
-        buildContext({ ccNumbers: ["CC3", "CC2", "CC1"], amount: "77.50" }),
-        [waiting("137.50")],
+        buildContext({ ccNumbers: ["CC3", "CC2", "CC1"], amount: "77.50" }, true),
       );
 
       expect(line.amount.toFixed(2)).toBe("0.00");
@@ -156,36 +143,21 @@ describe("pricing a Cost Confirmation", () => {
       expect(line.description).toContain("CC1");
     });
 
-    /** Only a real charge displaces a confirmation. */
-    it("counts in full beside a waiting time of €0", () => {
+    it("counts in full when no waiting time is recorded", () => {
       const [line] = calculator.calculate(
-        buildContext({ ccNumbers: ["CC4139505"], amount: "27.50" }),
-        [waiting("0.00")],
-      );
-
-      expect(line.amount.toFixed(2)).toBe("27.50");
-    });
-
-    it("counts in full when nothing precedes it", () => {
-      const [line] = calculator.calculate(
-        buildContext({ ccNumbers: ["CC1", "CC2"], amount: "77.50" }),
-        [],
+        buildContext({ ccNumbers: ["CC1", "CC2"], amount: "77.50" }, false),
       );
 
       expect(line.amount.toFixed(2)).toBe("77.50");
     });
 
     it("says in the log that it was superseded, without any amount", () => {
-      calculator.calculate(
-        buildContext({ ccNumbers: ["CC1"], amount: "1234.56" }),
-        [waiting("137.50")],
-      );
+      calculator.calculate(buildContext({ ccNumbers: ["CC1"], amount: "1234.56" }, true));
 
       const logged = JSON.stringify(logger.log.mock.calls);
 
       expect(logged).toContain('"supersededByWaitingTime":true');
       expect(logged).not.toContain("1234.56");
-      expect(logged).not.toContain("137.50");
     });
   });
 });

@@ -204,6 +204,15 @@ Page 1 contains the trip.
 
 Page 2 only contains additional depot information.
 
+Exception: long TRANSPORT REMARKS (for example several `BIxxxxx: n x 45PH`
+cargo lines) can push the CONTAINER/CARGO block, and with it LOADING 1, onto
+page 2. When page 1 prints no `Cntr type:` label at all, the container type
+and container number are read from the first later page that does. Page 1
+always wins when it prints the label. The BI cargo lines are remarks: they are
+never read as a container type and never become separate Trips.
+Example: transportorder1404135.pdf. A Combination never borrows from its other
+page, because that page is a different Trip.
+
 Example
 
 transportorder1352505.pdf

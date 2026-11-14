@@ -1,12 +1,14 @@
 import { Prisma } from "@prisma/client";
 
 import type { EffectivePricing } from "../../trip-pricing/effective-pricing";
-import { round } from "../workbook/invoice-amounts";
+import { isMissingPrice, round } from "../workbook/invoice-amounts";
+import type { InvoiceColumn } from "../workbook/invoice-columns";
 import type { InvoiceSheetRow } from "../workbook/invoice-sheet";
 import { expectedFuel, reconcileFuel } from "./fuel-reconciliation";
 import { INVOICE_COMPONENTS, type InvoiceComponent } from "./invoice-column-map";
 import {
   DifferenceKind,
+  InvoiceLineMark,
   InvoicePricingStatus,
   compared,
   informational,
@@ -41,6 +43,24 @@ export interface LineContext {
   readonly fuelRate: Prisma.Decimal | null;
   /** The Backload may be removed: an established GEEN COMBI. */
   readonly backloadRemovalAllowed?: boolean;
+  /**
+   * False when the Trip is a Combination the Excel does not mark as one: its
+   * €50 Backload is then not added to the invoice (owner, November 2026).
+   */
+  readonly backloadRaiseAllowed?: boolean;
+}
+
+/** The two components a line must state at least one of to be priced from us. */
+const PRICE_COLUMNS: readonly InvoiceColumn[] = ["tarief", "fuel"];
+
+/**
+ * The line states NO Tarief and NO Fuel: every one of its cells of both is
+ * empty or a dash (owner, November 2026). Neither is then filled in from this
+ * system and the line is marked. A figure — 0,00 included — is a price, and a
+ * line stating either one keeps every component check as it was.
+ */
+export function statesNoPrices(rows: readonly InvoiceSheetRow[]): boolean {
+  return rows.every((row) => PRICE_COLUMNS.every((column) => isMissingPrice(row.amounts[column])));
 }
 
 /**
@@ -69,15 +89,50 @@ export function reconcileLine(
   pricing: EffectivePricing,
   context: LineContext,
 ): readonly InvoiceRowPricing[] {
-  const unreadable = unreadableDifferences(rows);
+  if (!statesNoPrices(rows)) {
+    return compareLine(rows, pricing, context, INVOICE_COMPONENTS);
+  }
+
+  /*
+   * ── NO TARIEF AND NO FUEL: NEITHER IS FILLED IN ───────────────────────────
+   * Both were filled in from this system; they are now left exactly as the
+   * customer wrote them — empty, or the dash — and the line is marked. Every
+   * other component is compared as always; a dash in Tarief or Fuel is no
+   * longer a reason to leave the whole line unread.
+   */
+  const outcomes = compareLine(
+    rows,
+    pricing,
+    context,
+    INVOICE_COMPONENTS.filter((component) => !PRICE_COLUMNS.includes(component.correctionColumn)),
+  );
+
+  return outcomes.map((outcome) => withMark(outcome, InvoiceLineMark.PRICES_MISSING));
+}
+
+/** The outcome, marked yellow for one more reason. */
+export function withMark(outcome: InvoiceRowPricing, mark: InvoiceLineMark): InvoiceRowPricing {
+  return { ...outcome, marks: [...new Set([...(outcome.marks ?? []), mark])] };
+}
+
+function compareLine(
+  rows: readonly InvoiceSheetRow[],
+  pricing: EffectivePricing,
+  context: LineContext,
+  components: readonly InvoiceComponent[],
+): readonly InvoiceRowPricing[] {
+  const unreadable = unreadableDifferences(rows).filter((difference) =>
+    components.some((component) => component.label === difference.component),
+  );
 
   if (unreadable.length > 0) {
     return toRows(rows, unreadable, InvoicePricingStatus.AMOUNT_UNREADABLE);
   }
 
   const differences: InvoicePricingDifference[] = [];
+  const comparedComponents = components.filter((component) => !isBackloadWithheld(component, rows, pricing, context));
 
-  for (const component of INVOICE_COMPONENTS) {
+  for (const component of comparedComponents) {
     const difference =
       component.correctionColumn === "fuel"
         ? reconcileFuel(rows, pricing, component, context, differences)
@@ -105,7 +160,7 @@ export function reconcileLine(
       return toRows(rows, differences.map(withoutWrite), InvoicePricingStatus.NOT_DISTRIBUTABLE);
     }
 
-    const agreements = toAgreements(rows, pricing, context, differences);
+    const agreements = toAgreements(rows, pricing, context, differences, comparedComponents);
 
     return toRows(rows, differences, InvoicePricingStatus.NOT_DISTRIBUTABLE).map((outcome, index) => ({
       ...outcome,
@@ -113,7 +168,7 @@ export function reconcileLine(
     }));
   }
 
-  const agreements = toAgreements(rows, pricing, context, differences);
+  const agreements = toAgreements(rows, pricing, context, differences, comparedComponents);
 
   return rows.map((row, index) => {
     const own = differences.filter((difference) => difference.correctionRowNumber === row.rowNumber);
@@ -138,8 +193,9 @@ function toAgreements(
   pricing: EffectivePricing,
   context: LineContext,
   differences: readonly InvoicePricingDifference[],
+  components: readonly InvoiceComponent[],
 ): ComparedComponent[] {
-  return INVOICE_COMPONENTS.filter((component) => !differences.some((difference) => difference.component === component.label))
+  return components.filter((component) => !differences.some((difference) => difference.component === component.label))
     .map((component) =>
       compared(
         component,
@@ -148,6 +204,25 @@ function toAgreements(
       ),
     )
     .filter((agreement) => !agreement.expectedValue.isZero() || !(agreement.invoiceValue ?? new Prisma.Decimal(0)).isZero());
+}
+
+/**
+ * A Backload raise this line does not get: the Trip is a Combination the Excel
+ * does not mark as one, so its €50 is not added (owner, November 2026). Only
+ * the RAISE is withheld — a Backload the invoice already states is compared as
+ * always — and the Backload is then neither written nor reported as agreeing.
+ */
+function isBackloadWithheld(
+  component: InvoiceComponent,
+  rows: readonly InvoiceSheetRow[],
+  pricing: EffectivePricing,
+  context: LineContext,
+): boolean {
+  return (
+    component.correctionColumn === "backload" &&
+    context.backloadRaiseAllowed === false &&
+    decideComponent(sumOf(rows, component.columns), round(component.expected(pricing))) === ComponentDecision.RAISE
+  );
 }
 
 function reconcileComponent(

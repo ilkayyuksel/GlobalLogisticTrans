@@ -14,8 +14,19 @@ import { ParsedTrip } from "../types";
  * page 2 when page 1 has already answered would risk overriding the correct
  * value with a different one.
  *
+ * The one exception is the CONTAINER/CARGO block: when page 1 prints no
+ * `Cntr type:` at all, because long transport remarks pushed the block onto
+ * page 2, the later pages are offered as continuations. Page 1 still wins
+ * whenever it states the field.
+ *
  * A single trip has no group, so `groupKey` is null.
  */
 export function parseSingle(fragments: readonly Fragment[]): ParsedTrip[] {
-  return [extractTripFromPage(fragments, 1, null)];
+  return [extractTripFromPage(fragments, 1, null, laterPages(fragments))];
+}
+
+function laterPages(fragments: readonly Fragment[]): number[] {
+  const pages = new Set(fragments.map((fragment) => fragment.page));
+
+  return [...pages].filter((page) => page > 1).sort((left, right) => left - right);
 }

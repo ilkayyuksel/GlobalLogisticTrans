@@ -597,8 +597,9 @@ describe("manually managed Trip data", () => {
       expect(assignedPropertyIds()).toEqual([GENSET.id]);
     });
 
+    // Without a driver: a Trip planned with one is not revised by a document at all.
     it("Q: the document's own fields still move", async () => {
-      planned();
+      planned({ driverId: null });
 
       const result = await revisions.applyDocumentRevision(
         buildDocument({ terminal: "Deurganck", destinationCity: "Lille" }),
@@ -617,7 +618,7 @@ describe("manually managed Trip data", () => {
     });
 
     it("reopens a cancelled Trip with every protected value intact", async () => {
-      planned({ status: TripStatus.CANCELLED });
+      planned({ status: TripStatus.CANCELLED, driverId: null });
       await assign(GENSET);
 
       const result = await revisions.applyDocumentRevision(buildDocument());
@@ -626,10 +627,21 @@ describe("manually managed Trip data", () => {
       expect(trip).toMatchObject({
         status: TripStatus.OPEN,
         vehicleId: VEHICLE_ID,
-        driverId: DRIVER_ID,
         waitingTimeMinutes: 960,
       });
       expect(assignedPropertyIds()).toEqual([GENSET.id]);
+    });
+
+    it("leaves a Trip planned with a driver exactly as it is", async () => {
+      planned();
+      const before = { ...trip };
+
+      const result = await revisions.applyDocumentRevision(
+        buildDocument({ terminal: "Deurganck", destinationCity: "Lille" }),
+      );
+
+      expect(result.outcome).toBe("REFUSED_DRIVER_ASSIGNED");
+      expect(trip).toEqual(before);
     });
   });
 

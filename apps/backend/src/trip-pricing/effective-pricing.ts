@@ -132,7 +132,7 @@ export interface EffectivePricing {
   readonly tunnel: Prisma.Decimal;
   /** The priced Custom Properties. Calculated, never overridable. */
   readonly others: Prisma.Decimal;
-  /** The waiting time when charged (> €0), otherwise the Cost Confirmations. */
+  /** The recorded waiting time, otherwise the Cost Confirmations. */
   readonly ek: Prisma.Decimal;
   /** The sum of the seven above. Never stored as an independent figure. */
   readonly totaal: Prisma.Decimal;
@@ -375,18 +375,18 @@ export function fuelOnTarief(
  *
  *   waiting time charged (> €0)  → the waiting time; the confirmations are
  *                                  not added, however many there are
- *   otherwise                    → the confirmations, summed; €0 without any
+ *   otherwise                    → the stored confirmation line; €0 without any
  *
- * A waiting time priced at €0 — below the threshold, or entirely at night —
- * does not displace a confirmation: only a real charge does. The
- * confirmations stay stored and auditable either way; this decides only what
- * the Trip's EK is.
+ * Which source wins is decided by the Engine: a RECORDED waiting time — also
+ * one priced at €0 (owner, November 2026) — makes it store the confirmation
+ * line at €0 (`CostConfirmationCalculator`), so for a new snapshot this reads
+ * the waiting time's EK, €0 included. The confirmations stay stored and
+ * auditable either way; this decides only what the Trip's EK is.
  *
  * Applied here, on every read, rather than only in the Engine: a snapshot
- * written before the rule still carries the full confirmation line beside its
- * waiting time, and EK must follow the rule for it too. The Engine writes the
- * confirmation line at €0 when superseded, so for a NEW snapshot both agree
- * and its stored total counts the waiting time once.
+ * written before the Engine stored superseded confirmations at €0 still
+ * carries the full confirmation line beside a charged waiting time, and EK must
+ * follow the rule for it too.
  */
 function resolveEk(
   waitingTime: Prisma.Decimal,

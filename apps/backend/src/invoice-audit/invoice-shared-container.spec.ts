@@ -68,9 +68,12 @@ describe("EC lines with no transport line of theirs are that transport's line, h
       ["MATCHED", "bousbecque", [4]],
       ["MATCHED", "bousbecque", [3]],
     ]);
-    // Its prices filled once, on the first; its container filled in red on both.
-    expect([cell(3, COLUMN.tarief).value, cell(3, COLUMN.fuel).value]).toEqual([200, 30]);
+    // No Tarief and no Fuel stated: neither filled from Trano, both lines marked
+    // (owner, November 2026); its container filled in red on both.
+    expect([cell(3, COLUMN.tarief).value, cell(3, COLUMN.fuel).value]).toEqual([null, null]);
     expect([cell(4, COLUMN.tarief).value, cell(4, COLUMN.fuel).value]).toEqual([null, null]);
+    expect(result.rows.slice(1).map((row) => row.marks)).toEqual([["PRICES_MISSING"], ["PRICES_MISSING"]]);
+    expect(result.markedRowNumbers).toEqual(expect.arrayContaining([3, 4]));
     expect([cell(3, COLUMN.container).value, cell(4, COLUMN.container).value]).toEqual(["PVDU1106430", "PVDU1106430"]);
     // Both EC charges kept: 110 + 70 is the transport's EK of 180, unchanged.
     expect([cell(3, COLUMN.ek).value, cell(4, COLUMN.ek).value]).toEqual([110, 70]);
@@ -79,24 +82,24 @@ describe("EC lines with no transport line of theirs are that transport's line, h
       outcome: "UNCHANGED",
       excelValue: "180.00",
     });
-    // The totals grow by its Tarief and Fuel, and by no EK.
+    // The totals do not grow: no Tarief, no Fuel, no EK.
     const grew = (column: string) => {
       // The header as the sheet writes it: `Fuel 15%` for Fuel.
       const total = result.totals.columns.find((each) => each.column.startsWith(column))!;
 
       return new Prisma.Decimal(total.after).minus(total.before).toFixed(2);
     };
-    expect([grew("Tarief"), grew("Fuel"), grew("EK")]).toEqual(["200.00", "30.00", "0.00"]);
-    // Nothing added beside them.
+    expect([grew("Tarief"), grew("Fuel"), grew("EK")]).toEqual(["0.00", "0.00", "0.00"]);
+    // Nothing added beside them; a marked line is not settled.
     expect(result.missingTrips).toEqual([]);
     expect(result.payments.filter((payment) => payment.tripId === "bousbecque")).toEqual([
-      expect.objectContaining({ payable: true, rowNumbers: [3, 4] }),
+      expect.objectContaining({ payable: false, rowNumbers: [3, 4], reasons: expect.arrayContaining(["LINE_MARKED"]) }),
     ]);
 
     return checked;
   }
 
-  it("with R42's own Trip in Trano exactly: R42 is that Trip, R53-R54 priced", async () => {
+  it("with R42's own Trip in Trano exactly: R42 is that Trip, R53-R54 matched", async () => {
     world.trips.push(aTrip("laakdal", "ANRDUB2813293", "PVDU1106430", TUESDAY));
 
     const { result } = await expectPricedOnTheEcLines();
@@ -105,7 +108,7 @@ describe("EC lines with no transport line of theirs are that transport's line, h
   });
 
   /** Before: R42 was AMBIGUOUS between the two, and the transport was never priced. */
-  it("with R42's own Trip on another day: R42 finds it, its date corrected, R53-R54 priced", async () => {
+  it("with R42's own Trip on another day: R42 finds it, its date corrected, R53-R54 matched", async () => {
     world.trips.push(aTrip("laakdal", "ANRDUB2813293", "PVDU1106430", WEDNESDAY));
 
     const { result } = await expectPricedOnTheEcLines();
@@ -185,7 +188,7 @@ describe("EC lines with no transport line of theirs are that transport's line, h
   });
 
   /** The real week 41 workbook: R42, R53 and R54 as the customer sent them. */
-  it("prices ANRDUB2812770 on R53 of the real week 41 invoice", async () => {
+  it("matches ANRDUB2812770 on R53 of the real week 41 invoice, its missing prices not filled", async () => {
     world.trips.push(aTrip("laakdal", "ANRDUB2813293", "PVDU1106430", WEDNESDAY));
     const file = readFileSync(join(__dirname, "../../../../docs/07-excels/week 41 - 2026 GLT.xlsx"));
 
@@ -196,10 +199,12 @@ describe("EC lines with no transport line of theirs are that transport's line, h
       ["MATCHED", "bousbecque"],
       ["MATCHED", "bousbecque"],
     ]);
-    expect(cell(53, COLUMN.tarief).value).toBe(200);
+    // R53 states no Tarief and no Fuel: neither filled, the line marked.
+    expect(cell(53, COLUMN.tarief).value).toBeNull();
+    expect(result.rows.find((row) => row.rowNumber === 53)?.marks).toEqual(["PRICES_MISSING"]);
     expect(result.missingTrips.map((missing) => missing.tripId)).not.toContain("bousbecque");
     expect(result.payments.find((payment) => payment.tripId === "bousbecque")).toMatchObject({
-      payable: true,
+      payable: false,
       rowNumbers: [53, 54],
     });
   });

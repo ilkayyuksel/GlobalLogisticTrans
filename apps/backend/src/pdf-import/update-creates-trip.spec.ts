@@ -440,10 +440,10 @@ describe("an UPDATE document with no Trip to revise", () => {
       await harness.importer.revise(readFixture(FILE), "update.pdf");
       (tripFor(BOOKING) as Record<string, unknown>).status = TripStatus.CLOSED;
 
-      await expect(
-        harness.importer.revise(readFixture(FILE), "late-update.pdf"),
-      ).rejects.toThrow(/CLOSED/);
+      // Ignored, not failed: the document is handled and the Trip left alone.
+      const late = await harness.importer.revise(readFixture(FILE), "late-update.pdf");
 
+      expect(late.revisions.map((entry) => entry.action)).toEqual(["REFUSED_CLOSED"]);
       expect(harness.trips).toHaveLength(1);
       expect(tripFor(BOOKING)?.status).toBe(TripStatus.CLOSED);
     });
