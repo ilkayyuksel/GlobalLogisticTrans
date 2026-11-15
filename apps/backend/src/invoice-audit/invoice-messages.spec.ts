@@ -37,6 +37,7 @@ function priced(tarief: string, method: RouteMatchMethod = RouteMatchMethod.EXAC
     others: zero,
     ek: zero,
     totaal: new Prisma.Decimal(tarief),
+    fuelPercentage: null,
     routeMatch: { ...EXACT_ROUTE_MATCH, method },
   };
 }

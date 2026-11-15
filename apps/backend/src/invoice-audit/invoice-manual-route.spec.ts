@@ -43,6 +43,7 @@ function manuallyPriced(match: Partial<RouteMatchView> = {}, tarief = 150): Curr
     others: zero,
     ek: zero,
     totaal: new Prisma.Decimal(tarief),
+    fuelPercentage: null,
     routeMatch: {
       method: RouteMatchMethod.NOT_FOUND,
       routePricingId: "route-1",

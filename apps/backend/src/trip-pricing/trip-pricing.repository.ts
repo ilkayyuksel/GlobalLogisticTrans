@@ -215,6 +215,26 @@ export class TripPricingRepository {
   }
 
   /**
+   * Rewrites a snapshot's total — only while it is still the very calculation
+   * that was read (`calculatedAt` unchanged) and still current (CLOSED Trip,
+   * not FAILED). One conditional statement: the row lock it takes makes a
+   * concurrent full replacement wait, and a snapshot replaced in between is
+   * not touched. False when nothing was written.
+   */
+  async updateTotalIfUnchanged(
+    id: string,
+    calculatedAt: Date,
+    totalPrice: Prisma.Decimal,
+  ): Promise<boolean> {
+    const { count } = await this.prisma.tripPricing.updateMany({
+      where: { id, calculatedAt, ...CURRENT_SNAPSHOT },
+      data: { totalPrice },
+    });
+
+    return count === 1;
+  }
+
+  /**
    * Rewrites a snapshot's header unless the stored one describes LATER inputs.
    *
    * A conditional UPDATE in one statement: a concurrent writer of the same row

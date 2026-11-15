@@ -34,6 +34,8 @@ import { CombinationSurchargeCalculator } from "./combination-surcharge.calculat
 import { CostConfirmationCalculator } from "./cost-confirmation.calculator";
 import { CustomPropertyCalculator } from "./custom-property.calculator";
 import { FuelSurchargeCalculator } from "./fuel-surcharge.calculator";
+import { FuelRecalculationService } from "./fuel-recalculation.service";
+import { FuelLineStore } from "../trip-pricing/fuel-line.store";
 import { PricingComponentResolver } from "./pricing-component.resolver";
 import { PricingEngineService } from "./pricing-engine.service";
 import { PairedPricingService } from "./paired-pricing.service";
@@ -475,9 +477,30 @@ export function buildPricingLifecycle() {
         return Promise.resolve();
       },
     ),
+    /** As the real conditional UPDATE: the same calculation, still current. */
+    updateTotalIfUnchanged: jest.fn((id: string, calculatedAt: Date, totalPrice: Prisma.Decimal) => {
+      const row = snapshots.find((candidate) => candidate.id === id);
+      const unchanged =
+        row !== undefined &&
+        row.calculatedAt.getTime() === calculatedAt.getTime() &&
+        isCurrent(row.tripId) &&
+        row.calculationStatus !== PricingCalculationStatus.FAILED;
+      if (unchanged) {
+        row.totalPrice = totalPrice;
+      }
+      return Promise.resolve(unchanged);
+    }),
     runInTransaction: jest.fn(),
   };
   const itemRepository = {
+    /** As the real conditional UPDATE: that line, of that snapshot. */
+    updateLineOfSnapshot: jest.fn((id: string, tripPricingId: string, data: Partial<StoredItem>) => {
+      const row = items.find((candidate) => candidate.id === id && candidate.tripPricingId === tripPricingId);
+      if (row) {
+        Object.assign(row, data);
+      }
+      return Promise.resolve(row !== undefined);
+    }),
     findByTripPricingId: jest.fn((id: string) => Promise.resolve(itemsOf(id))),
     findById: jest.fn((id: string) =>
       Promise.resolve(items.find((row) => row.id === id) ?? null),
@@ -528,18 +551,24 @@ export function buildPricingLifecycle() {
     tripRead,
     logger,
   );
+  /** Operator corrections (Tarief, Toll, Tunnel), as the override table holds them. */
+  const overrides: { tripId: string; componentCode: string; amount: Prisma.Decimal }[] = [];
   const effectivePricing = new EffectivePricingService(
     {
-      findForTrip: () => Promise.resolve([]),
-      findForTrips: () => Promise.resolve([]),
+      findForTrip: (tripId: string) => Promise.resolve(overrides.filter((row) => row.tripId === tripId)),
+      findForTrips: (tripIds: readonly string[]) =>
+        Promise.resolve(overrides.filter((row) => tripIds.includes(row.tripId))),
     } as never,
     pricingRepository as never,
     { findReviewStatus: async () => NO_REVIEW_STATUS } as unknown as RouteReviewRepository,
   );
 
   /* ── the Engine ─────────────────────────────────────────────────────────── */
+  const resolve = jest.fn().mockResolvedValue(RULES);
   const ruleResolver = {
-    resolve: jest.fn().mockResolvedValue(RULES),
+    resolve,
+    // Always the FUEL_PERCENTAGE `resolve` answers now: one configuration.
+    resolveFuelPercentage: jest.fn(async () => ((await resolve()) as typeof RULES).fuelPercentage),
   } as unknown as PricingRuleResolver;
   const toPropertyView = (property: CatalogEntry) => ({
     ...property,
@@ -786,8 +815,22 @@ export function buildPricingLifecycle() {
     logger,
   );
 
+  const fuel = new FuelRecalculationService(
+    ruleResolver,
+    new FuelLineStore(pricingRepository as never, logger),
+    logger,
+  );
+
   return {
     trips,
+    /** "Brandstof herberekenen" for one Trip, over the same stored snapshots. */
+    fuel,
+    /** Operator corrections the effective read applies; push one to correct. */
+    overrides,
+    /** Sets FUEL_PERCENTAGE for every later calculation; nothing is repriced by it. */
+    setFuelPercentage(fuelPercentage: string): void {
+      resolve.mockResolvedValue({ ...RULES, fuelPercentage });
+    },
     /** The one logger every service shares, for asserting warnings. */
     logger: logger as unknown as { warn: jest.Mock; log: jest.Mock },
     /** Change these to change the configuration; nothing is repriced by it. */

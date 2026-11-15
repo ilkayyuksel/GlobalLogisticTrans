@@ -11,6 +11,7 @@ import {
 import { PricingEngineExceptionFilter } from "../pricing-engine/exceptions/pricing-engine-exception.filter";
 import { PairedPricingService } from "../pricing-engine/paired-pricing.service";
 import { PricingSnapshotDto } from "../trip-pricing/dto/pricing-snapshot.dto";
+import { BulkFuelRecalculationService } from "./bulk-fuel-recalculation.service";
 import { BulkPricingReprocessService } from "./bulk-pricing-reprocess.service";
 import { BulkReprocessResultDto, ReprocessTripsDto } from "./dto/reprocess-trips.dto";
 import { TripIdParamDto } from "../trip-pricing/dto/trip-pricing-params.dto";
@@ -43,6 +44,7 @@ export class PricingReprocessController {
     private readonly pairs: PairedPricingService,
     private readonly tripPricingService: TripPricingService,
     private readonly bulkReprocess: BulkPricingReprocessService,
+    private readonly bulkFuel: BulkFuelRecalculationService,
   ) {}
 
   /**
@@ -63,6 +65,26 @@ export class PricingReprocessController {
   })
   reprocessMany(@Body() dto: ReprocessTripsDto): Promise<BulkReprocessResultDto> {
     return this.bulkReprocess.reprocessMany(dto.tripIds);
+  }
+
+  /**
+   * "Brandstof herberekenen" for a selection: only the fuel line of each
+   * priced Trip, at the current FUEL_PERCENTAGE. See
+   * `BulkFuelRecalculationService`.
+   */
+  @Post("fuel-recalculations")
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: "Recalculate only the Brandstof of several selected Trips",
+    description:
+      "For each named Trip with a current price (CLOSED, priced): its fuel line is calculated again on the Tarief its snapshot was priced with, at the CURRENT FUEL_PERCENTAGE setting (read once for the whole request), with the same formula and rounding as a full calculation, and that percentage is stored on the line. Nothing else changes: Tarief, Backload, Toll, Tunnel, Others, EK, the matched route, the calculation metadata and every override stay as stored; the snapshot total follows its lines. Nothing is matched again and no partner leg is touched. OPEN, CANCELLED and DELETED Trips are skipped (NOT_CLOSED), unknown ones too (NOT_FOUND), a CLOSED Trip without a price (NOT_PRICED) or without a fuel line (NO_FUEL_LINE) as well; a Trip whose snapshot was replaced by a full recalculation meanwhile FAILS (SNAPSHOT_CHANGED) and keeps that newer snapshot. Per Trip, not all-or-nothing. `reprocessedCount` counts the Trips whose fuel was recalculated.",
+  })
+  @ApiOkResponse({ type: BulkReprocessResultDto })
+  @ApiBadRequestResponse({
+    description: "An empty list, duplicate ids, or a malformed UUID.",
+  })
+  recalculateFuel(@Body() dto: ReprocessTripsDto): Promise<BulkReprocessResultDto> {
+    return this.bulkFuel.recalculateMany(dto.tripIds);
   }
 
   @Post("trip/:tripId/reprocess")

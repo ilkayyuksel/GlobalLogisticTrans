@@ -29,6 +29,8 @@ export interface InvoiceWorld {
   readonly unpriced: Set<string>;
   /** Trips reliably priced at 0,00 in every component — a price, not a missing one. */
   readonly zeroPriced: Set<string>;
+  /** A Trip's assigned Custom Property names, when it has any. */
+  readonly propertiesOf: Map<string, string[]>;
   check(lines: readonly InvoiceFixtureLine[]): Promise<CheckedInvoice>;
   /** The check run over a workbook as it is — a corrected one, checked again. */
   checkFile(file: Buffer): Promise<CheckedInvoice>;
@@ -66,6 +68,7 @@ export function invoiceWorld(): InvoiceWorld {
   const backloadOf = new Map<string, string>();
   const unpriced = new Set<string>();
   const zeroPriced = new Set<string>();
+  const propertiesOf = new Map<string, string[]>();
   const onDay = (trip: Trip, days: readonly Date[]) =>
     days.some((each) => [trip.planningDate, trip.originalPlanningDate].some((date) => date?.getTime() === each.getTime()));
 
@@ -107,6 +110,9 @@ export function invoiceWorld(): InvoiceWorld {
     reads.findCostConfirmationNumbers.mockImplementation(
       async (ids) =>
         new Map(ids.map((id) => [id, confirmations.filter((each) => each.tripId === id).map((each) => each.ccNumber)])),
+    );
+    reads.findCustomPropertyNames.mockImplementation(
+      async (ids) => new Map(ids.map((id) => [id, propertiesOf.get(id) ?? []])),
     );
 
     return buildInvoiceAuditService({
@@ -155,6 +161,7 @@ export function invoiceWorld(): InvoiceWorld {
     backloadOf,
     unpriced,
     zeroPriced,
+    propertiesOf,
     checkFile,
     async check(lines) {
       return checkFile(await buildInvoiceWorkbook({ lines, fuelPercentage: 15 }));

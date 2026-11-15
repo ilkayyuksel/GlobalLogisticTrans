@@ -79,6 +79,15 @@ export class PricingRuleResolver {
   }
 
   /**
+   * The current FUEL_PERCENTAGE alone, validated exactly as `resolve` does —
+   * for "Brandstof herberekenen", which changes only the fuel and must not be
+   * refused over a Setting it never uses.
+   */
+  resolveFuelPercentage(): Promise<string> {
+    return this.requireNonNegativeDecimal(PricingSettingKey.FUEL_PERCENTAGE);
+  }
+
+  /**
    * The distance rate, required only by the distance-based strategy.
    *
    * Kept separate from `resolve` so a route-based system is never forced to

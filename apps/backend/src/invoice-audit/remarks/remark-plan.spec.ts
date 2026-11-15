@@ -6,6 +6,7 @@ import {
   type InvoiceRowMatch,
 } from "../matching/invoice-row-match";
 import {
+  InvoiceLineMark,
   InvoicePricingStatus,
   type InvoiceRowPricing,
 } from "../pricing/invoice-reconciliation";
@@ -185,5 +186,95 @@ describe("planRemarks", () => {
     const rows = [match({ rowNumber: 5, remarks: "" }, InvoiceRowStatus.MATCHED, null, other)];
 
     expect(planRemarks(rows, priced(rows), facts({ tarCharged: true }))).toEqual(new Map());
+  });
+
+  /*
+   * ── SITUATION B: A COMBINATION ONLY THIS SYSTEM KNOWS (owner, November 2026)
+   * Every row of the Trip carries the mark; its Remarks stay as received.
+   */
+  describe("a line marked COMBINATION_ONLY_IN_TRANO", () => {
+    const ALL_FACTS = facts({
+      propertyNames: ["Flat", "Stop", "Chassis"],
+      tarCharged: true,
+      ccNumbers: ["4220981"],
+      waiting: {
+        start: new Date("1970-01-01T08:00:00.000Z"),
+        end: new Date("1970-01-01T09:30:00.000Z"),
+        endsNextDay: false,
+        minutes: 90,
+      },
+      extraNotes: "klant belt vooraf",
+    });
+
+    function markedB(
+      rows: readonly InvoiceRowMatch[],
+      marks: readonly InvoiceLineMark[] = [InvoiceLineMark.COMBINATION_ONLY_IN_TRANO],
+    ): Map<number, InvoiceRowPricing> {
+      return new Map(
+        [...priced(rows, InvoicePricingStatus.PRICING_CORRECTED)].map(([rowNumber, outcome]) => [
+          rowNumber,
+          { ...outcome, marks },
+        ]),
+      );
+    }
+
+    it("1. keeps the Excel's own Remarks exactly as received", () => {
+      const rows = [match({ rowNumber: 5, remarks: "tar 869 , Kaai  " })];
+
+      expect(planRemarks(rows, markedB(rows), ALL_FACTS)).toEqual(new Map());
+    });
+
+    it("2. adds none of the Trip's standard facts, nor its Extra notities", () => {
+      const rows = [match({ rowNumber: 5, remarks: "" })];
+
+      expect(
+        planRemarks(rows, markedB(rows), facts({ tarCharged: true, ccNumbers: ["1"], extraNotes: "note" })),
+      ).toEqual(new Map());
+    });
+
+    it("3. adds no Custom Property", () => {
+      const rows = [match({ rowNumber: 5, remarks: "tar" })];
+
+      expect(planRemarks(rows, markedB(rows), facts({ propertyNames: ["Flat"] }))).toEqual(new Map());
+    });
+
+    it("4. adds no Combination remark, even were the pair GEEN COMBI", () => {
+      const rows = [match({ rowNumber: 23, remarks: "" }, InvoiceRowStatus.MATCHED, GEEN_COMBI)];
+
+      expect(planRemarks(rows, markedB(rows), facts())).toEqual(new Map());
+    });
+
+    it("5. excludes every one of several Custom Properties", () => {
+      const rows = [match({ rowNumber: 5, remarks: "" })];
+
+      expect(
+        planRemarks(rows, markedB(rows), facts({ propertyNames: ["Flat", "Stop", "Chassis", "Aan/Afkoppelen"] })),
+      ).toEqual(new Map());
+    });
+
+    it("also with prices missing: marked for both reasons, nothing added", () => {
+      const rows = [match({ rowNumber: 5, remarks: "" })];
+
+      expect(
+        planRemarks(rows, markedB(rows, [InvoiceLineMark.PRICES_MISSING, InvoiceLineMark.COMBINATION_ONLY_IN_TRANO]), ALL_FACTS),
+      ).toEqual(new Map());
+    });
+
+    it("6. situation A (COMBINATION_ONLY_IN_EXCEL) completes the Remarks as before", () => {
+      const rows = [match({ rowNumber: 23, remarks: "tar" }, InvoiceRowStatus.MATCHED, GEEN_COMBI)];
+
+      expect(
+        planRemarks(rows, markedB(rows, [InvoiceLineMark.COMBINATION_ONLY_IN_EXCEL]), facts({ propertyNames: ["Flat", "Stop"] }))
+          .get(23)?.after,
+      ).toBe("tar,flat,stop,GEEN COMBI");
+    });
+
+    it("7. an ordinary line, without a mark, completes the Remarks as before", () => {
+      const rows = [match({ rowNumber: 5, remarks: "tar" })];
+
+      expect(
+        planRemarks(rows, priced(rows), facts({ propertyNames: ["Flat", "Stop"], extraNotes: "note" })).get(5)?.after,
+      ).toBe("tar,flat,stop,note");
+    });
   });
 });

@@ -387,13 +387,15 @@ describe("the live captures the browser's export tests read", () => {
 });
 
 /**
- * The amounts of a breakdown, without its route record: the captures predate
- * `routeMatch`, and what they pin is the money. Writing `routeMatch: null` into
- * them would claim the captured API said so; it said nothing.
+ * The amounts of a breakdown, without its route record or fuel percentage: the
+ * captures predate `routeMatch` and `fuelPercentage`, and what they pin is the
+ * money. Writing either into them would claim the captured API said so; it
+ * said nothing.
  */
 function amountsOnly(pricing: ReturnType<typeof toEffectivePricingDto>) {
-  const { routeMatch, ...amounts } = pricing;
+  const { routeMatch, fuelPercentage, ...amounts } = pricing;
   void routeMatch;
+  void fuelPercentage;
 
   return amounts;
 }

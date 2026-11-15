@@ -385,6 +385,7 @@ const nl = {
     "Toont de opgeslagen prijzen rechts van de tabel. Scroll naar rechts.",
   "ritten.pricing.editLabel": "aanpassen",
   "ritten.pricing.overridden": "Handmatig aangepast",
+  "ritten.pricing.fuelPercentage": "Percentage waarmee deze brandstof berekend werd",
   "ritten.pricing.reset": "Terug naar berekende waarde",
   "ritten.value.empty": "—",
   "common.copied": "Gekopieerd",
@@ -735,9 +736,14 @@ const nl = {
   "ritten.select.complete": "Afwerken",
   "ritten.select.reprice": "Prijs herberekenen",
   "ritten.select.repricing": "Bezig met herberekenen…",
+  "ritten.select.recalculateFuel": "Brandstof herberekenen",
+  "ritten.select.recalculatingFuel": "Bezig met brandstof…",
   "ritten.feedback.repriceSummary":
     "Prijs herberekend: {reprocessed} herberekend, {skipped} overgeslagen, {failed} mislukt",
   "ritten.feedback.repriceFailed": "Herberekenen is niet gelukt",
+  "ritten.feedback.fuelSummary":
+    "Brandstof herberekend: {reprocessed} herberekend, {skipped} overgeslagen, {failed} mislukt",
+  "ritten.feedback.fuelFailed": "Brandstof herberekenen is niet gelukt",
   "ritten.feedback.repriced": "Prijs opnieuw berekend",
   "ritten.feedback.repricedWithoutRoute":
     "Prijs opnieuw berekend, maar er is geen passende route gevonden. Controleer de routeprijzen.",
@@ -761,6 +767,8 @@ const nl = {
   "ritten.routeChoice.cancel": "Annuleren",
   "ritten.reprice.reason.NOT_CLOSED": "niet afgewerkt, overgeslagen",
   "ritten.reprice.reason.NOT_FOUND": "niet gevonden, overgeslagen",
+  "ritten.reprice.reason.NOT_PRICED": "nog geen prijs, overgeslagen",
+  "ritten.reprice.reason.NO_FUEL_LINE": "geen brandstofregel, overgeslagen",
   "ritten.reprice.reason.FAILED": "mislukt",
   "ritten.select.count": "geselecteerd",
   "ritten.group.create": "Groepeer geselecteerde ritten",
@@ -1694,6 +1702,7 @@ const tr: Translations = {
     "Kaydedilmiş fiyatları tablonun sağında gösterir. Sağa kaydırın.",
   "ritten.pricing.editLabel": "düzenle",
   "ritten.pricing.overridden": "Elle düzeltildi",
+  "ritten.pricing.fuelPercentage": "Bu yakıtın hesaplandığı yüzde",
   "ritten.pricing.reset": "Hesaplanan değere dön",
   "ritten.value.empty": "—",
   "common.copied": "Kopyalandı",
@@ -2027,9 +2036,14 @@ const tr: Translations = {
   "ritten.select.complete": "Tamamla",
   "ritten.select.reprice": "Fiyatı yeniden hesapla",
   "ritten.select.repricing": "Yeniden hesaplanıyor…",
+  "ritten.select.recalculateFuel": "Yakıtı yeniden hesapla",
+  "ritten.select.recalculatingFuel": "Yakıt hesaplanıyor…",
   "ritten.feedback.repriceSummary":
     "Fiyat yeniden hesaplandı: {reprocessed} hesaplandı, {skipped} atlandı, {failed} başarısız",
   "ritten.feedback.repriceFailed": "Yeniden hesaplama başarısız oldu",
+  "ritten.feedback.fuelSummary":
+    "Yakıt yeniden hesaplandı: {reprocessed} hesaplandı, {skipped} atlandı, {failed} başarısız",
+  "ritten.feedback.fuelFailed": "Yakıt yeniden hesaplanamadı",
   "ritten.feedback.repriced": "Fiyat yeniden hesaplandı",
   "ritten.feedback.repricedWithoutRoute":
     "Fiyat yeniden hesaplandı, ancak uygun bir rota bulunamadı. Rota fiyatlarını kontrol edin.",
@@ -2053,6 +2067,8 @@ const tr: Translations = {
   "ritten.routeChoice.cancel": "İptal",
   "ritten.reprice.reason.NOT_CLOSED": "tamamlanmamış, atlandı",
   "ritten.reprice.reason.NOT_FOUND": "bulunamadı, atlandı",
+  "ritten.reprice.reason.NOT_PRICED": "henüz fiyat yok, atlandı",
+  "ritten.reprice.reason.NO_FUEL_LINE": "yakıt satırı yok, atlandı",
   "ritten.reprice.reason.FAILED": "başarısız",
   "ritten.select.count": "seçildi",
   "ritten.group.create": "Seçili seferleri grupla",

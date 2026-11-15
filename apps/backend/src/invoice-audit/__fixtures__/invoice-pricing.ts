@@ -35,8 +35,12 @@ export const EXACT_COMBINATION_MATCH: RouteMatchView = {
  * exact route — on a Combination when it carries a Backload. A Trip given one
  * of these with a Backload must be grouped (`tripGroupId`), as in the system.
  */
-export function reliablyPriced(pricing: EffectivePricing): CurrentTripPricing {
+export function reliablyPriced(
+  pricing: Omit<EffectivePricing, "fuelPercentage"> & Partial<Pick<EffectivePricing, "fuelPercentage">>,
+): CurrentTripPricing {
   return {
+    // The invoice check reads its Fuel rate elsewhere (`InvoiceFuelRateReader`).
+    fuelPercentage: null,
     ...pricing,
     routeMatch: pricing.backload.greaterThan(0) ? EXACT_COMBINATION_MATCH : EXACT_ROUTE_MATCH,
   };

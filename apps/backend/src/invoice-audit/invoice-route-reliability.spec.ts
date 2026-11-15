@@ -37,6 +37,7 @@ function pricedOn(destination: string, method: RouteMatchMethod | null, match: P
     others: zero,
     ek: zero,
     totaal: new Prisma.Decimal(150),
+    fuelPercentage: null,
     routeMatch: {
       method,
       routePricingId: "route-1",

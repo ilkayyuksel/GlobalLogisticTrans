@@ -179,7 +179,8 @@ export class BulkPricingReprocessService {
   }
 }
 
-function skipReasonOf(error: unknown): string | null {
+/** Why a Trip was skipped, from the error that refused it; null when it failed. */
+export function skipReasonOf(error: unknown): string | null {
   if (error instanceof PricingEngineException) {
     if (error.code === PricingEngineErrorCode.TRIP_NOT_CLOSED) {
       return SkipReason.NOT_CLOSED;

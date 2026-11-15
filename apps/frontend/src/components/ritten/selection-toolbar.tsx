@@ -24,6 +24,8 @@ import { useTranslation } from "@/lib/i18n/language-provider";
  * "Prijs herberekenen" asks nothing either: it only calculates the stored price
  * of finished Trips again, writes no Trip data, and reports per Trip what it
  * did. It cannot be started twice — the button waits for the answer.
+ * "Brandstof herberekenen" is its narrower sibling: only the Brandstof, at the
+ * current percentage. While either runs, both wait.
  */
 export function SelectionToolbar({
   selectedCount,
@@ -32,12 +34,14 @@ export function SelectionToolbar({
   canComplete,
   canReprice,
   isRepricing,
+  isRecalculatingFuel,
   isBusy,
   onSelectAllVisible,
   onClear,
   onGroup,
   onComplete,
   onReprice,
+  onRecalculateFuel,
   onMarkLoose,
   onMarkUnpaid,
 }: {
@@ -53,12 +57,16 @@ export function SelectionToolbar({
   canReprice: boolean;
   /** True while "Prijs herberekenen" runs for the selection. */
   isRepricing: boolean;
+  /** True while "Brandstof herberekenen" runs for the selection. */
+  isRecalculatingFuel: boolean;
   isBusy: boolean;
   onSelectAllVisible: () => void;
   onClear: () => void;
   onGroup: () => void;
   onComplete: () => void;
   onReprice: () => void;
+  /** Recalculates only the Brandstof; offered whenever "Prijs herberekenen" is. */
+  onRecalculateFuel: () => void;
   /**
    * Classifies the whole selection as LOSRIT.
    *
@@ -117,11 +125,21 @@ export function SelectionToolbar({
       <button
         type="button"
         onClick={onReprice}
-        disabled={!canReprice || isBusy || isRepricing}
+        disabled={!canReprice || isBusy || isRepricing || isRecalculatingFuel}
         aria-busy={isRepricing}
         className="rounded-md border border-border bg-card px-3 py-1.5 text-sm font-medium text-foreground hover:bg-hover disabled:cursor-not-allowed disabled:opacity-50"
       >
         {isRepricing ? t("ritten.select.repricing") : t("ritten.select.reprice")}
+      </button>
+
+      <button
+        type="button"
+        onClick={onRecalculateFuel}
+        disabled={!canReprice || isBusy || isRepricing || isRecalculatingFuel}
+        aria-busy={isRecalculatingFuel}
+        className="rounded-md border border-border bg-card px-3 py-1.5 text-sm font-medium text-foreground hover:bg-hover disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        {isRecalculatingFuel ? t("ritten.select.recalculatingFuel") : t("ritten.select.recalculateFuel")}
       </button>
 
       {/*

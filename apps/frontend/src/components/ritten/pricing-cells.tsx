@@ -122,7 +122,7 @@ export function PricingCells({
         isDisabled={isDisabled}
         onChooseRoute={onChooseRoute}
       />
-      <ReadOnlyAmountCell amount={pricing?.brandstof ?? null} empty={empty} />
+      <FuelAmountCell pricing={pricing} empty={empty} />
       <ReadOnlyAmountCell amount={pricing?.backload ?? null} empty={empty} />
       <EditableAmountCell
         column={EDITABLE_COLUMNS.tol}
@@ -165,6 +165,33 @@ function ReadOnlyAmountCell({
   return (
     <td className="whitespace-nowrap px-1.5 py-2 text-right tabular-nums text-secondary">
       {amount ?? empty}
+    </td>
+  );
+}
+
+/**
+ * Brandstof, with the percentage it was calculated with beside it — the one
+ * the backend STORED for this Trip, never the current setting. An older
+ * calculation recorded none: then only the amount shows, never a guessed rate.
+ */
+function FuelAmountCell({
+  pricing,
+  empty,
+}: {
+  pricing: EffectivePricing | null;
+  empty: string;
+}) {
+  const t = useTranslation();
+  const percentage = pricing?.fuelPercentage ?? null;
+
+  return (
+    <td className="whitespace-nowrap px-1.5 py-2 text-right tabular-nums text-secondary">
+      {pricing?.brandstof ?? empty}
+      {pricing && percentage !== null ? (
+        <span className="ml-1 text-xs text-muted" title={t("ritten.pricing.fuelPercentage")}>
+          ({percentage}%)
+        </span>
+      ) : null}
     </td>
   );
 }

@@ -37,6 +37,7 @@ function pricing(
     others: decimal("0"),
     ek: decimal(amounts.ek ?? "0"),
     totaal: decimal("0"),
+    fuelPercentage: null,
     routeMatch: EXACT_ROUTE_MATCH,
     ...overrides,
   };

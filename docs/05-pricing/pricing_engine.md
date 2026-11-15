@@ -226,6 +226,23 @@ before the read-back — or `NOT_FOUND`) or `FAILED` (the Engine's own error cod
 the previous snapshot stays). Only the price is written: no Trip field, group,
 Custom Value or Cost Confirmation. The list is then refetched.
 
+**Only the fuel, for a selection** — "Brandstof herberekenen" beside it —
+`POST /trip-pricing/fuel-recalculations` with the same `{ tripIds }` and the
+same answer (`BulkFuelRecalculationService` → `FuelRecalculationService`).
+FUEL_PERCENTAGE is read once for the request. For each Trip with a current
+snapshot, its FUEL_SURCHARGE line is calculated again by `toFuelSurchargeLine`
+— the calculator's own formula — on the sum of the snapshot's BASE_PRICE lines,
+and stored with its percentage (`unit_price`); the snapshot total follows its
+lines. Both are written in one transaction by `FuelLineStore`, and only while
+the snapshot is still the calculation that was read (`calculated_at`
+unchanged, still current) — otherwise the Trip FAILS with `SNAPSHOT_CHANGED`
+and the newer snapshot stands. Nothing else is written: no other line, route,
+calculation metadata or override; nothing is matched again and the partner leg
+is not priced (fuel depends only on the Trip's own Tarief). Skipped: `NOT_CLOSED`,
+`NOT_FOUND`, `NOT_PRICED` (CLOSED without a snapshot) and `NO_FUEL_LINE`.
+Repeating it changes nothing: the fuel is calculated from the Tarief, never
+from the previous fuel.
+
 ## Automatic recalculation after a Trip input changes
 
 Three writes change what a Trip is worth without touching its status, and each

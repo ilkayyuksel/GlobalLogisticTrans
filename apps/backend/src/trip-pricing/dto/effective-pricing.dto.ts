@@ -103,6 +103,15 @@ export class EffectivePricingDto {
   })
   totaal!: string;
 
+  @ApiPropertyOptional({
+    type: String,
+    nullable: true,
+    description:
+      "The percentage the stored Brandstof was calculated with, as the snapshot recorded it (never the current setting). Null when unknown: a snapshot written before the rate was recorded, or one without fuel.",
+    example: "13",
+  })
+  fuelPercentage!: string | null;
+
   @ApiProperty({ type: [EffectivePricingComponentDto] })
   components!: EffectivePricingComponentDto[];
 
@@ -131,6 +140,8 @@ export function toEffectivePricingDto(
     others: pricing.others.toFixed(MONEY_DECIMAL_PLACES),
     ek: pricing.ek.toFixed(MONEY_DECIMAL_PLACES),
     totaal: pricing.totaal.toFixed(MONEY_DECIMAL_PLACES),
+    // As configured: 13 reads "13", 12.5 reads "12.5" — a rate, not money.
+    fuelPercentage: pricing.fuelPercentage?.toString() ?? null,
     components: pricing.components.map(toComponentDto),
     routeMatch: pricing.routeMatch ? toRouteMatchDto(pricing.routeMatch) : null,
   };

@@ -237,6 +237,23 @@ Fuel must never be calculated on:
 - Manual Adjustments
 - Custom Property additions
 
+## The percentage each Trip keeps (November 2026)
+
+Every calculation stores the percentage it used on the Trip's fuel line
+(`trip_pricing_item.unit_price` of the FUEL_SURCHARGE line — no separate
+column). The Rittenlijst shows it beside Brandstof, e.g. `26.00 (13%)`. It is
+the stored rate, never the current setting: moving FUEL_PERCENTAGE from 13% to
+15% leaves every existing Trip at 13% until its fuel or its whole price is
+calculated again. A snapshot written before the rate was recorded has none,
+and none is shown — it is never derived or guessed.
+
+"Brandstof herberekenen" recalculates only the fuel of the selected Trips at
+the current percentage (see `pricing_engine.md`, Manual recalculation). It uses
+the same formula and rounding as a full calculation (`toFuelSurchargeLine`):
+on the stored Tarief, Over ST and its surcharge included; a Tarief of 0,00
+gives Brandstof 0,00. A corrected Tarief keeps its override and the fuel
+follows it at the stored percentage, as always.
+
 ---
 
 # Waiting Time

@@ -9,6 +9,7 @@ import { TripPricingRepository } from "./trip-pricing.repository";
 import { TripPricingItemRepository } from "../trip-pricing-items/trip-pricing-item.repository";
 import { TripPricingOverrideRepository } from "./trip-pricing-override.repository";
 import { TripPricingService } from "./trip-pricing.service";
+import { FuelLineStore } from "./fuel-line.store";
 
 /**
  * PrismaModule and LoggerModule are global, so only two modules are imported.
@@ -43,6 +44,7 @@ import { TripPricingService } from "./trip-pricing.service";
     TripPricingOverrideRepository,
     TripPricingOverrideService,
     TripPricingItemRepository,
+    FuelLineStore,
   ],
   /*
    * EffectivePricingModule is re-exported because EffectivePricingService is
@@ -52,6 +54,7 @@ import { TripPricingService } from "./trip-pricing.service";
    * for why. Exporting the override repository too would invite a caller to
    * write one without going through the rules; it stays inside.
    */
-  exports: [TripPricingService, EffectivePricingModule],
+  // FuelLineStore: the one narrow write "Brandstof herberekenen" needs.
+  exports: [TripPricingService, FuelLineStore, EffectivePricingModule],
 })
 export class TripPricingModule {}

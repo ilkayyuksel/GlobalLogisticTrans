@@ -64,6 +64,7 @@ function pricing(
     others: zero,
     ek: zero,
     totaal: new Prisma.Decimal("105"),
+    fuelPercentage: null,
     routeMatch: routeMatch(match),
   };
 }

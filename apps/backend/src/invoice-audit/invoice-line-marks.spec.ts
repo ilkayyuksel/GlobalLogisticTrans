@@ -14,7 +14,7 @@ import { CORRECTED_TEXT_ARGB } from "./workbook/cell-marking";
  *   No Tarief and no Fuel stated (empty or `-`)  → neither filled from Trano
  *   Combination in the Excel only (situation A)  → everything as before
  *   Combination in Trano only (situation B)      → its €50 Backload not added,
- *                                                  no Combination remark
+ *                                                  its Remarks kept as received
  *
  * Every Trip is priced at Tarief 200, Fuel 30 (`invoiceWorld`).
  */
@@ -55,6 +55,14 @@ function expectNotYellow(checked: CheckedInvoice, rowNumber: number): void {
   expect(isYellowFill(checked.cell(rowNumber, COLUMN.tarief).style.fill)).toBe(false);
   expect(checked.result.markedRowNumbers).not.toContain(rowNumber);
 }
+
+/** What a Trip holds for its Remarks besides its Custom Properties. */
+const TRANO_REMARK_FACTS = {
+  internalNotes: "klant belt vooraf",
+  waitingTimeStart: new Date("1970-01-01T08:00:00.000Z"),
+  waitingTimeEnd: new Date("1970-01-01T09:30:00.000Z"),
+  waitingTimeMinutes: 90,
+} as const;
 
 describe("lines marked yellow although compared as usual", () => {
   let world: InvoiceWorld;
@@ -159,6 +167,18 @@ describe("lines marked yellow although compared as usual", () => {
       expect([checked.cell(2, COLUMN.remarks).value, checked.cell(3, COLUMN.remarks).value]).toEqual(["GEEN COMBI", "GEEN COMBI"]);
     });
 
+    it("the Trip's facts and Custom Properties still completed as before", async () => {
+      world.propertiesOf.set("out", ["Flat", "Stop"]);
+      world.trips[0] = { ...world.trips[0], ...TRANO_REMARK_FACTS };
+
+      const checked = await world.check(LINES);
+
+      expect(checked.cell(2, COLUMN.remarks).value).toBe(
+        "flat,stop,wachtuur 8:00 tot 9:30,GEEN COMBI,klant belt vooraf",
+      );
+      expect(checked.cell(3, COLUMN.remarks).value).toBe("GEEN COMBI");
+    });
+
     it("9. both rows wholly yellow, and no Trano-Combination warning", async () => {
       const checked = await world.check(LINES);
 
@@ -239,6 +259,38 @@ describe("lines marked yellow although compared as usual", () => {
       expectWholeRowYellow(checked, 2);
     });
 
+    /*
+     * Situation B keeps the customer's Remarks as received (owner, November
+     * 2026): no Trano fact, no Custom Property, no Extra notities.
+     */
+    it("keeps the Remarks as received: no Trano facts, no Custom Properties, no notes", async () => {
+      world.propertiesOf.set("grouped", ["Flat", "Stop", "Chassis"]);
+      world.confirmations.push({ tripId: "grouped", ccNumber: "4220981", amount: new Prisma.Decimal(0) });
+      world.trips[0] = { ...world.trips[0], ...TRANO_REMARK_FACTS };
+
+      const checked = await world.check([line("ANRDUB2810001", "EUCU1000001", { remarks: "tar 869 , Kaai" })]);
+
+      expect(checked.cell(2, COLUMN.remarks).value).toBe("tar 869 , Kaai");
+      expect(isRed(checked.cell(2, COLUMN.remarks))).toBe(false);
+      expect(checked.result.rows[0].remarks).toBeNull();
+      // Prices, mark and yellow as ever.
+      expect(checked.cell(2, COLUMN.tarief).value).toBe(200);
+      expect(checked.cell(2, COLUMN.backload).value).toBeNull();
+      expect(checked.result.rows[0].marks).toEqual(["COMBINATION_ONLY_IN_TRANO"]);
+      expectWholeRowYellow(checked, 2);
+    });
+
+    it("an empty Remarks cell stays empty", async () => {
+      world.propertiesOf.set("grouped", ["Flat"]);
+      world.trips[0] = { ...world.trips[0], ...TRANO_REMARK_FACTS };
+
+      const checked = await world.check([line("ANRDUB2810001", "EUCU1000001")]);
+
+      // The fixture writes an empty Remarks cell as "": it stays exactly that.
+      expect(checked.cell(2, COLUMN.remarks).value).toBe("");
+      expect(checked.result.rows[0].remarks).toBeNull();
+    });
+
     it("18. marks every row the transport is charged on, its EC line included", async () => {
       world.confirmations.push({ tripId: "grouped", ccNumber: "4220981", amount: new Prisma.Decimal(110) });
       world.ekOf.set("grouped", "110");
@@ -283,6 +335,16 @@ describe("lines marked yellow although compared as usual", () => {
     expect(checked.result.rows[0]).toMatchObject({ pricingStatus: "PRICING_CORRECTED", marks: [], combination: null });
     expect(checked.cell(2, COLUMN.tarief).value).toBe(200);
     expectNotYellow(checked, 2);
+  });
+
+  it("16. neither a Combination: Trano facts and Custom Properties completed as before", async () => {
+    world.trips.push(aTrip("t1", "ANRDUB2810001", "EUCU1000001", TUESDAY, TRANO_REMARK_FACTS));
+    world.propertiesOf.set("t1", ["Flat", "Stop"]);
+
+    const checked = await world.check([line("ANRDUB2810001", "EUCU1000001", { remarks: "tar 869" })]);
+
+    expect(checked.cell(2, COLUMN.remarks).value).toBe("tar 869,flat,stop,wachtuur 8:00 tot 9:30,klant belt vooraf");
+    expect(isRed(checked.cell(2, COLUMN.remarks))).toBe(true);
   });
 
   it("19. the marks survive in the corrected file, and again when it is checked again", async () => {

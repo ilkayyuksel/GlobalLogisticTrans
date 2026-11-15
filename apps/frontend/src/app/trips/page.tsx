@@ -51,7 +51,7 @@ import {
   sendTripPdfOverWhatsApp,
   type WhatsAppStatus,
 } from "@/lib/api/whatsapp";
-import { reprocessTripPricing, reprocessTrips } from "@/lib/api/pricing";
+import { recalculateFuel, reprocessTripPricing, reprocessTrips } from "@/lib/api/pricing";
 import { canComplete, canReprice } from "@/lib/trip-actions";
 import {
   changeTripStatus,
@@ -75,6 +75,7 @@ import type {
   CostConfirmation,
   EffectivePricing,
   Trip,
+  BulkReprocessResult,
   TripReprocessResult,
 } from "@/lib/api/types";
 import { downloadBlob } from "@/lib/download";
@@ -177,6 +178,43 @@ function fill(text: string, values: Readonly<Record<string, string>> = {}): stri
   );
 }
 
+/** The two pricing actions on a selection; both answer one result per Trip. */
+type SelectionPricingAction = "reprice" | "fuel";
+
+const SELECTION_PRICING: Record<
+  SelectionPricingAction,
+  {
+    readonly run: (tripIds: readonly string[]) => Promise<BulkReprocessResult>;
+    readonly summaryKey: TranslationKey;
+    readonly failedKey: TranslationKey;
+  }
+> = {
+  reprice: {
+    run: reprocessTrips,
+    summaryKey: "ritten.feedback.repriceSummary",
+    failedKey: "ritten.feedback.repriceFailed",
+  },
+  fuel: {
+    run: recalculateFuel,
+    summaryKey: "ritten.feedback.fuelSummary",
+    failedKey: "ritten.feedback.fuelFailed",
+  },
+};
+
+/** The words for a skipped Trip's reason code; NOT_CLOSED for any other. */
+function skipReasonKey(reasonCode: string | null): TranslationKey {
+  switch (reasonCode) {
+    case "NOT_FOUND":
+      return "ritten.reprice.reason.NOT_FOUND";
+    case "NOT_PRICED":
+      return "ritten.reprice.reason.NOT_PRICED";
+    case "NO_FUEL_LINE":
+      return "ritten.reprice.reason.NO_FUEL_LINE";
+    default:
+      return "ritten.reprice.reason.NOT_CLOSED";
+  }
+}
+
 /**
  * One shared empty map, so clearing the row-local updates changes no identity
  * and costs no render.
@@ -275,8 +313,11 @@ function RittenList() {
   const [isCreating, setIsCreating] = useState(false);
 
   const [busyTripId, setBusyTripId] = useState<string | null>(null);
-  /** "Prijs herberekenen" is running for the selection: it cannot start twice. */
-  const [isRepricing, setIsRepricing] = useState(false);
+  /**
+   * The selection pricing action running — "Prijs herberekenen" or "Brandstof
+   * herberekenen" — or null. One at a time: neither can start while either runs.
+   */
+  const [selectionPricing, setSelectionPricing] = useState<SelectionPricingAction | null>(null);
   const [feedback, setFeedback] = useState<Feedback | null>(null);
 
   const [sort, setSort] = useUrlState(RITTEN_SORT_PARAMS);
@@ -823,21 +864,37 @@ function RittenList() {
    * Trip that was not done and why. A failure of the request itself reports
    * that, and claims nothing.
    */
-  async function repriceSelected(): Promise<void> {
-    if (isRepricing) {
+  function repriceSelected(): Promise<void> {
+    return runSelectionPricing("reprice");
+  }
+
+  /**
+   * "Brandstof herberekenen" for the selection: the same request, answer and
+   * summary as "Prijs herberekenen", but the backend recalculates ONLY each
+   * priced Trip's Brandstof, at the current fuel percentage. Nothing is
+   * calculated here; the refetched rows show the stored fuel and percentage.
+   */
+  function recalculateFuelSelected(): Promise<void> {
+    return runSelectionPricing("fuel");
+  }
+
+  async function runSelectionPricing(action: SelectionPricingAction): Promise<void> {
+    if (selectionPricing !== null) {
       return;
     }
 
+    const { run, summaryKey, failedKey } = SELECTION_PRICING[action];
+
     setFeedback(null);
-    setIsRepricing(true);
+    setSelectionPricing(action);
 
     try {
-      const result = await reprocessTrips(selectedIds);
+      const result = await run(selectedIds);
 
       trips.reload();
       setSelectedTripIds(new Set());
       setFeedback({
-        messageKey: "ritten.feedback.repriceSummary",
+        messageKey: summaryKey,
         values: {
           reprocessed: String(result.reprocessedCount),
           skipped: String(result.skippedCount),
@@ -848,12 +905,12 @@ function RittenList() {
       });
     } catch (error: unknown) {
       setFeedback({
-        messageKey: "ritten.feedback.repriceFailed",
+        messageKey: failedKey,
         detail: userFacingMessage(error),
         isError: true,
       });
     } finally {
-      setIsRepricing(false);
+      setSelectionPricing(null);
     }
   }
 
@@ -907,9 +964,7 @@ function RittenList() {
         const reason =
           result.outcome === "FAILED"
             ? `${t("ritten.reprice.reason.FAILED")}${result.message ? ` (${result.message})` : ""}`
-            : result.reasonCode === "NOT_FOUND"
-              ? t("ritten.reprice.reason.NOT_FOUND")
-              : t("ritten.reprice.reason.NOT_CLOSED");
+            : t(skipReasonKey(result.reasonCode));
 
         return `${bookingOf.get(result.tripId) ?? result.tripId}: ${reason}`;
       })
@@ -1239,8 +1294,10 @@ function RittenList() {
           canGroup={selectedIds.length >= MINIMUM_TRIPS_PER_GROUP}
           canComplete={canCompleteSelection}
           canReprice={canRepriceSelection}
-          isRepricing={isRepricing}
+          isRepricing={selectionPricing === "reprice"}
+          isRecalculatingFuel={selectionPricing === "fuel"}
           onReprice={() => void repriceSelected()}
+          onRecalculateFuel={() => void recalculateFuelSelected()}
           isBusy={busyTripId !== null}
           onSelectAllVisible={() =>
             // Added to what is already selected, never replacing it: five

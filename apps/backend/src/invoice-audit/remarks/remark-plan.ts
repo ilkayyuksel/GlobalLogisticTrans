@@ -4,6 +4,7 @@ import {
   type InvoiceRowMatch,
 } from "../matching/invoice-row-match";
 import {
+  InvoiceLineMark,
   InvoicePricingStatus,
   type InvoiceRowPricing,
 } from "../pricing/invoice-reconciliation";
@@ -56,6 +57,9 @@ const RELIABLE_PRICING: readonly InvoicePricingStatus[] = [
  * depends only on the pair, which was itself established from two reliably
  * matched Trips, so it is written even on a line marked for its price.
  *
+ * ── A COMBINATION ONLY THIS SYSTEM KNOWS: NOTHING ADDED ─────────────────────
+ * A line marked `COMBINATION_ONLY_IN_TRANO` keeps its Remarks as received.
+ *
  * Running it twice changes nothing the second time: everything it added is then
  * stated.
  */
@@ -94,7 +98,16 @@ function planRow(
     return null;
   }
 
-  const reliable = outcome !== undefined && RELIABLE_PRICING.includes(outcome.status);
+  /*
+   * A Combination only this system knows (situation B): the customer's Remarks
+   * stay exactly as received — none of the Trip's facts, no note, no
+   * Combination remark (owner, November 2026). Its prices are still compared.
+   */
+  if (outcome?.marks?.includes(InvoiceLineMark.COMBINATION_ONLY_IN_TRANO) ?? false) {
+    return null;
+  }
+
+  const reliable =outcome !== undefined && RELIABLE_PRICING.includes(outcome.status);
   const geenCombi = tripRows.some((match) => match.combination?.verdict === CombinationVerdict.GEEN_COMBI);
   const { parts, unexpressed } = toCustomerRemarkParts({
     propertyNames: reliable ? (facts?.propertyNames ?? []) : [],

@@ -16,6 +16,7 @@ import {
 import { PairedPricingService } from "../pricing-engine/paired-pricing.service";
 import { TripNotClosedException } from "../trip-pricing/exceptions/trip-pricing.exceptions";
 import { TripPricingService } from "../trip-pricing/trip-pricing.service";
+import { BulkFuelRecalculationService } from "./bulk-fuel-recalculation.service";
 import { BulkPricingReprocessService } from "./bulk-pricing-reprocess.service";
 import { PricingReprocessController } from "./pricing-reprocess.controller";
 
@@ -101,6 +102,7 @@ describe("PricingReprocessController (integration)", () => {
   let pairs: { reprocessWithPartner: jest.Mock };
   let tripPricingService: { requireCurrentSnapshot: jest.Mock };
   let bulkReprocess: { reprocessMany: jest.Mock };
+  let bulkFuel: { recalculateMany: jest.Mock };
 
   beforeEach(async () => {
     pairs = { reprocessWithPartner: jest.fn().mockResolvedValue([]) };
@@ -108,6 +110,14 @@ describe("PricingReprocessController (integration)", () => {
       reprocessMany: jest.fn().mockResolvedValue({
         reprocessedCount: 1,
         skippedCount: 1,
+        failedCount: 0,
+        results: [],
+      }),
+    };
+    bulkFuel = {
+      recalculateMany: jest.fn().mockResolvedValue({
+        reprocessedCount: 2,
+        skippedCount: 0,
         failedCount: 0,
         results: [],
       }),
@@ -135,6 +145,7 @@ describe("PricingReprocessController (integration)", () => {
         { provide: PairedPricingService, useValue: pairs },
         { provide: TripPricingService, useValue: tripPricingService },
         { provide: BulkPricingReprocessService, useValue: bulkReprocess },
+        { provide: BulkFuelRecalculationService, useValue: bulkFuel },
         { provide: AppLoggerService, useValue: logger },
         { provide: APP_FILTER, useClass: AllExceptionsFilter },
         { provide: APP_INTERCEPTOR, useClass: ResponseInterceptor },
@@ -391,6 +402,39 @@ describe("PricingReprocessController (integration)", () => {
       await request(app.getHttpServer()).post(BULK).send(body).expect(400);
 
       expect(bulkReprocess.reprocessMany).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("recalculating the fuel of a selection", () => {
+    const FUEL = "/api/v1/trip-pricing/fuel-recalculations";
+    const OTHER_TRIP = "6ba7b810-9dad-41d1-80b4-00c04fd430c8";
+
+    it("returns 200 with one result per Trip and the counts", async () => {
+      const { body } = await request(app.getHttpServer())
+        .post(FUEL)
+        .send({ tripIds: [TRIP_ID, OTHER_TRIP] })
+        .expect(200);
+
+      expect(bulkFuel.recalculateMany).toHaveBeenCalledWith([TRIP_ID, OTHER_TRIP]);
+      expect(body.data).toMatchObject({ reprocessedCount: 2, skippedCount: 0, failedCount: 0 });
+    });
+
+    it("is its own action: it never reprices", async () => {
+      await request(app.getHttpServer()).post(FUEL).send({ tripIds: [TRIP_ID] }).expect(200);
+
+      expect(bulkReprocess.reprocessMany).not.toHaveBeenCalled();
+      expect(pairs.reprocessWithPartner).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ["an empty selection", { tripIds: [] }],
+      ["the same Trip twice", { tripIds: [TRIP_ID, TRIP_ID] }],
+      ["a malformed id", { tripIds: ["not-a-uuid"] }],
+      ["no list at all", {}],
+    ])("refuses %s with 400, as Prijs herberekenen does, and changes nothing", async (_name, body) => {
+      await request(app.getHttpServer()).post(FUEL).send(body).expect(400);
+
+      expect(bulkFuel.recalculateMany).not.toHaveBeenCalled();
     });
   });
 

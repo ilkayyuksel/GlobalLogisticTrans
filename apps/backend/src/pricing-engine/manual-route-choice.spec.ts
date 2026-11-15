@@ -271,7 +271,7 @@ describe("choosing a route by hand", () => {
       const tripId = await unmatchedTrip();
       await choose(tripId, { kind: "NORMAL", routePricingId: OTHER_ROUTE });
 
-      await new PricingReprocessController(world.pairs, world.tripPricing, {} as never).reprocess({ tripId });
+      await new PricingReprocessController(world.pairs, world.tripPricing, {} as never, {} as never).reprocess({ tripId });
 
       expect(world.routeChoices.has(tripId)).toBe(false);
       // Still nothing usable — and the old choice does not come back.
@@ -282,7 +282,7 @@ describe("choosing a route by hand", () => {
       await unmatchedPair();
       await choose(LEG1, { kind: "COMBINATION", combinationRouteGroupId: HALF_MATCHING_COMBINATION });
 
-      await new PricingReprocessController(world.pairs, world.tripPricing, {} as never).reprocess({ tripId: LEG2 });
+      await new PricingReprocessController(world.pairs, world.tripPricing, {} as never, {} as never).reprocess({ tripId: LEG2 });
 
       expect(world.routeChoices.size).toBe(0);
       expect(world.storedSnapshot(LEG1)).toMatchObject({ routeSelection: "AUTOMATIC" });

@@ -41,7 +41,7 @@ describe("a pricing trigger on one leg reaches the other", () => {
   /** The ids the Engine calculated since the spy was set, in order. */
   const calculatedIds = () => calculated.mock.calls.map(([tripId]) => tripId as string);
   const storedAt = (tripId: string) => world.storedSnapshot(tripId)?.calculatedAt.getTime();
-  const reprocessEndpoint = () => new PricingReprocessController(world.pairs, world.tripPricing, {} as never);
+  const reprocessEndpoint = () => new PricingReprocessController(world.pairs, world.tripPricing, {} as never, {} as never);
   const bulk = () => new BulkPricingReprocessService(world.pairs, world.tripPricing, silentLogger());
 
   /** A closed, configured Combination; the spy watches only what follows. */

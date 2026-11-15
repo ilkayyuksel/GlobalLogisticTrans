@@ -45,6 +45,7 @@ function pricing(overrides: Partial<Record<string, string>> = {}): EffectivePric
     others: amount("others", "0"),
     ek: amount("ek", "0"),
     totaal: amount("totaal", "0"),
+    fuelPercentage: null,
   };
 }
 

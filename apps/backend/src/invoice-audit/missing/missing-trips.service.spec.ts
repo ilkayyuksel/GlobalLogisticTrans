@@ -70,6 +70,7 @@ function pricing(tarief: string): EffectivePricing {
     others: new Prisma.Decimal("0"),
     ek: new Prisma.Decimal("0"),
     totaal: amount,
+    fuelPercentage: null,
   };
 }
 

@@ -136,6 +136,13 @@ export interface EffectivePricing {
   readonly ek: Prisma.Decimal;
   /** The sum of the seven above. Never stored as an independent figure. */
   readonly totaal: Prisma.Decimal;
+  /**
+   * The percentage the stored fuel was calculated with, as its fuel line
+   * recorded it — never the current FUEL_PERCENTAGE setting. Null when the
+   * snapshot has no fuel line, or one written before the rate was recorded:
+   * a percentage is then unknown, and none is made up.
+   */
+  readonly fuelPercentage: Prisma.Decimal | null;
 }
 
 const ZERO = new Prisma.Decimal(0);
@@ -318,6 +325,7 @@ export function resolveEffectivePricing(
       .plus(tunnel)
       .plus(others)
       .plus(ek),
+    fuelPercentage: fuelRate,
   };
 }
 

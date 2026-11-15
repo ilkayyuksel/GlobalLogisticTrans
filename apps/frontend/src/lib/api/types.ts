@@ -511,6 +511,12 @@ export interface EffectivePricing {
   others: string;
   ek: string;
   totaal: string;
+  /**
+   * The percentage the stored Brandstof was calculated with ("13"), as the
+   * backend recorded it — never the current setting. Null when unknown (an
+   * older calculation); absent from backends older than the field.
+   */
+  fuelPercentage?: string | null;
   components: EffectivePricingComponent[];
   /**
    * The route the stored calculation behind these amounts was priced against.
@@ -525,7 +531,10 @@ export type TripReprocessOutcome = "REPROCESSED" | "SKIPPED" | "FAILED";
 export interface TripReprocessResult {
   tripId: string;
   outcome: TripReprocessOutcome;
-  /** NOT_CLOSED or NOT_FOUND when skipped; the backend's code when it failed. */
+  /**
+   * NOT_CLOSED or NOT_FOUND when skipped — and, for "Brandstof herberekenen",
+   * NOT_PRICED or NO_FUEL_LINE; the backend's code when it failed.
+   */
   reasonCode: string | null;
   /** The reason in the backend's words; null when reprocessed. */
   message: string | null;

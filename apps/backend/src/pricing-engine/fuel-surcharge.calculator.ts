@@ -79,7 +79,7 @@ export class FuelSurchargeCalculator implements PricingCalculationStep {
     }
 
     const lines = basePriceLine
-      ? [this.surchargeLine(basePriceLine, context.rules.fuelPercentage)]
+      ? [toFuelSurchargeLine(basePriceLine.amount, context.rules.fuelPercentage)]
       : [];
 
     this.logger.log("Fuel surcharge calculation completed", {
@@ -89,59 +89,64 @@ export class FuelSurchargeCalculator implements PricingCalculationStep {
 
     return lines;
   }
+}
 
-  /**
-   * base x percentage / 100.
-   *
-   * Multiplying before dividing keeps every intermediate exact: the product of
-   * two decimals is exact, and dividing by a power of ten only shifts the
-   * decimal point. Dividing the percentage by 100 first would introduce a
-   * repeating fraction for a rate such as 1/3 and lose precision before the
-   * multiplication ever happened.
-   *
-   * The single rounding is applied here, to the final amount, and nowhere else.
-   */
-  private surchargeLine(
-    basePriceLine: PricingLine,
-    fuelPercentage: string,
-  ): PricingLine {
-    const amount = basePriceLine.amount
-      .mul(new Prisma.Decimal(fuelPercentage))
-      .div(PERCENT_DIVISOR);
+/**
+ * The Fuel Surcharge line on a Tarief: base x percentage / 100.
+ *
+ * THE one fuel formula. The calculator applies it within a full calculation;
+ * "Brandstof herberekenen" (`FuelRecalculationService`) applies it alone to a
+ * stored Tarief — so the two can never round or describe fuel differently.
+ *
+ * Multiplying before dividing keeps every intermediate exact: the product of
+ * two decimals is exact, and dividing by a power of ten only shifts the
+ * decimal point. Dividing the percentage by 100 first would introduce a
+ * repeating fraction for a rate such as 1/3 and lose precision before the
+ * multiplication ever happened.
+ *
+ * The single rounding is applied here, to the final amount, and nowhere else.
+ * A Tarief of zero gives fuel of zero.
+ */
+export function toFuelSurchargeLine(
+  basePrice: Prisma.Decimal,
+  fuelPercentage: string,
+): PricingLine {
+  const amount = basePrice
+    .mul(new Prisma.Decimal(fuelPercentage))
+    .div(PERCENT_DIVISOR);
 
-    return {
-      component: PricingComponentCode.FUEL_SURCHARGE,
-      // Matches the wording used by the seeded pricing snapshots, and records
-      // the rate that was actually applied.
-      description: `Fuel ${fuelPercentage}%`,
-      amount: toStorableAmount(amount),
-      calculationOrder: FUEL_CALCULATION_ORDER,
-      quantity: null,
-      /*
-       * ── THE RATE THIS CALCULATION USED, KEPT WITH ITS RESULT ──────────────
-       * `unitPrice` is the line's own rate — exactly what the Waiting Time
-       * calculator stores in it, where it holds the price of one block. Here
-       * it holds the percentage.
-       *
-       * Two things depend on it, and neither can be answered without it:
-       *
-       *   an operator correcting the Tarief needs the fuel to follow. The
-       *     effective read used to derive the rate by dividing the stored fuel
-       *     by the stored base, which is exact — until the base is zero, which
-       *     is now the ordinary case for an unconfigured route. 0/0 names no
-       *     percentage, so the rate has to be recorded rather than inferred;
-       *
-       *   a closed Trip must stay historical. The rate that applied on the day
-       *     it was priced lives on the line, so moving the global
-       *     FUEL_PERCENTAGE afterwards cannot change what was charged.
-       *
-       * It is an existing nullable column being used for the thing it is
-       * named after, not an unrelated field pressed into service, and it needs
-       * no schema change.
-       * ─────────────────────────────────────────────────────────────────────
-       */
-      unitPrice: new Prisma.Decimal(fuelPercentage),
-      customPropertyId: null,
-    };
-  }
+  return {
+    component: PricingComponentCode.FUEL_SURCHARGE,
+    // Matches the wording used by the seeded pricing snapshots, and records
+    // the rate that was actually applied.
+    description: `Fuel ${fuelPercentage}%`,
+    amount: toStorableAmount(amount),
+    calculationOrder: FUEL_CALCULATION_ORDER,
+    quantity: null,
+    /*
+     * ── THE RATE THIS CALCULATION USED, KEPT WITH ITS RESULT ──────────────
+     * `unitPrice` is the line's own rate — exactly what the Waiting Time
+     * calculator stores in it, where it holds the price of one block. Here
+     * it holds the percentage.
+     *
+     * Two things depend on it, and neither can be answered without it:
+     *
+     *   an operator correcting the Tarief needs the fuel to follow. The
+     *     effective read used to derive the rate by dividing the stored fuel
+     *     by the stored base, which is exact — until the base is zero, which
+     *     is now the ordinary case for an unconfigured route. 0/0 names no
+     *     percentage, so the rate has to be recorded rather than inferred;
+     *
+     *   a closed Trip must stay historical. The rate that applied on the day
+     *     it was priced lives on the line, so moving the global
+     *     FUEL_PERCENTAGE afterwards cannot change what was charged.
+     *
+     * It is an existing nullable column being used for the thing it is
+     * named after, not an unrelated field pressed into service, and it needs
+     * no schema change.
+     * ─────────────────────────────────────────────────────────────────────
+     */
+    unitPrice: new Prisma.Decimal(fuelPercentage),
+    customPropertyId: null,
+  };
 }

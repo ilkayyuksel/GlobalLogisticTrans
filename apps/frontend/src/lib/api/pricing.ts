@@ -69,6 +69,22 @@ export function reprocessTrips(
   });
 }
 
+/**
+ * "Brandstof herberekenen" for a selection: only the Brandstof of each priced
+ * Trip, at the current fuel percentage — calculated and stored by the backend,
+ * every other amount untouched. Same answer shape as `reprocessTrips`.
+ */
+export function recalculateFuel(
+  tripIds: readonly string[],
+  signal?: AbortSignal,
+): Promise<BulkReprocessResult> {
+  return request<BulkReprocessResult>(`${PRICING_PATH}/fuel-recalculations`, {
+    method: "POST",
+    body: { tripIds },
+    signal,
+  });
+}
+
 /** The largest number of Trips one snapshots request may ask about. */
 const MAX_SNAPSHOT_TRIP_IDS = 100;
 

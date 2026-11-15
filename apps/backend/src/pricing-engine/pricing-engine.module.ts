@@ -14,6 +14,7 @@ import { CostConfirmationReadModule } from "../cost-confirmations/cost-confirmat
 import { CostConfirmationCalculator } from "./cost-confirmation.calculator";
 import { CustomPropertyCalculator } from "./custom-property.calculator";
 import { FuelSurchargeCalculator } from "./fuel-surcharge.calculator";
+import { FuelRecalculationService } from "./fuel-recalculation.service";
 import { PricingComponentResolver } from "./pricing-component.resolver";
 import { PairedPricingService } from "./paired-pricing.service";
 import { ManualRouteSelectionService } from "./manual-route-selection.service";
@@ -106,6 +107,7 @@ import { WaitingTimeCalculator } from "./waiting-time.calculator";
     PairedPricingService,
     ManualRouteSelectionService,
     PricingRecalculationService,
+    FuelRecalculationService,
     TripClosedPricingListener,
     PricingRuleResolver,
     PricingComponentResolver,
@@ -169,6 +171,8 @@ import { WaitingTimeCalculator } from "./waiting-time.calculator";
     PairedPricingService,
     ManualRouteSelectionService,
     PricingRecalculationService,
+    // "Brandstof herberekenen": the fuel line alone, by the same formula.
+    FuelRecalculationService,
   ],
 })
 export class PricingEngineModule {}

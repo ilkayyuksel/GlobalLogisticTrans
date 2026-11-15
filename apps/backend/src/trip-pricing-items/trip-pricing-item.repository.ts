@@ -101,6 +101,25 @@ export class TripPricingItemRepository {
     return this.prisma.tripPricingItem.deleteMany({ where: { tripPricingId } });
   }
 
+  /**
+   * Rewrites one line of one snapshot, in place. False when that line is not
+   * (or no longer) part of that snapshot — a full replacement recreates every
+   * line under new ids. Used only inside a transaction that also rewrites the
+   * snapshot's total, so the two never disagree.
+   */
+  async updateLineOfSnapshot(
+    id: string,
+    tripPricingId: string,
+    data: Prisma.TripPricingItemUncheckedUpdateManyInput,
+  ): Promise<boolean> {
+    const { count } = await this.prisma.tripPricingItem.updateMany({
+      where: { id, tripPricingId },
+      data,
+    });
+
+    return count === 1;
+  }
+
   update(
     id: string,
     data: UpdateTripPricingItemData,

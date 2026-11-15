@@ -188,7 +188,7 @@ marked line is not settled, like every yellow line):
 |---|---|---|
 | `PRICES_MISSING` | every Tarief AND every Fuel cell of the line is empty or a dash (`-`, `–`, `—`); 0,00 is a price | neither is filled from Trano; every other component compared as ever; a dash in them no longer makes the line `AMOUNT_UNREADABLE` |
 | `COMBINATION_ONLY_IN_EXCEL` (A) | a line of the Trip carries the Excel's `COMBINATION` marking, and the Trip is in no group | nothing — `GEEN COMBI`, its Backload removal and its Remarks stay exactly as before |
-| `COMBINATION_ONLY_IN_TRANO` (B) | the Trip is in a group (it carries the Combination Backload) and no line of it carries the Excel's marking | its €50 Backload is not ADDED (a Backload the invoice states is compared as ever); no Combination remark; the preview warns `WEL COMBI, MAAR PRIJS NIET AANGEPAST` on that line |
+| `COMBINATION_ONLY_IN_TRANO` (B) | the Trip is in a group (it carries the Combination Backload) and no line of it carries the Excel's marking | its €50 Backload is not ADDED (a Backload the invoice states is compared as ever); its Remarks stay exactly as received — no Trano fact, Custom Property, Extra notities or Combination remark is added (`remarks/remark-plan.ts`); the preview warns `WEL COMBI, MAAR PRIJS NIET AANGEPAST` on that line |
 
 `PRICES_MISSING` marks the transport's own line; A and B mark every row the
 Trip is charged on, its EC lines included. A row with several reasons is
@@ -378,6 +378,9 @@ second split row) is completed with what it does not say yet
   `GEEN COMBI` is also written on a line marked for another reason, because the
   pair itself was established from two reliably matched Trips — but never on
   the line of a Trip without a usable price, which stays untouched.
+- A line marked `COMBINATION_ONLY_IN_TRANO` (situation B) gets nothing added
+  at all: its Remarks stay exactly as received (owner, November 2026). Its
+  prices are compared as ever.
 - A completed Remarks cell is red, as in the owner's own corrections of week 36.
 - Running the check again on the corrected file adds nothing.
 
