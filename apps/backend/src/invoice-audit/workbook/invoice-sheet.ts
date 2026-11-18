@@ -119,6 +119,12 @@ export interface InvoiceSheetRow {
   /** Set when the line charges one Cost Confirmation and nothing else. */
   readonly costLine: InvoiceCostLine | null;
   /**
+   * Set on a Cost Confirmation line read as its transport's own line
+   * (`ec-transport-lines.ts`): `costLine` is then null, and this keeps that it
+   * charges an EK and nothing else of a transport.
+   */
+  readonly ekLineAsTransport?: boolean;
+  /**
    * What this row charges, per amount column.
    *
    * Read as the cell states it — a figure, nothing, or a formula — because all

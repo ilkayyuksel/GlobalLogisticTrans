@@ -17,7 +17,7 @@ import { isYellowFill } from "./workbook/cell-comparison";
  */
 
 const MONDAY = new Date(Date.UTC(2026, 9, 5));
-const COLUMN = { tarief: 12, fuel: 13, tolB: 16, remarks: 21 } as const;
+const COLUMN = { tarief: 12, fuel: 13, tolB: 16, ek: 20, remarks: 21 } as const;
 
 function stored(
   overrides: Partial<Record<"tarief" | "brandstof" | "tol" | "tunnel" | "others" | "ek", string>> = {},
@@ -74,38 +74,36 @@ describe("the price comparison of a line", () => {
   describe("a line stating no transport price", () => {
     /*
      * ── NO TARIEF AND NO FUEL: NEITHER FILLED IN (owner, November 2026) ───────
-     * Both used to be filled from Trano. They now stay as the customer wrote
-     * them and the line is marked yellow; every OTHER component is compared and
-     * filled as before.
+     * Both stay as the customer wrote them and the line is marked yellow. On a
+     * Trip that is a Combination on neither side, the EK then holds the
+     * transport's total: compared with Trano's stored total (475 + 114 + 50 =
+     * 639) and raised to it, and no other column is filled apart.
      */
-    it("leaves an empty Tarief and Fuel empty, marks the line, and still fills the other components", async () => {
+    it("leaves an empty Tarief and Fuel empty, marks the line, and raises the EK to Trano's total", async () => {
       const { row, cell } = await check({});
 
       expect(row).toMatchObject({ status: "MATCHED", pricingStatus: "PRICING_CORRECTED", transportPricesFilled: false, marks: ["PRICES_MISSING"] });
       expect(row.comparisons).toEqual([
-        { component: "Tol", outcome: "RAISE", excelValue: "0.00", excelCellEmpty: true, tranoValue: "50.00", writtenValue: "50.00" },
+        { component: "EK", outcome: "RAISE", excelValue: "0.00", excelCellEmpty: true, tranoValue: "639.00", writtenValue: "639.00" },
       ]);
       expect(cell(COLUMN.tarief).value).toBeNull();
       expect(cell(COLUMN.fuel).value).toBeNull();
-      expect(cell(COLUMN.tolB).value).toBe(50);
-      expect(cell(COLUMN.tolB).font?.color?.argb).toBe(CORRECTED_TEXT_ARGB);
+      expect(cell(COLUMN.tolB).value).toBeNull();
+      expect(cell(COLUMN.ek).value).toBe(639);
+      expect(cell(COLUMN.ek).font?.color?.argb).toBe(CORRECTED_TEXT_ARGB);
       // The whole row is painted yellow.
       expect(isYellowFill(cell(COLUMN.tarief).fill)).toBe(true);
       expect(isYellowFill(cell(COLUMN.remarks).fill)).toBe(true);
     });
 
-    it("fills every other component Trano holds — Tunnel, Others and EK — and leaves a zero empty", async () => {
+    it("counts Tunnel, Others and EK in that total, and fills none of them apart", async () => {
       const { row, cell } = await check({}, stored({ tunnel: "12", others: "35", ek: "25", tol: "0" }));
 
       expect(row.comparisons.map((comparison) => [comparison.component, comparison.writtenValue])).toEqual([
-        ["Tunnel", "12.00"],
-        ["Others", "35.00"],
-        ["EK", "25.00"],
+        ["EK", "661.00"],
       ]);
-      expect([cell(18).value, cell(19).value, cell(20).value]).toEqual([12, 35, 25]);
-      expect([cell(COLUMN.tarief).value, cell(COLUMN.fuel).value]).toEqual([null, null]);
-      // Tol is zero in Trano: no figure, no "- €", an empty cell as before.
-      expect(cell(COLUMN.tolB).value).toBeNull();
+      expect([cell(18).value, cell(19).value, cell(COLUMN.ek).value]).toEqual([null, null, 661]);
+      expect([cell(COLUMN.tarief).value, cell(COLUMN.fuel).value, cell(COLUMN.tolB).value]).toEqual([null, null, null]);
     });
 
     it("leaves a Tarief and a Fuel of a dash exactly as written, and marks the line", async () => {
@@ -114,7 +112,7 @@ describe("the price comparison of a line", () => {
       expect(row).toMatchObject({ status: "MATCHED", marks: ["PRICES_MISSING"] });
       expect(row.pricingStatus).not.toBe("AMOUNT_UNREADABLE");
       expect([cell(COLUMN.tarief).value, cell(COLUMN.fuel).value]).toEqual(["-", "-"]);
-      expect(cell(COLUMN.tolB).value).toBe(50);
+      expect(cell(COLUMN.ek).value).toBe(639);
       expect(isYellowFill(cell(COLUMN.tarief).fill)).toBe(true);
     });
 

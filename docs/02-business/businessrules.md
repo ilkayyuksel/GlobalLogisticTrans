@@ -298,40 +298,46 @@ through the configured rule. A Cost Confirmation is the money Eucon confirms for
 those minutes. Both belong to the same Trip and are stored separately; the
 confirmed amount is never merged into the WAITING_TIME pricing line.
 
-A Trip's EK is ONE source, in this order:
+A Trip's EK is the HIGHER of its two sources (owner, November 2026):
 
-1. the operator's waiting time, whenever one is RECORDED (a complete window),
-   at whatever price — also €0;
-2. otherwise the Cost Confirmations, summed, each number once;
-3. otherwise €0.
+    EK = max(manual waiting time charge, sum of the Cost Confirmations)
 
-The two are never added: a confirmed €27.50 beside a waiting time of €137.50 is
-EK €137.50, not €165.00. A recorded waiting time priced at €0 — below the
-threshold, or entirely outside 06:00–20:00 — also displaces the confirmations,
-and EK is then €0 (owner, November 2026; this reverses the earlier rule that
-only a waiting time above €0 did). A WAIT Cost Confirmation from a PDF is not a
-recorded waiting time. Removing the waiting time makes the confirmations the EK
-again. The order in which the two arrive never matters: recording, changing or
-removing the window and recording a confirmation all reprice the Trip from its
-current data, never on top of an earlier EK.
+- the waiting time charge is the existing Waiting Time rule's price for the
+  recorded window — €0 below the threshold or outside 06:00–20:00, and €0 when
+  none is recorded;
+- the confirmations are summed, each number once;
+- equal amounts give that amount once.
+
+The two are never added: confirmations of €138.75 beside a waiting time of
+€55.00 are EK €138.75, not €193.75; a waiting time of €150.00 beside them is EK
+€150.00. Recording a waiting time no longer decides on its own: a window priced
+at €0 leaves the confirmations as the EK. This replaces the earlier rule under
+which any recorded waiting time, even at €0, superseded the confirmations. A
+WAIT Cost Confirmation from a PDF is one of the confirmations. The order in
+which the two arrive never matters: recording, changing or removing the window
+and recording a confirmation all reprice the Trip from its current data, never
+on top of an earlier EK.
 
 Because the waiting time is an EK source, it is NOT part of Others; Others is the
 priced Custom Properties alone. The waiting time therefore counts once in Totaal.
 
-Where it is decided:
+Where it is decided — one comparison, `ekSourceOf` in `effective-pricing.ts`:
 
-- the Pricing Engine writes the Cost Confirmation line at €0 when a waiting
-  time is recorded on the Trip (`waitingTimeRecorded` in the calculation
-  context, `CostConfirmationCalculator`), still naming the documents (so
-  Remarks keeps the CC references), and the stored total counts the waiting
-  time alone;
-- the effective read (`effective-pricing.ts`) takes the waiting time when it is
-  charged, otherwise the stored confirmation line — €0 when superseded — so a
-  snapshot written before the first rule reads correctly too. A snapshot written
-  before November 2026 for a €0 window keeps its full confirmation line until
-  the Trip is priced again;
+- the Pricing Engine stores the lower source at €0: the Waiting Time line
+  (`WaitingTimeCalculator`, its blocks and unit price kept) when the
+  confirmations are higher, the Cost Confirmation line
+  (`CostConfirmationCalculator`, still naming the documents so Remarks keeps the
+  CC references) when the waiting time is as high or higher. Both compare the
+  same waiting time charge (`waitingTimeChargeOf`); the stored total counts EK
+  once;
+- the effective read (`resolveEk`) applies the same comparison to the stored
+  lines, so a snapshot written under an earlier rule — both lines in full, or a
+  €0 window's confirmation line at €0 — reads by the new rule; its stored total
+  follows once the Trip is priced again;
 - the invoice check owes nothing on an EC line when the stored snapshot says
-  the confirmations were superseded (`owedOnCostLine`).
+  the waiting time is the EK (`owedOnCostLine`);
+- the Trip response's `waitingTimeSupersedesCostConfirmations` is read off the
+  Trip's price by the same comparison.
 
 The confirmation records themselves are never changed or deleted by this: they
 stay stored and auditable. The Prijsoverzicht export keeps its informational

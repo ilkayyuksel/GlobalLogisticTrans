@@ -62,7 +62,6 @@ function buildContext(
     planningDate: "2026-08-17",
     isCombination: false,
     waitingTimeMinutes: 0,
-    waitingTimeRecorded: false,
     route: { departure: "MSC PSA European Terminal", destination: "Rotterdam" },
     routeMatch: { routePricingId: "route-1", method: "EXACT", combinationRouteGroupId: null, combinationMatch: null, selection: "AUTOMATIC", legs: [] },
     baseSource: {

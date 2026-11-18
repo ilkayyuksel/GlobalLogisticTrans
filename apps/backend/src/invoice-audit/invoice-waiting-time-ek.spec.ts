@@ -10,14 +10,13 @@ import { invoiceReads } from "./__fixtures__/invoice-reads";
 import { buildInvoiceWorkbook, type InvoiceFixtureLine } from "./__fixtures__/invoice-workbook";
 
 /**
- * EK: the waiting time OR the Cost Confirmations, never both — from the
+ * EK: the HIGHER of the waiting time and the Cost Confirmations, never both — from the
  * waiting window a person types, through the real Engine and the stored
  * snapshot, to the Excel invoice check reading that same stored price.
  *
- * ── THE RULE (`resolveEk`, `CostConfirmationCalculator`) ────────────────────
- *   waiting time recorded         → the EK, also at €0; the confirmations stay
- *                                   stored and named, their line stored at €0
- *   no waiting time recorded      → the confirmations, each number once, summed
+ * ── THE RULE (`ekSourceOf`, owner, November 2026) ──────────────────────────
+ *   EK = max(waiting time charge, sum of the confirmations, each number once)
+ *   the lower one is stored at €0; the confirmations are always kept
  * The waiting time is never in Others.
  *
  * ── THE NUMBERS (the Settings' defaults, as the harness holds them) ─────────
@@ -171,7 +170,7 @@ describe("waiting time and Cost Confirmations: one EK, the same in the Engine an
    * displaces a confirmation". The confirmations stay stored and named.
    */
   describe("2. a waiting time priced at €0 beside confirmations", () => {
-    it("is the EK at €0; the confirmations are stored at €0 and kept", async () => {
+    it("leaves the confirmations as the EK, stored in full and kept", async () => {
       await world.confirmCost(TRIP, "4132482", "25.00");
       await world.confirmCost(TRIP, "4139509", "41.25");
 
@@ -179,36 +178,36 @@ describe("waiting time and Cost Confirmations: one EK, the same in the Engine an
 
       expect(world.trips.get(TRIP)!.waitingTimeMinutes).toBe(135);
       expect(storedComponents()).not.toHaveProperty("WAITING_TIME");
-      expect(storedComponents()).toMatchObject({ COST_CONFIRMATION: "0.00" });
-      expect(await apiPricing()).toMatchObject({ ek: "0.00", totaal: "230.00" });
+      expect(storedComponents()).toMatchObject({ COST_CONFIRMATION: "66.25" });
+      expect(await apiPricing()).toMatchObject({ ek: "66.25", totaal: "296.25" });
       expect(world.costConfirmations.map((row) => row.amount.toFixed(2))).toEqual(["25.00", "41.25"]);
     });
 
-    it("owes nothing on an EC line, and does not raise the transport for it", async () => {
+    it("owes the EC line its confirmation, and the transport line the rest of the EK", async () => {
       await world.confirmCost(TRIP, "4132482", "25.00");
       await world.confirmCost(TRIP, "4139509", "41.25");
       await world.tripService.update(TRIP, BELOW_THRESHOLD);
 
       const { rows, cell } = await check([transportLine({ ek: null }), costLine(25, "4132482")]);
 
-      expect(rows[0].pricingStatus).toBe("MATCHED_NO_CHANGES");
-      // Compared with €0, so reported as higher — never lowered, never raised.
-      expect(rows[1].pricingStatus).toBe("INVOICE_HIGHER");
-      expect(cell(2, COLUMN.ek)).toBeNull();
+      // EK 66.25: the EC line charges its own 25.00, the transport line the 41.25 left.
+      expect(rows[0].pricingStatus).toBe("PRICING_CORRECTED");
+      expect(rows[1].pricingStatus).toBe("MATCHED_NO_CHANGES");
+      expect(cell(2, COLUMN.ek)).toBe(41.25);
       expect(cell(3, COLUMN.ek)).toBe(25);
     });
   });
 
-  it("3. a window with no counted time is still the EK, at €0", async () => {
+  it("3. a window with no counted time leaves the confirmation as the EK", async () => {
     await world.confirmCost(TRIP, "4132482", "25.00");
 
     await world.tripService.update(TRIP, AT_NIGHT);
 
     expect(world.trips.get(TRIP)).toMatchObject({ waitingTimeMinutes: 0, waitingTimeEndsNextDay: true });
     expect(storedComponents()).not.toHaveProperty("WAITING_TIME");
-    expect(await apiPricing()).toMatchObject({ ek: "0.00", totaal: "230.00" });
+    expect(await apiPricing()).toMatchObject({ ek: "25.00", totaal: "255.00" });
 
-    const { rows } = await check([transportLine({ ek: null })]);
+    const { rows } = await check([transportLine({ ek: 25 })]);
 
     expect(rows[0].pricingStatus).toBe("MATCHED_NO_CHANGES");
   });
@@ -302,13 +301,13 @@ describe("waiting time and Cost Confirmations: one EK, the same in the Engine an
       expect(cell(2, COLUMN.ek)).toBeNull();
     });
 
-    it("equal times are a stored zero, not a missing window, and supersede the confirmation", async () => {
+    it("equal times are a stored zero, not a missing window; the confirmation stays the EK", async () => {
       await world.confirmCost(TRIP, "4132482", "25.00");
 
       await world.tripService.update(TRIP, { waitingTimeStart: "10:00", waitingTimeEnd: "10:00" });
 
       expect(world.trips.get(TRIP)!.waitingTimeMinutes).toBe(0);
-      expect(await apiPricing()).toMatchObject({ ek: "0.00" });
+      expect(await apiPricing()).toMatchObject({ ek: "25.00" });
     });
 
     it("a removed window is missing again, and the confirmation is the EK", async () => {

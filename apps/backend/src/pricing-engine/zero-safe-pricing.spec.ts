@@ -315,13 +315,13 @@ describe("a CLOSED Trip on an unconfigured route", () => {
       ]);
       costConfirmations.findForTrip.mockResolvedValue({
         ccNumbers: ["4139505"],
-        amount: "165.00",
+        amount: "27.50",
       });
 
       const pricing = await amounts();
 
-      // Others: TAR 20 + Flat 80. EK: the charged waiting time 55, which
-      // supersedes the confirmed 165 — never 55 + 165.
+      // Others: TAR 20 + Flat 80. EK: the waiting time 55, higher than the
+      // confirmed 27.50 — never 55 + 27.50.
       expect(pricing.others).toBe("100.00");
       expect(pricing.ek).toBe("55.00");
       expect(pricing.totaal).toBe("155.00");
@@ -336,7 +336,7 @@ describe("a CLOSED Trip on an unconfigured route", () => {
       trips.findById.mockResolvedValue(buildTrip({ waitingTimeMinutes: 180 }));
       costConfirmations.findForTrip.mockResolvedValue({
         ccNumbers: ["4139505"],
-        amount: "165.00",
+        amount: "27.50",
       });
 
       const { lines, totalPrice } = await engine.calculate(TRIP_ID);
@@ -344,15 +344,16 @@ describe("a CLOSED Trip on an unconfigured route", () => {
 
       expect(confirmation?.amount.toFixed(2)).toBe("0.00");
       expect(confirmation?.description).toBe("Cost confirmation 4139505");
-      // TAR 20 + waiting 55; the confirmed 165 is not added.
+      // TAR 20 + waiting 55; the lower confirmed 27.50 is not added.
       expect(totalPrice.toFixed(2)).toBe("75.00");
     });
 
     /**
-     * Below the threshold the waiting time is €0 — and still the EK: a
-     * RECORDED waiting time supersedes the confirmation (owner, November 2026).
+     * Below the threshold the waiting time is €0: the confirmation is higher,
+     * so it is the EK (owner, November 2026) — recording a window no longer
+     * decides on its own.
      */
-    it("supersedes the confirmation with a recorded waiting time priced at €0", async () => {
+    it("counts the confirmation beside a recorded waiting time priced at €0", async () => {
       trips.findById.mockResolvedValue(buildTrip({ waitingTimeMinutes: 60 }));
       costConfirmations.findForTrip.mockResolvedValue({
         ccNumbers: ["4139505"],
@@ -361,8 +362,8 @@ describe("a CLOSED Trip on an unconfigured route", () => {
 
       const pricing = await amounts();
 
-      expect(pricing.ek).toBe("0.00");
-      expect(pricing.totaal).toBe("20.00");
+      expect(pricing.ek).toBe("165.00");
+      expect(pricing.totaal).toBe("185.00");
     });
 
     it("counts the confirmation in full when no waiting time is recorded", async () => {

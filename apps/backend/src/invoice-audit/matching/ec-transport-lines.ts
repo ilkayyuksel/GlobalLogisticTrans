@@ -15,7 +15,7 @@ import type { InvoiceRowMatch } from "./invoice-row-match";
  * Beside a transport line of its own, it stays the EC charge it is.
  */
 export function toTransportCandidates(rows: readonly InvoiceSheetRow[]): InvoiceSheetRow[] {
-  return rows.filter((row) => row.costLine !== null).map((row) => ({ ...row, costLine: null }));
+  return rows.filter((row) => row.costLine !== null).map((row) => ({ ...row, costLine: null, ekLineAsTransport: true }));
 }
 
 /**

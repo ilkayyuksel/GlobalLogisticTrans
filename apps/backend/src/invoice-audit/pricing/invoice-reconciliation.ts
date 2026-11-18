@@ -48,6 +48,12 @@ export interface LineContext {
    * €50 Backload is then not added to the invoice (owner, November 2026).
    */
   readonly backloadRaiseAllowed?: boolean;
+  /**
+   * The transport is no Combination in this system nor in the Excel: when the
+   * line states no Tarief and no Fuel, its EK is read as the transport's total
+   * (owner, November 2026). See `TRIP_TOTAL_IN_EK`.
+   */
+  readonly ekIsTripTotalWhenPricesMissing?: boolean;
 }
 
 /** The two components a line must state at least one of to be priced from us. */
@@ -104,10 +110,46 @@ export function reconcileLine(
     rows,
     pricing,
     context,
-    INVOICE_COMPONENTS.filter((component) => !PRICE_COLUMNS.includes(component.correctionColumn)),
+    context.ekIsTripTotalWhenPricesMissing === true
+      ? [TRIP_TOTAL_IN_EK]
+      : INVOICE_COMPONENTS.filter((component) => !PRICE_COLUMNS.includes(component.correctionColumn)),
   );
 
   return outcomes.map((outcome) => withMark(outcome, InvoiceLineMark.PRICES_MISSING));
+}
+
+/** The components a transport's total is made of, each counted once. */
+const TRIP_TOTAL_COLUMNS: readonly InvoiceColumn[] = ["tarief", "fuel", "backload", "tolB", "tunnel", "others", "ek"];
+
+/**
+ * ── A NORMAL TRIP WITHOUT TARIEF AND FUEL: ITS EK IS THE TOTAL ──────────────
+ * On a line that is a Combination neither here nor in the Excel, and states no
+ * Tarief and no Fuel, the customer's EK holds what the whole transport costs
+ * (owner, November 2026). It is compared with the stored snapshot's total —
+ * effective Tarief, stored Fuel, Toll, Tunnel, Backload, Others and EK, each
+ * rounded as the check rounds it — and only ever raised: the higher of the two
+ * stands. Nothing is priced again, and no other column is compared or written,
+ * since each of those is already inside the total.
+ *
+ * The EK of the snapshot is the one the Trip's own line is owed: Cost
+ * Confirmations charged on their own lines are already taken off it
+ * (`trip-reconciliation.ts`), and a waiting time or confirmation is in it
+ * exactly once (`effective-pricing.ts`). The label stays the EK's, so the
+ * preview and the EK-only exception for unplaceable amounts treat it as the EK.
+ */
+const TRIP_TOTAL_IN_EK: InvoiceComponent = {
+  label: COST_COMPONENT_LABEL,
+  columns: ["ek"],
+  correctionColumn: "ek",
+  expected: (pricing) => tripTotalOf(pricing),
+};
+
+/** The stored snapshot's total for the transport, every component once. */
+export function tripTotalOf(pricing: EffectivePricing): Prisma.Decimal {
+  return INVOICE_COMPONENTS.filter((component) => TRIP_TOTAL_COLUMNS.includes(component.correctionColumn)).reduce(
+    (total, component) => total.plus(round(component.expected(pricing))),
+    new Prisma.Decimal(0),
+  );
 }
 
 /** The outcome, marked yellow for one more reason. */

@@ -33,7 +33,6 @@ function buildContext(
     planningDate: "2026-08-17",
     isCombination: false,
     waitingTimeMinutes,
-    waitingTimeRecorded: true,
     route: { departure: "DP World Antwerp Gateway", destination: "Bousbecque" },
     routeMatch: { routePricingId: "route-1", method: "EXACT", combinationRouteGroupId: null, combinationMatch: null, selection: "AUTOMATIC", legs: [] },
     baseSource: {
@@ -307,7 +306,7 @@ describe("WaitingTimeCalculator", () => {
       expect(logger.log).toHaveBeenNthCalledWith(
         2,
         "Waiting time calculation completed",
-        { tripId: TRIP_ID, lineCount: 1 },
+        { tripId: TRIP_ID, lineCount: 1, outweighedByCostConfirmations: false },
       );
     });
 
@@ -318,7 +317,7 @@ describe("WaitingTimeCalculator", () => {
       expect(logger.log).toHaveBeenNthCalledWith(
         2,
         "Waiting time calculation completed",
-        { tripId: TRIP_ID, lineCount: 0 },
+        { tripId: TRIP_ID, lineCount: 0, outweighedByCostConfirmations: false },
       );
     });
 
@@ -497,5 +496,34 @@ describe("the waiting-time rule as the business stated it", () => {
     expect(line.component).toBe(PricingComponentCode.WAITING_TIME);
     expect(line.calculationOrder).toBe(WAITING_TIME_CALCULATION_ORDER);
     expect(line.customPropertyId).toBeNull();
+  });
+
+  /**
+   * EK is the HIGHER of this charge and the Cost Confirmations (owner, November
+   * 2026): when the confirmations add up to more, the line is still written,
+   * its blocks and price kept, at €0.
+   */
+  describe("beside Cost Confirmations", () => {
+    const withConfirmations = (minutes: number, amount: string): PricingCalculationContext => ({
+      ...buildContext(minutes),
+      costConfirmation: { ccNumbers: ["CC1"], amount },
+    });
+
+    // 180 minutes, 60 free → 4 blocks of 25.00 = 100.00.
+    it("contributes €0 when the confirmations are higher, keeping its blocks", () => {
+      const [line] = calculator.calculate(withConfirmations(180, "150.00"));
+
+      expect(line.amount.toFixed(2)).toBe("0.00");
+      expect(line.quantity?.toFixed(0)).toBe("4");
+      expect(line.unitPrice?.toFixed(2)).toBe(BLOCK_PRICE);
+    });
+
+    it("counts in full when it is as high or higher", () => {
+      const [higher] = calculator.calculate(withConfirmations(180, "27.50"));
+      const [equal] = calculator.calculate(withConfirmations(180, higher.amount.toFixed(2)));
+
+      expect(higher.amount.greaterThan(0)).toBe(true);
+      expect(equal.amount.toFixed(2)).toBe(higher.amount.toFixed(2));
+    });
   });
 });

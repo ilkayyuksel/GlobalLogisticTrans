@@ -2,13 +2,13 @@ import { ApiProperty, ApiPropertyOptional } from "@nestjs/swagger";
 
 import { CostConfirmationDto } from "../../cost-confirmations/dto/cost-confirmation-response.dto";
 import { EffectivePricingDto } from "../../trip-pricing/dto/effective-pricing.dto";
+import { EffectiveComponent, EkSource, ekSourceOf } from "../../trip-pricing/effective-pricing";
 import { toTripRoute } from "../trip-route";
-import { Trip, TripDirection, TripStatus } from "@prisma/client";
+import { Prisma, Trip, TripDirection, TripStatus } from "@prisma/client";
 
 import { toIsoDate } from "../../common/dates";
 import { PaginationMetaDto } from "../../common/dto/pagination-meta.dto";
 import { toClockTime } from "../../common/time-of-day";
-import { hasRecordedWaitingTime } from "../waiting-window";
 import { DISTANCE_DECIMAL_PLACES } from "./create-trip.dto";
 
 /**
@@ -409,13 +409,13 @@ export class TripResponseDto {
     nullable: true,
     example: "163.75",
     description:
-      "The sum of costConfirmations as a fixed-2 string, or null when there is none. What the confirmations add up to — EK only when no waiting time is recorded (see waitingTimeSupersedesCostConfirmations).",
+      "The sum of costConfirmations as a fixed-2 string, or null when there is none. What the confirmations add up to — EK when they are higher than the manual waiting time (see waitingTimeSupersedesCostConfirmations).",
   })
   costConfirmationTotal!: string | null;
 
   @ApiProperty({
     description:
-      "True when an operator recorded a waiting time on this Trip. It is then the EK source, also at €0, and the confirmations are kept but not counted in EK.",
+      "True when the Trip's current price takes its EK from the manual waiting time: its charge is above €0 and at least the sum of the confirmations. The confirmations are then kept but not counted in EK. False when the confirmations are higher, when there is no waiting-time charge, and when the Trip has no price.",
   })
   waitingTimeSupersedesCostConfirmations!: boolean;
 
@@ -509,7 +509,7 @@ export function toTripResponse(
     costConfirmation: planning.costConfirmation,
     costConfirmations: planning.costConfirmations,
     costConfirmationTotal: planning.costConfirmationTotal,
-    waitingTimeSupersedesCostConfirmations: hasRecordedWaitingTime(trip),
+    waitingTimeSupersedesCostConfirmations: isEkTheWaitingTime(planning.pricing),
     pricing: planning.pricing,
     /*
      * A READ never attempted a recalculation, so there is nothing to explain.
@@ -527,4 +527,27 @@ export function toTripResponse(
     createdAt: trip.createdAt,
     updatedAt: trip.updatedAt,
   };
+}
+
+/**
+ * Whether the Trip's EK is its manual waiting time rather than its Cost
+ * Confirmations, read off the price it holds — the same comparison the Engine
+ * priced it by (`ekSourceOf`), never a rule repeated here.
+ */
+function isEkTheWaitingTime(pricing: EffectivePricingDto | null | undefined): boolean {
+  // Absent as well as null: a read that loaded no price states none.
+  if (pricing === null || pricing === undefined) {
+    return false;
+  }
+
+  const amountOf = (componentCode: string) =>
+    new Prisma.Decimal(
+      pricing.components.find((component) => component.componentCode === componentCode)?.effectiveAmount ?? 0,
+    );
+  const waitingTime = amountOf(EffectiveComponent.WAITING_TIME);
+
+  return (
+    waitingTime.greaterThan(0) &&
+    ekSourceOf(waitingTime, amountOf(EffectiveComponent.COST_CONFIRMATION)) === EkSource.WAITING_TIME
+  );
 }

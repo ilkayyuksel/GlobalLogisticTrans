@@ -208,8 +208,9 @@ describe("the pricing lifecycle of a Trip", () => {
       await expectConsistent();
     });
 
-    // A recorded waiting time is the EK at any price (owner, November 2026).
-    it("5. changing it to an uncharged window keeps the waiting time as EK, at €0", async () => {
+    // EK is the higher of the two (owner, November 2026): an uncharged window
+    // leaves the confirmation as the EK.
+    it("5. changing it to an uncharged window gives the EK back to the confirmation", async () => {
       await closedTrip();
       await world.confirmCost(TRIP, "4132482", "25.00");
       await world.tripService.update(TRIP, CHARGED_WINDOW);
@@ -217,7 +218,7 @@ describe("the pricing lifecycle of a Trip", () => {
       const response = await world.tripService.update(TRIP, UNCHARGED_WINDOW);
 
       expect(world.trips.get(TRIP)?.waitingTimeMinutes).toBe(135);
-      expect(response.pricing).toMatchObject({ ek: "0.00" });
+      expect(response.pricing).toMatchObject({ ek: "25.00" });
       expect(storedComponents()).not.toHaveProperty("WAITING_TIME");
       await expectConsistent();
     });
@@ -244,13 +245,13 @@ describe("the pricing lifecycle of a Trip", () => {
       await expectConsistent();
     });
 
-    it("7. a waiting time priced at €0 displaces a confirmation too", async () => {
+    it("7. a waiting time priced at €0 does not displace a confirmation", async () => {
       await closedTrip();
       await world.confirmCost(TRIP, "4132482", "25.00");
 
       await world.tripService.update(TRIP, UNCHARGED_WINDOW);
 
-      expect(await apiPricing()).toMatchObject({ ek: "0.00" });
+      expect(await apiPricing()).toMatchObject({ ek: "25.00" });
       await expectConsistent();
     });
 

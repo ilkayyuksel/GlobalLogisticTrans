@@ -1,6 +1,6 @@
 import { Prisma } from "@prisma/client";
 
-import { EffectiveComponent } from "../../trip-pricing/effective-pricing";
+import { EffectiveComponent, EkSource, ekSourceOf } from "../../trip-pricing/effective-pricing";
 import type { CurrentTripPricing } from "../../trip-pricing/effective-pricing.service";
 import {
   CombinationVerdict,
@@ -118,12 +118,26 @@ function reconcileTrip(input: TripRowsInput, mismatch: InvoiceLineMark | null): 
             (match) => match.combination?.verdict === CombinationVerdict.GEEN_COMBI,
           ),
           backloadRaiseAllowed: mismatch !== InvoiceLineMark.COMBINATION_ONLY_IN_TRANO,
+          ekIsTripTotalWhenPricesMissing: isNormalTransportLine(transportRows, mismatch),
         },
       ),
     );
   }
 
   return outcomes.map((outcome) => ({ ...outcome, reliability }));
+}
+
+/**
+ * A Combination on neither side — both agree, and no line of the Excel marks
+ * one — charged on a transport line of its own. An EK line standing in as the
+ * transport's line (`ekLineAsTransport`) never states a Tarief or Fuel and
+ * keeps the EK rules it has (owner, November 2026).
+ */
+function isNormalTransportLine(transportRows: readonly InvoiceRowMatch[], mismatch: InvoiceLineMark | null): boolean {
+  return (
+    mismatch === null &&
+    transportRows.every((match) => match.combination === null && match.row.ekLineAsTransport !== true)
+  );
 }
 
 /**
@@ -166,19 +180,24 @@ export function owedOnCostLine(pricing: CurrentTripPricing, match: InvoiceRowMat
 
 /**
  * The Trip's EK is its waiting time rather than its confirmations, as the
- * stored snapshot says: a charged waiting time, or — since a RECORDED waiting
- * time supersedes them even at €0 (owner, November 2026) — a confirmation line
- * the Engine stored at €0. The confirmations are taken verbatim, so that line
- * is €0 only when superseded or when they confirm nothing at all.
+ * stored snapshot says — the higher of the two (`ekSourceOf`, owner, November
+ * 2026). The Engine stores the confirmation line at €0 when the waiting time
+ * is as high or higher; a snapshot from an earlier rule may carry both in
+ * full, and the same comparison decides it. No confirmation line at all: the
+ * waiting time is the EK when it charges anything.
  */
 function areConfirmationsSuperseded(pricing: CurrentTripPricing): boolean {
   const amountOf = (componentCode: string) =>
     pricing.components.find((component) => component.componentCode === componentCode)
       ?.effectiveAmount ?? null;
-  const waitingTime = amountOf(EffectiveComponent.WAITING_TIME);
+  const waitingTime = amountOf(EffectiveComponent.WAITING_TIME) ?? new Prisma.Decimal(0);
   const confirmations = amountOf(EffectiveComponent.COST_CONFIRMATION);
 
-  return (waitingTime?.greaterThan(0) ?? false) || (confirmations?.isZero() ?? false);
+  if (confirmations === null) {
+    return waitingTime.greaterThan(0);
+  }
+
+  return confirmations.isZero() || ekSourceOf(waitingTime, confirmations) === EkSource.WAITING_TIME;
 }
 
 function withStatus(

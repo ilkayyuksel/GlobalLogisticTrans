@@ -9,6 +9,8 @@ import {
   type PricingCalculationStep,
 } from "./pricing-line";
 import { toStorableAmount } from "./pricing-money";
+import { waitingTimeChargeOf } from "./waiting-time.calculator";
+import { EkSource, ekSourceOf } from "../trip-pricing/effective-pricing";
 
 /**
  * The cost Eucon confirmed for this Trip, as a pricing component.
@@ -45,24 +47,24 @@ import { toStorableAmount } from "./pricing-money";
  * A Trip without any confirmation produces no line at all — not a zero, which
  * would claim a confirmed cost of nothing.
  *
- * ── A RECORDED WAITING TIME TAKES ITS PLACE ─────────────────────────────────
- * EK is ONE source, by business rule: the operator's waiting time whenever one
- * is RECORDED on the Trip, otherwise the confirmations. The two are never
- * added — a confirmed €27.50 beside a waiting time of €137.50 is EK €137.50,
- * not €165.00.
+ * ── EK IS THE HIGHER OF THE WAITING TIME AND THE CONFIRMATIONS ──────────────
+ * EK is ONE source, by business rule (owner, November 2026): the HIGHER of the
+ * manual waiting time's charge and the confirmations' sum. The two are never
+ * added — confirmations of €138.75 beside a waiting time of €55.00 are EK
+ * €138.75, not €193.75; a waiting time of €150.00 beside them is EK €150.00.
  *
- * Recorded, not charged (owner, November 2026): a valid waiting window priced
- * at €0 — below the threshold, or at night — still supersedes the
- * confirmations, and EK is then €0. This reverses the earlier rule, under which
- * only a waiting time above €0 did. A WAIT confirmation from a PDF is not a
- * recorded waiting time: it is one of the confirmations.
+ * This replaces the rule under which any RECORDED waiting time, even one priced
+ * at €0, superseded the confirmations: the amounts are compared now, whatever
+ * is recorded. A WAIT confirmation from a PDF is one of the confirmations.
  *
- * So when one is recorded, the line is still written — its description keeps
- * naming the documents, which is how Remarks shows the CC references — but it
- * contributes €0, and the stored total counts the waiting time alone. The
- * confirmations themselves are untouched: this decides only what they
- * contribute to THIS calculation, which is always made from the current Trip
- * and the current confirmations, never added to an earlier EK.
+ * When the waiting time is as high or higher, the line is still written — its
+ * description keeps naming the documents, which is how Remarks shows the CC
+ * references — but it contributes €0. When the confirmations are higher, the
+ * waiting time's line contributes €0 instead (`WaitingTimeCalculator`). The
+ * comparison is `ekSourceOf`, against the waiting time's own charge
+ * (`waitingTimeChargeOf`) — never against an earlier EK. The confirmations
+ * themselves are untouched: this decides only what they contribute to THIS
+ * calculation, made from the current Trip and the current confirmations.
  * ────────────────────────────────────────────────────────────────────────────
  */
 
@@ -88,14 +90,16 @@ export class CostConfirmationCalculator implements PricingCalculationStep {
       return [];
     }
 
-    const isSuperseded = context.waitingTimeRecorded;
+    const confirmed = new Prisma.Decimal(confirmation.amount);
+    const waitingTimeCharge = waitingTimeChargeOf(context)?.amount ?? ZERO;
+    const isSuperseded = ekSourceOf(waitingTimeCharge, confirmed) === EkSource.WAITING_TIME;
 
     this.logger.log("Cost confirmation priced", {
       tripId: context.tripId,
       // The references identify the documents; no amount is ever logged.
       ccNumbers: confirmation.ccNumbers,
       confirmationCount: confirmation.ccNumbers.length,
-      supersededByWaitingTime: isSuperseded,
+      outweighedByWaitingTime: isSuperseded,
     });
 
     return [
@@ -114,7 +118,7 @@ export class CostConfirmationCalculator implements PricingCalculationStep {
         // rather than trusting the string.
         amount: isSuperseded
           ? ZERO
-          : toStorableAmount(new Prisma.Decimal(confirmation.amount)),
+          : toStorableAmount(confirmed),
         calculationOrder: CALCULATION_ORDER,
         quantity: null,
         unitPrice: null,

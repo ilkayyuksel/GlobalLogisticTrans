@@ -119,7 +119,7 @@ transport was matched, and on which row, or found but not on the invoice, or
 not found at all: a missing confirmation is never a failed transport match. Otherwise it is
 `COST_LINE_UNRESOLVED` (yellow). A resolved line is compared ONLY on its EK,
 with its own confirmation's amount — or with nothing when the Trip's EK is its
-waiting time (a recorded waiting time supersedes the confirmations, also at €0). What the Trip's Cost Confirmation lines charge is taken
+waiting time (the higher of the two is the EK — see `businessrules.md`). What the Trip's Cost Confirmation lines charge is taken
 off the EK its own line is compared with, so no confirmation is charged twice.
 A Cost Confirmation line is never its transport's own line (owner, October
 2026). It never settles its Trip on its own and never makes its Trip "stated"
@@ -186,13 +186,43 @@ marked line is not settled, like every yellow line):
 
 | Mark | When | What changes beside the yellow |
 |---|---|---|
-| `PRICES_MISSING` | every Tarief AND every Fuel cell of the line is empty or a dash (`-`, `–`, `—`); 0,00 is a price | neither is filled from Trano; every other component compared as ever; a dash in them no longer makes the line `AMOUNT_UNREADABLE` |
+| `PRICES_MISSING` | every Tarief AND every Fuel cell of the line is empty or a dash (`-`, `–`, `—`); 0,00 is a price | neither is filled from Trano; a dash in them no longer makes the line `AMOUNT_UNREADABLE`. On a **normal** Trip (see below) the EK is compared with Trano's total; on any other line every other component is compared as ever |
 | `COMBINATION_ONLY_IN_EXCEL` (A) | a line of the Trip carries the Excel's `COMBINATION` marking, and the Trip is in no group | nothing — `GEEN COMBI`, its Backload removal and its Remarks stay exactly as before |
 | `COMBINATION_ONLY_IN_TRANO` (B) | the Trip is in a group (it carries the Combination Backload) and no line of it carries the Excel's marking | its €50 Backload is not ADDED (a Backload the invoice states is compared as ever); its Remarks stay exactly as received — no Trano fact, Custom Property, Extra notities or Combination remark is added (`remarks/remark-plan.ts`); the preview warns `WEL COMBI, MAAR PRIJS NIET AANGEPAST` on that line |
 
 `PRICES_MISSING` marks the transport's own line; A and B mark every row the
 Trip is charged on, its EC lines included. A row with several reasons is
 painted once.
+
+#### A normal Trip without Tarief and Fuel: the EK is the total (November 2026)
+
+A Trip that is a Combination neither in Trano (no group) nor in the Excel (no
+`COMBINATION` marking, no `GEEN COMBI`), whose own transport line states no
+Tarief and no Fuel, is read as the customer stating the transport's TOTAL in
+its EK. Only then (`ekIsTripTotalWhenPricesMissing`, set in
+`pricing/trip-reconciliation.ts`; the comparison is `TRIP_TOTAL_IN_EK` in
+`pricing/invoice-reconciliation.ts`):
+
+- Trano's total is read from the stored snapshot, nothing priced again:
+  effective Tarief + stored Fuel + Toll + Tunnel + Backload + Others + EK, each
+  rounded to the cent as the check rounds it, each counted once (`tripTotalOf`).
+- The EK is the one the transport line is owed: Cost Confirmations charged on
+  their own EC lines are already taken off it, and a waiting time or the
+  confirmations are in it once (`resolveEk`, `owedOnCostLine`).
+- The EK becomes `max(Trano total, Excel EK)` through the ordinary raise-only
+  rule: raised in red when Trano is higher, left alone when equal or lower.
+- No other column is compared or written: each is inside the total. Tarief and
+  Fuel stay as received, and the row is marked `PRICES_MISSING`.
+- Remarks are completed as for any normal Trip.
+- An EK line standing in as its transport's own line (`ekLineAsTransport`,
+  `matching/ec-transport-lines.ts`) never states a Tarief or Fuel and keeps its
+  EK rules. EK split over several rows stays `NOT_DISTRIBUTABLE` as before.
+- A Trip without a usable price stays untouched apart from the yellow
+  (`hasNoUsablePrice`). An ungrouped Trip whose snapshot carries a Backload is
+  such a Trip (`price-reliability.ts`).
+
+Situations A and B, and Combinations on both sides, keep the component-by-
+component comparison described above.
 
 ### Missing transports
 

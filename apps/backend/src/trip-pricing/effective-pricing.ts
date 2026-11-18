@@ -379,28 +379,51 @@ export function fuelOnTarief(
 }
 
 /**
- * EK: ONE source, never two added together.
+ * EK: the HIGHER of the manual waiting time and the Cost Confirmations, never
+ * the two added together (owner, November 2026).
  *
- *   waiting time charged (> €0)  → the waiting time; the confirmations are
- *                                  not added, however many there are
- *   otherwise                    → the stored confirmation line; €0 without any
+ *   EK = max(waiting time charge, sum of the confirmations)
  *
- * Which source wins is decided by the Engine: a RECORDED waiting time — also
- * one priced at €0 (owner, November 2026) — makes it store the confirmation
- * line at €0 (`CostConfirmationCalculator`), so for a new snapshot this reads
- * the waiting time's EK, €0 included. The confirmations stay stored and
- * auditable either way; this decides only what the Trip's EK is.
+ * Both are calculated as before and apart; only the choice between them is this
+ * rule. A waiting time priced at €0 is compared like any other amount — merely
+ * recording one no longer decides. This replaces the earlier rule under which a
+ * recorded waiting time always won.
  *
- * Applied here, on every read, rather than only in the Engine: a snapshot
- * written before the Engine stored superseded confirmations at €0 still
- * carries the full confirmation line beside a charged waiting time, and EK must
- * follow the rule for it too.
+ * The Engine stores the lower of the two at €0 (`WaitingTimeCalculator`,
+ * `CostConfirmationCalculator`), so for a new snapshot this is simply the one
+ * line that counts. Applied here, on every read, as well: a snapshot stored
+ * under an earlier rule may carry both in full, and EK must follow the rule for
+ * it too. The confirmations stay stored and auditable either way.
  */
 function resolveEk(
   waitingTime: Prisma.Decimal,
   costConfirmations: Prisma.Decimal,
 ): Prisma.Decimal {
-  return waitingTime.greaterThan(ZERO) ? waitingTime : costConfirmations;
+  return ekSourceOf(waitingTime, costConfirmations) === EkSource.WAITING_TIME
+    ? waitingTime
+    : costConfirmations;
+}
+
+/** Which of the two EK sources counts for a Trip. */
+export const EkSource = {
+  WAITING_TIME: "WAITING_TIME",
+  COST_CONFIRMATION: "COST_CONFIRMATION",
+} as const;
+
+export type EkSource = (typeof EkSource)[keyof typeof EkSource];
+
+/**
+ * The one comparison behind EK, shared by the Engine and every read: the
+ * higher amount wins. Equal amounts name the waiting time — the EK is the same
+ * either way, and a choice must be made so exactly one line counts.
+ */
+export function ekSourceOf(
+  waitingTimeCharge: Prisma.Decimal,
+  confirmedTotal: Prisma.Decimal,
+): EkSource {
+  return confirmedTotal.greaterThan(waitingTimeCharge)
+    ? EkSource.COST_CONFIRMATION
+    : EkSource.WAITING_TIME;
 }
 
 /**

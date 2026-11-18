@@ -111,7 +111,7 @@ describe("several Cost Confirmations on one Trip in Ritten", () => {
     const note = await hoverNote();
 
     expect(note).toContain("CC-totaal: € 163,75");
-    expect(note).toContain("EK-bijdrage: € 55,00 (handmatige wachturen — de CC's tellen niet mee in EK)");
+    expect(note).toContain("EK-bijdrage: € 55,00 (handmatige wachturen hoger — de CC's tellen niet mee in EK)");
   });
 
   it("says EK is not priced yet for a Trip that never was", async () => {

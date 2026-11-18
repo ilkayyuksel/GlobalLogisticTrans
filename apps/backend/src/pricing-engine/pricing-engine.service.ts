@@ -3,7 +3,6 @@ import { PricingCalculationStatus } from "@prisma/client";
 
 import { AppLoggerService } from "../logger/app-logger.service";
 import { TripReadService, TripReadView } from "../trips/trip-read.service";
-import { hasRecordedWaitingTime } from "../trips/waiting-window";
 import { carriesCombinationSurcharge } from "./combination-leg";
 import {
   NegativeTotalPriceException,
@@ -355,7 +354,6 @@ export class PricingEngineService {
        */
       isCombination: carriesCombinationSurcharge(trip),
       waitingTimeMinutes: trip.waitingTimeMinutes ?? NO_WAITING_TIME_MINUTES,
-      waitingTimeRecorded: hasRecordedWaitingTime(trip),
       route,
       routeMatch: selection.trace,
       baseSource,

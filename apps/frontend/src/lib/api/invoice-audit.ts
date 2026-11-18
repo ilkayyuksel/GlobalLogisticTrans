@@ -194,6 +194,7 @@ export interface InvoiceAuditRow {
 
 /**
  * PRICES_MISSING            the line states no Tarief and no Fuel; neither filled
+ *                           (on a normal Trip its EK is compared with Trano's total)
  * COMBINATION_ONLY_IN_EXCEL the Excel marks a Combination the Trip is not
  * COMBINATION_ONLY_IN_TRANO the Trip is a Combination the Excel does not mark;
  *                           its €50 Backload is not added

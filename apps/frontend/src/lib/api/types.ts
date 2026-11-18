@@ -204,9 +204,9 @@ export interface Trip {
   /** Their sum, summed by the backend, as a fixed-2 string; null when none. */
   costConfirmationTotal: string | null;
   /**
-   * True when an operator recorded a waiting time: it is then the EK, and the
-   * confirmations are kept but not counted in it. The backend's rule, read
-   * here, never re-derived.
+   * True when the manual waiting time is the EK because it is at least as high
+   * as the confirmations together; they are kept but not counted in it. The
+   * backend's rule, read here, never re-derived.
    */
   waitingTimeSupersedesCostConfirmations: boolean;
   /**

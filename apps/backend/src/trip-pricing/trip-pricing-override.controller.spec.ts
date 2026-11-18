@@ -57,7 +57,7 @@ function buildEngineItems() {
     item("WAITING_TIME", "30.00"),
     item("CUSTOM_PROPERTY", "20.00", "prop-tar"),
     item("CUSTOM_PROPERTY", "80.00", "prop-flat"),
-    item("COST_CONFIRMATION", "165.00"),
+    item("COST_CONFIRMATION", "25.00"),
   ];
 }
 
@@ -231,7 +231,7 @@ describe("TripPricingOverrideController (integration)", () => {
       expect(response.body.data.tarief).toBe("120.00");
       expect(response.body.data.brandstof).toBe("18.00");
       expect(response.body.data.others).toBe("100.00");
-      // The waiting time (30) is EK and supersedes the confirmation (165).
+      // The waiting time (30) is higher than the confirmation (25), so it is the EK.
       expect(response.body.data.ek).toBe("30.00");
       expect(response.body.data.totaal).toBe("283.00");
     });

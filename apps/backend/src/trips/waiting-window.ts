@@ -171,18 +171,3 @@ export function changesWaitingTimeWindow(update: {
   );
 }
 
-/**
- * Whether an operator recorded a waiting time on the Trip — a complete window,
- * whatever it counts for, €0 included.
- *
- * The derived minutes exist exactly when a window was recorded: the window is
- * both times or neither (`toWaitingTimeWrite`). A recorded waiting time is the
- * Trip's EK source and supersedes its Cost Confirmations (owner, November
- * 2026). One definition, read by the Pricing Engine to price that rule and by
- * the Trip response to say so.
- */
-export function hasRecordedWaitingTime(trip: {
-  readonly waitingTimeMinutes?: number | null;
-}): boolean {
-  return (trip.waitingTimeMinutes ?? null) !== null;
-}

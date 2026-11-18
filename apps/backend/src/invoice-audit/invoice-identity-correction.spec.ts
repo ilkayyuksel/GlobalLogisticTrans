@@ -746,6 +746,14 @@ describe("an invoice line with one misprinted value", () => {
       ]);
     });
 
+    /*
+     * A normal Trip without Tarief and Fuel: its EK is compared with Trano's
+     * total (owner, November 2026) — minus the confirmation its EC line already
+     * charges, so the 386.16 is on the invoice once.
+     */
+    /** 200 Tarief + 30 Fuel; the EK left for this line is 386.16 − 386.16 = 0. */
+    const TRANSPORT_TOTAL = "230.00";
+
     it("A, an empty transport line beside its EC line: no price filled, the line marked, the EK not a second time", async () => {
       confirmations.push({ tripId: "gent", ccNumber: "4224479", amount: new Prisma.Decimal("386.16") });
       ekOf.set("gent", "386.16");
@@ -757,8 +765,8 @@ describe("an invoice line with one misprinted value", () => {
       ]);
 
       expect(rows[1]).toMatchObject({ status: "MATCHED", trip: { id: "gent" }, transportPricesFilled: false, marks: ["PRICES_MISSING"] });
-      expect(rows[1].comparisons).toEqual([]);
-      expect([cell(3, COLUMN.tarief).value, cell(3, COLUMN.fuel).value, cell(3, EK).value]).toEqual([null, null, null]);
+      expect(rows[1].comparisons).toEqual([expect.objectContaining({ component: "EK", tranoValue: TRANSPORT_TOTAL })]);
+      expect([cell(3, COLUMN.tarief).value, cell(3, COLUMN.fuel).value, cell(3, EK).value]).toEqual([null, null, Number(TRANSPORT_TOTAL)]);
       // The EC line keeps its own figure, and is not given a transport price.
       expect([cell(4, EK).value, cell(4, COLUMN.tarief).value]).toEqual([386.16, null]);
       expect(result.missingTrips).toEqual([]);

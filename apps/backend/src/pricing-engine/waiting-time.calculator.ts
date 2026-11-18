@@ -12,6 +12,7 @@ import {
   PricingLine,
 } from "./pricing-line";
 import { toStorableAmount } from "./pricing-money";
+import { EkSource, ekSourceOf } from "../trip-pricing/effective-pricing";
 
 /** pricing_rules.md numbers the Waiting Time fourth in the sequence. */
 export const WAITING_TIME_CALCULATION_ORDER = 4;
@@ -51,6 +52,11 @@ const NO_BILLABLE_BLOCKS = 0;
  * Waiting time is priced from Trip data alone, so this step ignores what earlier
  * steps produced and declares only the context.
  *
+ * ── EK IS THE HIGHER OF IT AND THE CONFIRMATIONS (owner, November 2026) ─────
+ * When the Trip's Cost Confirmations add up to MORE, they are the EK and this
+ * line is stored at €0 — still written, its blocks and price kept, so the
+ * charge stays readable. See `ekSourceOf`.
+ *
  * The percentage-free arithmetic is Decimal, and the amount is rounded exactly
  * once. Amounts are never logged.
  */
@@ -65,72 +71,91 @@ export class WaitingTimeCalculator implements PricingCalculationStep {
       tripId: context.tripId,
     });
 
-    const billableMinutes = this.billableMinutes(context);
-    const blocks = this.billableBlocks(billableMinutes, context.rules);
-
-    const lines =
-      blocks > NO_BILLABLE_BLOCKS
-        ? [this.waitingTimeLine(billableMinutes, blocks, context.rules)]
-        : [];
+    const charge = waitingTimeChargeOf(context);
+    const outweighed = charge !== null && isOutweighedByConfirmations(charge.amount, context);
+    const lines = charge === null ? [] : [waitingTimeLine(charge, context.rules, outweighed)];
 
     this.logger.log("Waiting time calculation completed", {
       tripId: context.tripId,
       lineCount: lines.length,
+      outweighedByCostConfirmations: outweighed,
     });
 
     return lines;
   }
+}
 
-  /**
-   * The minutes this Trip is charged for.
-   *
-   * Nothing at all until the threshold is reached; from there, the total wait
-   * less the free allowance. The result is never negative.
-   */
-  private billableMinutes(context: PricingCalculationContext): number {
-    if (context.waitingTimeMinutes < context.rules.waitingTimeThresholdMinutes) {
-      return 0;
-    }
+/** What the waiting time is charged at, before EK chooses between its sources. */
+export interface WaitingTimeCharge {
+  readonly billableMinutes: number;
+  readonly blocks: number;
+  readonly amount: Prisma.Decimal;
+}
 
-    return Math.max(
-      0,
-      context.waitingTimeMinutes - context.rules.waitingTimeFreeMinutes,
-    );
+/**
+ * The waiting time's own charge, or null when nothing is billable — the
+ * calculation above, as one function, so the Cost Confirmation step compares
+ * EK against exactly this figure rather than a second calculation of it.
+ */
+export function waitingTimeChargeOf(context: PricingCalculationContext): WaitingTimeCharge | null {
+  const billableMinutes = billableMinutesOf(context);
+  const blocks = Math.ceil(billableMinutes / context.rules.waitingTimeBlockMinutes);
+
+  if (blocks <= NO_BILLABLE_BLOCKS) {
+    return null;
   }
 
-  /**
-   * Every started block counts.
-   *
-   * Both operands are whole minutes and the block size is guaranteed positive
-   * by PricingRuleResolver, so the quotient is exact and the ceiling is safe.
-   */
-  private billableBlocks(
-    billableMinutes: number,
-    rules: PricingRuleConfiguration,
-  ): number {
-    return Math.ceil(billableMinutes / rules.waitingTimeBlockMinutes);
+  return {
+    billableMinutes,
+    blocks,
+    amount: toStorableAmount(new Prisma.Decimal(blocks).mul(context.rules.waitingTimeBlockPrice)),
+  };
+}
+
+/**
+ * The minutes this Trip is charged for.
+ *
+ * Nothing at all until the threshold is reached; from there, the total wait
+ * less the free allowance. The result is never negative. Every started block
+ * counts: both operands are whole minutes and the block size is guaranteed
+ * positive by PricingRuleResolver, so the ceiling above is safe.
+ */
+function billableMinutesOf(context: PricingCalculationContext): number {
+  if (context.waitingTimeMinutes < context.rules.waitingTimeThresholdMinutes) {
+    return 0;
   }
 
-  /**
-   * The block count and the configured price are kept on the line as quantity
-   * and unit price, so the charge can be read back without recalculating it.
-   */
-  private waitingTimeLine(
-    billableMinutes: number,
-    blocks: number,
-    rules: PricingRuleConfiguration,
-  ): PricingLine {
-    const blockPrice = new Prisma.Decimal(rules.waitingTimeBlockPrice);
+  return Math.max(0, context.waitingTimeMinutes - context.rules.waitingTimeFreeMinutes);
+}
 
-    return {
-      component: PricingComponentCode.WAITING_TIME,
-      // Matches the wording used by the seeded pricing snapshots.
-      description: `${billableMinutes} billable minutes`,
-      amount: toStorableAmount(new Prisma.Decimal(blocks).mul(blockPrice)),
-      calculationOrder: WAITING_TIME_CALCULATION_ORDER,
-      quantity: new Prisma.Decimal(blocks),
-      unitPrice: blockPrice,
-      customPropertyId: null,
-    };
-  }
+/** The Cost Confirmations add up to more: they are the EK (`ekSourceOf`). */
+function isOutweighedByConfirmations(charge: Prisma.Decimal, context: PricingCalculationContext): boolean {
+  const confirmation = context.costConfirmation;
+
+  return (
+    confirmation !== null &&
+    ekSourceOf(charge, new Prisma.Decimal(confirmation.amount)) === EkSource.COST_CONFIRMATION
+  );
+}
+
+/**
+ * The block count and the configured price are kept on the line as quantity
+ * and unit price, so the charge can be read back without recalculating it —
+ * also when the confirmations outweigh it and it contributes €0 to EK.
+ */
+function waitingTimeLine(
+  charge: WaitingTimeCharge,
+  rules: PricingRuleConfiguration,
+  outweighed: boolean,
+): PricingLine {
+  return {
+    component: PricingComponentCode.WAITING_TIME,
+    // Matches the wording used by the seeded pricing snapshots.
+    description: `${charge.billableMinutes} billable minutes`,
+    amount: outweighed ? new Prisma.Decimal(0) : charge.amount,
+    calculationOrder: WAITING_TIME_CALCULATION_ORDER,
+    quantity: new Prisma.Decimal(charge.blocks),
+    unitPrice: new Prisma.Decimal(rules.waitingTimeBlockPrice),
+    customPropertyId: null,
+  };
 }

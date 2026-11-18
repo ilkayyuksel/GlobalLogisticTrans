@@ -19,7 +19,6 @@ function buildContext(fuelPercentage = "15"): PricingCalculationContext {
     planningDate: "2026-08-17",
     isCombination: false,
     waitingTimeMinutes: 0,
-    waitingTimeRecorded: false,
     route: { departure: "DP World Antwerp Gateway", destination: "Bousbecque" },
     routeMatch: { routePricingId: "route-1", method: "EXACT", combinationRouteGroupId: null, combinationMatch: null, selection: "AUTOMATIC", legs: [] },
     baseSource: {

@@ -2,6 +2,7 @@ import ExcelJS from "exceljs";
 import { Prisma, RouteMatchMethod, type Trip, TripStatus } from "@prisma/client";
 
 import type { AppLoggerService } from "../../logger/app-logger.service";
+import type { EffectiveAmount, EffectivePricing } from "../../trip-pricing/effective-pricing";
 import type { CurrentTripPricing } from "../../trip-pricing/effective-pricing.service";
 import { buildInvoiceAuditService } from "./invoice-audit-service";
 import { reliablyPriced } from "./invoice-pricing";
@@ -31,10 +32,19 @@ export interface InvoiceWorld {
   readonly zeroPriced: Set<string>;
   /** A Trip's assigned Custom Property names, when it has any. */
   readonly propertiesOf: Map<string, string[]>;
+  /** A Trip's stored amounts, where they differ from Tarief 200, Fuel 30 and nothing else. */
+  readonly amountsOf: Map<string, Partial<Record<StoredAmount, string>>>;
+  /** A Trip's stored component lines, where a test reads them (waiting time, confirmations). */
+  readonly componentsOf: Map<string, EffectiveAmount[]>;
   check(lines: readonly InvoiceFixtureLine[]): Promise<CheckedInvoice>;
   /** The check run over a workbook as it is — a corrected one, checked again. */
   checkFile(file: Buffer): Promise<CheckedInvoice>;
 }
+
+export type StoredAmount = keyof Pick<
+  EffectivePricing,
+  "tarief" | "brandstof" | "backload" | "tol" | "tunnel" | "others" | "ek"
+>;
 
 export interface CheckedInvoice {
   result: Awaited<ReturnType<ReturnType<typeof buildInvoiceAuditService>["apply"]>>["result"];
@@ -69,6 +79,8 @@ export function invoiceWorld(): InvoiceWorld {
   const unpriced = new Set<string>();
   const zeroPriced = new Set<string>();
   const propertiesOf = new Map<string, string[]>();
+  const amountsOf = new Map<string, Partial<Record<StoredAmount, string>>>();
+  const componentsOf = new Map<string, EffectiveAmount[]>();
   const onDay = (trip: Trip, days: readonly Date[]) =>
     days.some((each) => [trip.planningDate, trip.originalPlanningDate].some((date) => date?.getTime() === each.getTime()));
 
@@ -77,18 +89,26 @@ export function invoiceWorld(): InvoiceWorld {
     const zero = new Prisma.Decimal(0);
     const priced = (tripId: string): CurrentTripPricing => {
       const base = zeroPriced.has(tripId) ? zero : null;
-      const ek = new Prisma.Decimal(ekOf.get(tripId) ?? 0);
-      const backload = new Prisma.Decimal(backloadOf.get(tripId) ?? 0);
+      const stated = amountsOf.get(tripId) ?? {};
+      const amount = (key: StoredAmount, fallback: Prisma.Decimal) =>
+        stated[key] === undefined ? fallback : new Prisma.Decimal(stated[key]);
+      const tarief = amount("tarief", base ?? new Prisma.Decimal(200));
+      const brandstof = amount("brandstof", base ?? new Prisma.Decimal(30));
+      const backload = amount("backload", new Prisma.Decimal(backloadOf.get(tripId) ?? 0));
+      const tol = amount("tol", zero);
+      const tunnel = amount("tunnel", zero);
+      const others = amount("others", zero);
+      const ek = amount("ek", new Prisma.Decimal(ekOf.get(tripId) ?? 0));
       const pricing = reliablyPriced({
-        components: [],
-        tarief: base ?? new Prisma.Decimal(200),
-        brandstof: base ?? new Prisma.Decimal(30),
+        components: componentsOf.get(tripId) ?? [],
+        tarief,
+        brandstof,
         backload,
-        tol: zero,
-        tunnel: zero,
-        others: zero,
+        tol,
+        tunnel,
+        others,
         ek,
-        totaal: (base ?? new Prisma.Decimal(230)).add(ek).add(backload),
+        totaal: [brandstof, backload, tol, tunnel, others, ek].reduce((total, each) => total.add(each), tarief),
       });
 
       return unreliable.has(tripId)
@@ -162,6 +182,8 @@ export function invoiceWorld(): InvoiceWorld {
     unpriced,
     zeroPriced,
     propertiesOf,
+    amountsOf,
+    componentsOf,
     checkFile,
     async check(lines) {
       return checkFile(await buildInvoiceWorkbook({ lines, fuelPercentage: 15 }));

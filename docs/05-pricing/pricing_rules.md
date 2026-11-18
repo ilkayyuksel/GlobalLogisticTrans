@@ -392,6 +392,11 @@ A Trip with at least one billable block always carries a line, including when
 `WAITING_TIME_BLOCK_PRICE` is zero. That line records an amount of zero: the
 waiting time was charged, at nothing.
 
+The line also records €0 when the Trip's Cost Confirmations add up to more:
+EK is the higher of the two (November 2026, see `businessrules.md`), and the
+lower source is stored at €0 so the total counts EK once. Its quantity and unit
+price still state the charge.
+
 ## Recorded values
 
 The pricing line records the number of blocks as its quantity and the configured

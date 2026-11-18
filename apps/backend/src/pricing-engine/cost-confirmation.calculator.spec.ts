@@ -17,7 +17,7 @@ import { PricingComponentCode } from "./pricing-line";
  */
 function buildContext(
   costConfirmation: PricingCalculationContext["costConfirmation"],
-  waitingTimeRecorded = false,
+  waitingTimeMinutes = 0,
 ): PricingCalculationContext {
   return {
     tripId: "trip-1",
@@ -25,15 +25,20 @@ function buildContext(
     tripStatus: "CLOSED",
     planningDate: "2026-08-24",
     isCombination: false,
-    waitingTimeMinutes: 0,
-    waitingTimeRecorded,
+    waitingTimeMinutes,
     route: { departure: "PSA Quay 869", destination: "Gent" },
     baseSource: {
       strategy: "ROUTE_BASED",
       routePricingId: "route-1",
       basePrice: "500.00",
     },
-    rules: {} as PricingCalculationContext["rules"],
+    // The Settings' defaults: from 150 minutes, 120 free, €13.75 per started 15.
+    rules: {
+      waitingTimeThresholdMinutes: 150,
+      waitingTimeFreeMinutes: 120,
+      waitingTimeBlockMinutes: 15,
+      waitingTimeBlockPrice: "13.75",
+    } as PricingCalculationContext["rules"],
     assignedCustomProperties: [],
     routeCosts: [],
     costConfirmation,
@@ -116,48 +121,65 @@ describe("pricing a Cost Confirmation", () => {
   });
 
   /**
-   * ── A RECORDED WAITING TIME IS THE EK SOURCE ────────────────────────────
-   * The confirmation line is still written — its description names the
-   * documents, which is how Remarks shows them — but contributes €0, so the
-   * stored total never adds the two. Recorded, not charged: a waiting time
-   * priced at €0 supersedes the confirmations too (owner, November 2026).
+   * EK is the HIGHER of the waiting time's charge and the confirmations (owner,
+   * November 2026). When the waiting time is as high or higher, this line is
+   * still written — its description names the documents, which is how Remarks
+   * shows them — but contributes €0, so the stored total never adds the two.
    */
-  describe("beside a recorded waiting time", () => {
-    it("contributes nothing when a waiting time is recorded", () => {
+  describe("beside a manual waiting time", () => {
+    /** 180 minutes → 4 blocks → 55.00; 300 minutes → 12 blocks → 165.00. */
+    const WAITING_55 = 180;
+    const WAITING_165 = 300;
+    /** 135 minutes: a recorded window below the threshold, charged €0. */
+    const WAITING_0 = 135;
+
+    it("contributes nothing when the waiting time is higher", () => {
       const [line] = calculator.calculate(
-        buildContext({ ccNumbers: ["CC4139505"], amount: "27.50" }, true),
+        buildContext({ ccNumbers: ["CC4139505"], amount: "27.50" }, WAITING_55),
       );
 
       expect(line.amount.toFixed(2)).toBe("0.00");
       expect(line.description).toBe("Cost confirmation CC4139505");
     });
 
-    /** Several confirmations are one line, superseded as one: 25 + 40 + 12.50. */
-    it("supersedes several confirmations alike, still naming each", () => {
-      const [line] = calculator.calculate(
-        buildContext({ ccNumbers: ["CC3", "CC2", "CC1"], amount: "77.50" }, true),
-      );
+    it("contributes nothing when the two are equal: the EK is counted once", () => {
+      const [line] = calculator.calculate(buildContext({ ccNumbers: ["CC1"], amount: "55.00" }, WAITING_55));
 
       expect(line.amount.toFixed(2)).toBe("0.00");
+    });
+
+    /** Several confirmations are one line, compared as their sum: 25 + 40 + 12.50. */
+    it("counts in full when the confirmations together are higher, still naming each", () => {
+      const [line] = calculator.calculate(
+        buildContext({ ccNumbers: ["CC3", "CC2", "CC1"], amount: "77.50" }, WAITING_55),
+      );
+
+      expect(line.amount.toFixed(2)).toBe("77.50");
       expect(line.description).toContain("CC3");
       expect(line.description).toContain("CC1");
     });
 
-    it("counts in full when no waiting time is recorded", () => {
+    it("is outweighed by a waiting time above their sum", () => {
       const [line] = calculator.calculate(
-        buildContext({ ccNumbers: ["CC1", "CC2"], amount: "77.50" }, false),
+        buildContext({ ccNumbers: ["CC3", "CC2", "CC1"], amount: "77.50" }, WAITING_165),
       );
+
+      expect(line.amount.toFixed(2)).toBe("0.00");
+    });
+
+    it("counts in full beside a recorded waiting time charged at €0", () => {
+      const [line] = calculator.calculate(buildContext({ ccNumbers: ["CC1", "CC2"], amount: "77.50" }, WAITING_0));
 
       expect(line.amount.toFixed(2)).toBe("77.50");
     });
 
-    it("says in the log that it was superseded, without any amount", () => {
-      calculator.calculate(buildContext({ ccNumbers: ["CC1"], amount: "1234.56" }, true));
+    it("says in the log that it was outweighed, without any amount", () => {
+      calculator.calculate(buildContext({ ccNumbers: ["CC1"], amount: "12.34" }, WAITING_55));
 
       const logged = JSON.stringify(logger.log.mock.calls);
 
-      expect(logged).toContain('"supersededByWaitingTime":true');
-      expect(logged).not.toContain("1234.56");
+      expect(logged).toContain('"outweighedByWaitingTime":true');
+      expect(logged).not.toContain("12.34");
     });
   });
 });

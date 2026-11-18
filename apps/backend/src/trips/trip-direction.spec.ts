@@ -108,19 +108,36 @@ describe("Trip direction", () => {
 
 /**
  * Whether the Trip's confirmations count in EK is the backend's answer, read
- * from the same rule the Engine prices (`hasRecordedWaitingTime`): a recorded
- * waiting time — €0 included — supersedes them.
+ * off the price it holds by the Engine's own comparison (`ekSourceOf`): the
+ * higher of the waiting time and the confirmations is the EK (owner, November
+ * 2026). Merely recording a waiting time no longer decides.
  */
-describe("whether a waiting time supersedes the confirmations", () => {
-  it("is false when no waiting time is recorded", () => {
-    expect(
-      toTripResponse(buildTrip(TripDirection.COLLECTION), NO_PLANNING).waitingTimeSupersedesCostConfirmations,
-    ).toBe(false);
+describe("whether the waiting time is the EK rather than the confirmations", () => {
+  const pricedWith = (waitingTime: string | null, confirmations: string | null) => ({
+    ...NO_PLANNING,
+    pricing: {
+      components: [
+        ...(waitingTime === null ? [] : [{ componentCode: "WAITING_TIME", effectiveAmount: waitingTime }]),
+        ...(confirmations === null ? [] : [{ componentCode: "COST_CONFIRMATION", effectiveAmount: confirmations }]),
+      ],
+    } as unknown as typeof NO_PLANNING.pricing,
+  });
+  const supersedes = (planning: typeof NO_PLANNING) =>
+    toTripResponse(buildTrip(TripDirection.COLLECTION), planning).waitingTimeSupersedesCostConfirmations;
+
+  it("is false for a Trip without a price", () => {
+    expect(supersedes(NO_PLANNING)).toBe(false);
   });
 
-  it.each([0, 135, 180])("is true for a recorded waiting time of %i minutes", (minutes) => {
-    const trip = { ...buildTrip(TripDirection.COLLECTION), waitingTimeMinutes: minutes };
-
-    expect(toTripResponse(trip, NO_PLANNING).waitingTimeSupersedesCostConfirmations).toBe(true);
+  it.each([
+    ["the waiting time higher (confirmations stored at €0)", "150.00", "0.00", true],
+    ["the waiting time without confirmations", "68.75", null, true],
+    ["equal amounts (one stored at €0)", "55.00", "0.00", true],
+    ["the confirmations higher (waiting time stored at €0)", "0.00", "138.75", false],
+    ["a waiting time priced at €0", "0.00", "68.75", false],
+    ["confirmations only", null, "68.75", false],
+    ["an older snapshot carrying both, the confirmations higher", "55.00", "138.75", false],
+  ])("%s", (_label, waitingTime, confirmations, expected) => {
+    expect(supersedes(pricedWith(waitingTime, confirmations))).toBe(expected);
   });
 });

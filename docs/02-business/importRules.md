@@ -351,7 +351,7 @@ Matching never changes the Trip: not its container, not its planning date, not
 its original date.
 
 A Trip may carry several CCs (unique per Trip and CC number). Their sum is the
-EK unless a waiting time is recorded (see `businessrules.md`). The Ritten CC
+EK unless the manual waiting time is higher (see `businessrules.md`). The Ritten CC
 cell marks a Trip with several and lists each with its amount, their total and
 the EK on hover; every figure comes from the Trip response
 (`costConfirmations`, `costConfirmationTotal`,
